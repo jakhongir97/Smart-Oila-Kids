@@ -4,6 +4,9 @@
 "common.home" = "Home";
 "common.save" = "Save";
 "common.cancel" = "Cancel";
+"common.back" = "Back";
+"common.done" = "Done";
+"common.close" = "Close";
 "common.dsn_missing" = "Device DSN is missing";
 
 "auth.welcome" = "Welcome!";
@@ -33,6 +36,7 @@
 "main.tasks" = "Tasks";
 "main.message" = "Message";
 "main.info_title" = "Info";
+"main.notifications" = "Notifications";
 "main.no_notifications" = "No notifications yet";
 "main.weekly_stats" = "Weekly phone usage statistics";
 "main.hours_short" = "h";
@@ -55,6 +59,8 @@
 "chat.attachments_loading" = "Loading attachments...";
 "chat.attachments_count" = "%d attachments selected";
 "chat.empty" = "No messages yet. Start the conversation.";
+"chat.send" = "Send message";
+"chat.open_parent_chat_hint" = "Opens the chat thread";
 
 "permissions.setup_title" = "Permission setup";
 "permissions.setup_subtitle" = "For proper app operation, please allow the following permissions";
@@ -76,6 +82,8 @@
 "templates.default_1" = "I'm home";
 "templates.default_2" = "I'm at school";
 "templates.default_3" = "I'm outside";
+"templates.add" = "Add template";
+"templates.edit_action" = "Edit template";
 
 "tasks.title" = "Tasks";
 "tasks.prize_title" = "Prize name";
@@ -90,7 +98,16 @@
 "settings.title" = "Profile";
 "settings.change_username" = "Change username";
 "settings.username_placeholder" = "User";
+"settings.appearance" = "Appearance";
+"settings.theme.system" = "System";
+"settings.theme.light" = "Light";
+"settings.theme.dark" = "Dark";
+"settings.language" = "Language";
+"settings.language.en" = "EN";
+"settings.language.ru" = "RU";
+"settings.language.uz" = "UZ";
 "settings.connected_devices" = "Connected devices:";
+"settings.edit_device" = "Edit connected device";
 "settings.device_mom" = "Mom";
 "settings.device_dad" = "Dad";
 "settings.logout" = "Log out";

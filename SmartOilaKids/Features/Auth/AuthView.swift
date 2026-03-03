@@ -43,6 +43,7 @@ struct AuthView: View {
                     buttonColor: AppColors.dangerRed,
                     trailingArrow: false
                 ) {
+                    AppHaptics.tap()
                     stage = .scan
                 }
             case .success:
@@ -54,6 +55,7 @@ struct AuthView: View {
                     trailingArrow: true
                 ) {
                     guard let pendingRegistration else { return }
+                    AppHaptics.success()
                     sessionStore.setDSN(pendingRegistration.dsn)
                     sessionStore.setAPIAccessToken(pendingRegistration.authorizationHeader)
                 }
@@ -85,7 +87,7 @@ struct AuthView: View {
             let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
 
             VStack(spacing: 0) {
-                ChildStatusBar()
+                ChildStatusBar(background: AppColors.white)
 
                 Spacer(minLength: compact ? 30 : 60)
 
@@ -111,7 +113,7 @@ struct AuthView: View {
             let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
 
             VStack(spacing: 0) {
-                ChildStatusBar()
+                ChildStatusBar(background: AppColors.white)
 
                 HStack {
                     Spacer()
@@ -153,6 +155,7 @@ struct AuthView: View {
                         trailingArrow: false,
                         disabled: viewModel.isLoading
                     ) {
+                        AppHaptics.tap()
                         showScanner = true
                     }
                     .padding(.horizontal, 20)
@@ -163,7 +166,62 @@ struct AuthView: View {
     }
 
     private var languageBadge: some View {
-        LanguageBadgeRU()
+        Menu {
+            ForEach(AppLanguage.allCases) { language in
+                Button {
+                    guard sessionStore.appLanguage != language else { return }
+                    AppHaptics.selection()
+                    sessionStore.setLanguage(language)
+                } label: {
+                    HStack {
+                        Text(languageTitle(language))
+                        if sessionStore.appLanguage == language {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if UIImage(named: "FlagRU") != nil {
+                    Image("FlagRU")
+                        .resizable()
+                        .frame(width: 18, height: 18)
+                } else {
+                    Text("🌐")
+                        .font(.system(size: 13))
+                }
+
+                Text(languageTitle(sessionStore.appLanguage))
+                    .font(AppTypography.unbounded(12, weight: .regular))
+                    .foregroundStyle(AppColors.black)
+
+                if UIImage(named: "ChevronDownSmall") != nil {
+                    Image("ChevronDownSmall")
+                        .resizable()
+                        .frame(width: 10, height: 5)
+                } else {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(AppColors.black)
+                }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 20)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(L10n.tr("settings.language"))
+    }
+
+    private func languageTitle(_ language: AppLanguage) -> String {
+        switch language {
+        case .en:
+            return L10n.tr("settings.language.en")
+        case .ru:
+            return L10n.tr("settings.language.ru")
+        case .uz:
+            return L10n.tr("settings.language.uz")
+        }
     }
 
     private func authBranding(compact: Bool) -> some View {
@@ -201,7 +259,7 @@ struct AuthView: View {
             let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
 
             VStack(spacing: 0) {
-                ChildStatusBar()
+                ChildStatusBar(background: AppColors.white)
 
                 Spacer(minLength: compact ? 26 : 52)
 
@@ -240,8 +298,10 @@ struct AuthView: View {
         Task {
             if let result = await viewModel.submit(scannedPayload: payload) {
                 pendingRegistration = result
+                AppHaptics.success()
                 stage = .success
             } else {
+                AppHaptics.warning()
                 stage = .failed
             }
         }

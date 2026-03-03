@@ -75,7 +75,7 @@ struct GeoPermissionView: View {
             let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
 
             VStack(spacing: 0) {
-                ChildStatusBar()
+                ChildStatusBar(background: AppColors.white)
 
                 Spacer(minLength: compact ? 26 : 52)
 
@@ -118,7 +118,7 @@ struct GeoPermissionView: View {
             let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
 
             VStack(spacing: 0) {
-                ChildStatusBar()
+                ChildStatusBar(background: AppColors.white)
 
                 Text(L10n.tr("permissions.requirements_title"))
                     .font(AppTypography.unbounded(compact ? 18 : 20, weight: .semibold))

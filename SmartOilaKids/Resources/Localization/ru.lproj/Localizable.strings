@@ -4,6 +4,9 @@
 "common.home" = "На главную";
 "common.save" = "Сохранить";
 "common.cancel" = "Отмена";
+"common.back" = "Назад";
+"common.done" = "Готово";
+"common.close" = "Закрыть";
 "common.dsn_missing" = "DSN отсутствует";
 
 "auth.welcome" = "Добро пожаловать!";
@@ -33,6 +36,7 @@
 "main.tasks" = "Задания";
 "main.message" = "Сообщение";
 "main.info_title" = "Информация";
+"main.notifications" = "Уведомления";
 "main.no_notifications" = "Уведомлений пока нет";
 "main.weekly_stats" = "Статистика использования телефона за неделю";
 "main.hours_short" = "ч";
@@ -55,6 +59,8 @@
 "chat.attachments_loading" = "Загрузка вложений...";
 "chat.attachments_count" = "%d вложений выбрано";
 "chat.empty" = "Сообщений пока нет. Начните переписку.";
+"chat.send" = "Отправить сообщение";
+"chat.open_parent_chat_hint" = "Открывает переписку";
 
 "permissions.setup_title" = "Настройка разрешений";
 "permissions.setup_subtitle" = "Для корректной работы приложения, Вам нужно дать согласие на следующие разрешения";
@@ -76,6 +82,8 @@
 "templates.default_1" = "Я дома";
 "templates.default_2" = "Я в школе";
 "templates.default_3" = "Я на улице";
+"templates.add" = "Добавить шаблон";
+"templates.edit_action" = "Редактировать шаблон";
 
 "tasks.title" = "Задания";
 "tasks.prize_title" = "Название приза";
@@ -90,7 +98,16 @@
 "settings.title" = "Профиль";
 "settings.change_username" = "Изменить имя пользователя";
 "settings.username_placeholder" = "Пользователь";
+"settings.appearance" = "Тема оформления";
+"settings.theme.system" = "Система";
+"settings.theme.light" = "Светлая";
+"settings.theme.dark" = "Тёмная";
+"settings.language" = "Язык";
+"settings.language.en" = "EN";
+"settings.language.ru" = "RU";
+"settings.language.uz" = "UZ";
 "settings.connected_devices" = "Подключеные устройства:";
+"settings.edit_device" = "Редактировать подключенное устройство";
 "settings.device_mom" = "Мама";
 "settings.device_dad" = "Папа";
 "settings.logout" = "Выйти";

@@ -7,6 +7,7 @@ struct TemplatesView: View {
     @State private var draftText: String = ""
     @State private var editingIndex: Int?
     @State private var showEditor = false
+    @FocusState private var isEditorFocused: Bool
 
     var body: some View {
         GeometryReader { proxy in
@@ -18,16 +19,18 @@ struct TemplatesView: View {
                 AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar()
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: L10n.tr("templates.title"),
                         leading: { ChildTopBackButton { dismiss() } },
                         trailing: {
                             Button {
+                                AppHaptics.tap()
                                 editingIndex = nil
                                 draftText = ""
                                 showEditor = true
+                                isEditorFocused = true
                             } label: {
                                 Image(systemName: "plus")
                                     .font(.system(size: 20, weight: .semibold))
@@ -35,6 +38,7 @@ struct TemplatesView: View {
                                     .frame(width: 30, height: 30)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(L10n.tr("templates.add"))
                         }
                     )
 
@@ -49,6 +53,7 @@ struct TemplatesView: View {
                             .padding(.top, 30)
                             .padding(.bottom, max(20, proxy.safeAreaInsets.bottom + 8))
                         }
+                        .scrollDismissesKeyboard(.interactively)
                     }
                 }
 
@@ -58,6 +63,7 @@ struct TemplatesView: View {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
                         .onTapGesture {
+                            AppHaptics.tap()
                             if draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 showEditor = false
                             } else {
@@ -75,6 +81,24 @@ struct TemplatesView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .onChange(of: showEditor) { isPresented in
+            if isPresented {
+                DispatchQueue.main.async {
+                    isEditorFocused = true
+                }
+            } else {
+                isEditorFocused = false
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(L10n.tr("common.done")) {
+                    saveTemplate()
+                    isEditorFocused = false
+                }
+            }
+        }
     }
 
     private func templateRow(text: String, index: Int) -> some View {
@@ -88,9 +112,11 @@ struct TemplatesView: View {
             Spacer()
 
             Button {
+                AppHaptics.selection()
                 editingIndex = index
                 draftText = text
                 showEditor = true
+                isEditorFocused = true
             } label: {
                 VStack(spacing: 2) {
                     Circle().fill(AppColors.black).frame(width: 4, height: 4)
@@ -100,6 +126,7 @@ struct TemplatesView: View {
                 .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("templates.edit_action"))
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 60)
@@ -117,6 +144,8 @@ struct TemplatesView: View {
                 .font(AppTypography.unbounded(16, weight: .medium))
                 .padding(.horizontal, 15)
                 .frame(height: 60)
+                .focused($isEditorFocused)
+                .textInputAutocapitalization(.sentences)
                 .submitLabel(.done)
                 .onSubmit {
                     saveTemplate()
@@ -143,6 +172,7 @@ struct TemplatesView: View {
         }
 
         TemplatesStorage.save(templates)
+        AppHaptics.success()
         showEditor = false
     }
 }

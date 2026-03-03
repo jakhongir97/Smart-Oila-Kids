@@ -9,7 +9,7 @@ struct MainHeaderSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ChildStatusBar()
+            ChildStatusBar(background: AppColors.white)
 
             HStack(spacing: 10) {
                 Circle()
@@ -45,15 +45,24 @@ struct MainHeaderSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 2) {
-                    MainHeaderIconButton(action: onInfoTap) {
+                    MainHeaderIconButton(
+                        action: onInfoTap,
+                        accessibilityLabel: L10n.tr("main.info_title")
+                    ) {
                         iconOrFallback(asset: "IconInfo", system: "info.circle", size: 18)
                     }
 
-                    MainHeaderIconButton(action: onNotificationTap) {
+                    MainHeaderIconButton(
+                        action: onNotificationTap,
+                        accessibilityLabel: L10n.tr("main.notifications")
+                    ) {
                         iconOrFallback(asset: "IconNotification", system: "bell", size: 18)
                     }
 
-                    MainHeaderIconButton(action: onSettingsTap) {
+                    MainHeaderIconButton(
+                        action: onSettingsTap,
+                        accessibilityLabel: L10n.tr("settings.title")
+                    ) {
                         iconOrFallback(asset: "IconSettings", system: "gearshape", size: 18)
                     }
                 }
@@ -84,15 +93,20 @@ struct MainHeaderSection: View {
 
 private struct MainHeaderIconButton<Content: View>: View {
     let action: () -> Void
+    let accessibilityLabel: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            AppHaptics.tap()
+            action()
+        } label: {
             content()
                 .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -119,12 +133,18 @@ struct MainPrimaryActions: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Button(action: onTasksTap) {
+            Button {
+                AppHaptics.tap()
+                onTasksTap()
+            } label: {
                 MainActionButton(title: L10n.tr("main.tasks"))
             }
             .buttonStyle(.plain)
 
-            Button(action: onChatTap) {
+            Button {
+                AppHaptics.tap()
+                onChatTap()
+            } label: {
                 MainActionButton(title: L10n.tr("main.message"))
             }
             .buttonStyle(.plain)
@@ -149,6 +169,8 @@ private struct MainActionButton: View {
 }
 
 struct WeeklyUsageChartCard: View {
+    var compact: Bool = false
+
     private struct DayUsage: Identifiable {
         let id: Int
         let dayKey: String
@@ -232,7 +254,7 @@ struct WeeklyUsageChartCard: View {
                     }
                 }
             }
-            .frame(height: 300)
+            .frame(height: compact ? 260 : 300)
             .frame(maxWidth: .infinity)
 
             Text(L10n.tr("main.weekly_stats"))

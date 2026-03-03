@@ -70,7 +70,10 @@ struct SettingsDeviceCard: View {
 
             Spacer()
 
-            Button(action: onEdit) {
+            Button {
+                AppHaptics.tap()
+                onEdit()
+            } label: {
                 if UIImage(named: "IconPencil") != nil {
                     Image("IconPencil")
                         .resizable()
@@ -83,6 +86,7 @@ struct SettingsDeviceCard: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("settings.edit_device"))
         }
         .padding(.horizontal, 15)
         .frame(height: 70)

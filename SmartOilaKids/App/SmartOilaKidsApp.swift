@@ -3,15 +3,23 @@ import SwiftUI
 @main
 struct SmartOilaKidsApp: App {
     @UIApplicationDelegateAdaptor(SmartOilaKidsAppDelegate.self) private var appDelegate
+    @AppStorage("APP_THEME") private var appThemeRawValue = AppTheme.system.rawValue
+    @AppStorage("APP_LANGUAGE") private var appLanguageRawValue = AppLanguage.defaultForDevice.rawValue
     @StateObject private var sessionStore = SessionStore()
     private let dependencies = AppDependencies.live
 
     var body: some Scene {
+        let appTheme = AppTheme(rawValue: appThemeRawValue) ?? .system
+        let appLanguage = AppLanguage(rawValue: appLanguageRawValue) ?? .en
+
         WindowGroup {
             RootView()
                 .environmentObject(sessionStore)
                 .environment(\.appDependencies, dependencies)
+                .environment(\.locale, Locale(identifier: appLanguage.localeIdentifier))
+                .preferredColorScheme(appTheme.colorScheme)
                 .onAppear {
+                    L10n.setLanguage(appLanguage.rawValue)
 #if DEBUG
                     applyDebugLaunchOverridesIfNeeded()
 #endif
@@ -19,6 +27,9 @@ struct SmartOilaKidsApp: App {
                         await PushTokenSyncCoordinator.shared.bootstrapFromDefaults()
                         await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
                     }
+                }
+                .onChange(of: appLanguageRawValue) { newValue in
+                    L10n.setLanguage(newValue)
                 }
         }
     }

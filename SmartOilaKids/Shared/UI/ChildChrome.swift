@@ -1,13 +1,40 @@
 import SwiftUI
 import UIKit
 
+enum AppHaptics {
+    static func tap() {
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+    }
+
+    static func success() {
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+    }
+
+    static func warning() {
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.warning)
+    }
+
+    static func selection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
+    }
+}
+
 struct ChildStatusBar: View {
     var foreground: Color = AppColors.black
+    var background: Color = .clear
 
     var body: some View {
-        // System status bar is rendered by iOS; we keep this spacer minimal to avoid duplicate time/icons.
         Color.clear
+            .frame(maxWidth: .infinity)
             .frame(height: 0)
+            .background(
+                background
+                    .ignoresSafeArea(edges: .top)
+            )
     }
 }
 
@@ -113,13 +140,17 @@ struct ChildTopBackButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            AppHaptics.tap()
+            action()
+        } label: {
             Image(systemName: "chevron.left")
                 .font(.system(size: 17, weight: .bold))
             .foregroundStyle(foreground)
             .frame(width: 30, height: 30, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(L10n.tr("common.back"))
     }
 }
 
@@ -185,7 +216,10 @@ struct ChildPrimaryButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            AppHaptics.tap()
+            action()
+        } label: {
             ZStack {
                 Text(title)
                     .font(AppTypography.unbounded(16, weight: .regular))
@@ -221,6 +255,10 @@ struct ChildPurpleSurface<Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(AppColors.surfacePurple)
         .clipShape(TopRoundedShape(radius: 30))
+        .background(
+            AppColors.surfacePurple
+                .ignoresSafeArea(edges: .bottom)
+        )
     }
 }
 

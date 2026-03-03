@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var userName: String = ""
     @State private var bannerText: String?
     @State private var showDeleteAlert = false
+    @FocusState private var isNameFieldFocused: Bool
 
     init(viewModel: SettingsViewModel? = nil) {
         _viewModel = StateObject(
@@ -24,7 +25,7 @@ struct SettingsView: View {
                 AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar()
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: L10n.tr("settings.title"),
@@ -50,10 +51,49 @@ struct SettingsView: View {
                                     .foregroundStyle(AppColors.textSecondary)
                                     .padding(.horizontal, 20)
                                     .frame(height: 50)
+                                    .focused($isNameFieldFocused)
+                                    .textInputAutocapitalization(.words)
+                                    .autocorrectionDisabled(true)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        save()
+                                    }
                                     .background(AppColors.white)
                                     .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                                     .padding(.horizontal, sidePadding)
                                     .padding(.top, compact ? 8 : 10)
+
+                                Text(L10n.tr("settings.appearance"))
+                                    .font(AppTypography.unbounded(14, weight: .medium))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, sidePadding)
+                                    .padding(.top, compact ? 16 : 20)
+
+                                Picker("", selection: themeBinding) {
+                                    ForEach(AppTheme.allCases) { theme in
+                                        Text(themeTitle(theme)).tag(theme)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .padding(.horizontal, sidePadding)
+                                .padding(.top, compact ? 8 : 10)
+
+                                Text(L10n.tr("settings.language"))
+                                    .font(AppTypography.unbounded(14, weight: .medium))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, sidePadding)
+                                    .padding(.top, compact ? 14 : 18)
+
+                                Picker("", selection: languageBinding) {
+                                    ForEach(AppLanguage.allCases) { language in
+                                        Text(languageTitle(language)).tag(language)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .padding(.horizontal, sidePadding)
+                                .padding(.top, compact ? 8 : 10)
 
                                 Text(L10n.tr("settings.connected_devices"))
                                     .font(AppTypography.unbounded(14, weight: .medium))
@@ -73,6 +113,7 @@ struct SettingsView: View {
                                 .padding(.top, compact ? 8 : 10)
 
                                 Button {
+                                    AppHaptics.tap()
                                     save()
                                 } label: {
                                     Text(viewModel.isSaving ? L10n.tr("settings.saving") : L10n.tr("common.save"))
@@ -90,6 +131,7 @@ struct SettingsView: View {
 
                                 HStack(spacing: 10) {
                                     Button {
+                                        AppHaptics.tap()
                                         sessionStore.clearSession()
                                     } label: {
                                         Text(L10n.tr("settings.logout"))
@@ -103,6 +145,7 @@ struct SettingsView: View {
                                     .buttonStyle(.plain)
 
                                     Button {
+                                        AppHaptics.tap()
                                         showDeleteAlert = true
                                     } label: {
                                         Text(L10n.tr("settings.delete_account"))
@@ -120,6 +163,7 @@ struct SettingsView: View {
                                 .padding(.bottom, max(24, proxy.safeAreaInsets.bottom + 12))
                             }
                         }
+                        .scrollDismissesKeyboard(.interactively)
                     }
                 }
 
@@ -129,6 +173,17 @@ struct SettingsView: View {
         .navigationBarBackButtonHidden(true)
         .task {
             await loadRemoteDataIfNeeded()
+        }
+        .onChange(of: sessionStore.appLanguage) { _ in
+            viewModel.refreshLocalizedFallbacksIfNeeded()
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(L10n.tr("common.done")) {
+                    isNameFieldFocused = false
+                }
+            }
         }
         .overlay(alignment: .top) {
             if let bannerText {
@@ -144,17 +199,20 @@ struct SettingsView: View {
         }
         .alert(L10n.tr("settings.delete_title"), isPresented: $showDeleteAlert) {
             Button(L10n.tr("settings.delete_account"), role: .destructive) {
+                AppHaptics.warning()
                 sessionStore.clearSession()
             }
             Button(L10n.tr("common.cancel"), role: .cancel) {}
         } message: {
             Text(L10n.tr("settings.delete_message"))
         }
+        .preferredColorScheme(sessionStore.appTheme.colorScheme)
     }
 
     private func save() {
         let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
+            AppHaptics.warning()
             banner(L10n.tr("settings.enter_username"))
             return
         }
@@ -164,10 +222,12 @@ struct SettingsView: View {
                 let remoteName = try await viewModel.saveProfileName(trimmed)
                 userName = remoteName
                 sessionStore.setProfileName(remoteName)
+                AppHaptics.success()
                 banner(L10n.tr("settings.saved"))
             } catch {
                 // Keep local profile editable even when backend update is unavailable.
                 sessionStore.setProfileName(trimmed)
+                AppHaptics.warning()
                 banner(L10n.tr("settings.save_failed"))
             }
         }
@@ -196,6 +256,42 @@ struct SettingsView: View {
            remoteProfileName != sessionStore.profileName {
             userName = remoteProfileName
             sessionStore.setProfileName(remoteProfileName)
+        }
+    }
+
+    private var themeBinding: Binding<AppTheme> {
+        Binding(
+            get: { sessionStore.appTheme },
+            set: { sessionStore.setTheme($0) }
+        )
+    }
+
+    private var languageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { sessionStore.appLanguage },
+            set: { sessionStore.setLanguage($0) }
+        )
+    }
+
+    private func themeTitle(_ theme: AppTheme) -> String {
+        switch theme {
+        case .system:
+            return L10n.tr("settings.theme.system")
+        case .light:
+            return L10n.tr("settings.theme.light")
+        case .dark:
+            return L10n.tr("settings.theme.dark")
+        }
+    }
+
+    private func languageTitle(_ language: AppLanguage) -> String {
+        switch language {
+        case .en:
+            return L10n.tr("settings.language.en")
+        case .ru:
+            return L10n.tr("settings.language.ru")
+        case .uz:
+            return L10n.tr("settings.language.uz")
         }
     }
 }

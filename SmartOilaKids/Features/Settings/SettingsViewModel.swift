@@ -21,7 +21,13 @@ final class SettingsViewModel: ObservableObject {
         if let names = try? await service.fetchConnectedDeviceNames(),
            !names.isEmpty {
             connectedDevices = names
+            hasLoadedRemoteDeviceNames = true
         }
+    }
+
+    func refreshLocalizedFallbacksIfNeeded() {
+        guard !hasLoadedRemoteDeviceNames else { return }
+        connectedDevices = SettingsViewModel.fallbackDeviceNames()
     }
 
     func saveProfileName(_ name: String) async throws -> String {
@@ -43,4 +49,5 @@ final class SettingsViewModel: ObservableObject {
 
     private let service: SettingsServicing
     private var didLoad = false
+    private var hasLoadedRemoteDeviceNames = false
 }

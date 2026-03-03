@@ -22,7 +22,7 @@ struct ChatView: View {
                 AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar()
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: L10n.tr("chat.parents_title"),
@@ -34,12 +34,16 @@ struct ChatView: View {
                         VStack(spacing: 10) {
                             ForEach(parentRows, id: \.id) { row in
                                 Button {
+                                    AppHaptics.tap()
                                     selectedParent = row.name
                                     openThread = true
                                 } label: {
                                     chatRow(name: row.name, preview: row.preview)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("\(row.name). \(row.preview)")
+                                .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
                             }
 
                             Spacer()
@@ -145,6 +149,7 @@ private struct ChatThreadView: View {
 
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var isLoadingAttachments = false
+    @FocusState private var isComposerFocused: Bool
 
     var body: some View {
         GeometryReader { proxy in
@@ -155,7 +160,7 @@ private struct ChatThreadView: View {
                 AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar()
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: title,
@@ -185,6 +190,7 @@ private struct ChatThreadView: View {
                                 .padding(.top, 10)
                                 .padding(.bottom, 14)
                             }
+                            .scrollDismissesKeyboard(.interactively)
                             .onChange(of: flatMessages.count) { _ in
                                 if let id = displayMessages.last?.id {
                                     withAnimation {
@@ -210,6 +216,14 @@ private struct ChatThreadView: View {
         }
         .onDisappear {
             viewModel.stop()
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(L10n.tr("common.done")) {
+                    isComposerFocused = false
+                }
+            }
         }
     }
 
@@ -267,11 +281,17 @@ private struct ChatThreadView: View {
                     TextField(L10n.tr("chat.message_placeholder"), text: $viewModel.text)
                         .font(AppTypography.unbounded(14, weight: .medium))
                         .foregroundStyle(AppColors.textSecondary)
+                        .focused($isComposerFocused)
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.send)
+                        .onSubmit {
+                            sendCurrentMessage()
+                        }
 
                     Spacer(minLength: 0)
 
                     Button {
-                        Task { await viewModel.send() }
+                        sendCurrentMessage()
                     } label: {
                         if viewModel.isSending {
                             ProgressView()
@@ -289,6 +309,7 @@ private struct ChatThreadView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!viewModel.canSend || isLoadingAttachments)
+                    .accessibilityLabel(L10n.tr("chat.send"))
                 }
                 .padding(.horizontal, 20)
                 .frame(height: 45)
@@ -321,6 +342,19 @@ private struct ChatThreadView: View {
 
         viewModel.setAttachments(loaded)
         isLoadingAttachments = false
+    }
+
+    private func sendCurrentMessage() {
+        guard !isLoadingAttachments, viewModel.canSend else { return }
+        Task {
+            let sent = await viewModel.send()
+            if sent {
+                AppHaptics.success()
+                isComposerFocused = false
+            } else {
+                AppHaptics.warning()
+            }
+        }
     }
 }
 

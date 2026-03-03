@@ -46,8 +46,8 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    func send() async {
-        guard canSend else { return }
+    func send() async -> Bool {
+        guard canSend else { return false }
         isSending = true
         let payloadText = text
         let payloadAttachments = selectedAttachments
@@ -63,11 +63,13 @@ final class ChatViewModel: ObservableObject {
             groupedMessages[dateKey, default: []].append(datum)
             text = ""
             selectedAttachments = []
+            isSending = false
+            return true
         } catch {
             phase = .failed(error.localizedDescription)
+            isSending = false
+            return false
         }
-
-        isSending = false
     }
 
     func stop() {

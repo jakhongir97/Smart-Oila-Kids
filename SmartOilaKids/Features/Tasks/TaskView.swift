@@ -18,7 +18,7 @@ struct TaskView: View {
                 AppColors.primaryPurple.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(foreground: .white)
+                    ChildStatusBar(foreground: .white, background: AppColors.primaryPurple)
 
                     ChildTitleBar(
                         title: L10n.tr("tasks.title"),
@@ -67,6 +67,7 @@ struct TaskView: View {
                                 .multilineTextAlignment(.center)
 
                             Button(L10n.tr("common.retry")) {
+                                AppHaptics.tap()
                                 Task { await viewModel.load() }
                             }
                             .font(AppTypography.unbounded(14, weight: .medium))
@@ -191,6 +192,7 @@ struct TaskView: View {
             Spacer(minLength: 14)
 
             Button {
+                AppHaptics.tap()
                 action?()
             } label: {
                 Text(buttonTitle(completed: completed, isUpdating: isUpdating))

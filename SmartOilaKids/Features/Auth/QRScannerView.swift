@@ -33,6 +33,7 @@ struct QRScannerSheet: View {
                         Spacer()
 
                         Button {
+                            AppHaptics.tap()
                             onClose()
                         } label: {
                             Image(systemName: "xmark")
@@ -41,6 +42,7 @@ struct QRScannerSheet: View {
                                 .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.tr("common.close"))
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, topInset)
@@ -205,6 +207,7 @@ private final class QRScannerViewController: UIViewController, AVCaptureMetadata
 
         didEmit = true
         session.stopRunning()
+        AppHaptics.success()
         onCodeDetected?(code)
     }
 }

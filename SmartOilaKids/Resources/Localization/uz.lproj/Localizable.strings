@@ -4,6 +4,9 @@
 "common.home" = "Bosh sahifa";
 "common.save" = "Saqlash";
 "common.cancel" = "Bekor qilish";
+"common.back" = "Orqaga";
+"common.done" = "Tayyor";
+"common.close" = "Yopish";
 "common.dsn_missing" = "Qurilma DSN topilmadi";
 
 "auth.welcome" = "Xush kelibsiz!";
@@ -33,6 +36,7 @@
 "main.tasks" = "Vazifalar";
 "main.message" = "Xabar";
 "main.info_title" = "Ma'lumot";
+"main.notifications" = "Bildirishnomalar";
 "main.no_notifications" = "Hozircha bildirishnoma yo'q";
 "main.weekly_stats" = "Telefondan haftalik foydalanish statistikasi";
 "main.hours_short" = "s";
@@ -55,6 +59,8 @@
 "chat.attachments_loading" = "Ilovalar yuklanmoqda...";
 "chat.attachments_count" = "%d ta ilova tanlandi";
 "chat.empty" = "Hozircha xabarlar yo'q. Suhbatni boshlang.";
+"chat.send" = "Xabar yuborish";
+"chat.open_parent_chat_hint" = "Suhbatni ochadi";
 
 "permissions.setup_title" = "Ruxsatlarni sozlash";
 "permissions.setup_subtitle" = "Ilova to'g'ri ishlashi uchun quyidagi ruxsatlarni bering";
@@ -76,6 +82,8 @@
 "templates.default_1" = "Men uydaman";
 "templates.default_2" = "Men maktabdaman";
 "templates.default_3" = "Men ko'chadaman";
+"templates.add" = "Shablon qo'shish";
+"templates.edit_action" = "Shablonni tahrirlash";
 
 "tasks.title" = "Vazifalar";
 "tasks.prize_title" = "Sovrin nomi";
@@ -90,7 +98,16 @@
 "settings.title" = "Profil";
 "settings.change_username" = "Foydalanuvchi nomini o'zgartirish";
 "settings.username_placeholder" = "Foydalanuvchi";
+"settings.appearance" = "Ko'rinish";
+"settings.theme.system" = "Tizim";
+"settings.theme.light" = "Yorug'";
+"settings.theme.dark" = "Qorong'i";
+"settings.language" = "Til";
+"settings.language.en" = "EN";
+"settings.language.ru" = "RU";
+"settings.language.uz" = "UZ";
 "settings.connected_devices" = "Ulangan qurilmalar:";
+"settings.edit_device" = "Ulangan qurilmani tahrirlash";
 "settings.device_mom" = "Ona";
 "settings.device_dad" = "Ota";
 "settings.logout" = "Chiqish";

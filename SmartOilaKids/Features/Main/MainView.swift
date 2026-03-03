@@ -19,10 +19,19 @@ struct MainView: View {
         GeometryReader { proxy in
             let horizontalPadding = adaptiveHorizontalPadding(for: proxy.size.width)
             let sectionSpacing = proxy.size.height < 760 ? 16.0 : 20.0
+            let compact = proxy.size.height < 760
 
             ZStack(alignment: .bottomTrailing) {
                 AppColors.surfacePurple
                     .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    AppColors.white
+                        .frame(height: proxy.safeAreaInsets.top)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(edges: .top)
 
                 VStack(spacing: 0) {
                     MainHeaderSection(
@@ -36,7 +45,7 @@ struct MainView: View {
                         VStack(spacing: sectionSpacing) {
                             MainAdInfoCard()
 
-                            WeeklyUsageChartCard()
+                            WeeklyUsageChartCard(compact: compact)
 
                             MainPrimaryActions(
                                 onTasksTap: { showTasks = true },
@@ -46,7 +55,7 @@ struct MainView: View {
                         }
                         .padding(.horizontal, horizontalPadding)
                         .padding(.top, 15)
-                        .padding(.bottom, max(24, proxy.safeAreaInsets.bottom + 8))
+                        .padding(.bottom, max(36, proxy.safeAreaInsets.bottom + 18))
                     }
                 }
 
