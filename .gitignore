@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Xcode user data and build output
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+**/xcuserdata/
+**/project.xcworkspace/xcuserdata/
+
+# SwiftPM / local build artifacts
+.build/
+Artifacts/
+
+# Legacy archives / imported snapshots
+LegacyArchive_20260224/
+__MACOSX/

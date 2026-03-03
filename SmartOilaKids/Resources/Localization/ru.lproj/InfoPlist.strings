@@ -1,0 +1,5 @@
+"NSCameraUsageDescription" = "Доступ к камере нужен для сканирования QR-кода родителя.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Доступ к геолокации нужен, чтобы родитель видел местоположение ребенка.";
+"NSLocationAlwaysUsageDescription" = "Доступ к геолокации нужен, чтобы родитель видел местоположение ребенка.";
+"NSLocationWhenInUseUsageDescription" = "Доступ к геолокации нужен, чтобы родитель видел местоположение ребенка.";
+"NSPhotoLibraryUsageDescription" = "Доступ к фото нужен для отправки вложений в чате.";

@@ -1,0 +1,104 @@
+"common.ok" = "OK";
+"common.next" = "Далее";
+"common.retry" = "Повторить";
+"common.home" = "На главную";
+"common.save" = "Сохранить";
+"common.cancel" = "Отмена";
+"common.dsn_missing" = "DSN отсутствует";
+
+"auth.welcome" = "Добро пожаловать!";
+"auth.company_mission" = "Задача нашей компании - обеспечить безопасность детям, позволив их родителям наблюдать за своими детьми!";
+"auth.scan_qr_hint" = "Отсканируйте Qr - код на устройстве родителя";
+"auth.scan_qr_button" = "Отсканировать код";
+"auth.connecting" = "Подключение...";
+"auth.error_title" = "Ошибка!";
+"auth.error_bind_failed" = "Вам не удалось привязать устройство Вашего ребенка";
+"auth.success_title" = "Успешно!";
+"auth.success_bind_success" = "Вы успешно привязали устройство Вашего ребенка";
+"auth.verify_failed" = "Привязка выполнена, но проверка устройства не прошла. Отсканируйте QR снова.";
+"auth.qr_missing_auth_data" = "QR-код не содержит данных для привязки";
+
+"scanner.hint" = "Наведите камеру на QR-код родителя";
+"scanner.unavailable_title" = "Сканирование недоступно";
+"scanner.camera_denied" = "Доступ к камере не предоставлен";
+"scanner.camera_settings" = "Разрешите доступ к камере в Настройках устройства";
+"scanner.camera_unavailable" = "Камера недоступна";
+"scanner.camera_not_found" = "Камера на устройстве не найдена";
+"scanner.camera_attach_failed" = "Не удалось подключить камеру";
+"scanner.camera_start_failed" = "Не удалось запустить сканер";
+"scanner.camera_runtime_error" = "Ошибка камеры";
+
+"main.ad_info" = "Реклама / информация";
+"main.sos_title" = "SOS";
+"main.tasks" = "Задания";
+"main.message" = "Сообщение";
+"main.info_title" = "Информация";
+"main.no_notifications" = "Уведомлений пока нет";
+"main.weekly_stats" = "Статистика использования телефона за неделю";
+"main.hours_short" = "ч";
+"main.device_not_bound" = "Устройство не привязано";
+"main.sos_sent" = "SOS отправлен";
+
+"weekday.mon" = "Пн";
+"weekday.tue" = "Вт";
+"weekday.wed" = "Ср";
+"weekday.thu" = "Чт";
+"weekday.fri" = "Пт";
+"weekday.sat" = "Сб";
+"weekday.sun" = "Вс";
+
+"chat.parents_title" = "Чаты с родителями";
+"chat.parent" = "Родитель";
+"chat.default_preview" = "Содержимое сообщения";
+"chat.message_placeholder" = "Сообщение";
+"chat.attachment" = "Вложение";
+"chat.attachments_loading" = "Загрузка вложений...";
+"chat.attachments_count" = "%d вложений выбрано";
+"chat.empty" = "Сообщений пока нет. Начните переписку.";
+
+"permissions.setup_title" = "Настройка разрешений";
+"permissions.setup_subtitle" = "Для корректной работы приложения, Вам нужно дать согласие на следующие разрешения";
+"permissions.done_title" = "Настройка завершена!";
+"permissions.done_subtitle" = "Благодарим Вас за доверие, благодаря этим разрешениям, приложение сможет работать в штатном режиме";
+"permissions.requirements_title" = "Для корректной работы приложения, потребуются следующие разрешения";
+"permissions.item_1" = "Показывать окна поверх других приложений";
+"permissions.item_2" = "Доступ к геолокации";
+"permissions.item_3" = "Отключения оптимизации энергопотребления";
+"permissions.item_4" = "Доступ к микрофону";
+"permissions.item_5" = "Доступ к статистике приложений";
+"permissions.item_6" = "Фоновая передача данных";
+"permissions.item_7" = "Просмотр уведомлений";
+
+"templates.title" = "Шаблоны СМС";
+"templates.create" = "Создать шаблон";
+"templates.edit" = "Изменить шаблон";
+"templates.input_placeholder" = "Ввод";
+"templates.default_1" = "Я дома";
+"templates.default_2" = "Я в школе";
+"templates.default_3" = "Я на улице";
+
+"tasks.title" = "Задания";
+"tasks.prize_title" = "Название приза";
+"tasks.task_title" = "Задание";
+"tasks.placeholder_line_1" = "Введите какую либо информа-";
+"tasks.placeholder_line_2" = "цию для заполнения пустого поля";
+"tasks.completed_cleanup_note" = "Завершенные задания автоматически удаляются спустя 3 дня";
+"tasks.start" = "Начать";
+"tasks.completed" = "Завершено";
+"tasks.updating" = "Обновление...";
+
+"settings.title" = "Профиль";
+"settings.change_username" = "Изменить имя пользователя";
+"settings.username_placeholder" = "Пользователь";
+"settings.connected_devices" = "Подключеные устройства:";
+"settings.device_mom" = "Мама";
+"settings.device_dad" = "Папа";
+"settings.logout" = "Выйти";
+"settings.delete_account" = "Удалить";
+"settings.delete_title" = "Удалить аккаунт";
+"settings.delete_message" = "Вы уверены что хотите удалить аккаунт?";
+"settings.edit_soon" = "Редактирование скоро будет доступно";
+"settings.enter_username" = "Введите имя пользователя";
+"settings.saved" = "Сохранено";
+"settings.saving" = "Сохранение...";
+"settings.save_failed" = "Сохранено локально. Обновить на сервере не удалось.";

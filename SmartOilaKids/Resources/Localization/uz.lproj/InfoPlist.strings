@@ -1,0 +1,5 @@
+"NSCameraUsageDescription" = "Ota-ona QR kodini skanerlash uchun kameraga ruxsat kerak.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Ota-ona bolani ko'rishi uchun geolokatsiya ruxsati kerak.";
+"NSLocationAlwaysUsageDescription" = "Ota-ona bolani ko'rishi uchun geolokatsiya ruxsati kerak.";
+"NSLocationWhenInUseUsageDescription" = "Ota-ona bolani ko'rishi uchun geolokatsiya ruxsati kerak.";
+"NSPhotoLibraryUsageDescription" = "Chatga ilova yuborish uchun rasmlarga ruxsat kerak.";

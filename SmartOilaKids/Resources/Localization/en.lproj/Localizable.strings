@@ -1,0 +1,104 @@
+"common.ok" = "OK";
+"common.next" = "Next";
+"common.retry" = "Try Again";
+"common.home" = "Home";
+"common.save" = "Save";
+"common.cancel" = "Cancel";
+"common.dsn_missing" = "Device DSN is missing";
+
+"auth.welcome" = "Welcome!";
+"auth.company_mission" = "Our mission is to keep children safe by helping parents stay connected with them.";
+"auth.scan_qr_hint" = "Scan the QR code on the parent device";
+"auth.scan_qr_button" = "Scan Code";
+"auth.connecting" = "Connecting...";
+"auth.error_title" = "Error!";
+"auth.error_bind_failed" = "We could not bind your child's device";
+"auth.success_title" = "Success!";
+"auth.success_bind_success" = "Your child's device has been successfully linked";
+"auth.verify_failed" = "Linking succeeded, but device verification failed. Please scan again.";
+"auth.qr_missing_auth_data" = "QR code does not contain binding data";
+
+"scanner.hint" = "Point the camera at the parent's QR code";
+"scanner.unavailable_title" = "Scanner Unavailable";
+"scanner.camera_denied" = "Camera access was denied";
+"scanner.camera_settings" = "Allow camera access in device Settings";
+"scanner.camera_unavailable" = "Camera is unavailable";
+"scanner.camera_not_found" = "No camera found on this device";
+"scanner.camera_attach_failed" = "Failed to attach camera";
+"scanner.camera_start_failed" = "Failed to start scanner";
+"scanner.camera_runtime_error" = "Camera error";
+
+"main.ad_info" = "Advertisement / info";
+"main.sos_title" = "SOS";
+"main.tasks" = "Tasks";
+"main.message" = "Message";
+"main.info_title" = "Info";
+"main.no_notifications" = "No notifications yet";
+"main.weekly_stats" = "Weekly phone usage statistics";
+"main.hours_short" = "h";
+"main.device_not_bound" = "Device is not linked";
+"main.sos_sent" = "SOS sent";
+
+"weekday.mon" = "Mon";
+"weekday.tue" = "Tue";
+"weekday.wed" = "Wed";
+"weekday.thu" = "Thu";
+"weekday.fri" = "Fri";
+"weekday.sat" = "Sat";
+"weekday.sun" = "Sun";
+
+"chat.parents_title" = "Parent chats";
+"chat.parent" = "Parent";
+"chat.default_preview" = "Message preview";
+"chat.message_placeholder" = "Message";
+"chat.attachment" = "Attachment";
+"chat.attachments_loading" = "Loading attachments...";
+"chat.attachments_count" = "%d attachments selected";
+"chat.empty" = "No messages yet. Start the conversation.";
+
+"permissions.setup_title" = "Permission setup";
+"permissions.setup_subtitle" = "For proper app operation, please allow the following permissions";
+"permissions.done_title" = "Setup complete!";
+"permissions.done_subtitle" = "Thank you. With these permissions enabled, the app can run correctly.";
+"permissions.requirements_title" = "The app requires the following permissions";
+"permissions.item_1" = "Display over other apps";
+"permissions.item_2" = "Location access";
+"permissions.item_3" = "Disable battery optimization";
+"permissions.item_4" = "Microphone access";
+"permissions.item_5" = "Usage stats access";
+"permissions.item_6" = "Background data transfer";
+"permissions.item_7" = "Notification access";
+
+"templates.title" = "SMS templates";
+"templates.create" = "Create template";
+"templates.edit" = "Edit template";
+"templates.input_placeholder" = "Input";
+"templates.default_1" = "I'm home";
+"templates.default_2" = "I'm at school";
+"templates.default_3" = "I'm outside";
+
+"tasks.title" = "Tasks";
+"tasks.prize_title" = "Prize name";
+"tasks.task_title" = "Task";
+"tasks.placeholder_line_1" = "Enter some information";
+"tasks.placeholder_line_2" = "to fill this empty field";
+"tasks.completed_cleanup_note" = "Completed tasks are automatically removed after 3 days";
+"tasks.start" = "Start";
+"tasks.completed" = "Completed";
+"tasks.updating" = "Updating...";
+
+"settings.title" = "Profile";
+"settings.change_username" = "Change username";
+"settings.username_placeholder" = "User";
+"settings.connected_devices" = "Connected devices:";
+"settings.device_mom" = "Mom";
+"settings.device_dad" = "Dad";
+"settings.logout" = "Log out";
+"settings.delete_account" = "Delete";
+"settings.delete_title" = "Delete account";
+"settings.delete_message" = "Are you sure you want to delete the account?";
+"settings.edit_soon" = "Editing will be available soon";
+"settings.enter_username" = "Enter a username";
+"settings.saved" = "Saved";
+"settings.saving" = "Saving...";
+"settings.save_failed" = "Saved locally. Backend update failed.";

@@ -1,0 +1,104 @@
+"common.ok" = "OK";
+"common.next" = "Keyingi";
+"common.retry" = "Qayta urinish";
+"common.home" = "Bosh sahifa";
+"common.save" = "Saqlash";
+"common.cancel" = "Bekor qilish";
+"common.dsn_missing" = "Qurilma DSN topilmadi";
+
+"auth.welcome" = "Xush kelibsiz!";
+"auth.company_mission" = "Bizning maqsadimiz - bolalar xavfsizligini ta'minlash va ota-onalarga bolalarini kuzatishda yordam berish.";
+"auth.scan_qr_hint" = "Ota-ona qurilmasidagi QR kodni skaner qiling";
+"auth.scan_qr_button" = "Kodni skanerlash";
+"auth.connecting" = "Ulanmoqda...";
+"auth.error_title" = "Xatolik!";
+"auth.error_bind_failed" = "Farzandingiz qurilmasini ulab bo'lmadi";
+"auth.success_title" = "Muvaffaqiyatli!";
+"auth.success_bind_success" = "Farzandingiz qurilmasi muvaffaqiyatli ulandi";
+"auth.verify_failed" = "Ulash bajarildi, lekin qurilma tasdiqlanmadi. QR kodni qayta skaner qiling.";
+"auth.qr_missing_auth_data" = "QR kodda ulash ma'lumotlari yo'q";
+
+"scanner.hint" = "Kamerani ota-onaning QR kodiga yo'naltiring";
+"scanner.unavailable_title" = "Skaner mavjud emas";
+"scanner.camera_denied" = "Kamera uchun ruxsat berilmagan";
+"scanner.camera_settings" = "Qurilma sozlamalaridan kameraga ruxsat bering";
+"scanner.camera_unavailable" = "Kamera mavjud emas";
+"scanner.camera_not_found" = "Qurilmada kamera topilmadi";
+"scanner.camera_attach_failed" = "Kamerani ulab bo'lmadi";
+"scanner.camera_start_failed" = "Skanerni ishga tushirib bo'lmadi";
+"scanner.camera_runtime_error" = "Kamera xatoligi";
+
+"main.ad_info" = "Reklama / ma'lumot";
+"main.sos_title" = "SOS";
+"main.tasks" = "Vazifalar";
+"main.message" = "Xabar";
+"main.info_title" = "Ma'lumot";
+"main.no_notifications" = "Hozircha bildirishnoma yo'q";
+"main.weekly_stats" = "Telefondan haftalik foydalanish statistikasi";
+"main.hours_short" = "s";
+"main.device_not_bound" = "Qurilma ulanmagan";
+"main.sos_sent" = "SOS yuborildi";
+
+"weekday.mon" = "Du";
+"weekday.tue" = "Se";
+"weekday.wed" = "Ch";
+"weekday.thu" = "Pa";
+"weekday.fri" = "Ju";
+"weekday.sat" = "Sh";
+"weekday.sun" = "Ya";
+
+"chat.parents_title" = "Ota-ona chatlari";
+"chat.parent" = "Ota-ona";
+"chat.default_preview" = "Xabar matni";
+"chat.message_placeholder" = "Xabar";
+"chat.attachment" = "Ilova";
+"chat.attachments_loading" = "Ilovalar yuklanmoqda...";
+"chat.attachments_count" = "%d ta ilova tanlandi";
+"chat.empty" = "Hozircha xabarlar yo'q. Suhbatni boshlang.";
+
+"permissions.setup_title" = "Ruxsatlarni sozlash";
+"permissions.setup_subtitle" = "Ilova to'g'ri ishlashi uchun quyidagi ruxsatlarni bering";
+"permissions.done_title" = "Sozlash yakunlandi!";
+"permissions.done_subtitle" = "Ishonchingiz uchun rahmat. Ushbu ruxsatlar bilan ilova to'liq ishlaydi.";
+"permissions.requirements_title" = "Ilova uchun quyidagi ruxsatlar kerak";
+"permissions.item_1" = "Boshqa ilovalar ustida ko'rsatish";
+"permissions.item_2" = "Geolokatsiya ruxsati";
+"permissions.item_3" = "Energiya tejamkorligini o'chirish";
+"permissions.item_4" = "Mikrofon ruxsati";
+"permissions.item_5" = "Ilovalar statistikasi ruxsati";
+"permissions.item_6" = "Fon rejimida ma'lumot uzatish";
+"permissions.item_7" = "Bildirishnomalarni ko'rish";
+
+"templates.title" = "SMS shablonlar";
+"templates.create" = "Shablon yaratish";
+"templates.edit" = "Shablonni tahrirlash";
+"templates.input_placeholder" = "Kiritish";
+"templates.default_1" = "Men uydaman";
+"templates.default_2" = "Men maktabdaman";
+"templates.default_3" = "Men ko'chadaman";
+
+"tasks.title" = "Vazifalar";
+"tasks.prize_title" = "Sovrin nomi";
+"tasks.task_title" = "Vazifa";
+"tasks.placeholder_line_1" = "Bu joyni to'ldirish uchun";
+"tasks.placeholder_line_2" = "istalgan ma'lumot kiriting";
+"tasks.completed_cleanup_note" = "Yakunlangan vazifalar 3 kundan so'ng avtomatik o'chiriladi";
+"tasks.start" = "Boshlash";
+"tasks.completed" = "Yakunlangan";
+"tasks.updating" = "Yangilanmoqda...";
+
+"settings.title" = "Profil";
+"settings.change_username" = "Foydalanuvchi nomini o'zgartirish";
+"settings.username_placeholder" = "Foydalanuvchi";
+"settings.connected_devices" = "Ulangan qurilmalar:";
+"settings.device_mom" = "Ona";
+"settings.device_dad" = "Ota";
+"settings.logout" = "Chiqish";
+"settings.delete_account" = "O'chirish";
+"settings.delete_title" = "Akkauntni o'chirish";
+"settings.delete_message" = "Akkauntni o'chirishni xohlaysizmi?";
+"settings.edit_soon" = "Tahrirlash tez orada mavjud bo'ladi";
+"settings.enter_username" = "Foydalanuvchi nomini kiriting";
+"settings.saved" = "Saqlandi";
+"settings.saving" = "Saqlanmoqda...";
+"settings.save_failed" = "Mahalliy saqlandi. Serverni yangilab bo'lmadi.";
