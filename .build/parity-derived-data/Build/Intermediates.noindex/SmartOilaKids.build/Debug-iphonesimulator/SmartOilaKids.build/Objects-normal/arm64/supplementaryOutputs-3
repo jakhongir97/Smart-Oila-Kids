@@ -1,0 +1,30 @@
+{
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Auth/AuthViewModel.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AuthViewModel.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AuthViewModel.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AuthViewModel.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AuthViewModel.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AuthViewModel.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Chat/ChatBubbleComponents.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatBubbleComponents.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatBubbleComponents.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatBubbleComponents.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatBubbleComponents.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatBubbleComponents.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Chat/ChatModels.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatModels.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatModels.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatModels.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatModels.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatModels.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Chat/ChatService.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatService.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatService.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatService.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatService.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/ChatService.swiftdeps"
+  }
+}

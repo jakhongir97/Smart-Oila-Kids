@@ -1,0 +1,30 @@
+{
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Core/Networking/NetworkError.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/NetworkError.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/NetworkError.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/NetworkError.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/NetworkError.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/NetworkError.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Auth/QRScannerView.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/QRScannerView.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/QRScannerView.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/QRScannerView.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/QRScannerView.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/QRScannerView.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Main/MainComponents.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainComponents.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainComponents.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainComponents.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainComponents.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainComponents.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Main/MainViewModel.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainViewModel.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainViewModel.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainViewModel.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainViewModel.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/MainViewModel.swiftdeps"
+  }
+}

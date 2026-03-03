@@ -1,0 +1,30 @@
+{
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Core/Socket/GeoBackgroundService.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoBackgroundService.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoBackgroundService.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoBackgroundService.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoBackgroundService.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoBackgroundService.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Core/Utils/Date+Formatting.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/Date+Formatting.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/Date+Formatting.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/Date+Formatting.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/Date+Formatting.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/Date+Formatting.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Features/Permissions/GeoPermissionView.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoPermissionView.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoPermissionView.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoPermissionView.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoPermissionView.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoPermissionView.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Shared/UI/GeoDebugOverlay.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoDebugOverlay.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoDebugOverlay.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoDebugOverlay.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoDebugOverlay.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/GeoDebugOverlay.swiftdeps"
+  }
+}

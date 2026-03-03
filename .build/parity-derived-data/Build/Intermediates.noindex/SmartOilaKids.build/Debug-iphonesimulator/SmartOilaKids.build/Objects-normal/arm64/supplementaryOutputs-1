@@ -1,0 +1,30 @@
+{
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/App/AppDependencies.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppDependencies.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppDependencies.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppDependencies.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppDependencies.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppDependencies.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Core/Config/AppConfig.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppConfig.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppConfig.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppConfig.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppConfig.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppConfig.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Core/Networking/APIClient.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/APIClient.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/APIClient.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/APIClient.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/APIClient.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/APIClient.swiftdeps"
+  },
+  "/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/DesignSystem/AppColors.swift" : {
+    "const-values" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppColors.swiftconstvalues",
+    "dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppColors.d",
+    "diagnostics" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppColors.dia",
+    "object" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppColors.o",
+    "swift-dependencies" : "/Users/jakhongirnematov/Desktop/Smart Oila Kids/.build/parity-derived-data/Build/Intermediates.noindex/SmartOilaKids.build/Debug-iphonesimulator/SmartOilaKids.build/Objects-normal/arm64/AppColors.swiftdeps"
+  }
+}

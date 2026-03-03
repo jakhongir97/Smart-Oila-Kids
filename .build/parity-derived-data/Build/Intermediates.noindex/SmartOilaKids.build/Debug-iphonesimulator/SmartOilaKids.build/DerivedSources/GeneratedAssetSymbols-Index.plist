@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>colors</key>
+	<array>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACColorNameAccentColor</string>
+			<key>relativePath</key>
+			<string>./AccentColor.colorset</string>
+			<key>swiftSymbol</key>
+			<string>accent</string>
+		</dict>
+	</array>
+	<key>images</key>
+	<array>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameChevronDownSmall</string>
+			<key>relativePath</key>
+			<string>./ChevronDownSmall.imageset</string>
+			<key>swiftSymbol</key>
+			<string>chevronDownSmall</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameFlagRU</string>
+			<key>relativePath</key>
+			<string>./FlagRU.imageset</string>
+			<key>swiftSymbol</key>
+			<string>flagRU</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIconBack</string>
+			<key>relativePath</key>
+			<string>./IconBack.imageset</string>
+			<key>swiftSymbol</key>
+			<string>iconBack</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIconInfo</string>
+			<key>relativePath</key>
+			<string>./IconInfo.imageset</string>
+			<key>swiftSymbol</key>
+			<string>iconInfo</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIconNotification</string>
+			<key>relativePath</key>
+			<string>./IconNotification.imageset</string>
+			<key>swiftSymbol</key>
+			<string>iconNotification</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIconPencil</string>
+			<key>relativePath</key>
+			<string>./IconPencil.imageset</string>
+			<key>swiftSymbol</key>
+			<string>iconPencil</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIconSend</string>
+			<key>relativePath</key>
+			<string>./IconSend.imageset</string>
+			<key>swiftSymbol</key>
+			<string>iconSend</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIconSettings</string>
+			<key>relativePath</key>
+			<string>./IconSettings.imageset</string>
+			<key>swiftSymbol</key>
+			<string>iconSettings</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIconTrophy</string>
+			<key>relativePath</key>
+			<string>./IconTrophy.imageset</string>
+			<key>swiftSymbol</key>
+			<string>iconTrophy</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameProfileCircleBg</string>
+			<key>relativePath</key>
+			<string>./ProfileCircleBg.imageset</string>
+			<key>swiftSymbol</key>
+			<string>profileCircleBg</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameSmartOilaMark</string>
+			<key>relativePath</key>
+			<string>./SmartOilaMark.imageset</string>
+			<key>swiftSymbol</key>
+			<string>smartOilaMark</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameStatusIcons</string>
+			<key>relativePath</key>
+			<string>./StatusIcons.imageset</string>
+			<key>swiftSymbol</key>
+			<string>statusIcons</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameUserAvatarGlyph</string>
+			<key>relativePath</key>
+			<string>./UserAvatarGlyph.imageset</string>
+			<key>swiftSymbol</key>
+			<string>userAvatarGlyph</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids/Resources/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameWatermarkMark</string>
+			<key>relativePath</key>
+			<string>./WatermarkMark.imageset</string>
+			<key>swiftSymbol</key>
+			<string>watermarkMark</string>
+		</dict>
+	</array>
+	<key>symbols</key>
+	<array/>
+</dict>
+</plist>
