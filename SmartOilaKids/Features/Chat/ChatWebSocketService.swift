@@ -9,21 +9,26 @@ final class ChatWebSocketService {
         isDisconnectRequested = false
         connectedDSN = dsn
         currentBaseIndex = 0
+        reconnectAttemptCount = 0
         connectUsingCurrentBase()
     }
 
     func disconnect() {
         isDisconnectRequested = true
         connectedDSN = nil
+        reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
     }
 
     private func connectUsingCurrentBase() {
-        guard
-            let dsn = connectedDSN,
-            currentBaseIndex < AppConfig.websocketBaseCandidates.count
-        else {
+        guard let dsn = connectedDSN else {
+            return
+        }
+
+        guard currentBaseIndex < AppConfig.websocketBaseCandidates.count else {
+            scheduleReconnect()
             return
         }
 
@@ -36,13 +41,33 @@ final class ChatWebSocketService {
 
         task = URLSession.shared.webSocketTask(with: url)
         task?.resume()
+        reconnectAttemptCount = 0
         receiveLoop(baseIndex: currentBaseIndex)
     }
 
     private func connectNextBase() {
         guard !isDisconnectRequested else { return }
         currentBaseIndex += 1
-        connectUsingCurrentBase()
+        if currentBaseIndex < AppConfig.websocketBaseCandidates.count {
+            connectUsingCurrentBase()
+            return
+        }
+
+        currentBaseIndex = 0
+        scheduleReconnect()
+    }
+
+    private func scheduleReconnect() {
+        guard !isDisconnectRequested else { return }
+
+        reconnectAttemptCount += 1
+        reconnectWorkItem?.cancel()
+
+        let item = DispatchWorkItem { [weak self] in
+            self?.connectUsingCurrentBase()
+        }
+        reconnectWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + reconnectDelay, execute: item)
     }
 
     private func receiveLoop(baseIndex: Int) {
@@ -101,4 +126,7 @@ final class ChatWebSocketService {
     private var currentBaseIndex = 0
     private var isDisconnectRequested = false
     private var task: URLSessionWebSocketTask?
+    private var reconnectWorkItem: DispatchWorkItem?
+    private var reconnectAttemptCount = 0
+    private let reconnectDelay: TimeInterval = 3
 }

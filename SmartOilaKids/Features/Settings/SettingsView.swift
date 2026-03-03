@@ -8,6 +8,9 @@ struct SettingsView: View {
     @State private var userName: String = ""
     @State private var bannerText: String?
     @State private var showDeleteAlert = false
+    @State private var showDeviceEditor = false
+    @State private var editingDevice: ConnectedDevice?
+    @State private var editingDeviceName: String = ""
     @FocusState private var isNameFieldFocused: Bool
 
     init(viewModel: SettingsViewModel? = nil) {
@@ -102,15 +105,24 @@ struct SettingsView: View {
                                     .padding(.horizontal, sidePadding)
                                     .padding(.top, compact ? 16 : 20)
 
-                                VStack(spacing: compact ? 14 : 20) {
-                                    ForEach(viewModel.connectedDevices, id: \.self) { name in
-                                        SettingsDeviceCard(name: name) {
-                                            banner(L10n.tr("settings.edit_soon"))
+                                if viewModel.connectedDevices.isEmpty {
+                                    Text(L10n.tr("settings.no_connected_devices"))
+                                        .font(AppTypography.unbounded(12, weight: .regular))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, sidePadding)
+                                        .padding(.top, compact ? 8 : 10)
+                                } else {
+                                    VStack(spacing: compact ? 14 : 20) {
+                                        ForEach(viewModel.connectedDevices) { device in
+                                            SettingsDeviceCard(name: device.name) {
+                                                beginDeviceEditing(device)
+                                            }
                                         }
                                     }
+                                    .padding(.horizontal, sidePadding)
+                                    .padding(.top, compact ? 8 : 10)
                                 }
-                                .padding(.horizontal, sidePadding)
-                                .padding(.top, compact ? 8 : 10)
 
                                 Button {
                                     AppHaptics.tap()
@@ -174,9 +186,6 @@ struct SettingsView: View {
         .task {
             await loadRemoteDataIfNeeded()
         }
-        .onChange(of: sessionStore.appLanguage) { _ in
-            viewModel.refreshLocalizedFallbacksIfNeeded()
-        }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -199,12 +208,36 @@ struct SettingsView: View {
         }
         .alert(L10n.tr("settings.delete_title"), isPresented: $showDeleteAlert) {
             Button(L10n.tr("settings.delete_account"), role: .destructive) {
-                AppHaptics.warning()
-                sessionStore.clearSession()
+                Task {
+                    do {
+                        try await viewModel.deleteCurrentDeviceSession(dsn: sessionStore.dsn)
+                        AppHaptics.success()
+                        sessionStore.clearSession()
+                    } catch {
+                        AppHaptics.warning()
+                        banner(L10n.tr("settings.delete_failed"))
+                    }
+                }
             }
             Button(L10n.tr("common.cancel"), role: .cancel) {}
         } message: {
             Text(L10n.tr("settings.delete_message"))
+        }
+        .alert(L10n.tr("settings.edit_device"), isPresented: $showDeviceEditor) {
+            TextField(L10n.tr("settings.username_placeholder"), text: $editingDeviceName)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled(true)
+
+            Button(L10n.tr("common.cancel"), role: .cancel) {
+                editingDevice = nil
+            }
+
+            Button(viewModel.isUpdatingDevice ? L10n.tr("settings.saving") : L10n.tr("common.save")) {
+                saveEditedDevice()
+            }
+            .disabled(viewModel.isUpdatingDevice)
+        } message: {
+            Text(L10n.tr("settings.change_username"))
         }
         .preferredColorScheme(sessionStore.appTheme.colorScheme)
     }
@@ -219,7 +252,7 @@ struct SettingsView: View {
 
         Task {
             do {
-                let remoteName = try await viewModel.saveProfileName(trimmed)
+                let remoteName = try await viewModel.saveProfileName(trimmed, currentDSN: sessionStore.dsn)
                 userName = remoteName
                 sessionStore.setProfileName(remoteName)
                 AppHaptics.success()
@@ -245,12 +278,42 @@ struct SettingsView: View {
         }
     }
 
+    private func beginDeviceEditing(_ device: ConnectedDevice) {
+        editingDevice = device
+        editingDeviceName = device.name
+        showDeviceEditor = true
+    }
+
+    private func saveEditedDevice() {
+        guard let device = editingDevice else { return }
+        let trimmed = editingDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            AppHaptics.warning()
+            banner(L10n.tr("settings.enter_username"))
+            return
+        }
+
+        Task {
+            do {
+                let updatedName = try await viewModel.renameDevice(deviceID: device.id, name: trimmed)
+                AppHaptics.success()
+                showDeviceEditor = false
+                editingDevice = nil
+                editingDeviceName = ""
+                banner(updatedName == device.name ? L10n.tr("settings.saved") : L10n.tr("settings.device_renamed"))
+            } catch {
+                AppHaptics.warning()
+                banner(L10n.tr("settings.device_rename_failed"))
+            }
+        }
+    }
+
     private func loadRemoteDataIfNeeded() async {
         if userName.isEmpty {
             userName = sessionStore.profileName
         }
 
-        await viewModel.loadIfNeeded()
+        await viewModel.loadIfNeeded(currentDSN: sessionStore.dsn)
 
         if let remoteProfileName = viewModel.remoteProfileName,
            remoteProfileName != sessionStore.profileName {

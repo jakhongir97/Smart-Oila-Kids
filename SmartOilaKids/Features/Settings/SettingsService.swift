@@ -1,23 +1,35 @@
 import Foundation
 
+struct ConnectedDevice: Identifiable, Equatable {
+    let id: Int
+    let dsn: String?
+    let name: String
+}
+
 protocol SettingsServicing {
     func fetchProfileName() async throws -> String
-    func fetchConnectedDeviceNames(limit: Int) async throws -> [String]
+    func fetchConnectedDevices(limit: Int) async throws -> [ConnectedDevice]
+    func resolveConnectedDevice(dsn: String) async throws -> ConnectedDevice
     func updateProfileName(_ name: String) async throws -> String
+    func renameConnectedDevice(deviceID: Int, name: String) async throws -> ConnectedDevice
+    func deleteConnectedDevice(deviceID: Int) async throws
 }
 
 extension SettingsServicing {
-    func fetchConnectedDeviceNames() async throws -> [String] {
-        try await fetchConnectedDeviceNames(limit: 50)
+    func fetchConnectedDevices() async throws -> [ConnectedDevice] {
+        try await fetchConnectedDevices(limit: 50)
     }
 }
 
 final class SettingsService: SettingsServicing {
-    init(client: APIClient = APIClient()) {
+    init(client: APIClient = APIClient(), memberDevicesService: MemberDevicesServicing? = nil) {
         self.client = client
+        self.memberDevicesService = memberDevicesService ?? MemberDevicesService(client: client)
     }
 
     func fetchProfileName() async throws -> String {
+        try ensureAuthorized()
+
         let profile: MemberProfile = try await client.requestDecodableWithBaseFallback(
             baseURLs: AppConfig.apiBaseCandidates,
             path: "members/me",
@@ -33,27 +45,21 @@ final class SettingsService: SettingsServicing {
         throw NetworkError.unexpectedBody
     }
 
-    func fetchConnectedDeviceNames(limit: Int) async throws -> [String] {
-        let response: MembersDevicesResponse = try await client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "members/me/devices",
-            method: .get,
-            queryItems: [
-                URLQueryItem(name: "offset", value: "0"),
-                URLQueryItem(name: "limit", value: "\(limit)")
-            ],
-            headers: ["Accept": "application/json"],
-            as: MembersDevicesResponse.self
-        )
+    func fetchConnectedDevices(limit: Int) async throws -> [ConnectedDevice] {
+        let records = try await memberDevicesService.fetchDevices(limit: limit)
+        return records.map { record in
+            ConnectedDevice(id: record.id, dsn: record.dsn, name: record.name)
+        }
+    }
 
-        let names = response.devices
-            .compactMap(\.resolvedName)
-            .compactMap(\.trimmedNonEmpty)
-
-        return uniqueStableValues(in: names)
+    func resolveConnectedDevice(dsn: String) async throws -> ConnectedDevice {
+        try ensureAuthorized()
+        let record = try await memberDevicesService.resolveDevice(byDSN: dsn, limit: 100)
+        return ConnectedDevice(id: record.id, dsn: record.dsn, name: record.name)
     }
 
     func updateProfileName(_ name: String) async throws -> String {
+        try ensureAuthorized()
         let payload = MemberProfileUpdate(name: name, region: nil)
         let body = try JSONEncoder().encode(payload)
 
@@ -70,18 +76,43 @@ final class SettingsService: SettingsServicing {
         return profile.resolvedName?.trimmedNonEmpty ?? name
     }
 
-    private func uniqueStableValues(in values: [String]) -> [String] {
-        var visited = Set<String>()
-        var unique: [String] = []
+    func renameConnectedDevice(deviceID: Int, name: String) async throws -> ConnectedDevice {
+        try ensureAuthorized()
+        let payload = ConnectedDeviceRenameRequest(name: name)
+        let body = try JSONEncoder().encode(payload)
+        let response: MemberDevice = try await client.requestDecodableWithBaseFallback(
+            baseURLs: AppConfig.apiBaseCandidates,
+            path: "devices/\(deviceID)",
+            method: .put,
+            headers: ["Accept": "application/json"],
+            body: body,
+            contentType: "application/json",
+            as: MemberDevice.self
+        )
 
-        for value in values where visited.insert(value).inserted {
-            unique.append(value)
-        }
+        let resolvedName = response.resolvedName?.trimmedNonEmpty ?? name
+        return ConnectedDevice(id: deviceID, dsn: response.dsn?.trimmedNonEmpty, name: resolvedName)
+    }
 
-        return unique
+    func deleteConnectedDevice(deviceID: Int) async throws {
+        try ensureAuthorized()
+        _ = try await client.requestDataWithBaseFallback(
+            baseURLs: AppConfig.apiBaseCandidates,
+            path: "devices/\(deviceID)",
+            method: .delete,
+            headers: ["Accept": "application/json"]
+        )
     }
 
     private let client: APIClient
+    private let memberDevicesService: MemberDevicesServicing
+    private let userDefaults: UserDefaults = .standard
+
+    private func ensureAuthorized() throws {
+        guard userDefaults.string(forKey: "API_ACCESS_TOKEN")?.trimmedNonEmpty != nil else {
+            throw NetworkError.server(statusCode: 401, body: "Not authenticated")
+        }
+    }
 }
 
 private struct MemberProfile: Decodable {
@@ -113,7 +144,13 @@ private struct MemberProfileUpdate: Encodable {
     let region: String?
 }
 
+private struct ConnectedDeviceRenameRequest: Encodable {
+    let name: String
+}
+
 private struct MemberDevice: Decodable {
+    let id: Int?
+    let dsn: String?
     let name: String?
     let username: String?
     let fullName: String?
@@ -123,47 +160,10 @@ private struct MemberDevice: Decodable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case id
+        case dsn
         case name
         case username
         case fullName = "full_name"
-    }
-}
-
-private enum MembersDevicesResponse: Decodable {
-    case array([MemberDevice])
-    case envelope(Envelope)
-
-    struct Envelope: Decodable {
-        let data: [MemberDevice]?
-        let results: [MemberDevice]?
-        let devices: [MemberDevice]?
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-
-        if let items = try? container.decode([MemberDevice].self) {
-            self = .array(items)
-            return
-        }
-
-        if let envelope = try? container.decode(Envelope.self) {
-            self = .envelope(envelope)
-            return
-        }
-
-        throw DecodingError.typeMismatch(
-            MembersDevicesResponse.self,
-            DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unsupported devices response shape")
-        )
-    }
-
-    var devices: [MemberDevice] {
-        switch self {
-        case let .array(items):
-            return items
-        case let .envelope(payload):
-            return payload.data ?? payload.results ?? payload.devices ?? []
-        }
     }
 }

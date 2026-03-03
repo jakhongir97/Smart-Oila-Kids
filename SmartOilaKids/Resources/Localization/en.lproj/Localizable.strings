@@ -20,6 +20,7 @@
 "auth.success_bind_success" = "Your child's device has been successfully linked";
 "auth.verify_failed" = "Linking succeeded, but device verification failed. Please scan again.";
 "auth.qr_missing_auth_data" = "QR code does not contain binding data";
+"auth.qr_invalid_contract" = "QR code format is invalid. Please regenerate QR from the parent app.";
 
 "scanner.hint" = "Point the camera at the parent's QR code";
 "scanner.unavailable_title" = "Scanner Unavailable";
@@ -42,6 +43,12 @@
 "main.hours_short" = "h";
 "main.device_not_bound" = "Device is not linked";
 "main.sos_sent" = "SOS sent";
+"main.usage_load_failed" = "Couldn't load usage data. Tap to retry.";
+
+"lock.title" = "Device is locked";
+"lock.subtitle" = "This device is temporarily restricted by your parent.";
+"lock.schedule" = "Schedule: %@";
+"lock.local_time" = "Device time: %@";
 
 "weekday.mon" = "Mon";
 "weekday.tue" = "Tue";
@@ -61,6 +68,9 @@
 "chat.empty" = "No messages yet. Start the conversation.";
 "chat.send" = "Send message";
 "chat.open_parent_chat_hint" = "Opens the chat thread";
+"chat.template_button" = "Open templates";
+"chat.template_picker_title" = "SMS templates";
+"chat.template_empty" = "No templates available.";
 
 "permissions.setup_title" = "Permission setup";
 "permissions.setup_subtitle" = "For proper app operation, please allow the following permissions";
@@ -90,6 +100,8 @@
 "tasks.task_title" = "Task";
 "tasks.placeholder_line_1" = "Enter some information";
 "tasks.placeholder_line_2" = "to fill this empty field";
+"tasks.empty_title" = "No active tasks";
+"tasks.empty_subtitle" = "Parent will add tasks here.";
 "tasks.completed_cleanup_note" = "Completed tasks are automatically removed after 3 days";
 "tasks.start" = "Start";
 "tasks.completed" = "Completed";
@@ -107,6 +119,7 @@
 "settings.language.ru" = "RU";
 "settings.language.uz" = "UZ";
 "settings.connected_devices" = "Connected devices:";
+"settings.no_connected_devices" = "No connected devices yet.";
 "settings.edit_device" = "Edit connected device";
 "settings.device_mom" = "Mom";
 "settings.device_dad" = "Dad";
@@ -119,3 +132,6 @@
 "settings.saved" = "Saved";
 "settings.saving" = "Saving...";
 "settings.save_failed" = "Saved locally. Backend update failed.";
+"settings.device_renamed" = "Device name updated.";
+"settings.device_rename_failed" = "Couldn't update device name.";
+"settings.delete_failed" = "Couldn't delete device on server.";

@@ -47,53 +47,40 @@ struct TaskView: View {
                         .padding(.top, compact ? 34 : 50)
 
                 case let .failed(text):
-                    if isDebugRouteMode {
-                        ForEach(0..<4, id: \.self) { _ in
-                            taskCard(
-                                title: L10n.tr("tasks.prize_title"),
-                                taskTitle: L10n.tr("tasks.task_title"),
-                                details: [L10n.tr("tasks.placeholder_line_1"), L10n.tr("tasks.placeholder_line_2")],
-                                completed: false,
-                                isUpdating: false,
-                                compact: compact,
-                                action: nil
-                            )
-                        }
-                    } else {
-                        VStack(spacing: 10) {
-                            Text(text)
-                                .font(AppTypography.unbounded(12, weight: .regular))
-                                .foregroundStyle(.white.opacity(0.7))
-                                .multilineTextAlignment(.center)
+                    VStack(spacing: 10) {
+                        Text(text)
+                            .font(AppTypography.unbounded(12, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
 
-                            Button(L10n.tr("common.retry")) {
-                                AppHaptics.tap()
-                                Task { await viewModel.load() }
-                            }
-                            .font(AppTypography.unbounded(14, weight: .medium))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                            .background(AppColors.accentGreen)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .padding(.horizontal, 40)
+                        Button(L10n.tr("common.retry")) {
+                            AppHaptics.tap()
+                            Task { await viewModel.load() }
                         }
-                        .padding(.top, compact ? 28 : 40)
+                        .font(AppTypography.unbounded(14, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(AppColors.accentGreen)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.horizontal, 40)
                     }
+                    .padding(.top, compact ? 28 : 40)
 
                 case .loaded:
                     if viewModel.isEmptyState {
-                        ForEach(0..<4, id: \.self) { _ in
-                            taskCard(
-                                title: L10n.tr("tasks.prize_title"),
-                                taskTitle: L10n.tr("tasks.task_title"),
-                                details: [L10n.tr("tasks.placeholder_line_1"), L10n.tr("tasks.placeholder_line_2")],
-                                completed: false,
-                                isUpdating: false,
-                                compact: compact,
-                                action: nil
-                            )
+                        VStack(spacing: 10) {
+                            Text(L10n.tr("tasks.empty_title"))
+                                .font(AppTypography.unbounded(16, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+
+                            Text(L10n.tr("tasks.empty_subtitle"))
+                                .font(AppTypography.unbounded(12, weight: .regular))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .multilineTextAlignment(.center)
                         }
+                        .padding(.top, compact ? 34 : 50)
                     } else {
                         ForEach(viewModel.awards) { award in
                             taskCard(
@@ -113,9 +100,12 @@ struct TaskView: View {
                     }
                 }
             }
-            .padding(.horizontal, sidePadding)
-            .padding(.top, compact ? 14 : 20)
-            .padding(.bottom, bottomInset + (compact ? 8 : 14))
+        .padding(.horizontal, sidePadding)
+        .padding(.top, compact ? 14 : 20)
+        .padding(.bottom, bottomInset + (compact ? 8 : 14))
+        .refreshable {
+            await viewModel.load()
+        }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(red: 0.31, green: 0.31, blue: 0.31)) // #4F4F4F
@@ -235,7 +225,4 @@ struct TaskView: View {
         return [names[0], names[1]]
     }
 
-    private var isDebugRouteMode: Bool {
-        AppRuntime.hasDebugRoute
-    }
 }

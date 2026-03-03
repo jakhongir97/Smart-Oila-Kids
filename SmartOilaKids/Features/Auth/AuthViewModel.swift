@@ -42,6 +42,7 @@ final class AuthViewModel: ObservableObject {
         let preferredDeviceName = payload.deviceName?.trimmedNonEmpty ?? UIDevice.current.name
         return try await authService.registerDevice(
             qrToken: payload.token,
+            qrRefreshToken: payload.refreshToken,
             parentPhone: payload.parentPhone,
             deviceName: preferredDeviceName,
             appVersion: appVersion

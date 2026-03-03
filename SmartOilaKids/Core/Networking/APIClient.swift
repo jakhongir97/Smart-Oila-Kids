@@ -3,6 +3,7 @@ import Foundation
 final class APIClient {
     private enum Keys {
         static let apiAccessToken = "API_ACCESS_TOKEN"
+        static let apiRefreshToken = "API_REFRESH_TOKEN"
     }
 
     private struct APIFailureEnvelope: Decodable {
@@ -14,6 +15,18 @@ final class APIClient {
             case status
             case message
             case statusCode = "status_code"
+        }
+    }
+
+    private struct TokenRefreshResponse: Decodable {
+        let refreshToken: String?
+        let accessToken: String?
+        let tokenType: String?
+
+        enum CodingKeys: String, CodingKey {
+            case refreshToken = "refresh_token"
+            case accessToken = "access_token"
+            case tokenType = "token_type"
         }
     }
 
@@ -66,8 +79,7 @@ final class APIClient {
     }
 
     func requestData(_ request: URLRequest) async throws -> Data {
-        let result = try await requestDataResponse(request)
-        return result.data
+        try await requestData(request, allowAuthRefresh: true)
     }
 
     func requestDecodable<T: Decodable>(_ request: URLRequest, as type: T.Type) async throws -> T {
@@ -204,6 +216,92 @@ final class APIClient {
         JSONDecoder()
     }
 
+    private func requestData(_ request: URLRequest, allowAuthRefresh: Bool) async throws -> Data {
+        do {
+            let result = try await requestDataResponse(request)
+            return result.data
+        } catch let NetworkError.server(statusCode, body) where statusCode == 401 {
+            guard allowAuthRefresh, shouldAttemptAuthRefresh(for: request) else {
+                throw NetworkError.server(statusCode: statusCode, body: body)
+            }
+
+            guard let refreshedAuthorization = await refreshAuthorizationHeaderIfPossible() else {
+                throw NetworkError.server(statusCode: statusCode, body: body)
+            }
+
+            var retried = request
+            retried.setValue(refreshedAuthorization, forHTTPHeaderField: "Authorization")
+            return try await requestData(retried, allowAuthRefresh: false)
+        }
+    }
+
+    private func shouldAttemptAuthRefresh(for request: URLRequest) -> Bool {
+        guard let path = request.url?.path.lowercased() else { return false }
+        return !path.contains("/auth/refresh_token")
+    }
+
+    private func refreshAuthorizationHeaderIfPossible() async -> String? {
+        do {
+            return try await Self.authRefreshCoordinator.refresh(using: self)
+        } catch {
+            return nil
+        }
+    }
+
+    fileprivate func performTokenRefreshIfPossible() async throws -> String? {
+        guard let refreshToken = UserDefaults.standard.string(forKey: Keys.apiRefreshToken)?.trimmedNonEmpty else {
+            return nil
+        }
+
+        let payload = ["refresh_token": refreshToken]
+        let body = try JSONSerialization.data(withJSONObject: payload)
+
+        var lastError: Error?
+        for baseURL in AppConfig.apiBaseCandidates {
+            do {
+                var request = try makeRequest(
+                    baseURL: baseURL,
+                    path: "auth/refresh_token",
+                    method: .post,
+                    headers: ["Accept": "application/json"],
+                    body: body,
+                    contentType: "application/json"
+                )
+                request.setValue(nil, forHTTPHeaderField: "Authorization")
+
+                let data = try await requestData(request, allowAuthRefresh: false)
+                if let apiError = detectEnvelopeError(in: data) {
+                    throw apiError
+                }
+
+                let response = try decode(TokenRefreshResponse.self, from: data)
+                guard let accessToken = response.accessToken?.trimmedNonEmpty else {
+                    return nil
+                }
+
+                UserDefaults.standard.set(accessToken, forKey: Keys.apiAccessToken)
+
+                if let refreshed = response.refreshToken?.trimmedNonEmpty {
+                    UserDefaults.standard.set(refreshed, forKey: Keys.apiRefreshToken)
+                }
+
+                return accessToken
+            } catch let NetworkError.server(statusCode, _) where statusCode == 400 || statusCode == 401 || statusCode == 403 {
+                UserDefaults.standard.removeObject(forKey: Keys.apiAccessToken)
+                UserDefaults.standard.removeObject(forKey: Keys.apiRefreshToken)
+                return nil
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let lastError {
+            throw lastError
+        }
+
+        return nil
+    }
+
     private func debugLogRequest(_ request: URLRequest) {
 #if DEBUG
         guard let method = request.httpMethod,
@@ -282,6 +380,28 @@ final class APIClient {
 
     private let session: URLSession
     private let decoder: JSONDecoder
+    private static let authRefreshCoordinator = APIAuthRefreshCoordinator()
+}
+
+private actor APIAuthRefreshCoordinator {
+    private var inFlight: Task<String?, Error>?
+
+    func refresh(using client: APIClient) async throws -> String? {
+        if let inFlight {
+            return try await inFlight.value
+        }
+
+        let task = Task {
+            try await client.performTokenRefreshIfPossible()
+        }
+        inFlight = task
+
+        defer {
+            inFlight = nil
+        }
+
+        return try await task.value
+    }
 }
 
 private extension NetworkError {

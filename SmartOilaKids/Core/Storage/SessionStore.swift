@@ -46,6 +46,7 @@ final class SessionStore: ObservableObject {
         static let dsn = "DSN"
         static let profileName = "PROFILE_NAME"
         static let apiAccessToken = "API_ACCESS_TOKEN"
+        static let apiRefreshToken = "API_REFRESH_TOKEN"
         static let appTheme = "APP_THEME"
         static let appLanguage = "APP_LANGUAGE"
     }
@@ -53,6 +54,7 @@ final class SessionStore: ObservableObject {
     @Published private(set) var dsn: String?
     @Published var profileName: String
     @Published private(set) var apiAccessToken: String?
+    @Published private(set) var apiRefreshToken: String?
     @Published private(set) var appTheme: AppTheme
     @Published private(set) var appLanguage: AppLanguage
 
@@ -61,6 +63,7 @@ final class SessionStore: ObservableObject {
         self.dsn = userDefaults.string(forKey: Keys.dsn)
         self.profileName = userDefaults.string(forKey: Keys.profileName) ?? "Пользователь"
         self.apiAccessToken = userDefaults.string(forKey: Keys.apiAccessToken)
+        self.apiRefreshToken = userDefaults.string(forKey: Keys.apiRefreshToken)
         self.appTheme = AppTheme(rawValue: userDefaults.string(forKey: Keys.appTheme) ?? "") ?? .system
         self.appLanguage = SessionStore.defaultLanguage(userDefaults: userDefaults)
 
@@ -90,6 +93,15 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    func setAPIRefreshToken(_ token: String?) {
+        apiRefreshToken = token
+        if let token, !token.isEmpty {
+            userDefaults.set(token, forKey: Keys.apiRefreshToken)
+        } else {
+            userDefaults.removeObject(forKey: Keys.apiRefreshToken)
+        }
+    }
+
     func setTheme(_ value: AppTheme) {
         appTheme = value
         userDefaults.set(value.rawValue, forKey: Keys.appTheme)
@@ -104,6 +116,7 @@ final class SessionStore: ObservableObject {
     func clearSession() {
         setDSN(nil)
         setAPIAccessToken(nil)
+        setAPIRefreshToken(nil)
     }
 
     private static func defaultLanguage(userDefaults: UserDefaults) -> AppLanguage {

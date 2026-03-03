@@ -20,6 +20,7 @@
 "auth.success_bind_success" = "Вы успешно привязали устройство Вашего ребенка";
 "auth.verify_failed" = "Привязка выполнена, но проверка устройства не прошла. Отсканируйте QR снова.";
 "auth.qr_missing_auth_data" = "QR-код не содержит данных для привязки";
+"auth.qr_invalid_contract" = "Неверный формат QR-кода. Сгенерируйте QR заново в приложении родителя.";
 
 "scanner.hint" = "Наведите камеру на QR-код родителя";
 "scanner.unavailable_title" = "Сканирование недоступно";
@@ -42,6 +43,12 @@
 "main.hours_short" = "ч";
 "main.device_not_bound" = "Устройство не привязано";
 "main.sos_sent" = "SOS отправлен";
+"main.usage_load_failed" = "Не удалось загрузить статистику. Нажмите, чтобы повторить.";
+
+"lock.title" = "Устройство заблокировано";
+"lock.subtitle" = "Родитель временно ограничил использование этого устройства.";
+"lock.schedule" = "Расписание: %@";
+"lock.local_time" = "Время устройства: %@";
 
 "weekday.mon" = "Пн";
 "weekday.tue" = "Вт";
@@ -61,6 +68,9 @@
 "chat.empty" = "Сообщений пока нет. Начните переписку.";
 "chat.send" = "Отправить сообщение";
 "chat.open_parent_chat_hint" = "Открывает переписку";
+"chat.template_button" = "Открыть шаблоны";
+"chat.template_picker_title" = "Шаблоны СМС";
+"chat.template_empty" = "Шаблонов пока нет.";
 
 "permissions.setup_title" = "Настройка разрешений";
 "permissions.setup_subtitle" = "Для корректной работы приложения, Вам нужно дать согласие на следующие разрешения";
@@ -90,6 +100,8 @@
 "tasks.task_title" = "Задание";
 "tasks.placeholder_line_1" = "Введите какую либо информа-";
 "tasks.placeholder_line_2" = "цию для заполнения пустого поля";
+"tasks.empty_title" = "Активных заданий нет";
+"tasks.empty_subtitle" = "Родитель добавит задания здесь.";
 "tasks.completed_cleanup_note" = "Завершенные задания автоматически удаляются спустя 3 дня";
 "tasks.start" = "Начать";
 "tasks.completed" = "Завершено";
@@ -107,6 +119,7 @@
 "settings.language.ru" = "RU";
 "settings.language.uz" = "UZ";
 "settings.connected_devices" = "Подключеные устройства:";
+"settings.no_connected_devices" = "Подключенных устройств пока нет.";
 "settings.edit_device" = "Редактировать подключенное устройство";
 "settings.device_mom" = "Мама";
 "settings.device_dad" = "Папа";
@@ -119,3 +132,6 @@
 "settings.saved" = "Сохранено";
 "settings.saving" = "Сохранение...";
 "settings.save_failed" = "Сохранено локально. Обновить на сервере не удалось.";
+"settings.device_renamed" = "Название устройства обновлено.";
+"settings.device_rename_failed" = "Не удалось обновить название устройства.";
+"settings.delete_failed" = "Не удалось удалить устройство на сервере.";

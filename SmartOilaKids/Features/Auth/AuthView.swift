@@ -14,6 +14,7 @@ struct AuthView: View {
 
     @State private var stage: Stage = .splash
     @State private var pendingRegistration: AuthRegistrationResult?
+    @State private var pendingProfileName: String?
     @State private var showScanner = false
 
     init(viewModel: AuthViewModel) {
@@ -58,6 +59,10 @@ struct AuthView: View {
                     AppHaptics.success()
                     sessionStore.setDSN(pendingRegistration.dsn)
                     sessionStore.setAPIAccessToken(pendingRegistration.authorizationHeader)
+                    sessionStore.setAPIRefreshToken(pendingRegistration.refreshToken)
+                    if let profileName = pendingProfileName?.trimmedNonEmpty {
+                        sessionStore.setProfileName(profileName)
+                    }
                 }
             }
         }
@@ -295,6 +300,7 @@ struct AuthView: View {
     }
 
     private func bindByScannedPayload(_ payload: AuthScanPayload) {
+        pendingProfileName = payload.deviceName?.trimmedNonEmpty
         Task {
             if let result = await viewModel.submit(scannedPayload: payload) {
                 pendingRegistration = result
@@ -308,27 +314,71 @@ struct AuthView: View {
     }
 
     private func handleScannedCode(_ rawCode: String) {
-        let payload = extractAuthPayload(from: rawCode)
-        guard payload.token?.trimmedNonEmpty != nil else {
-            viewModel.errorText = L10n.tr("auth.qr_missing_auth_data")
+        let parsed = parseAuthPayload(from: rawCode)
+        guard parsed.payload.hasAuthData else {
+            viewModel.errorText = parsed.isContractV1
+                ? L10n.tr("auth.qr_invalid_contract")
+                : L10n.tr("auth.qr_missing_auth_data")
             stage = .failed
             return
         }
 
-        bindByScannedPayload(payload)
+        debugLog(parsed.isContractV1
+            ? "QR contract v1 detected."
+            : "Legacy QR payload detected (no contract marker).")
+        bindByScannedPayload(parsed.payload)
     }
 
-    private func extractAuthPayload(from rawCode: String) -> AuthScanPayload {
+    private func parseAuthPayload(from rawCode: String) -> ParsedAuthPayload {
+        if let contractPayload = extractContractPayload(from: rawCode) {
+            return ParsedAuthPayload(payload: contractPayload, isContractV1: true)
+        }
+
+        return ParsedAuthPayload(
+            payload: extractLegacyAuthPayload(from: rawCode),
+            isContractV1: false
+        )
+    }
+
+    private func extractContractPayload(from rawCode: String) -> AuthScanPayload? {
+        if let jsonPayload = parseJSONObject(rawCode), isContractPayload(jsonPayload) {
+            let contractData = (jsonPayload["data"] as? [String: Any]) ?? jsonPayload
+            return AuthScanPayload(
+                token: extractToken(from: contractData),
+                refreshToken: extractRefreshToken(from: contractData),
+                parentPhone: extractPhone(from: contractData),
+                deviceName: extractDeviceName(from: contractData)
+            )
+        }
+
+        if let url = URL(string: rawCode),
+           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           hasContractMarker(in: components) {
+            return AuthScanPayload(
+                token: extractToken(from: components),
+                refreshToken: extractRefreshToken(from: components),
+                parentPhone: extractPhone(from: components),
+                deviceName: extractDeviceName(from: components)
+            )
+        }
+
+        return nil
+    }
+
+    private func extractLegacyAuthPayload(from rawCode: String) -> AuthScanPayload {
         var token: String?
+        var refreshToken: String?
         var parentPhone: String?
         var deviceName: String?
 
         if let jsonPayload = parseJSONObject(rawCode) {
             token = token ?? extractToken(from: jsonPayload)
+            refreshToken = refreshToken ?? extractRefreshToken(from: jsonPayload)
             parentPhone = parentPhone ?? extractPhone(from: jsonPayload)
             deviceName = deviceName ?? extractDeviceName(from: jsonPayload)
             if let nested = jsonPayload["data"] as? [String: Any] {
                 token = token ?? extractToken(from: nested)
+                refreshToken = refreshToken ?? extractRefreshToken(from: nested)
                 parentPhone = parentPhone ?? extractPhone(from: nested)
                 deviceName = deviceName ?? extractDeviceName(from: nested)
             }
@@ -337,13 +387,84 @@ struct AuthView: View {
         if let url = URL(string: rawCode),
            let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
             token = token ?? extractToken(from: components)
+            refreshToken = refreshToken ?? extractRefreshToken(from: components)
             parentPhone = parentPhone ?? extractPhone(from: components)
             deviceName = deviceName ?? extractDeviceName(from: components)
         }
 
         token = token ?? normalizeToken(rawCode)
 
-        return AuthScanPayload(token: token, parentPhone: parentPhone, deviceName: deviceName)
+        return AuthScanPayload(
+            token: token,
+            refreshToken: refreshToken,
+            parentPhone: parentPhone,
+            deviceName: deviceName
+        )
+    }
+
+    private func isContractPayload(_ payload: [String: Any]) -> Bool {
+        if let marker = extractContractMarker(from: payload),
+           Self.qrContractMarkers.contains(marker.lowercased()) {
+            return true
+        }
+
+        if let nested = payload["data"] as? [String: Any],
+           let marker = extractContractMarker(from: nested),
+           Self.qrContractMarkers.contains(marker.lowercased()) {
+            return true
+        }
+
+        return false
+    }
+
+    private func hasContractMarker(in components: URLComponents) -> Bool {
+        let keys = Set(["schema", "format", "type", "qr_type"])
+        let values = components.queryItems?
+            .filter { keys.contains($0.name.lowercased()) }
+            .compactMap(\.value) ?? []
+
+        return values.contains { value in
+            Self.qrContractMarkers.contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
+    }
+
+    private func extractContractMarker(from payload: [String: Any]) -> String? {
+        extractStringValue(
+            from: payload,
+            keys: ["schema", "format", "type", "qr_type"]
+        )
+    }
+
+    private func extractStringValue(from payload: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = payload[key] {
+                if let normalized = normalizeStringValue(value) {
+                    return normalized
+                }
+            }
+
+            if let matchedKey = payload.keys.first(where: { $0.caseInsensitiveCompare(key) == .orderedSame }),
+               let value = payload[matchedKey],
+               let normalized = normalizeStringValue(value) {
+                return normalized
+            }
+        }
+
+        return nil
+    }
+
+    private func normalizeStringValue(_ value: Any) -> String? {
+        if let text = value as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        if let number = value as? NSNumber {
+            let text = number.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
+        }
+
+        return nil
     }
 
     private func normalizeToken(_ value: String) -> String? {
@@ -407,6 +528,27 @@ struct AuthView: View {
 
             if let phone = normalizePhone(value) {
                 return phone
+            }
+        }
+        return nil
+    }
+
+    private func extractRefreshToken(from payload: [String: Any]) -> String? {
+        let keys = ["refresh_token", "refreshToken", "refresh", "rtoken"]
+        for key in keys {
+            guard let raw = payload[key] else { continue }
+
+            let value: String
+            if let text = raw as? String {
+                value = text
+            } else if let number = raw as? NSNumber {
+                value = number.stringValue
+            } else {
+                continue
+            }
+
+            if let token = normalizeToken(value) {
+                return token
             }
         }
         return nil
@@ -482,6 +624,21 @@ struct AuthView: View {
         return nil
     }
 
+    private func extractRefreshToken(from components: URLComponents) -> String? {
+        let queryTokenKeys = Set(["refresh_token", "refreshToken", "refresh", "rtoken"])
+        let prioritized = components.queryItems?
+            .filter { queryTokenKeys.contains($0.name) }
+            .compactMap(\.value) ?? []
+
+        for value in prioritized {
+            if let token = normalizeToken(value) {
+                return token
+            }
+        }
+
+        return nil
+    }
+
     private func extractDeviceName(from components: URLComponents) -> String? {
         let queryNameKeys = Set(["device_name", "child_name", "name", "deviceName", "childName"])
         let prioritized = components.queryItems?
@@ -531,9 +688,29 @@ struct AuthView: View {
         guard !trimmed.isEmpty else { return nil }
         return String(trimmed.prefix(64))
     }
+
+    private func debugLog(_ message: String) {
+#if DEBUG
+        print("[AuthView] \(message)")
+#endif
+    }
 }
 
 private extension AuthView {
+    struct ParsedAuthPayload {
+        let payload: AuthScanPayload
+        let isContractV1: Bool
+    }
+
+    // Preferred parent QR schema (v1):
+    // {"schema":"smartoila.child.bind.v1","token":"...","refresh_token":"...","phone":"+998...","device_name":"Child 1"}
+    // URL form is also supported via query items with the same keys.
+    static let qrContractMarkers: Set<String> = [
+        "smartoila.child.bind.v1",
+        "smart-oila.child.bind.v1",
+        "child.bind.v1"
+    ]
+
     private static var debugInitialStage: Stage? {
         switch AppRuntime.debugAuthStage {
         case .splash:

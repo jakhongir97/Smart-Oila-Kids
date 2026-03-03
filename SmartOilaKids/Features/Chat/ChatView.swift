@@ -31,26 +31,31 @@ struct ChatView: View {
                     )
 
                     ChildPurpleSurface {
-                        VStack(spacing: 10) {
-                            ForEach(parentRows, id: \.id) { row in
-                                Button {
-                                    AppHaptics.tap()
-                                    selectedParent = row.name
-                                    openThread = true
-                                } label: {
-                                    chatRow(name: row.name, preview: row.preview)
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 10) {
+                                ForEach(parentRows, id: \.id) { row in
+                                    Button {
+                                        AppHaptics.tap()
+                                        selectedParent = row.name
+                                        openThread = true
+                                    } label: {
+                                        chatRow(name: row.name, preview: row.preview)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel("\(row.name). \(row.preview)")
+                                    .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel("\(row.name). \(row.preview)")
-                                .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
-                            }
 
-                            Spacer()
+                                Spacer()
+                            }
+                            .padding(.horizontal, sidePadding)
+                            .padding(.top, compact ? 18 : 30)
+                            .padding(.bottom, max(16, proxy.safeAreaInsets.bottom + 6))
                         }
-                        .padding(.horizontal, sidePadding)
-                        .padding(.top, compact ? 18 : 30)
-                        .padding(.bottom, max(16, proxy.safeAreaInsets.bottom + 6))
+                        .refreshable {
+                            await viewModel.load()
+                        }
                     }
                 }
 
@@ -148,6 +153,8 @@ private struct ChatThreadView: View {
     let title: String
 
     @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var templates: [String] = []
+    @State private var showTemplatesSheet = false
     @State private var isLoadingAttachments = false
     @FocusState private var isComposerFocused: Bool
 
@@ -225,6 +232,11 @@ private struct ChatThreadView: View {
                 }
             }
         }
+        .sheet(isPresented: $showTemplatesSheet) {
+            chatTemplatesSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var flatMessages: [Datum] {
@@ -278,6 +290,19 @@ private struct ChatThreadView: View {
                         }
                     }
 
+                    Button {
+                        AppHaptics.tap()
+                        templates = SMSTemplatesStore.load()
+                        showTemplatesSheet = true
+                    } label: {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(AppColors.textSecondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.tr("chat.template_button"))
+
                     TextField(L10n.tr("chat.message_placeholder"), text: $viewModel.text)
                         .font(AppTypography.unbounded(14, weight: .medium))
                         .foregroundStyle(AppColors.textSecondary)
@@ -321,6 +346,65 @@ private struct ChatThreadView: View {
         .background(AppColors.white)
     }
 
+    @ViewBuilder
+    private var chatTemplatesSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.tr("chat.template_picker_title"))
+                    .font(AppTypography.unbounded(18, weight: .semibold))
+                    .foregroundStyle(AppColors.black)
+                Spacer()
+                Button(L10n.tr("common.close")) {
+                    AppHaptics.tap()
+                    showTemplatesSheet = false
+                }
+                .font(AppTypography.unbounded(12, weight: .medium))
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
+
+            if templates.isEmpty {
+                Text(L10n.tr("chat.template_empty"))
+                    .font(AppTypography.unbounded(12, weight: .regular))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 10) {
+                        ForEach(templates, id: \.self) { template in
+                            Button {
+                                sendTemplate(template)
+                            } label: {
+                                HStack {
+                                    Text(template)
+                                        .font(AppTypography.unbounded(13, weight: .medium))
+                                        .foregroundStyle(AppColors.black)
+                                        .multilineTextAlignment(.leading)
+                                        .lineLimit(3)
+                                    Spacer()
+                                    Image(systemName: "paperplane.fill")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(AppColors.primaryPurple)
+                                }
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 52)
+                                .background(AppColors.neutral100)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 20)
+                }
+            }
+        }
+    }
+
     private func loadSelectedAttachments(from items: [PhotosPickerItem]) async {
         guard !items.isEmpty else {
             isLoadingAttachments = false
@@ -351,6 +435,19 @@ private struct ChatThreadView: View {
             if sent {
                 AppHaptics.success()
                 isComposerFocused = false
+            } else {
+                AppHaptics.warning()
+            }
+        }
+    }
+
+    private func sendTemplate(_ template: String) {
+        Task {
+            let sent = await viewModel.sendTemplate(template)
+            if sent {
+                AppHaptics.success()
+                isComposerFocused = false
+                showTemplatesSheet = false
             } else {
                 AppHaptics.warning()
             }

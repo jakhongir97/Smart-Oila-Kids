@@ -3,7 +3,7 @@ import SwiftUI
 struct TemplatesView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var templates: [String] = TemplatesStorage.load()
+    @State private var templates: [String] = SMSTemplatesStore.load()
     @State private var draftText: String = ""
     @State private var editingIndex: Int?
     @State private var showEditor = false
@@ -171,33 +171,8 @@ struct TemplatesView: View {
             templates.append(value)
         }
 
-        TemplatesStorage.save(templates)
+        SMSTemplatesStore.save(templates)
         AppHaptics.success()
         showEditor = false
-    }
-}
-
-private enum TemplatesStorage {
-    private static let key = "SMS_TEMPLATES"
-
-    static func load(userDefaults: UserDefaults = .standard) -> [String] {
-        if
-            let data = userDefaults.data(forKey: key),
-            let value = try? JSONDecoder().decode([String].self, from: data),
-            !value.isEmpty
-        {
-            return value
-        }
-
-        return [
-            L10n.tr("templates.default_1"),
-            L10n.tr("templates.default_2"),
-            L10n.tr("templates.default_3")
-        ]
-    }
-
-    static func save(_ templates: [String], userDefaults: UserDefaults = .standard) {
-        guard let data = try? JSONEncoder().encode(templates) else { return }
-        userDefaults.set(data, forKey: key)
     }
 }

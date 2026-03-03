@@ -14,7 +14,10 @@ struct AppDependencies {
 
     @MainActor
     func makeMainViewModel() -> MainViewModel {
-        MainViewModel(sosService: SOSService(client: apiClient))
+        MainViewModel(
+            sosService: SOSService(client: apiClient),
+            dashboardService: MainDashboardService(client: apiClient)
+        )
     }
 
     @MainActor

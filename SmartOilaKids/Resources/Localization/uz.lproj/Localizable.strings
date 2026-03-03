@@ -20,6 +20,7 @@
 "auth.success_bind_success" = "Farzandingiz qurilmasi muvaffaqiyatli ulandi";
 "auth.verify_failed" = "Ulash bajarildi, lekin qurilma tasdiqlanmadi. QR kodni qayta skaner qiling.";
 "auth.qr_missing_auth_data" = "QR kodda ulash ma'lumotlari yo'q";
+"auth.qr_invalid_contract" = "QR kod formati noto'g'ri. Ota-ona ilovasida QR kodni qayta yarating.";
 
 "scanner.hint" = "Kamerani ota-onaning QR kodiga yo'naltiring";
 "scanner.unavailable_title" = "Skaner mavjud emas";
@@ -42,6 +43,12 @@
 "main.hours_short" = "s";
 "main.device_not_bound" = "Qurilma ulanmagan";
 "main.sos_sent" = "SOS yuborildi";
+"main.usage_load_failed" = "Statistikani yuklab bo'lmadi. Qayta urinish uchun bosing.";
+
+"lock.title" = "Qurilma bloklangan";
+"lock.subtitle" = "Ota-ona ushbu qurilmadan foydalanishni vaqtincha chekladi.";
+"lock.schedule" = "Jadval: %@";
+"lock.local_time" = "Qurilma vaqti: %@";
 
 "weekday.mon" = "Du";
 "weekday.tue" = "Se";
@@ -61,6 +68,9 @@
 "chat.empty" = "Hozircha xabarlar yo'q. Suhbatni boshlang.";
 "chat.send" = "Xabar yuborish";
 "chat.open_parent_chat_hint" = "Suhbatni ochadi";
+"chat.template_button" = "Shablonlarni ochish";
+"chat.template_picker_title" = "SMS shablonlar";
+"chat.template_empty" = "Hozircha shablonlar yo'q.";
 
 "permissions.setup_title" = "Ruxsatlarni sozlash";
 "permissions.setup_subtitle" = "Ilova to'g'ri ishlashi uchun quyidagi ruxsatlarni bering";
@@ -90,6 +100,8 @@
 "tasks.task_title" = "Vazifa";
 "tasks.placeholder_line_1" = "Bu joyni to'ldirish uchun";
 "tasks.placeholder_line_2" = "istalgan ma'lumot kiriting";
+"tasks.empty_title" = "Faol vazifalar yo'q";
+"tasks.empty_subtitle" = "Ota-ona vazifalarni shu yerga qo'shadi.";
 "tasks.completed_cleanup_note" = "Yakunlangan vazifalar 3 kundan so'ng avtomatik o'chiriladi";
 "tasks.start" = "Boshlash";
 "tasks.completed" = "Yakunlangan";
@@ -107,6 +119,7 @@
 "settings.language.ru" = "RU";
 "settings.language.uz" = "UZ";
 "settings.connected_devices" = "Ulangan qurilmalar:";
+"settings.no_connected_devices" = "Hozircha ulangan qurilmalar yo'q.";
 "settings.edit_device" = "Ulangan qurilmani tahrirlash";
 "settings.device_mom" = "Ona";
 "settings.device_dad" = "Ota";
@@ -119,3 +132,6 @@
 "settings.saved" = "Saqlandi";
 "settings.saving" = "Saqlanmoqda...";
 "settings.save_failed" = "Mahalliy saqlandi. Serverni yangilab bo'lmadi.";
+"settings.device_renamed" = "Qurilma nomi yangilandi.";
+"settings.device_rename_failed" = "Qurilma nomini yangilab bo'lmadi.";
+"settings.delete_failed" = "Qurilmani serverdan o'chirib bo'lmadi.";

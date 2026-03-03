@@ -35,7 +35,7 @@ struct MainView: View {
 
                 VStack(spacing: 0) {
                     MainHeaderSection(
-                        profileName: sessionStore.profileName,
+                        profileName: viewModel.currentDeviceName ?? sessionStore.profileName,
                         onInfoTap: { showTemplates = true },
                         onNotificationTap: { viewModel.alertText = L10n.tr("main.no_notifications") },
                         onSettingsTap: { showSettings = true }
@@ -45,7 +45,28 @@ struct MainView: View {
                         VStack(spacing: sectionSpacing) {
                             MainAdInfoCard()
 
-                            WeeklyUsageChartCard(compact: compact)
+                            WeeklyUsageChartCard(
+                                compact: compact,
+                                usageHours: viewModel.weeklyUsageHours
+                            )
+
+                            if case .failed = viewModel.usagePhase {
+                                Button {
+                                    AppHaptics.tap()
+                                    Task {
+                                        await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+                                    }
+                                } label: {
+                                    Text(L10n.tr("main.usage_load_failed"))
+                                        .font(AppTypography.unbounded(12, weight: .medium))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(AppColors.primaryPurple)
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
 
                             MainPrimaryActions(
                                 onTasksTap: { showTasks = true },
@@ -57,10 +78,30 @@ struct MainView: View {
                         .padding(.top, 15)
                         .padding(.bottom, max(36, proxy.safeAreaInsets.bottom + 18))
                     }
+                    .refreshable {
+                        await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+                    }
                 }
 
                 ChildWatermarkOverlay(opacity: 0.45)
+
+                MainSOSFloatingButton(isSending: viewModel.isSendingSOS) {
+                    Task {
+                        await viewModel.sendSOS(dsn: sessionStore.dsn)
+                    }
+                }
+                .padding(.trailing, horizontalPadding)
+                .padding(.bottom, max(22, proxy.safeAreaInsets.bottom + 8))
             }
+        }
+        .task(id: sessionStore.dsn) {
+            await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+        }
+        .onChange(of: viewModel.currentDeviceName) { newValue in
+            guard let newValue = newValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !newValue.isEmpty,
+                  sessionStore.profileName != newValue else { return }
+            sessionStore.setProfileName(newValue)
         }
         .fullScreenCover(isPresented: $showChat) {
             NavigationStack {

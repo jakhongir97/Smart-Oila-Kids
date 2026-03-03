@@ -152,6 +152,42 @@ struct MainPrimaryActions: View {
     }
 }
 
+struct MainSOSFloatingButton: View {
+    let isSending: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            AppHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 8) {
+                if isSending {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.85)
+                } else {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+
+                Text(L10n.tr("main.sos_title"))
+                    .font(AppTypography.unbounded(13, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .frame(height: 45)
+            .background(AppColors.dangerRed)
+            .clipShape(Capsule())
+            .shadow(color: Color.black.opacity(0.16), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .disabled(isSending)
+        .accessibilityLabel(L10n.tr("main.sos_title"))
+    }
+}
+
 private struct MainActionButton: View {
     let title: String
 
@@ -170,6 +206,7 @@ private struct MainActionButton: View {
 
 struct WeeklyUsageChartCard: View {
     var compact: Bool = false
+    var usageHours: [Double] = Array(repeating: 0, count: 7)
 
     private struct DayUsage: Identifiable {
         let id: Int
@@ -177,18 +214,35 @@ struct WeeklyUsageChartCard: View {
         let hours: CGFloat
     }
 
-    private let maxHours: CGFloat = 5
-
     private var usage: [DayUsage] {
-        [
-            DayUsage(id: 0, dayKey: "weekday.mon", hours: 1.7),
-            DayUsage(id: 1, dayKey: "weekday.tue", hours: 2.1),
-            DayUsage(id: 2, dayKey: "weekday.wed", hours: 1.8),
-            DayUsage(id: 3, dayKey: "weekday.thu", hours: 1.3),
-            DayUsage(id: 4, dayKey: "weekday.fri", hours: 1.9),
-            DayUsage(id: 5, dayKey: "weekday.sat", hours: 2.3),
-            DayUsage(id: 6, dayKey: "weekday.sun", hours: 2.5)
+        let keys = [
+            "weekday.mon",
+            "weekday.tue",
+            "weekday.wed",
+            "weekday.thu",
+            "weekday.fri",
+            "weekday.sat",
+            "weekday.sun"
         ]
+
+        let normalized = normalizeUsageHours(usageHours)
+        return keys.enumerated().map { index, dayKey in
+            DayUsage(id: index, dayKey: dayKey, hours: CGFloat(normalized[index]))
+        }
+    }
+
+    private var maxHours: CGFloat {
+        let maxFromData = usage.map(\.hours).max() ?? 0
+        let rounded = ceil(maxFromData)
+        return max(5, rounded)
+    }
+
+    private func normalizeUsageHours(_ value: [Double]) -> [Double] {
+        var normalized = value.prefix(7).map { max(0, $0) }
+        if normalized.count < 7 {
+            normalized.append(contentsOf: Array(repeating: 0, count: 7 - normalized.count))
+        }
+        return normalized
     }
 
     var body: some View {

@@ -3,6 +3,7 @@ import Foundation
 protocol AuthServicing {
     func registerDevice(
         qrToken: String?,
+        qrRefreshToken: String?,
         parentPhone: String?,
         deviceName: String,
         appVersion: String
@@ -17,11 +18,13 @@ final class AuthService: AuthServicing {
 
     func registerDevice(
         qrToken: String?,
+        qrRefreshToken: String?,
         parentPhone: String?,
         deviceName: String,
         appVersion: String
     ) async throws -> AuthRegistrationResult {
         let normalizedToken = qrToken?.trimmedNonEmpty
+        let normalizedRefreshToken = qrRefreshToken?.trimmedNonEmpty
         let normalizedPhone = normalizePhone(parentPhone)
 
         guard normalizedToken != nil || normalizedPhone != nil else {
@@ -53,7 +56,11 @@ final class AuthService: AuthServicing {
                     deviceName: deviceName,
                     appVersion: appVersion
                 )
-                return mergeAuthorization(from: legacyResult, fallbackToken: normalizedToken)
+                return mergeAuthorization(
+                    from: legacyResult,
+                    fallbackToken: normalizedToken,
+                    fallbackRefreshToken: normalizedRefreshToken
+                )
             }
         }
 
@@ -86,17 +93,35 @@ final class AuthService: AuthServicing {
 }
 
 private extension AuthService {
-    func mergeAuthorization(from result: AuthRegistrationResult, fallbackToken: String?) -> AuthRegistrationResult {
+    func mergeAuthorization(
+        from result: AuthRegistrationResult,
+        fallbackToken: String?,
+        fallbackRefreshToken: String?
+    ) -> AuthRegistrationResult {
+        let resolvedRefreshToken = result.refreshToken?.trimmedNonEmpty ?? fallbackRefreshToken?.trimmedNonEmpty
+
         if let header = result.authorizationHeader?.trimmedNonEmpty {
-            return AuthRegistrationResult(dsn: result.dsn, authorizationHeader: header)
+            return AuthRegistrationResult(
+                dsn: result.dsn,
+                authorizationHeader: header,
+                refreshToken: resolvedRefreshToken
+            )
         }
 
         if let fallbackToken = fallbackToken?.trimmedNonEmpty {
             debugLog("Legacy registration succeeded without auth header. Reusing scanned QR token for API authorization.")
-            return AuthRegistrationResult(dsn: result.dsn, authorizationHeader: fallbackToken)
+            return AuthRegistrationResult(
+                dsn: result.dsn,
+                authorizationHeader: fallbackToken,
+                refreshToken: resolvedRefreshToken
+            )
         }
 
-        return result
+        return AuthRegistrationResult(
+            dsn: result.dsn,
+            authorizationHeader: result.authorizationHeader,
+            refreshToken: resolvedRefreshToken
+        )
     }
 
     func registerDeviceByQRClaim(token: String, deviceName: String, appVersion: String) async throws -> Data {
@@ -253,17 +278,23 @@ private extension AuthService {
                     token: extractString(in: payload, keys: ["authorization", "auth_token", "access_token", "accessToken", "token"]),
                     tokenType: extractString(in: payload, keys: ["token_type", "tokenType", "type"])
                 )
+                let bodyRefreshToken = extractString(in: payload, keys: ["refresh_token", "refreshToken"])
 
                 return AuthRegistrationResult(
                     dsn: dsn,
-                    authorizationHeader: headerAuthorization ?? bodyAuthorization
+                    authorizationHeader: headerAuthorization ?? bodyAuthorization,
+                    refreshToken: bodyRefreshToken
                 )
             }
         }
 
         if let dsn = parseDSN(from: text) {
             debugLog("Registration success. Parsed DSN: \(dsn)")
-            return AuthRegistrationResult(dsn: dsn, authorizationHeader: headerAuthorization)
+            return AuthRegistrationResult(
+                dsn: dsn,
+                authorizationHeader: headerAuthorization,
+                refreshToken: nil
+            )
         }
 
         throw NetworkError.unexpectedBody

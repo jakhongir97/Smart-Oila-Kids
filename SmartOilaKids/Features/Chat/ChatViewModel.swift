@@ -48,28 +48,13 @@ final class ChatViewModel: ObservableObject {
 
     func send() async -> Bool {
         guard canSend else { return false }
-        isSending = true
-        let payloadText = text
-        let payloadAttachments = selectedAttachments
+        return await sendMessage(payloadText: text, payloadAttachments: selectedAttachments, clearComposerOnSuccess: true)
+    }
 
-        do {
-            let response = try await service.sendMessage(
-                sendFromID: dsn,
-                text: payloadText,
-                attachments: payloadAttachments
-            )
-            let dateKey = Self.dateKey(from: response.createdAt)
-            let datum = Datum(userType: "child", text: response.text, attachments: response.attachments, time: response.createdAt)
-            groupedMessages[dateKey, default: []].append(datum)
-            text = ""
-            selectedAttachments = []
-            isSending = false
-            return true
-        } catch {
-            phase = .failed(error.localizedDescription)
-            isSending = false
-            return false
-        }
+    func sendTemplate(_ templateText: String) async -> Bool {
+        let trimmed = templateText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return await sendMessage(payloadText: trimmed, payloadAttachments: [], clearComposerOnSuccess: false)
     }
 
     func stop() {
@@ -83,6 +68,42 @@ final class ChatViewModel: ObservableObject {
     private func appendIncoming(_ datum: Datum) {
         let dateKey = Self.dateKey(from: datum.time)
         groupedMessages[dateKey, default: []].append(datum)
+    }
+
+    private func sendMessage(
+        payloadText: String,
+        payloadAttachments: [Data],
+        clearComposerOnSuccess: Bool
+    ) async -> Bool {
+        guard !isSending else { return false }
+        isSending = true
+        defer { isSending = false }
+
+        do {
+            let response = try await service.sendMessage(
+                sendFromID: dsn,
+                text: payloadText,
+                attachments: payloadAttachments
+            )
+            let dateKey = Self.dateKey(from: response.createdAt)
+            let datum = Datum(
+                userType: "child",
+                text: response.text,
+                attachments: response.attachments,
+                time: response.createdAt
+            )
+            groupedMessages[dateKey, default: []].append(datum)
+
+            if clearComposerOnSuccess {
+                text = ""
+                selectedAttachments = []
+            }
+
+            return true
+        } catch {
+            phase = .failed(error.localizedDescription)
+            return false
+        }
     }
 
     private static func dateKey(from input: String) -> String {
