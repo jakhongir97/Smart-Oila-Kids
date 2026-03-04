@@ -10,11 +10,13 @@ final class ChatWebSocketService {
         connectedDSN = dsn
         currentBaseIndex = 0
         reconnectAttemptCount = 0
+        updateChatDiagnostics(status: "starting", dsn: dsn, lastError: "-", reconnectCount: 0)
         connectUsingCurrentBase()
     }
 
     func disconnect() {
         isDisconnectRequested = true
+        updateChatDiagnostics(status: "stopped", endpoint: "-", lastError: "-", reconnectCount: reconnectAttemptCount)
         connectedDSN = nil
         reconnectWorkItem?.cancel()
         reconnectWorkItem = nil
@@ -34,7 +36,9 @@ final class ChatWebSocketService {
 
         let base = AppConfig.websocketBaseCandidates[currentBaseIndex]
         let urlString = "\(base)\(AppConfig.websocketTokenPath)/children/device/\(dsn)/chat/"
+        updateChatDiagnostics(status: "connecting", endpoint: urlString, dsn: dsn)
         guard let url = URL(string: urlString) else {
+            updateChatDiagnostics(status: "failed", lastError: "invalid websocket url")
             connectNextBase()
             return
         }
@@ -42,6 +46,7 @@ final class ChatWebSocketService {
         task = URLSession.shared.webSocketTask(with: url)
         task?.resume()
         reconnectAttemptCount = 0
+        updateChatDiagnostics(status: "connected", endpoint: urlString, dsn: dsn, lastError: "-", reconnectCount: 0)
         receiveLoop(baseIndex: currentBaseIndex)
     }
 
@@ -61,6 +66,7 @@ final class ChatWebSocketService {
         guard !isDisconnectRequested else { return }
 
         reconnectAttemptCount += 1
+        updateChatDiagnostics(status: "reconnecting", reconnectCount: reconnectAttemptCount)
         reconnectWorkItem?.cancel()
 
         let item = DispatchWorkItem { [weak self] in
@@ -85,6 +91,7 @@ final class ChatWebSocketService {
                 self?.receiveLoop(baseIndex: baseIndex)
             case .failure:
                 guard let self else { return }
+                self.updateChatDiagnostics(status: "failed", lastError: "websocket receive failed")
                 if !self.isDisconnectRequested, baseIndex == self.currentBaseIndex {
                     self.connectNextBase()
                 }
@@ -102,14 +109,16 @@ final class ChatWebSocketService {
                 userType: "parent",
                 text: message.data.text,
                 attachments: message.data.attachments,
-                time: message.data.time
+                time: message.data.time,
+                senderName: message.data.senderName
             )
         } else if let direct = try? decoder.decode(WBSocketChat.self, from: data) {
             datum = Datum(
                 userType: direct.sendFromType,
                 text: direct.text,
                 attachments: direct.attachments,
-                time: direct.createdAt
+                time: direct.createdAt,
+                senderName: direct.sendFromName
             )
         } else {
             datum = nil
@@ -117,8 +126,35 @@ final class ChatWebSocketService {
 
         guard let datum else { return }
 
+        let timestamp = shortTimeFormatter.string(from: Date())
+        updateChatDiagnostics(
+            status: "connected",
+            lastMessage: "message \(timestamp)",
+            lastError: "-"
+        )
+
         DispatchQueue.main.async { [weak self] in
             self?.onMessage?(datum)
+        }
+    }
+
+    private func updateChatDiagnostics(
+        status: String? = nil,
+        endpoint: String? = nil,
+        dsn: String? = nil,
+        lastMessage: String? = nil,
+        lastError: String? = nil,
+        reconnectCount: Int? = nil
+    ) {
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updateChat(
+                status: status,
+                endpoint: endpoint,
+                dsn: dsn ?? connectedDSN ?? "-",
+                lastMessage: lastMessage,
+                lastError: lastError,
+                reconnectCount: reconnectCount
+            )
         }
     }
 
@@ -129,4 +165,10 @@ final class ChatWebSocketService {
     private var reconnectWorkItem: DispatchWorkItem?
     private var reconnectAttemptCount = 0
     private let reconnectDelay: TimeInterval = 3
+    private lazy var shortTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 }

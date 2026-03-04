@@ -6,11 +6,17 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: ChatViewModel
 
-    @State private var openThread = false
-    @State private var selectedParent = L10n.tr("chat.parent")
+    @State private var openThread: Bool
+    @State private var selectedParent: String
 
-    init(viewModel: ChatViewModel) {
+    init(
+        viewModel: ChatViewModel,
+        openThreadOnAppear: Bool = false
+    ) {
+        let parentFallback = L10n.tr("chat.parent")
         _viewModel = StateObject(wrappedValue: viewModel)
+        _openThread = State(initialValue: openThreadOnAppear)
+        _selectedParent = State(initialValue: parentFallback)
     }
 
     var body: some View {
@@ -39,11 +45,11 @@ struct ChatView: View {
                                         selectedParent = row.name
                                         openThread = true
                                     } label: {
-                                        chatRow(name: row.name, preview: row.preview)
+                                        chatRow(name: row.name, preview: row.preview, unreadCount: row.unreadCount)
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityElement(children: .ignore)
-                                    .accessibilityLabel("\(row.name). \(row.preview)")
+                                    .accessibilityLabel(accessibilityLabel(for: row))
                                     .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
                                 }
 
@@ -68,32 +74,62 @@ struct ChatView: View {
         }
         .task {
             await viewModel.load()
+            if openThread,
+               let resolved = viewModel.parentDisplayName?.trimmedNonEmpty {
+                selectedParent = resolved
+            }
+        }
+        .onChange(of: viewModel.parentDisplayName) { newValue in
+            guard openThread,
+                  let resolved = newValue?.trimmedNonEmpty else { return }
+            selectedParent = resolved
+        }
+        .onChange(of: openThread) { isOpen in
+            viewModel.setThreadActive(isOpen)
         }
         .onDisappear {
+            viewModel.setThreadActive(false)
             if !openThread {
                 viewModel.stop()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshChat)) { notification in
+            guard shouldHandlePush(notification: notification) else { return }
+            Task {
+                await viewModel.load()
             }
         }
     }
 
     private var parentRows: [ParentChatRow] {
         let parentMessages = flatMessages.filter { $0.userType.lowercased() == "parent" }
-        guard !parentMessages.isEmpty else {
+        guard let latestMessage = flatMessages.last else {
             let preview = L10n.tr("chat.default_preview")
-            return [ParentChatRow(id: "placeholder-parent", name: L10n.tr("chat.parent"), preview: preview)]
+            let fallbackName = viewModel.parentDisplayName?.trimmedNonEmpty ?? L10n.tr("chat.parent")
+            return [
+                ParentChatRow(
+                    id: "placeholder-parent",
+                    name: fallbackName,
+                    preview: preview,
+                    unreadCount: viewModel.unreadParentCount
+                )
+            ]
         }
 
-        let latest = parentMessages.last
         let preview: String
-        if let text = latest?.text, !text.isEmpty {
+        if let text = latestMessage.text, !text.isEmpty {
             preview = text
-        } else if latest?.attachments.isEmpty == false {
+        } else if latestMessage.attachments.isEmpty == false {
             preview = L10n.tr("chat.attachment")
         } else {
             preview = L10n.tr("chat.default_preview")
         }
 
-        return [ParentChatRow(id: "parent-live", name: L10n.tr("chat.parent"), preview: preview)]
+        let latestParent = parentMessages.last
+        let resolvedName = viewModel.parentDisplayName?.trimmedNonEmpty
+            ?? latestParent?.senderName?.trimmedNonEmpty
+            ?? L10n.tr("chat.parent")
+        return [ParentChatRow(id: "parent-live", name: resolvedName, preview: preview, unreadCount: viewModel.unreadParentCount)]
     }
 
     private var flatMessages: [Datum] {
@@ -102,7 +138,7 @@ struct ChatView: View {
             .sorted(by: { $0.time < $1.time })
     }
 
-    private func chatRow(name: String, preview: String) -> some View {
+    private func chatRow(name: String, preview: String, unreadCount: Int) -> some View {
         HStack(spacing: 10) {
             Circle()
                 .fill(Color.gray.opacity(0.35))
@@ -132,11 +168,37 @@ struct ChatView: View {
             }
 
             Spacer()
+
+            if unreadCount > 0 {
+                Text("\(min(99, unreadCount))")
+                    .font(AppTypography.unbounded(10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .background(AppColors.primaryPurple)
+                    .clipShape(Capsule())
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 15)
         .frame(minHeight: 80)
         .background(AppColors.white)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func shouldHandlePush(notification: Notification) -> Bool {
+        guard let currentDSN = viewModel.currentDSN?.trimmedNonEmpty else { return true }
+        guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
+            return true
+        }
+        return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
+    }
+
+    private func accessibilityLabel(for row: ParentChatRow) -> String {
+        if row.unreadCount > 0 {
+            return "\(row.name). \(row.preview). \(L10n.tr("chat.unread_count", row.unreadCount))"
+        }
+        return "\(row.name). \(row.preview)"
     }
 }
 
@@ -144,6 +206,7 @@ private struct ParentChatRow {
     let id: String
     let name: String
     let preview: String
+    let unreadCount: Int
 }
 
 private struct ChatThreadView: View {
@@ -183,6 +246,32 @@ private struct ChatThreadView: View {
                         ScrollViewReader { proxy in
                             ScrollView(showsIndicators: false) {
                                 LazyVStack(spacing: 10) {
+                                    if viewModel.canLoadMore {
+                                        Button {
+                                            AppHaptics.tap()
+                                            Task {
+                                                await viewModel.loadOlder()
+                                            }
+                                        } label: {
+                                            Group {
+                                                if viewModel.isLoadingMore {
+                                                    ProgressView()
+                                                        .tint(AppColors.white)
+                                                } else {
+                                                    Text(L10n.tr("chat.load_older"))
+                                                        .font(AppTypography.unbounded(11, weight: .semibold))
+                                                }
+                                            }
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 8)
+                                            .background(AppColors.primaryPurple.opacity(0.9))
+                                            .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.bottom, 6)
+                                    }
+
                                     if displayMessages.isEmpty {
                                         ChatEmptyStateView()
                                             .padding(.top, emptyStateTop)
@@ -216,13 +305,16 @@ private struct ChatThreadView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .onAppear {
+            viewModel.setThreadActive(true)
+        }
         .onChange(of: pickerItems) { items in
             Task {
                 await loadSelectedAttachments(from: items)
             }
         }
         .onDisappear {
-            viewModel.stop()
+            viewModel.setThreadActive(false)
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -253,14 +345,52 @@ private struct ChatThreadView: View {
 
     private func composer(bottomInset: CGFloat, sidePadding: CGFloat) -> some View {
         VStack(spacing: 6) {
-            if isLoadingAttachments {
+            if viewModel.queuedMessagesCount > 0 {
+                HStack(spacing: 10) {
+                    Text(L10n.tr("chat.retry_pending", viewModel.queuedMessagesCount))
+                        .font(AppTypography.unbounded(11, weight: .medium))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(2)
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        AppHaptics.tap()
+                        Task {
+                            await viewModel.retryQueuedMessages()
+                        }
+                    } label: {
+                        Text(L10n.tr("chat.retry"))
+                            .font(AppTypography.unbounded(11, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(AppColors.primaryPurple)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 2)
+            }
+
+            if let sendStatusText = viewModel.sendStatusText, !sendStatusText.isEmpty {
+                Text(sendStatusText)
+                    .font(AppTypography.unbounded(11, weight: .regular))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
+            } else if isLoadingAttachments {
                 Text(L10n.tr("chat.attachments_loading"))
                     .font(AppTypography.unbounded(11, weight: .regular))
                     .foregroundStyle(AppColors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
             } else if !viewModel.selectedAttachments.isEmpty {
                 Text(L10n.tr("chat.attachments_count", viewModel.selectedAttachments.count))
                     .font(AppTypography.unbounded(11, weight: .regular))
                     .foregroundStyle(AppColors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
             }
 
             ZStack {

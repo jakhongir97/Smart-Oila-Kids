@@ -1,4 +1,9 @@
 import SwiftUI
+import PhotosUI
+import CoreLocation
+import UserNotifications
+import AVFAudio
+import UIKit
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -7,10 +12,16 @@ struct SettingsView: View {
     @StateObject private var viewModel: SettingsViewModel
     @State private var userName: String = ""
     @State private var bannerText: String?
-    @State private var showDeleteAlert = false
+    @State private var showUnlinkAlert = false
     @State private var showDeviceEditor = false
     @State private var editingDevice: ConnectedDevice?
     @State private var editingDeviceName: String = ""
+    @State private var showDiagnostics = false
+    @State private var showPermissionsCenter = false
+    @State private var showAvatarPicker = false
+    @State private var avatarPickerItem: PhotosPickerItem?
+    @State private var avatarPreviewImage: UIImage?
+    @StateObject private var permissionManager = LocationPermissionManager()
     @FocusState private var isNameFieldFocused: Bool
 
     init(viewModel: SettingsViewModel? = nil) {
@@ -39,7 +50,12 @@ struct SettingsView: View {
                     ChildPurpleSurface {
                         ScrollView(showsIndicators: false) {
                             VStack(spacing: 0) {
-                                SettingsAvatarSection()
+                                SettingsAvatarSection(
+                                    imageURL: viewModel.currentAvatarURL(for: sessionStore.dsn),
+                                    localImage: avatarPreviewImage,
+                                    isUploading: viewModel.isUploadingAvatar,
+                                    onEdit: { showAvatarPicker = true }
+                                )
                                     .padding(.top, compact ? 14 : 20)
 
                                 Text(L10n.tr("settings.change_username"))
@@ -98,6 +114,47 @@ struct SettingsView: View {
                                 .padding(.horizontal, sidePadding)
                                 .padding(.top, compact ? 8 : 10)
 
+                                Button {
+                                    AppHaptics.tap()
+                                    showDiagnostics = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "stethoscope")
+                                        Text(L10n.tr("settings.diagnostics"))
+                                            .lineLimit(1)
+                                    }
+                                    .font(AppTypography.unbounded(12, weight: .semibold))
+                                    .foregroundStyle(AppColors.primaryPurple)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 40)
+                                    .background(AppColors.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, sidePadding)
+                                .padding(.top, compact ? 10 : 12)
+
+                                Button {
+                                    AppHaptics.tap()
+                                    permissionManager.refreshStatuses()
+                                    showPermissionsCenter = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "hand.raised.fill")
+                                        Text(L10n.tr("settings.permissions"))
+                                            .lineLimit(1)
+                                    }
+                                    .font(AppTypography.unbounded(12, weight: .semibold))
+                                    .foregroundStyle(AppColors.primaryPurple)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 40)
+                                    .background(AppColors.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, sidePadding)
+                                .padding(.top, 8)
+
                                 Text(L10n.tr("settings.connected_devices"))
                                     .font(AppTypography.unbounded(14, weight: .medium))
                                     .foregroundStyle(.white)
@@ -115,7 +172,7 @@ struct SettingsView: View {
                                 } else {
                                     VStack(spacing: compact ? 14 : 20) {
                                         ForEach(viewModel.connectedDevices) { device in
-                                            SettingsDeviceCard(name: device.name) {
+                                            SettingsDeviceCard(name: device.name, avatarURL: device.avatarURL) {
                                                 beginDeviceEditing(device)
                                             }
                                         }
@@ -158,9 +215,9 @@ struct SettingsView: View {
 
                                     Button {
                                         AppHaptics.tap()
-                                        showDeleteAlert = true
+                                        showUnlinkAlert = true
                                     } label: {
-                                        Text(L10n.tr("settings.delete_account"))
+                                        Text(L10n.tr("settings.unlink_device"))
                                             .font(AppTypography.unbounded(12, weight: .semibold))
                                             .foregroundStyle(.white)
                                             .frame(maxWidth: .infinity)
@@ -206,8 +263,8 @@ struct SettingsView: View {
                     .padding(.top, 10)
             }
         }
-        .alert(L10n.tr("settings.delete_title"), isPresented: $showDeleteAlert) {
-            Button(L10n.tr("settings.delete_account"), role: .destructive) {
+        .alert(L10n.tr("settings.unlink_title"), isPresented: $showUnlinkAlert) {
+            Button(L10n.tr("settings.unlink_device"), role: .destructive) {
                 Task {
                     do {
                         try await viewModel.deleteCurrentDeviceSession(dsn: sessionStore.dsn)
@@ -215,13 +272,13 @@ struct SettingsView: View {
                         sessionStore.clearSession()
                     } catch {
                         AppHaptics.warning()
-                        banner(L10n.tr("settings.delete_failed"))
+                        banner(L10n.tr("settings.unlink_failed"))
                     }
                 }
             }
             Button(L10n.tr("common.cancel"), role: .cancel) {}
         } message: {
-            Text(L10n.tr("settings.delete_message"))
+            Text(L10n.tr("settings.unlink_message"))
         }
         .alert(L10n.tr("settings.edit_device"), isPresented: $showDeviceEditor) {
             TextField(L10n.tr("settings.username_placeholder"), text: $editingDeviceName)
@@ -238,6 +295,22 @@ struct SettingsView: View {
             .disabled(viewModel.isUpdatingDevice)
         } message: {
             Text(L10n.tr("settings.change_username"))
+        }
+        .sheet(isPresented: $showDiagnostics) {
+            DiagnosticsPanelView()
+                .environmentObject(sessionStore)
+        }
+        .sheet(isPresented: $showPermissionsCenter) {
+            SettingsPermissionsPanelView(manager: permissionManager)
+        }
+        .photosPicker(
+            isPresented: $showAvatarPicker,
+            selection: $avatarPickerItem,
+            matching: .images
+        )
+        .onChange(of: avatarPickerItem) { newValue in
+            guard let newValue else { return }
+            uploadAvatar(from: newValue)
         }
         .preferredColorScheme(sessionStore.appTheme.colorScheme)
     }
@@ -322,6 +395,31 @@ struct SettingsView: View {
         }
     }
 
+    private func uploadAvatar(from item: PhotosPickerItem) {
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                AppHaptics.warning()
+                banner(L10n.tr("settings.avatar_invalid_image"))
+                return
+            }
+
+            let uploadData = image.jpegData(compressionQuality: 0.85) ?? data
+            let previousImage = avatarPreviewImage
+            avatarPreviewImage = image
+
+            do {
+                _ = try await viewModel.uploadCurrentDeviceAvatar(dsn: sessionStore.dsn, imageData: uploadData)
+                AppHaptics.success()
+                banner(L10n.tr("settings.avatar_uploaded"))
+            } catch {
+                avatarPreviewImage = previousImage
+                AppHaptics.warning()
+                banner(L10n.tr("settings.avatar_upload_failed"))
+            }
+        }
+    }
+
     private var themeBinding: Binding<AppTheme> {
         Binding(
             get: { sessionStore.appTheme },
@@ -355,6 +453,357 @@ struct SettingsView: View {
             return L10n.tr("settings.language.ru")
         case .uz:
             return L10n.tr("settings.language.uz")
+        }
+    }
+}
+
+private struct SettingsPermissionsPanelView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var manager: LocationPermissionManager
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(L10n.tr("settings.permissions_subtitle"))
+                        .font(AppTypography.unbounded(12, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .padding(.top, 4)
+
+                    ForEach(PermissionRequirement.allCases) { requirement in
+                        permissionRow(requirement)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(AppColors.white.ignoresSafeArea())
+            .navigationTitle(L10n.tr("settings.permissions"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(L10n.tr("common.close")) {
+                        dismiss()
+                    }
+                    .font(AppTypography.unbounded(12, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        manager.refreshStatuses()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(AppColors.primaryPurple)
+                    }
+                }
+            }
+            .onAppear {
+                manager.refreshStatuses()
+            }
+        }
+    }
+
+    private func permissionRow(_ requirement: PermissionRequirement) -> some View {
+        let isSatisfied = manager.isSatisfied(requirement)
+        let borderColor = isSatisfied ? AppColors.accentGreen : AppColors.neutral200
+        let actionTitle = manager.primaryActionTitle(for: requirement) ?? L10n.tr("permissions.action_open_settings")
+        let canAct = manager.isInteractive(requirement) && !isSatisfied
+        let toggleBinding = permissionBinding(for: requirement)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(L10n.tr(requirement.titleKey))
+                    .font(AppTypography.unbounded(13, weight: .semibold))
+                    .foregroundStyle(AppColors.black)
+                    .lineLimit(2)
+
+                Spacer(minLength: 8)
+
+                Toggle("", isOn: toggleBinding)
+                    .labelsHidden()
+                    .disabled(!manager.isInteractive(requirement))
+                    .tint(AppColors.accentGreen)
+            }
+
+            Text(manager.statusText(for: requirement))
+                .font(AppTypography.unbounded(11, weight: .regular))
+                .foregroundStyle(isSatisfied ? AppColors.accentGreen : AppColors.textSecondary)
+                .lineLimit(3)
+
+            HStack {
+                if canAct {
+                    Button(actionTitle) {
+                        AppHaptics.tap()
+                        manager.performAction(for: requirement)
+                    }
+                    .font(AppTypography.unbounded(11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(AppColors.primaryPurple)
+                    .clipShape(Capsule())
+                } else {
+                    Text(L10n.tr("permissions.status_granted"))
+                        .font(AppTypography.unbounded(11, weight: .semibold))
+                        .foregroundStyle(AppColors.accentGreen)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .background(AppColors.accentGreen.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(borderColor, lineWidth: 2)
+        }
+    }
+
+    private func permissionBinding(for requirement: PermissionRequirement) -> Binding<Bool> {
+        Binding(
+            get: { manager.isSatisfied(requirement) },
+            set: { newValue in
+                guard manager.isInteractive(requirement) else { return }
+
+                // iOS permission toggles cannot be force-disabled in-app once granted.
+                // Ignore "off" attempts and refresh visual state.
+                guard newValue else {
+                    manager.refreshStatuses()
+                    return
+                }
+
+                AppHaptics.tap()
+                manager.performAction(for: requirement)
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    manager.refreshStatuses()
+                }
+            }
+        )
+    }
+}
+
+private struct DiagnosticsPanelView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var sessionStore: SessionStore
+
+    @ObservedObject private var diagnostics = RuntimeDiagnosticsCenter.shared
+    @StateObject private var permissionManager = LocationPermissionManager()
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 12) {
+                    diagnosticsSection(
+                        title: L10n.tr("diagnostics.section_session"),
+                        rows: [
+                            (L10n.tr("diagnostics.session_dsn"), sessionStore.dsn ?? "-"),
+                            (L10n.tr("diagnostics.session_profile"), sessionStore.profileName),
+                            (L10n.tr("diagnostics.session_theme"), themeValue(sessionStore.appTheme)),
+                            (L10n.tr("diagnostics.session_language"), languageValue(sessionStore.appLanguage))
+                        ]
+                    )
+
+                    diagnosticsSection(
+                        title: L10n.tr("diagnostics.section_network"),
+                        rows: [
+                            (L10n.tr("diagnostics.api_base"), AppConfig.apiBaseURL.absoluteString),
+                            (L10n.tr("diagnostics.ws_base"), AppConfig.websocketBaseCandidates.joined(separator: ", ")),
+                            (L10n.tr("diagnostics.ws_token_path"), AppConfig.websocketTokenPath)
+                        ]
+                    )
+
+                    diagnosticsSection(
+                        title: L10n.tr("diagnostics.section_geo"),
+                        rows: [
+                            (L10n.tr("diagnostics.state"), diagnostics.geo.status),
+                            (L10n.tr("diagnostics.geo_dsn"), diagnostics.geo.dsn),
+                            (L10n.tr("diagnostics.endpoint"), diagnostics.geo.endpoint),
+                            (L10n.tr("diagnostics.last_payload"), diagnostics.geo.lastPayload),
+                            (L10n.tr("diagnostics.last_error"), diagnostics.geo.lastError),
+                            (L10n.tr("diagnostics.retries"), "\(diagnostics.geo.reconnectCount)"),
+                            (L10n.tr("diagnostics.updated"), formatTimestamp(diagnostics.geo.updatedAt))
+                        ]
+                    )
+
+                    diagnosticsSection(
+                        title: L10n.tr("diagnostics.section_chat"),
+                        rows: [
+                            (L10n.tr("diagnostics.state"), diagnostics.chat.status),
+                            (L10n.tr("diagnostics.chat_dsn"), diagnostics.chat.dsn),
+                            (L10n.tr("diagnostics.endpoint"), diagnostics.chat.endpoint),
+                            (L10n.tr("diagnostics.last_message"), diagnostics.chat.lastMessage),
+                            (L10n.tr("diagnostics.last_error"), diagnostics.chat.lastError),
+                            (L10n.tr("diagnostics.retries"), "\(diagnostics.chat.reconnectCount)"),
+                            (L10n.tr("diagnostics.updated"), formatTimestamp(diagnostics.chat.updatedAt))
+                        ]
+                    )
+
+                    diagnosticsSection(
+                        title: L10n.tr("diagnostics.section_permissions"),
+                        rows: [
+                            (L10n.tr("diagnostics.permission_location"), locationStatusText(permissionManager.locationAuthorizationStatus)),
+                            (L10n.tr("diagnostics.permission_notifications"), notificationStatusText(permissionManager.notificationAuthorizationStatus)),
+                            (L10n.tr("diagnostics.permission_microphone"), microphoneStatusText(permissionManager.microphonePermission)),
+                            (L10n.tr("diagnostics.permission_background_refresh"), backgroundRefreshText(permissionManager.backgroundRefreshStatus)),
+                            (L10n.tr("diagnostics.permission_low_power"), permissionManager.isLowPowerModeEnabled ? L10n.tr("diagnostics.value_on") : L10n.tr("diagnostics.value_off")),
+                            (L10n.tr("diagnostics.permission_checklist"), permissionManager.allChecklistSatisfied ? L10n.tr("diagnostics.value_ok") : L10n.tr("diagnostics.value_incomplete"))
+                        ]
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
+            }
+            .background(AppColors.white.ignoresSafeArea())
+            .navigationTitle(L10n.tr("settings.diagnostics"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(L10n.tr("common.close")) {
+                        dismiss()
+                    }
+                    .font(AppTypography.unbounded(12, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
+                }
+
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        permissionManager.refreshStatuses()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(AppColors.primaryPurple)
+                    }
+
+                    Button(L10n.tr("diagnostics.open_settings")) {
+                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                        openURL(url)
+                    }
+                    .font(AppTypography.unbounded(11, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
+                }
+            }
+            .onAppear {
+                permissionManager.refreshStatuses()
+            }
+        }
+    }
+
+    private func diagnosticsSection(title: String, rows: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(AppTypography.unbounded(13, weight: .semibold))
+                .foregroundStyle(AppColors.black)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(row.0)
+                            .font(AppTypography.unbounded(10, weight: .medium))
+                            .foregroundStyle(AppColors.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(row.1)
+                            .font(AppTypography.unbounded(10, weight: .regular))
+                            .foregroundStyle(AppColors.black)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+
+                    if index < rows.count - 1 {
+                        Divider()
+                            .overlay(AppColors.neutral300)
+                            .padding(.horizontal, 12)
+                    }
+                }
+            }
+            .background(AppColors.neutral100)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(AppColors.neutral300, lineWidth: 1)
+            }
+        }
+    }
+
+    private func formatTimestamp(_ date: Date?) -> String {
+        guard let date else { return "-" }
+        return date.formatted(
+            Date.FormatStyle()
+                .year()
+                .month(.twoDigits)
+                .day(.twoDigits)
+                .hour(.twoDigits(amPM: .omitted))
+                .minute(.twoDigits)
+                .second(.twoDigits)
+        )
+    }
+
+    private func themeValue(_ theme: AppTheme) -> String {
+        switch theme {
+        case .system: return L10n.tr("settings.theme.system")
+        case .light: return L10n.tr("settings.theme.light")
+        case .dark: return L10n.tr("settings.theme.dark")
+        }
+    }
+
+    private func languageValue(_ language: AppLanguage) -> String {
+        switch language {
+        case .en: return L10n.tr("settings.language.en")
+        case .ru: return L10n.tr("settings.language.ru")
+        case .uz: return L10n.tr("settings.language.uz")
+        }
+    }
+
+    private func locationStatusText(_ status: CLAuthorizationStatus) -> String {
+        switch status {
+        case .authorizedAlways: return "authorizedAlways"
+        case .authorizedWhenInUse: return "authorizedWhenInUse"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "notDetermined"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private func notificationStatusText(_ status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "authorized"
+        case .provisional: return "provisional"
+        case .ephemeral: return "ephemeral"
+        case .denied: return "denied"
+        case .notDetermined: return "notDetermined"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private func microphoneStatusText(_ status: AVAudioSession.RecordPermission) -> String {
+        switch status {
+        case .granted: return "granted"
+        case .denied: return "denied"
+        case .undetermined: return "undetermined"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private func backgroundRefreshText(_ status: UIBackgroundRefreshStatus) -> String {
+        switch status {
+        case .available: return "available"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        @unknown default: return "unknown"
         }
     }
 }

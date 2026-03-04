@@ -1,47 +1,95 @@
 import SwiftUI
+import UIKit
 
 struct SettingsAvatarSection: View {
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Circle()
-                .fill(AppColors.white)
-                .frame(width: 100, height: 100)
-                .overlay {
-                    if UIImage(named: "UserAvatarGlyph") != nil {
-                        Image("UserAvatarGlyph")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 50, height: 50)
-                            .opacity(0.3)
-                    } else {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 46, weight: .regular))
-                            .foregroundStyle(AppColors.textSecondary)
-                    }
-                }
+    let imageURL: URL?
+    let localImage: UIImage?
+    let isUploading: Bool
+    let onEdit: () -> Void
 
-            Circle()
-                .fill(AppColors.secondaryPurple)
-                .frame(width: 30, height: 30)
-                .overlay {
-                    if UIImage(named: "IconPencil") != nil {
-                        Image("IconPencil")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20, height: 20)
-                            .foregroundStyle(.white)
-                    } else {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
+    var body: some View {
+        Button {
+            AppHaptics.tap()
+            onEdit()
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                Circle()
+                    .fill(AppColors.white)
+                    .frame(width: 100, height: 100)
+                    .overlay {
+                        avatarContent
                     }
+                    .clipShape(Circle())
+
+                Circle()
+                    .fill(AppColors.secondaryPurple)
+                    .frame(width: 30, height: 30)
+                    .overlay {
+                        if isUploading {
+                            ProgressView()
+                                .tint(.white)
+                        } else if UIImage(named: "IconPencil") != nil {
+                            Image("IconPencil")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 20, height: 20)
+                                .foregroundStyle(.white)
+                        } else {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.tr("settings.edit_avatar"))
+        .disabled(isUploading)
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        if let localImage {
+            Image(uiImage: localImage)
+                .resizable()
+                .scaledToFill()
+        } else if let imageURL {
+            AsyncImage(url: imageURL) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .failure, .empty:
+                    placeholderAvatar
+                @unknown default:
+                    placeholderAvatar
                 }
+            }
+        } else {
+            placeholderAvatar
+        }
+    }
+
+    @ViewBuilder
+    private var placeholderAvatar: some View {
+        if UIImage(named: "UserAvatarGlyph") != nil {
+            Image("UserAvatarGlyph")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 50, height: 50)
+                .opacity(0.3)
+        } else {
+            Image(systemName: "person.fill")
+                .font(.system(size: 46, weight: .regular))
+                .foregroundStyle(AppColors.textSecondary)
         }
     }
 }
 
 struct SettingsDeviceCard: View {
     let name: String
+    let avatarURL: URL?
     let onEdit: () -> Void
 
     var body: some View {
@@ -50,16 +98,7 @@ struct SettingsDeviceCard: View {
                 .stroke(AppColors.primaryPurple, lineWidth: 2)
                 .frame(width: 50, height: 50)
                 .overlay {
-                    if UIImage(named: "UserAvatarGlyph") != nil {
-                        Image("UserAvatarGlyph")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 30, height: 30)
-                            .opacity(0.3)
-                    } else {
-                        Image(systemName: "person.fill")
-                            .foregroundStyle(AppColors.textSecondary)
-                    }
+                    avatarGlyph
                 }
 
             Text(name)
@@ -95,6 +134,43 @@ struct SettingsDeviceCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(AppColors.primaryPurple, lineWidth: 3)
+        }
+    }
+
+    @ViewBuilder
+    private var avatarGlyph: some View {
+        if let avatarURL {
+            AsyncImage(url: avatarURL) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                case .failure, .empty:
+                    placeholderGlyph
+                @unknown default:
+                    placeholderGlyph
+                }
+            }
+            .frame(width: 46, height: 46)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        } else {
+            placeholderGlyph
+        }
+    }
+
+    @ViewBuilder
+    private var placeholderGlyph: some View {
+        if UIImage(named: "UserAvatarGlyph") != nil {
+            Image("UserAvatarGlyph")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 30, height: 30)
+                .opacity(0.3)
+        } else {
+            Image(systemName: "person.fill")
+                .foregroundStyle(AppColors.textSecondary)
         }
     }
 }

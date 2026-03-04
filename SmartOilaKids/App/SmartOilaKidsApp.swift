@@ -26,6 +26,7 @@ struct SmartOilaKidsApp: App {
                     Task {
                         await PushTokenSyncCoordinator.shared.bootstrapFromDefaults()
                         await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
+                        await PushInboxStore.shared.reconcileAppBadge()
                     }
                 }
                 .onChange(of: appLanguageRawValue) { newValue in

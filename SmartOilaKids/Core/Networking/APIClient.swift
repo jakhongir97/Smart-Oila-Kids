@@ -1,11 +1,6 @@
 import Foundation
 
 final class APIClient {
-    private enum Keys {
-        static let apiAccessToken = "API_ACCESS_TOKEN"
-        static let apiRefreshToken = "API_REFRESH_TOKEN"
-    }
-
     private struct APIFailureEnvelope: Decodable {
         let status: Bool?
         let message: String?
@@ -15,6 +10,13 @@ final class APIClient {
             case status
             case message
             case statusCode = "status_code"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            status = container.decodeLossyBoolIfPresent(forKey: .status)
+            message = container.decodeLossyStringIfPresent(forKey: .message)
+            statusCode = container.decodeLossyIntIfPresent(forKey: .statusCode)
         }
     }
 
@@ -28,11 +30,23 @@ final class APIClient {
             case accessToken = "access_token"
             case tokenType = "token_type"
         }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            refreshToken = container.decodeLossyStringIfPresent(forKey: .refreshToken)
+            accessToken = container.decodeLossyStringIfPresent(forKey: .accessToken)
+            tokenType = container.decodeLossyStringIfPresent(forKey: .tokenType)
+        }
     }
 
-    init(session: URLSession = .shared, decoder: JSONDecoder = APIClient.makeDecoder()) {
+    init(
+        session: URLSession = .shared,
+        decoder: JSONDecoder = APIClient.makeDecoder(),
+        secureTokens: SecureTokenStoring = SecureTokenStore.shared
+    ) {
         self.session = session
         self.decoder = decoder
+        self.secureTokens = secureTokens
     }
 
     func requestDataResponse(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
@@ -180,9 +194,7 @@ final class APIClient {
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
 
         if request.value(forHTTPHeaderField: "Authorization") == nil,
-           let token = UserDefaults.standard.string(forKey: Keys.apiAccessToken)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !token.isEmpty {
+           let token = secureTokens.accessToken() {
             request.setValue(token, forHTTPHeaderField: "Authorization")
         }
         return request
@@ -208,6 +220,12 @@ final class APIClient {
         do {
             return try decoder.decode(type, from: data)
         } catch {
+#if DEBUG
+            let payloadText = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+            print("[APIClient] Decoding failed for \(String(describing: type))")
+            print("[APIClient] Decoder error: \(error.localizedDescription)")
+            print("[APIClient] Payload: \(payloadText)")
+#endif
             throw NetworkError.decodingFailed
         }
     }
@@ -249,7 +267,7 @@ final class APIClient {
     }
 
     fileprivate func performTokenRefreshIfPossible() async throws -> String? {
-        guard let refreshToken = UserDefaults.standard.string(forKey: Keys.apiRefreshToken)?.trimmedNonEmpty else {
+        guard let refreshToken = secureTokens.refreshToken() else {
             return nil
         }
 
@@ -279,16 +297,15 @@ final class APIClient {
                     return nil
                 }
 
-                UserDefaults.standard.set(accessToken, forKey: Keys.apiAccessToken)
+                secureTokens.setAccessToken(accessToken)
 
                 if let refreshed = response.refreshToken?.trimmedNonEmpty {
-                    UserDefaults.standard.set(refreshed, forKey: Keys.apiRefreshToken)
+                    secureTokens.setRefreshToken(refreshed)
                 }
 
                 return accessToken
             } catch let NetworkError.server(statusCode, _) where statusCode == 400 || statusCode == 401 || statusCode == 403 {
-                UserDefaults.standard.removeObject(forKey: Keys.apiAccessToken)
-                UserDefaults.standard.removeObject(forKey: Keys.apiRefreshToken)
+                secureTokens.clear()
                 return nil
             } catch {
                 lastError = error
@@ -380,6 +397,7 @@ final class APIClient {
 
     private let session: URLSession
     private let decoder: JSONDecoder
+    private let secureTokens: SecureTokenStoring
     private static let authRefreshCoordinator = APIAuthRefreshCoordinator()
 }
 

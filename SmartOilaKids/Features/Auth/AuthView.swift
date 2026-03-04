@@ -341,23 +341,40 @@ struct AuthView: View {
     }
 
     private func extractContractPayload(from rawCode: String) -> AuthScanPayload? {
-        if let jsonPayload = parseJSONObject(rawCode), isContractPayload(jsonPayload) {
+        if let jsonPayload = decodeJSONObjectCandidate(rawCode), isContractPayload(jsonPayload) {
             let contractData = (jsonPayload["data"] as? [String: Any]) ?? jsonPayload
             return AuthScanPayload(
                 token: extractToken(from: contractData),
                 refreshToken: extractRefreshToken(from: contractData),
                 parentPhone: extractPhone(from: contractData),
+                dsn: extractDSN(from: contractData),
                 deviceName: extractDeviceName(from: contractData)
             )
         }
 
         if let url = URL(string: rawCode),
-           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-           hasContractMarker(in: components) {
+           let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            if let embedded = extractEmbeddedPayload(from: components),
+               isContractPayload(embedded) {
+                let contractData = (embedded["data"] as? [String: Any]) ?? embedded
+                return AuthScanPayload(
+                    token: extractToken(from: contractData),
+                    refreshToken: extractRefreshToken(from: contractData),
+                    parentPhone: extractPhone(from: contractData),
+                    dsn: extractDSN(from: contractData),
+                    deviceName: extractDeviceName(from: contractData)
+                )
+            }
+
+            guard hasContractMarker(in: components) else {
+                return nil
+            }
+
             return AuthScanPayload(
                 token: extractToken(from: components),
                 refreshToken: extractRefreshToken(from: components),
                 parentPhone: extractPhone(from: components),
+                dsn: extractDSN(from: components),
                 deviceName: extractDeviceName(from: components)
             )
         }
@@ -369,17 +386,20 @@ struct AuthView: View {
         var token: String?
         var refreshToken: String?
         var parentPhone: String?
+        var dsn: String?
         var deviceName: String?
 
-        if let jsonPayload = parseJSONObject(rawCode) {
+        if let jsonPayload = decodeJSONObjectCandidate(rawCode) {
             token = token ?? extractToken(from: jsonPayload)
             refreshToken = refreshToken ?? extractRefreshToken(from: jsonPayload)
             parentPhone = parentPhone ?? extractPhone(from: jsonPayload)
+            dsn = dsn ?? extractDSN(from: jsonPayload)
             deviceName = deviceName ?? extractDeviceName(from: jsonPayload)
             if let nested = jsonPayload["data"] as? [String: Any] {
                 token = token ?? extractToken(from: nested)
                 refreshToken = refreshToken ?? extractRefreshToken(from: nested)
                 parentPhone = parentPhone ?? extractPhone(from: nested)
+                dsn = dsn ?? extractDSN(from: nested)
                 deviceName = deviceName ?? extractDeviceName(from: nested)
             }
         }
@@ -389,7 +409,16 @@ struct AuthView: View {
             token = token ?? extractToken(from: components)
             refreshToken = refreshToken ?? extractRefreshToken(from: components)
             parentPhone = parentPhone ?? extractPhone(from: components)
+            dsn = dsn ?? extractDSN(from: components)
             deviceName = deviceName ?? extractDeviceName(from: components)
+
+            if let embeddedPayload = extractEmbeddedPayload(from: components) {
+                token = token ?? extractToken(from: embeddedPayload)
+                refreshToken = refreshToken ?? extractRefreshToken(from: embeddedPayload)
+                parentPhone = parentPhone ?? extractPhone(from: embeddedPayload)
+                dsn = dsn ?? extractDSN(from: embeddedPayload)
+                deviceName = deviceName ?? extractDeviceName(from: embeddedPayload)
+            }
         }
 
         token = token ?? normalizeToken(rawCode)
@@ -398,6 +427,7 @@ struct AuthView: View {
             token: token,
             refreshToken: refreshToken,
             parentPhone: parentPhone,
+            dsn: dsn,
             deviceName: deviceName
         )
     }
@@ -419,9 +449,9 @@ struct AuthView: View {
 
     private func hasContractMarker(in components: URLComponents) -> Bool {
         let keys = Set(["schema", "format", "type", "qr_type"])
-        let values = components.queryItems?
+        let values = allQueryItems(from: components)
             .filter { keys.contains($0.name.lowercased()) }
-            .compactMap(\.value) ?? []
+            .compactMap(\.value)
 
         return values.contains { value in
             Self.qrContractMarkers.contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
@@ -492,19 +522,80 @@ struct AuthView: View {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    private func extractToken(from payload: [String: Any]) -> String? {
-        let keys = ["token", "qr_token", "bind_token", "link_token", "claim_token", "code"]
-        for key in keys {
-            guard let raw = payload[key] else { continue }
-            let value: String
-            if let text = raw as? String {
-                value = text
-            } else if let number = raw as? NSNumber {
-                value = number.stringValue
-            } else {
-                continue
-            }
+    private func extractEmbeddedPayload(from components: URLComponents) -> [String: Any]? {
+        let candidateKeys = Set([
+            "data",
+            "payload",
+            "json",
+            "qr",
+            "content"
+        ])
 
+        let values = allQueryItems(from: components)
+            .filter { candidateKeys.contains($0.name.lowercased()) }
+            .compactMap(\.value)
+
+        for value in values {
+            if let payload = decodeJSONObjectCandidate(value) {
+                return payload
+            }
+        }
+
+        return nil
+    }
+
+    private func decodeJSONObjectCandidate(_ rawValue: String) -> [String: Any]? {
+        let candidates = [
+            rawValue,
+            rawValue.removingPercentEncoding ?? "",
+            decodeBase64URLString(rawValue) ?? "",
+            decodeBase64URLString(rawValue.removingPercentEncoding ?? "") ?? ""
+        ].filter { !$0.isEmpty }
+
+        for candidate in candidates {
+            if let payload = parseJSONObject(candidate) {
+                return payload
+            }
+        }
+
+        return nil
+    }
+
+    private func decodeBase64URLString(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        var normalized = trimmed
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = normalized.count % 4
+        if remainder != 0 {
+            normalized += String(repeating: "=", count: 4 - remainder)
+        }
+
+        guard let data = Data(base64Encoded: normalized),
+              let decoded = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return decoded
+    }
+
+    private func extractToken(from payload: [String: Any]) -> String? {
+        let keys = [
+            "token",
+            "qr_token",
+            "bind_token",
+            "link_token",
+            "claim_token",
+            "code",
+            "access_token",
+            "auth_token",
+            "authorization"
+        ]
+
+        for key in keys {
+            guard let value = extractStringValue(from: payload, keys: [key]) else { continue }
             if let token = normalizeToken(value) {
                 return token
             }
@@ -513,19 +604,16 @@ struct AuthView: View {
     }
 
     private func extractPhone(from payload: [String: Any]) -> String? {
-        let keys = ["phone", "parent_phone", "phone_number", "parentPhone"]
+        let keys = [
+            "phone",
+            "parent_phone",
+            "phone_number",
+            "parentPhone",
+            "parent_phone_number"
+        ]
+
         for key in keys {
-            guard let raw = payload[key] else { continue }
-
-            let value: String
-            if let text = raw as? String {
-                value = text
-            } else if let number = raw as? NSNumber {
-                value = number.stringValue
-            } else {
-                continue
-            }
-
+            guard let value = extractStringValue(from: payload, keys: [key]) else { continue }
             if let phone = normalizePhone(value) {
                 return phone
             }
@@ -534,19 +622,9 @@ struct AuthView: View {
     }
 
     private func extractRefreshToken(from payload: [String: Any]) -> String? {
-        let keys = ["refresh_token", "refreshToken", "refresh", "rtoken"]
+        let keys = ["refresh_token", "refreshToken", "refresh", "rtoken", "rt"]
         for key in keys {
-            guard let raw = payload[key] else { continue }
-
-            let value: String
-            if let text = raw as? String {
-                value = text
-            } else if let number = raw as? NSNumber {
-                value = number.stringValue
-            } else {
-                continue
-            }
-
+            guard let value = extractStringValue(from: payload, keys: [key]) else { continue }
             if let token = normalizeToken(value) {
                 return token
             }
@@ -554,20 +632,39 @@ struct AuthView: View {
         return nil
     }
 
-    private func extractDeviceName(from payload: [String: Any]) -> String? {
-        let keys = ["device_name", "child_name", "name", "deviceName", "childName"]
+    private func extractDSN(from payload: [String: Any]) -> String? {
+        let keys = [
+            "dsn",
+            "device_dsn",
+            "deviceDsn",
+            "child_dsn",
+            "childDsn",
+            "children_device_dsn",
+            "childDeviceDsn"
+        ]
+
         for key in keys {
-            guard let raw = payload[key] else { continue }
-
-            let value: String
-            if let text = raw as? String {
-                value = text
-            } else if let number = raw as? NSNumber {
-                value = number.stringValue
-            } else {
-                continue
+            guard let value = extractStringValue(from: payload, keys: [key]) else { continue }
+            if let dsn = normalizeDSN(value) {
+                return dsn
             }
+        }
+        return nil
+    }
 
+    private func extractDeviceName(from payload: [String: Any]) -> String? {
+        let keys = [
+            "device_name",
+            "child_name",
+            "name",
+            "deviceName",
+            "childName",
+            "child_device_name",
+            "kid_name"
+        ]
+
+        for key in keys {
+            guard let value = extractStringValue(from: payload, keys: [key]) else { continue }
             if let deviceName = normalizeDeviceName(value) {
                 return deviceName
             }
@@ -576,17 +673,28 @@ struct AuthView: View {
     }
 
     private func extractToken(from components: URLComponents) -> String? {
-        let queryTokenKeys = Set(["token", "qr_token", "bind_token", "link_token", "claim_token", "code"])
-        let prioritized = components.queryItems?
-            .filter { queryTokenKeys.contains($0.name) }
-            .compactMap(\.value) ?? []
+        let queryTokenKeys = Set([
+            "token",
+            "qr_token",
+            "bind_token",
+            "link_token",
+            "claim_token",
+            "code",
+            "access_token",
+            "auth_token",
+            "authorization"
+        ])
+        let queryItems = allQueryItems(from: components)
+        let prioritized = queryItems
+            .filter { queryTokenKeys.contains($0.name.lowercased()) }
+            .compactMap(\.value)
         for value in prioritized {
             if let token = normalizeToken(value) {
                 return token
             }
         }
 
-        let allValues = components.queryItems?.compactMap(\.value) ?? []
+        let allValues = queryItems.compactMap(\.value)
         for value in allValues {
             if let token = normalizeToken(value) {
                 return token
@@ -603,10 +711,17 @@ struct AuthView: View {
     }
 
     private func extractPhone(from components: URLComponents) -> String? {
-        let queryPhoneKeys = Set(["phone", "parent_phone", "phone_number", "parentPhone"])
-        let prioritized = components.queryItems?
-            .filter { queryPhoneKeys.contains($0.name) }
-            .compactMap(\.value) ?? []
+        let queryPhoneKeys = Set([
+            "phone",
+            "parent_phone",
+            "phone_number",
+            "parentphone",
+            "parent_phone_number"
+        ])
+        let queryItems = allQueryItems(from: components)
+        let prioritized = queryItems
+            .filter { queryPhoneKeys.contains($0.name.lowercased()) }
+            .compactMap(\.value)
 
         for value in prioritized {
             if let phone = normalizePhone(value) {
@@ -614,7 +729,7 @@ struct AuthView: View {
             }
         }
 
-        let allValues = components.queryItems?.compactMap(\.value) ?? []
+        let allValues = queryItems.compactMap(\.value)
         for value in allValues {
             if let phone = normalizePhone(value) {
                 return phone
@@ -625,10 +740,11 @@ struct AuthView: View {
     }
 
     private func extractRefreshToken(from components: URLComponents) -> String? {
-        let queryTokenKeys = Set(["refresh_token", "refreshToken", "refresh", "rtoken"])
-        let prioritized = components.queryItems?
-            .filter { queryTokenKeys.contains($0.name) }
-            .compactMap(\.value) ?? []
+        let queryTokenKeys = Set(["refresh_token", "refreshtoken", "refresh", "rtoken", "rt"])
+        let queryItems = allQueryItems(from: components)
+        let prioritized = queryItems
+            .filter { queryTokenKeys.contains($0.name.lowercased()) }
+            .compactMap(\.value)
 
         for value in prioritized {
             if let token = normalizeToken(value) {
@@ -639,11 +755,57 @@ struct AuthView: View {
         return nil
     }
 
+    private func extractDSN(from components: URLComponents) -> String? {
+        let queryDSNKeys = Set([
+            "dsn",
+            "device_dsn",
+            "devicedsn",
+            "child_dsn",
+            "childdsn",
+            "children_device_dsn",
+            "childdevicedsn"
+        ])
+        let queryItems = allQueryItems(from: components)
+        let prioritized = queryItems
+            .filter { queryDSNKeys.contains($0.name.lowercased()) }
+            .compactMap(\.value)
+
+        for value in prioritized {
+            if let dsn = normalizeDSN(value) {
+                return dsn
+            }
+        }
+
+        let allValues = queryItems.compactMap(\.value)
+        for value in allValues {
+            if let dsn = normalizeDSN(value) {
+                return dsn
+            }
+        }
+
+        for segment in components.path.split(separator: "/").map(String.init) {
+            if let dsn = normalizeDSN(segment) {
+                return dsn
+            }
+        }
+
+        return nil
+    }
+
     private func extractDeviceName(from components: URLComponents) -> String? {
-        let queryNameKeys = Set(["device_name", "child_name", "name", "deviceName", "childName"])
-        let prioritized = components.queryItems?
-            .filter { queryNameKeys.contains($0.name) }
-            .compactMap(\.value) ?? []
+        let queryNameKeys = Set([
+            "device_name",
+            "child_name",
+            "name",
+            "devicename",
+            "childname",
+            "child_device_name",
+            "kid_name"
+        ])
+        let queryItems = allQueryItems(from: components)
+        let prioritized = queryItems
+            .filter { queryNameKeys.contains($0.name.lowercased()) }
+            .compactMap(\.value)
 
         for value in prioritized {
             if let deviceName = normalizeDeviceName(value) {
@@ -651,7 +813,7 @@ struct AuthView: View {
             }
         }
 
-        let allValues = components.queryItems?.compactMap(\.value) ?? []
+        let allValues = queryItems.compactMap(\.value)
         for value in allValues {
             if let deviceName = normalizeDeviceName(value) {
                 return deviceName
@@ -659,6 +821,20 @@ struct AuthView: View {
         }
 
         return nil
+    }
+
+    private func allQueryItems(from components: URLComponents) -> [URLQueryItem] {
+        var items = components.queryItems ?? []
+
+        let fragments = [components.fragment, components.fragment?.removingPercentEncoding]
+            .compactMap { $0?.trimmedNonEmpty }
+
+        for fragment in fragments where fragment.contains("=") {
+            guard let fragmentQuery = URLComponents(string: "?\(fragment)")?.queryItems else { continue }
+            items.append(contentsOf: fragmentQuery)
+        }
+
+        return items
     }
 
     private func normalizePhone(_ value: String) -> String? {
@@ -689,6 +865,17 @@ struct AuthView: View {
         return String(trimmed.prefix(64))
     }
 
+    private func normalizeDSN(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 5, trimmed.count <= 64 else { return nil }
+
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let hasInvalid = trimmed.unicodeScalars.contains { !allowed.contains($0) }
+        guard !hasInvalid else { return nil }
+
+        return trimmed
+    }
+
     private func debugLog(_ message: String) {
 #if DEBUG
         print("[AuthView] \(message)")
@@ -703,7 +890,7 @@ private extension AuthView {
     }
 
     // Preferred parent QR schema (v1):
-    // {"schema":"smartoila.child.bind.v1","token":"...","refresh_token":"...","phone":"+998...","device_name":"Child 1"}
+    // {"schema":"smartoila.child.bind.v1","token":"...","refresh_token":"...","phone":"+998...","dsn":"abc-12-xyz","device_name":"Child 1"}
     // URL form is also supported via query items with the same keys.
     static let qrContractMarkers: Set<String> = [
         "smartoila.child.bind.v1",

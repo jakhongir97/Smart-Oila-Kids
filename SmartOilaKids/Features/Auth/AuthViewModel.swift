@@ -31,7 +31,7 @@ final class AuthViewModel: ObservableObject {
 
             return result
         } catch {
-            errorText = error.localizedDescription
+            errorText = NetworkError.userMessage(for: error)
         }
 
         return nil
@@ -44,6 +44,8 @@ final class AuthViewModel: ObservableObject {
             qrToken: payload.token,
             qrRefreshToken: payload.refreshToken,
             parentPhone: payload.parentPhone,
+            qrDSN: payload.dsn,
+            scannedDeviceName: payload.deviceName,
             deviceName: preferredDeviceName,
             appVersion: appVersion
         )

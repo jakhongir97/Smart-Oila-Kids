@@ -28,22 +28,24 @@ struct ChatMessagesModel: Decodable {
 }
 
 struct Datum: Identifiable {
-    var id: String { "\(time)-\(userType)-\((text ?? ""))" }
+    var id: String { "\(time)-\(userType)-\((senderName ?? ""))-\((text ?? ""))-\(attachments.joined(separator: ","))" }
 
     let userType: String
     let text: String?
     let attachments: [String]
     let time: String
+    let senderName: String?
 
     var dateKey: String {
         Self.dateKey(from: time)
     }
 
-    init(userType: String, text: String?, attachments: [String], time: String) {
+    init(userType: String, text: String?, attachments: [String], time: String, senderName: String? = nil) {
         self.userType = userType
         self.text = text
         self.attachments = attachments
         self.time = time
+        self.senderName = senderName?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -51,6 +53,10 @@ struct Datum: Identifiable {
         case text
         case attachments
         case time
+        case name
+        case senderName = "sender_name"
+        case fromName = "from_name"
+        case parentName = "parent_name"
     }
 
     private static func dateKey(from input: String) -> String {
@@ -64,10 +70,14 @@ struct Datum: Identifiable {
 extension Datum: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        userType = (try? container.decode(String.self, forKey: .userType)) ?? "parent"
-        text = try? container.decodeIfPresent(String.self, forKey: .text)
-        time = (try? container.decode(String.self, forKey: .time)) ?? ""
+        userType = container.decodeLossyStringIfPresent(forKey: .userType) ?? "parent"
+        text = container.decodeLossyStringIfPresent(forKey: .text)
+        time = container.decodeLossyStringIfPresent(forKey: .time) ?? ""
         attachments = decodeAttachmentList(from: container, key: .attachments)
+        senderName = decodeFirstString(
+            from: container,
+            keys: [.name, .senderName, .fromName, .parentName]
+        )
     }
 }
 
@@ -85,6 +95,16 @@ struct Pagination: Decodable {
         case totalPage = "total_page"
         case totalCount = "total_count"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        current = container.decodeLossyIntIfPresent(forKey: .current) ?? 0
+        previous = container.decodeLossyIntIfPresent(forKey: .previous)
+        next = container.decodeLossyIntIfPresent(forKey: .next)
+        perPage = container.decodeLossyIntIfPresent(forKey: .perPage) ?? 0
+        totalPage = container.decodeLossyIntIfPresent(forKey: .totalPage) ?? 0
+        totalCount = container.decodeLossyIntIfPresent(forKey: .totalCount) ?? 0
+    }
 }
 
 struct WBSocketMessage: Decodable {
@@ -96,20 +116,29 @@ struct ChatMessageWB {
     let text: String?
     let attachments: [String]
     let time: String
+    let senderName: String?
 
     enum CodingKeys: String, CodingKey {
         case text
         case attachments
         case time
+        case name
+        case senderName = "sender_name"
+        case fromName = "from_name"
+        case parentName = "parent_name"
     }
 }
 
 extension ChatMessageWB: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        text = try? container.decodeIfPresent(String.self, forKey: .text)
+        text = container.decodeLossyStringIfPresent(forKey: .text)
         attachments = decodeAttachmentList(from: container, key: .attachments)
-        time = (try? container.decode(String.self, forKey: .time)) ?? ""
+        time = container.decodeLossyStringIfPresent(forKey: .time) ?? ""
+        senderName = decodeFirstString(
+            from: container,
+            keys: [.name, .senderName, .fromName, .parentName]
+        )
     }
 }
 
@@ -120,6 +149,7 @@ struct WBSocketChat: Decodable {
     let sendToType: String
     let sendFromID: String?
     let sendFromType: String
+    let sendFromName: String?
     let text: String?
     let attachments: [String]
 
@@ -130,19 +160,27 @@ struct WBSocketChat: Decodable {
         case sendToType = "send_to_type"
         case sendFromID = "send_from_id"
         case sendFromType = "send_from_type"
+        case sendFromName = "send_from_name"
         case text
         case attachments
+        case name
+        case fromName = "from_name"
+        case parentName = "parent_name"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        createdAt = try container.decode(String.self, forKey: .createdAt)
-        sendToID = try? container.decodeIfPresent(String.self, forKey: .sendToID)
-        sendToType = (try? container.decode(String.self, forKey: .sendToType)) ?? "child"
-        sendFromID = try? container.decodeIfPresent(String.self, forKey: .sendFromID)
-        sendFromType = (try? container.decode(String.self, forKey: .sendFromType)) ?? "parent"
-        text = try? container.decodeIfPresent(String.self, forKey: .text)
+        id = container.decodeLossyIntIfPresent(forKey: .id) ?? 0
+        createdAt = container.decodeLossyStringIfPresent(forKey: .createdAt) ?? ""
+        sendToID = container.decodeLossyStringIfPresent(forKey: .sendToID)
+        sendToType = container.decodeLossyStringIfPresent(forKey: .sendToType) ?? "child"
+        sendFromID = container.decodeLossyStringIfPresent(forKey: .sendFromID)
+        sendFromType = container.decodeLossyStringIfPresent(forKey: .sendFromType) ?? "parent"
+        sendFromName = decodeFirstString(
+            from: container,
+            keys: [.sendFromName, .name, .fromName, .parentName]
+        )
+        text = container.decodeLossyStringIfPresent(forKey: .text)
         attachments = decodeAttachmentList(from: container, key: .attachments)
     }
 }
@@ -151,14 +189,22 @@ private func decodeAttachmentList<K: CodingKey>(
     from container: KeyedDecodingContainer<K>,
     key: K
 ) -> [String] {
-    if let items = try? container.decodeIfPresent([String].self, forKey: key) {
+    if let items = container.decodeLossyStringArrayIfPresent(forKey: key) {
         return items
     }
 
-    if let item = try? container.decodeIfPresent(String.self, forKey: key) {
-        guard !item.isEmpty else { return [] }
-        return [item]
-    }
-
     return []
+}
+
+private func decodeFirstString<K: CodingKey>(
+    from container: KeyedDecodingContainer<K>,
+    keys: [K]
+) -> String? {
+    for key in keys {
+        if let value = container.decodeLossyStringIfPresent(forKey: key),
+           !value.isEmpty {
+            return value
+        }
+    }
+    return nil
 }

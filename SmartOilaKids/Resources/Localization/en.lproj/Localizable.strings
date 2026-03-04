@@ -8,6 +8,13 @@
 "common.done" = "Done";
 "common.close" = "Close";
 "common.dsn_missing" = "Device DSN is missing";
+"error.network_offline" = "No internet connection.";
+"error.timeout" = "Request timed out. Please try again.";
+"error.auth_required" = "Session expired. Please sign in again.";
+"error.not_found" = "Requested data was not found.";
+"error.server_unavailable" = "Server is temporarily unavailable.";
+"error.invalid_response" = "Unexpected server response.";
+"error.request_failed" = "Request failed. Please try again.";
 
 "auth.welcome" = "Welcome!";
 "auth.company_mission" = "Our mission is to keep children safe by helping parents stay connected with them.";
@@ -44,6 +51,18 @@
 "main.device_not_bound" = "Device is not linked";
 "main.sos_sent" = "SOS sent";
 "main.usage_load_failed" = "Couldn't load usage data. Tap to retry.";
+"main.device_live_status" = "Device live status";
+"main.device_name" = "Device: %@";
+"main.device_battery" = "Battery: %@";
+"main.device_connection" = "Connection: %@";
+"main.device_sound_mode" = "Sound mode: %@";
+"main.device_location" = "Location: %@";
+"main.connection_wifi" = "Wi-Fi";
+"main.connection_mobile" = "Mobile";
+"main.connection_offline" = "Offline";
+"main.sound_normal" = "Normal";
+"main.sound_silent" = "Silent";
+"main.sound_vibrate" = "Vibrate";
 
 "lock.title" = "Device is locked";
 "lock.subtitle" = "This device is temporarily restricted by your parent.";
@@ -71,6 +90,14 @@
 "chat.template_button" = "Open templates";
 "chat.template_picker_title" = "SMS templates";
 "chat.template_empty" = "No templates available.";
+"chat.load_older" = "Load older messages";
+"chat.load_older_failed" = "Couldn't load older messages.";
+"chat.retry" = "Retry";
+"chat.retry_pending" = "%d unsent messages";
+"chat.send_queued" = "Message queued. Pending: %d";
+"chat.send_failed" = "Couldn't send message.";
+"chat.unread_count" = "%d unread";
+"chat.offline_cached" = "Offline mode: showing cached chat history.";
 
 "permissions.setup_title" = "Permission setup";
 "permissions.setup_subtitle" = "For proper app operation, please allow the following permissions";
@@ -84,6 +111,36 @@
 "permissions.item_5" = "Usage stats access";
 "permissions.item_6" = "Background data transfer";
 "permissions.item_7" = "Notification access";
+"permissions.status_not_required_ios" = "Not required on iOS";
+"permissions.status_granted" = "Granted";
+"permissions.status_tap_to_allow" = "Tap to allow";
+"permissions.status_location_always_required" = "Allow \"Always\" in location settings";
+"permissions.status_open_settings" = "Open Settings";
+"permissions.status_low_power_disable" = "Disable Low Power Mode";
+"permissions.details_title" = "Permission details";
+"permissions.details_why_title" = "Why this is needed";
+"permissions.details_how_title" = "How to enable";
+"permissions.details_status_title" = "Current status";
+"permissions.details.body_1" = "iOS doesn't require this permission. The app keeps this row for cross-platform parity.";
+"permissions.details.step_1" = "No action needed on iPhone.";
+"permissions.details.body_2" = "Location lets parent see child position and safety events.";
+"permissions.details.step_2" = "Tap allow and select \"Always\" for location access.";
+"permissions.details.body_3" = "Low Power Mode can pause background updates.";
+"permissions.details.step_3" = "Turn off Low Power Mode in Settings > Battery.";
+"permissions.details.body_4" = "Microphone is required for voice and audio-related features.";
+"permissions.details.step_4" = "Tap allow when iOS asks for microphone access.";
+"permissions.details.body_5" = "iOS does not provide Android-like app usage statistics permission.";
+"permissions.details.step_5" = "No action needed on iPhone.";
+"permissions.details.body_6" = "Background refresh keeps location and status updates working while the app is in background.";
+"permissions.details.step_6" = "Enable Background App Refresh in Settings > General > Background App Refresh.";
+"permissions.details.body_7" = "Notifications are needed for parent messages, tasks, and lock alerts.";
+"permissions.details.step_7" = "Allow notifications with alerts, sounds, and badges.";
+"permissions.action_allow_location" = "Allow Location";
+"permissions.action_allow_location_always" = "Allow Location Always";
+"permissions.action_allow_notifications" = "Allow Notifications";
+"permissions.action_allow_microphone" = "Allow Microphone";
+"permissions.action_open_settings" = "Open Settings";
+"permissions.action_disable_low_power" = "Open Battery Settings";
 
 "templates.title" = "SMS templates";
 "templates.create" = "Create template";
@@ -94,6 +151,10 @@
 "templates.default_3" = "I'm outside";
 "templates.add" = "Add template";
 "templates.edit_action" = "Edit template";
+"templates.actions_title" = "Template actions";
+"templates.delete" = "Delete template";
+"templates.delete_title" = "Delete template?";
+"templates.delete_message" = "This action cannot be undone.";
 
 "tasks.title" = "Tasks";
 "tasks.prize_title" = "Prize name";
@@ -106,6 +167,11 @@
 "tasks.start" = "Start";
 "tasks.completed" = "Completed";
 "tasks.updating" = "Updating...";
+"tasks.no_pending_tasks" = "No pending tasks for this award.";
+"tasks.offline_cached" = "Offline mode: showing cached tasks.";
+"tasks.action_queued" = "Offline mode: task queued (%d pending).";
+"tasks.sync_pending" = "Pending sync: %d task update(s).";
+"tasks.sync_complete" = "Queued task updates were synced.";
 
 "settings.title" = "Profile";
 "settings.change_username" = "Change username";
@@ -118,6 +184,9 @@
 "settings.language.en" = "EN";
 "settings.language.ru" = "RU";
 "settings.language.uz" = "UZ";
+"settings.diagnostics" = "Diagnostics";
+"settings.permissions" = "Permissions";
+"settings.permissions_subtitle" = "Enable all required permissions for stable background tracking and alerts.";
 "settings.connected_devices" = "Connected devices:";
 "settings.no_connected_devices" = "No connected devices yet.";
 "settings.edit_device" = "Edit connected device";
@@ -127,6 +196,9 @@
 "settings.delete_account" = "Delete";
 "settings.delete_title" = "Delete account";
 "settings.delete_message" = "Are you sure you want to delete the account?";
+"settings.unlink_device" = "Unlink";
+"settings.unlink_title" = "Unlink this device";
+"settings.unlink_message" = "This will remove this child device from the parent account and sign out on this phone.";
 "settings.edit_soon" = "Editing will be available soon";
 "settings.enter_username" = "Enter a username";
 "settings.saved" = "Saved";
@@ -135,3 +207,49 @@
 "settings.device_renamed" = "Device name updated.";
 "settings.device_rename_failed" = "Couldn't update device name.";
 "settings.delete_failed" = "Couldn't delete device on server.";
+"settings.unlink_failed" = "Couldn't unlink device on server.";
+"settings.edit_avatar" = "Edit avatar";
+"settings.avatar_uploaded" = "Avatar updated.";
+"settings.avatar_upload_failed" = "Couldn't update avatar on server.";
+"settings.avatar_invalid_image" = "Could not read selected image.";
+
+"notifications.title" = "Notifications";
+"notifications.mark_all_read" = "Mark read";
+"notifications.empty" = "No notifications yet";
+"notifications.event_chat" = "New message";
+"notifications.event_lock" = "Lock status update";
+"notifications.event_task" = "Task update";
+"notifications.event_default" = "New update";
+
+"diagnostics.section_session" = "Session";
+"diagnostics.section_network" = "Network";
+"diagnostics.section_geo" = "Geo websocket";
+"diagnostics.section_chat" = "Chat websocket";
+"diagnostics.section_permissions" = "Permissions";
+"diagnostics.session_dsn" = "DSN";
+"diagnostics.session_profile" = "Profile";
+"diagnostics.session_theme" = "Theme";
+"diagnostics.session_language" = "Language";
+"diagnostics.api_base" = "API base";
+"diagnostics.ws_base" = "WS base";
+"diagnostics.ws_token_path" = "WS token path";
+"diagnostics.state" = "State";
+"diagnostics.geo_dsn" = "Geo DSN";
+"diagnostics.chat_dsn" = "Chat DSN";
+"diagnostics.endpoint" = "Endpoint";
+"diagnostics.last_payload" = "Last payload";
+"diagnostics.last_message" = "Last message";
+"diagnostics.last_error" = "Last error";
+"diagnostics.retries" = "Reconnect retries";
+"diagnostics.updated" = "Updated";
+"diagnostics.permission_location" = "Location";
+"diagnostics.permission_notifications" = "Notifications";
+"diagnostics.permission_microphone" = "Microphone";
+"diagnostics.permission_background_refresh" = "Background refresh";
+"diagnostics.permission_low_power" = "Low power mode";
+"diagnostics.permission_checklist" = "Checklist";
+"diagnostics.value_on" = "On";
+"diagnostics.value_off" = "Off";
+"diagnostics.value_ok" = "OK";
+"diagnostics.value_incomplete" = "Incomplete";
+"diagnostics.open_settings" = "Settings";

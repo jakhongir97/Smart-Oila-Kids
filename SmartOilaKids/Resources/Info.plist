@@ -36,6 +36,8 @@
 	<string>Geolocation access is needed so that parent can know where the child is.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photo library access is required to send chat attachments.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is required for voice-related child safety features.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Unbounded-Variable.ttf</string>
@@ -48,6 +50,8 @@
 		<false/>
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>

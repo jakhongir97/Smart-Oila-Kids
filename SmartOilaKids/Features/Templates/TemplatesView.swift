@@ -6,7 +6,10 @@ struct TemplatesView: View {
     @State private var templates: [String] = SMSTemplatesStore.load()
     @State private var draftText: String = ""
     @State private var editingIndex: Int?
+    @State private var selectedTemplateIndex: Int?
     @State private var showEditor = false
+    @State private var showActionsDialog = false
+    @State private var showDeleteAlert = false
     @FocusState private var isEditorFocused: Bool
 
     var body: some View {
@@ -99,6 +102,33 @@ struct TemplatesView: View {
                 }
             }
         }
+        .confirmationDialog(
+            L10n.tr("templates.actions_title"),
+            isPresented: $showActionsDialog,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.tr("templates.edit")) {
+                beginEditingSelectedTemplate()
+            }
+
+            Button(L10n.tr("templates.delete"), role: .destructive) {
+                showDeleteAlert = true
+            }
+
+            Button(L10n.tr("common.cancel"), role: .cancel) {
+                selectedTemplateIndex = nil
+            }
+        }
+        .alert(L10n.tr("templates.delete_title"), isPresented: $showDeleteAlert) {
+            Button(L10n.tr("templates.delete"), role: .destructive) {
+                deleteSelectedTemplate()
+            }
+            Button(L10n.tr("common.cancel"), role: .cancel) {
+                selectedTemplateIndex = nil
+            }
+        } message: {
+            Text(L10n.tr("templates.delete_message"))
+        }
     }
 
     private func templateRow(text: String, index: Int) -> some View {
@@ -113,10 +143,8 @@ struct TemplatesView: View {
 
             Button {
                 AppHaptics.selection()
-                editingIndex = index
-                draftText = text
-                showEditor = true
-                isEditorFocused = true
+                selectedTemplateIndex = index
+                showActionsDialog = true
             } label: {
                 VStack(spacing: 2) {
                     Circle().fill(AppColors.black).frame(width: 4, height: 4)
@@ -174,5 +202,34 @@ struct TemplatesView: View {
         SMSTemplatesStore.save(templates)
         AppHaptics.success()
         showEditor = false
+        draftText = ""
+        editingIndex = nil
+        selectedTemplateIndex = nil
+    }
+
+    private func beginEditingSelectedTemplate() {
+        guard let selectedTemplateIndex,
+              templates.indices.contains(selectedTemplateIndex) else {
+            return
+        }
+
+        editingIndex = selectedTemplateIndex
+        draftText = templates[selectedTemplateIndex]
+        showEditor = true
+        isEditorFocused = true
+    }
+
+    private func deleteSelectedTemplate() {
+        guard let selectedTemplateIndex,
+              templates.indices.contains(selectedTemplateIndex) else {
+            return
+        }
+
+        templates.remove(at: selectedTemplateIndex)
+        SMSTemplatesStore.save(templates)
+        self.selectedTemplateIndex = nil
+        editingIndex = nil
+        draftText = ""
+        AppHaptics.success()
     }
 }

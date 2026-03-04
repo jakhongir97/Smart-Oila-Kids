@@ -6,6 +6,7 @@ struct RootView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var geoBackgroundService = GeoBackgroundService()
     @StateObject private var lockCoordinator = DeviceLockCoordinator()
+    @State private var lastSessionDSN: String?
 
     var body: some View {
         Group {
@@ -16,21 +17,47 @@ struct RootView: View {
             }
         }
         .onAppear {
+            lastSessionDSN = sessionStore.dsn?.trimmedNonEmpty
             syncGeoService(with: sessionStore.dsn)
             syncLockService(with: sessionStore.dsn)
             Task {
                 await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
+                await PushInboxStore.shared.reconcileAppBadge()
             }
         }
         .onChange(of: sessionStore.dsn) { newValue in
+            let normalizedNewDSN = newValue?.trimmedNonEmpty
+            let previousDSN = lastSessionDSN?.trimmedNonEmpty
+            lastSessionDSN = normalizedNewDSN
+
             syncGeoService(with: newValue)
             syncLockService(with: newValue)
+
             Task {
-                await PushTokenSyncCoordinator.shared.updateDSN(newValue)
+                await PushTokenSyncCoordinator.shared.updateDSN(normalizedNewDSN)
+
+                if let previousDSN,
+                   !dsnEquals(previousDSN, normalizedNewDSN) {
+                    await PushDeepLinkStore.shared.clear(matching: previousDSN)
+                    await PushInboxStore.shared.clear(dsn: previousDSN)
+                }
+
+                if normalizedNewDSN == nil {
+                    await PushDeepLinkStore.shared.clearAll()
+                    await PushInboxStore.shared.clearAll()
+                } else {
+                    await PushInboxStore.shared.reconcileAppBadge()
+                }
             }
         }
         .onChange(of: scenePhase) { newValue in
             guard newValue == .active else { return }
+            Task {
+                await lockCoordinator.refreshNow()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshLockState)) { notification in
+            guard shouldHandlePush(notification: notification, currentDSN: sessionStore.dsn) else { return }
             Task {
                 await lockCoordinator.refreshNow()
             }
@@ -107,6 +134,11 @@ struct RootView: View {
     private func syncLockService(with dsn: String?) {
         lockCoordinator.start(dsn: dsn)
     }
+
+    private func dsnEquals(_ lhs: String, _ rhs: String?) -> Bool {
+        guard let rhs = rhs else { return false }
+        return lhs.caseInsensitiveCompare(rhs) == .orderedSame
+    }
 }
 
 private struct DeviceLockOverlay: View {
@@ -162,5 +194,15 @@ private struct DeviceLockOverlay: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(L10n.tr("lock.title"))
         .accessibilityHint(L10n.tr("lock.subtitle"))
+    }
+}
+
+private extension RootView {
+    func shouldHandlePush(notification: Notification, currentDSN: String?) -> Bool {
+        guard let currentDSN = currentDSN?.trimmedNonEmpty else { return false }
+        guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
+            return true
+        }
+        return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
     }
 }

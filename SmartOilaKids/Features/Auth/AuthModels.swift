@@ -22,9 +22,12 @@ struct AuthScanPayload {
     let token: String?
     let refreshToken: String?
     let parentPhone: String?
+    let dsn: String?
     let deviceName: String?
 
     var hasAuthData: Bool {
-        token?.trimmedNonEmpty != nil || parentPhone?.trimmedNonEmpty != nil
+        token?.trimmedNonEmpty != nil
+            || parentPhone?.trimmedNonEmpty != nil
+            || dsn?.trimmedNonEmpty != nil
     }
 }

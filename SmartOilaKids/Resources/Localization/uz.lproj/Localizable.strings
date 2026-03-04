@@ -8,6 +8,13 @@
 "common.done" = "Tayyor";
 "common.close" = "Yopish";
 "common.dsn_missing" = "Qurilma DSN topilmadi";
+"error.network_offline" = "Internetga ulanish yo'q.";
+"error.timeout" = "So'rov vaqti tugadi. Qayta urinib ko'ring.";
+"error.auth_required" = "Sessiya muddati tugadi. Qayta kiring.";
+"error.not_found" = "So'ralgan ma'lumot topilmadi.";
+"error.server_unavailable" = "Server vaqtincha mavjud emas.";
+"error.invalid_response" = "Serverdan kutilmagan javob keldi.";
+"error.request_failed" = "So'rovni bajarib bo'lmadi. Qayta urinib ko'ring.";
 
 "auth.welcome" = "Xush kelibsiz!";
 "auth.company_mission" = "Bizning maqsadimiz - bolalar xavfsizligini ta'minlash va ota-onalarga bolalarini kuzatishda yordam berish.";
@@ -44,6 +51,18 @@
 "main.device_not_bound" = "Qurilma ulanmagan";
 "main.sos_sent" = "SOS yuborildi";
 "main.usage_load_failed" = "Statistikani yuklab bo'lmadi. Qayta urinish uchun bosing.";
+"main.device_live_status" = "Qurilma holati";
+"main.device_name" = "Qurilma: %@";
+"main.device_battery" = "Batareya: %@";
+"main.device_connection" = "Ulanish: %@";
+"main.device_sound_mode" = "Ovoz rejimi: %@";
+"main.device_location" = "Joylashuv: %@";
+"main.connection_wifi" = "Wi‑Fi";
+"main.connection_mobile" = "Mobil tarmoq";
+"main.connection_offline" = "Oflayn";
+"main.sound_normal" = "Oddiy";
+"main.sound_silent" = "Jim";
+"main.sound_vibrate" = "Vibratsiya";
 
 "lock.title" = "Qurilma bloklangan";
 "lock.subtitle" = "Ota-ona ushbu qurilmadan foydalanishni vaqtincha chekladi.";
@@ -71,6 +90,14 @@
 "chat.template_button" = "Shablonlarni ochish";
 "chat.template_picker_title" = "SMS shablonlar";
 "chat.template_empty" = "Hozircha shablonlar yo'q.";
+"chat.load_older" = "Oldingi xabarlarni yuklash";
+"chat.load_older_failed" = "Oldingi xabarlarni yuklab bo'lmadi.";
+"chat.retry" = "Qayta yuborish";
+"chat.retry_pending" = "Yuborilmagan xabarlar: %d";
+"chat.send_queued" = "Xabar navbatga qo'shildi. Qoldi: %d";
+"chat.send_failed" = "Xabarni yuborib bo'lmadi.";
+"chat.unread_count" = "%d ta o'qilmagan";
+"chat.offline_cached" = "Oflayn rejim: saqlangan chat tarixi ko‘rsatildi.";
 
 "permissions.setup_title" = "Ruxsatlarni sozlash";
 "permissions.setup_subtitle" = "Ilova to'g'ri ishlashi uchun quyidagi ruxsatlarni bering";
@@ -84,6 +111,36 @@
 "permissions.item_5" = "Ilovalar statistikasi ruxsati";
 "permissions.item_6" = "Fon rejimida ma'lumot uzatish";
 "permissions.item_7" = "Bildirishnomalarni ko'rish";
+"permissions.status_not_required_ios" = "iOS'da talab qilinmaydi";
+"permissions.status_granted" = "Ruxsat berilgan";
+"permissions.status_tap_to_allow" = "Ruxsat berish uchun bosing";
+"permissions.status_location_always_required" = "Lokatsiyada \"Har doim\"ni yoqing";
+"permissions.status_open_settings" = "Sozlamalarni oching";
+"permissions.status_low_power_disable" = "Quvvat tejash rejimini o'chiring";
+"permissions.details_title" = "Ruxsat tafsilotlari";
+"permissions.details_why_title" = "Nima uchun kerak";
+"permissions.details_how_title" = "Qanday yoqiladi";
+"permissions.details_status_title" = "Joriy holat";
+"permissions.details.body_1" = "iOS'da bu ruxsat talab qilinmaydi. Qator Android bilan moslik uchun saqlangan.";
+"permissions.details.step_1" = "iPhone'da hech qanday amal talab qilinmaydi.";
+"permissions.details.body_2" = "Lokatsiya ota-onaga bolaning joylashuvi va xavfsizlik holatini ko‘rsatadi.";
+"permissions.details.step_2" = "Ruxsat bering va lokatsiya uchun \"Har doim\" ni tanlang.";
+"permissions.details.body_3" = "Quvvat tejash rejimi fon yangilanishlarini to‘xtatib qo‘yishi mumkin.";
+"permissions.details.step_3" = "Sozlamalar > Batareya bo‘limida quvvat tejashni o‘chiring.";
+"permissions.details.body_4" = "Mikrofon ovoz va audio funksiyalar uchun kerak.";
+"permissions.details.step_4" = "iOS mikrofon so‘raganda ruxsat bering.";
+"permissions.details.body_5" = "iOS Android dagidek ilova foydalanish statistikasi ruxsatini qo‘llamaydi.";
+"permissions.details.step_5" = "iPhone'da hech qanday amal talab qilinmaydi.";
+"permissions.details.body_6" = "Fon yangilanishi ilova fon rejimida bo‘lsa ham lokatsiya va holatni yuboradi.";
+"permissions.details.step_6" = "Sozlamalar > Asosiy > Fon ilova yangilanishi bo‘limida yoqing.";
+"permissions.details.body_7" = "Bildirishnomalar ota-onadan xabarlar, vazifalar va bloklash ogohlantirishlari uchun kerak.";
+"permissions.details.step_7" = "Bildirishnomalarda banner, ovoz va belgilarga ruxsat bering.";
+"permissions.action_allow_location" = "Lokatsiyaga ruxsat berish";
+"permissions.action_allow_location_always" = "Lokatsiyani doimiy ruxsat qilish";
+"permissions.action_allow_notifications" = "Bildirishnomalarga ruxsat berish";
+"permissions.action_allow_microphone" = "Mikrofonga ruxsat berish";
+"permissions.action_open_settings" = "Sozlamalarni ochish";
+"permissions.action_disable_low_power" = "Batareya sozlamalarini ochish";
 
 "templates.title" = "SMS shablonlar";
 "templates.create" = "Shablon yaratish";
@@ -94,6 +151,10 @@
 "templates.default_3" = "Men ko'chadaman";
 "templates.add" = "Shablon qo'shish";
 "templates.edit_action" = "Shablonni tahrirlash";
+"templates.actions_title" = "Shablon amallari";
+"templates.delete" = "Shablonni o'chirish";
+"templates.delete_title" = "Shablonni o'chirilsinmi?";
+"templates.delete_message" = "Bu amalni ortga qaytarib bo'lmaydi.";
 
 "tasks.title" = "Vazifalar";
 "tasks.prize_title" = "Sovrin nomi";
@@ -106,6 +167,11 @@
 "tasks.start" = "Boshlash";
 "tasks.completed" = "Yakunlangan";
 "tasks.updating" = "Yangilanmoqda...";
+"tasks.no_pending_tasks" = "Bu sovrin uchun bajarilmagan vazifalar yo'q.";
+"tasks.offline_cached" = "Oflayn rejim: saqlangan vazifalar ro‘yxati ko‘rsatildi.";
+"tasks.action_queued" = "Oflayn rejim: vazifa navbatga qo'shildi (%d).";
+"tasks.sync_pending" = "Sinxron kutilyapti: %d ta vazifa yangilanishi.";
+"tasks.sync_complete" = "Navbatdagi vazifa yangilanishlari sinxronlandi.";
 
 "settings.title" = "Profil";
 "settings.change_username" = "Foydalanuvchi nomini o'zgartirish";
@@ -118,6 +184,9 @@
 "settings.language.en" = "EN";
 "settings.language.ru" = "RU";
 "settings.language.uz" = "UZ";
+"settings.diagnostics" = "Diagnostika";
+"settings.permissions" = "Ruxsatlar";
+"settings.permissions_subtitle" = "Fon rejimida barqaror ishlash va bildirishnomalar uchun barcha kerakli ruxsatlarni yoqing.";
 "settings.connected_devices" = "Ulangan qurilmalar:";
 "settings.no_connected_devices" = "Hozircha ulangan qurilmalar yo'q.";
 "settings.edit_device" = "Ulangan qurilmani tahrirlash";
@@ -127,6 +196,9 @@
 "settings.delete_account" = "O'chirish";
 "settings.delete_title" = "Akkauntni o'chirish";
 "settings.delete_message" = "Akkauntni o'chirishni xohlaysizmi?";
+"settings.unlink_device" = "Ulashni uzish";
+"settings.unlink_title" = "Ushbu qurilmani uzish";
+"settings.unlink_message" = "Bu bolalar qurilmasini ota-ona akkauntidan uzadi va shu telefonda sessiyani yakunlaydi.";
 "settings.edit_soon" = "Tahrirlash tez orada mavjud bo'ladi";
 "settings.enter_username" = "Foydalanuvchi nomini kiriting";
 "settings.saved" = "Saqlandi";
@@ -135,3 +207,49 @@
 "settings.device_renamed" = "Qurilma nomi yangilandi.";
 "settings.device_rename_failed" = "Qurilma nomini yangilab bo'lmadi.";
 "settings.delete_failed" = "Qurilmani serverdan o'chirib bo'lmadi.";
+"settings.unlink_failed" = "Qurilma ulanishini serverda uzib bo'lmadi.";
+"settings.edit_avatar" = "Avatarni o'zgartirish";
+"settings.avatar_uploaded" = "Avatar yangilandi.";
+"settings.avatar_upload_failed" = "Avatarni serverda yangilab bo'lmadi.";
+"settings.avatar_invalid_image" = "Tanlangan rasmni o'qib bo'lmadi.";
+
+"notifications.title" = "Bildirishnomalar";
+"notifications.mark_all_read" = "Barchasini o'qish";
+"notifications.empty" = "Hozircha bildirishnomalar yo'q";
+"notifications.event_chat" = "Yangi xabar";
+"notifications.event_lock" = "Blok holati yangilandi";
+"notifications.event_task" = "Vazifalar yangilandi";
+"notifications.event_default" = "Yangi yangilanish";
+
+"diagnostics.section_session" = "Sessiya";
+"diagnostics.section_network" = "Tarmoq";
+"diagnostics.section_geo" = "Geo websocket";
+"diagnostics.section_chat" = "Chat websocket";
+"diagnostics.section_permissions" = "Ruxsatlar";
+"diagnostics.session_dsn" = "DSN";
+"diagnostics.session_profile" = "Profil";
+"diagnostics.session_theme" = "Mavzu";
+"diagnostics.session_language" = "Til";
+"diagnostics.api_base" = "API manzili";
+"diagnostics.ws_base" = "WS manzili";
+"diagnostics.ws_token_path" = "WS token path";
+"diagnostics.state" = "Holat";
+"diagnostics.geo_dsn" = "Geo DSN";
+"diagnostics.chat_dsn" = "Chat DSN";
+"diagnostics.endpoint" = "Endpoint";
+"diagnostics.last_payload" = "Oxirgi payload";
+"diagnostics.last_message" = "Oxirgi xabar";
+"diagnostics.last_error" = "Oxirgi xato";
+"diagnostics.retries" = "Qayta ulanishlar";
+"diagnostics.updated" = "Yangilangan vaqti";
+"diagnostics.permission_location" = "Lokatsiya";
+"diagnostics.permission_notifications" = "Bildirishnomalar";
+"diagnostics.permission_microphone" = "Mikrofon";
+"diagnostics.permission_background_refresh" = "Fon yangilanishi";
+"diagnostics.permission_low_power" = "Quvvat tejash";
+"diagnostics.permission_checklist" = "Cheklist";
+"diagnostics.value_on" = "Yoqilgan";
+"diagnostics.value_off" = "O'chirilgan";
+"diagnostics.value_ok" = "OK";
+"diagnostics.value_incomplete" = "Yakunlanmagan";
+"diagnostics.open_settings" = "Sozlamalar";

@@ -4,6 +4,7 @@ struct MemberDeviceRecord: Identifiable, Equatable {
     let id: Int
     let dsn: String?
     let name: String
+    let avatarURL: URL?
 }
 
 protocol MemberDevicesServicing {
@@ -22,40 +23,62 @@ extension MemberDevicesServicing {
 }
 
 final class MemberDevicesService: MemberDevicesServicing {
-    init(client: APIClient = APIClient()) {
+    init(
+        client: APIClient = APIClient(),
+        secureTokens: SecureTokenStoring = SecureTokenStore.shared,
+        userDefaults: UserDefaults = .standard
+    ) {
         self.client = client
+        self.secureTokens = secureTokens
+        self.userDefaults = userDefaults
     }
 
     func fetchDevices(limit: Int) async throws -> [MemberDeviceRecord] {
         guard hasAuthorization else {
-            return []
+            return cachedRecords(limit: limit)
         }
 
-        let response: MembersDevicesResponse = try await client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "members/me/devices",
-            method: .get,
-            queryItems: [
-                URLQueryItem(name: "offset", value: "0"),
-                URLQueryItem(name: "limit", value: "\(max(1, min(limit, 500)))")
-            ],
-            headers: ["Accept": "application/json"],
-            as: MembersDevicesResponse.self
-        )
+        do {
+            let response: MembersDevicesResponse = try await client.requestDecodableWithBaseFallback(
+                baseURLs: AppConfig.apiBaseCandidates,
+                path: "members/me/devices",
+                method: .get,
+                queryItems: [
+                    URLQueryItem(name: "offset", value: "0"),
+                    URLQueryItem(name: "limit", value: "\(max(1, min(limit, 500)))")
+                ],
+                headers: ["Accept": "application/json"],
+                as: MembersDevicesResponse.self
+            )
 
-        let sortedDevices = response.devices.sorted { lhs, rhs in
-            (lhs.id ?? 0) < (rhs.id ?? 0)
-        }
+            let sortedDevices = response.devices.sorted { lhs, rhs in
+                (lhs.id ?? 0) < (rhs.id ?? 0)
+            }
 
-        var visited = Set<Int>()
-        return sortedDevices.compactMap { item in
-            guard let id = item.id else { return nil }
-            guard visited.insert(id).inserted else { return nil }
-            let resolvedDSN = item.resolvedDSN?.trimmedNonEmpty
-            let name = item.resolvedName?.trimmedNonEmpty
-                ?? resolvedDSN
-                ?? "Device \(id)"
-            return MemberDeviceRecord(id: id, dsn: resolvedDSN, name: name)
+            var visited = Set<Int>()
+            let records: [MemberDeviceRecord] = sortedDevices.compactMap { item -> MemberDeviceRecord? in
+                guard let id = item.id else { return nil }
+                guard visited.insert(id).inserted else { return nil }
+                let resolvedDSN = item.resolvedDSN?.trimmedNonEmpty
+                let name = item.resolvedName?.trimmedNonEmpty
+                    ?? resolvedDSN
+                    ?? "Device \(id)"
+                return MemberDeviceRecord(
+                    id: id,
+                    dsn: resolvedDSN,
+                    name: name,
+                    avatarURL: item.resolvedAvatarURL
+                )
+            }
+
+            saveCachedRecords(records)
+            return records
+        } catch {
+            let cached = cachedRecords(limit: limit)
+            if !cached.isEmpty {
+                return cached
+            }
+            throw error
         }
     }
 
@@ -79,11 +102,54 @@ final class MemberDevicesService: MemberDevicesServicing {
     }
 
     private let client: APIClient
-    private let userDefaults: UserDefaults = .standard
+    private let secureTokens: SecureTokenStoring
+    private let userDefaults: UserDefaults
 
     private var hasAuthorization: Bool {
-        userDefaults.string(forKey: "API_ACCESS_TOKEN")?.trimmedNonEmpty != nil
+        secureTokens.accessToken() != nil
     }
+
+    private func saveCachedRecords(_ records: [MemberDeviceRecord]) {
+        let payload = records.map {
+            CachedDeviceRecord(
+                id: $0.id,
+                dsn: $0.dsn,
+                name: $0.name,
+                avatarURL: $0.avatarURL?.absoluteString
+            )
+        }
+
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        userDefaults.set(data, forKey: cacheKey)
+    }
+
+    private func cachedRecords(limit: Int) -> [MemberDeviceRecord] {
+        guard let data = userDefaults.data(forKey: cacheKey),
+              let payload = try? JSONDecoder().decode([CachedDeviceRecord].self, from: data) else {
+            return []
+        }
+
+        let records = payload.map {
+            MemberDeviceRecord(
+                id: $0.id,
+                dsn: $0.dsn,
+                name: $0.name,
+                avatarURL: $0.avatarURL.flatMap(URL.init(string:))
+            )
+        }
+
+        let normalizedLimit = max(1, min(limit, 500))
+        return Array(records.prefix(normalizedLimit))
+    }
+
+    private struct CachedDeviceRecord: Codable {
+        let id: Int
+        let dsn: String?
+        let name: String
+        let avatarURL: String?
+    }
+
+    private var cacheKey: String { "MEMBER_DEVICES_CACHE_V1" }
 }
 
 private struct MemberDeviceDTO: Decodable {
@@ -94,6 +160,7 @@ private struct MemberDeviceDTO: Decodable {
     let name: String?
     let username: String?
     let fullName: String?
+    let avatarURL: String?
 
     var resolvedDSN: String? {
         dsn ?? deviceDSN ?? childrenDeviceDSN
@@ -101,6 +168,11 @@ private struct MemberDeviceDTO: Decodable {
 
     var resolvedName: String? {
         name ?? username ?? fullName
+    }
+
+    var resolvedAvatarURL: URL? {
+        guard let avatarURL = avatarURL?.trimmedNonEmpty else { return nil }
+        return URL(string: avatarURL)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -111,6 +183,19 @@ private struct MemberDeviceDTO: Decodable {
         case name
         case username
         case fullName = "full_name"
+        case avatarURL = "avatar_url"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decodeLossyIntIfPresent(forKey: .id)
+        dsn = container.decodeLossyStringIfPresent(forKey: .dsn)
+        deviceDSN = container.decodeLossyStringIfPresent(forKey: .deviceDSN)
+        childrenDeviceDSN = container.decodeLossyStringIfPresent(forKey: .childrenDeviceDSN)
+        name = container.decodeLossyStringIfPresent(forKey: .name)
+        username = container.decodeLossyStringIfPresent(forKey: .username)
+        fullName = container.decodeLossyStringIfPresent(forKey: .fullName)
+        avatarURL = container.decodeLossyStringIfPresent(forKey: .avatarURL)
     }
 }
 

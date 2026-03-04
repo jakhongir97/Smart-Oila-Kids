@@ -8,6 +8,13 @@
 "common.done" = "Готово";
 "common.close" = "Закрыть";
 "common.dsn_missing" = "DSN отсутствует";
+"error.network_offline" = "Нет подключения к интернету.";
+"error.timeout" = "Время ожидания истекло. Попробуйте снова.";
+"error.auth_required" = "Сессия истекла. Войдите снова.";
+"error.not_found" = "Запрошенные данные не найдены.";
+"error.server_unavailable" = "Сервер временно недоступен.";
+"error.invalid_response" = "Некорректный ответ сервера.";
+"error.request_failed" = "Не удалось выполнить запрос. Попробуйте снова.";
 
 "auth.welcome" = "Добро пожаловать!";
 "auth.company_mission" = "Задача нашей компании - обеспечить безопасность детям, позволив их родителям наблюдать за своими детьми!";
@@ -44,6 +51,18 @@
 "main.device_not_bound" = "Устройство не привязано";
 "main.sos_sent" = "SOS отправлен";
 "main.usage_load_failed" = "Не удалось загрузить статистику. Нажмите, чтобы повторить.";
+"main.device_live_status" = "Состояние устройства";
+"main.device_name" = "Устройство: %@";
+"main.device_battery" = "Батарея: %@";
+"main.device_connection" = "Соединение: %@";
+"main.device_sound_mode" = "Режим звука: %@";
+"main.device_location" = "Локация: %@";
+"main.connection_wifi" = "Wi-Fi";
+"main.connection_mobile" = "Мобильная сеть";
+"main.connection_offline" = "Офлайн";
+"main.sound_normal" = "Обычный";
+"main.sound_silent" = "Без звука";
+"main.sound_vibrate" = "Вибро";
 
 "lock.title" = "Устройство заблокировано";
 "lock.subtitle" = "Родитель временно ограничил использование этого устройства.";
@@ -71,6 +90,14 @@
 "chat.template_button" = "Открыть шаблоны";
 "chat.template_picker_title" = "Шаблоны СМС";
 "chat.template_empty" = "Шаблонов пока нет.";
+"chat.load_older" = "Загрузить более ранние";
+"chat.load_older_failed" = "Не удалось загрузить более ранние сообщения.";
+"chat.retry" = "Повторить";
+"chat.retry_pending" = "Не отправлено сообщений: %d";
+"chat.send_queued" = "Сообщение в очереди. Осталось: %d";
+"chat.send_failed" = "Не удалось отправить сообщение.";
+"chat.unread_count" = "Непрочитанных: %d";
+"chat.offline_cached" = "Офлайн-режим: показана сохранённая история чата.";
 
 "permissions.setup_title" = "Настройка разрешений";
 "permissions.setup_subtitle" = "Для корректной работы приложения, Вам нужно дать согласие на следующие разрешения";
@@ -84,6 +111,36 @@
 "permissions.item_5" = "Доступ к статистике приложений";
 "permissions.item_6" = "Фоновая передача данных";
 "permissions.item_7" = "Просмотр уведомлений";
+"permissions.status_not_required_ios" = "Не требуется на iOS";
+"permissions.status_granted" = "Разрешено";
+"permissions.status_tap_to_allow" = "Нажмите, чтобы разрешить";
+"permissions.status_location_always_required" = "Включите \"Всегда\" в геолокации";
+"permissions.status_open_settings" = "Откройте Настройки";
+"permissions.status_low_power_disable" = "Отключите режим энергосбережения";
+"permissions.details_title" = "Детали разрешения";
+"permissions.details_why_title" = "Зачем это нужно";
+"permissions.details_how_title" = "Как включить";
+"permissions.details_status_title" = "Текущий статус";
+"permissions.details.body_1" = "На iOS это разрешение не требуется. Строка сохранена для паритета с Android.";
+"permissions.details.step_1" = "На iPhone никаких действий не нужно.";
+"permissions.details.body_2" = "Геолокация позволяет родителю видеть местоположение ребенка и события безопасности.";
+"permissions.details.step_2" = "Нажмите разрешить и выберите \"Всегда\" для геолокации.";
+"permissions.details.body_3" = "Режим энергосбережения может останавливать фоновые обновления.";
+"permissions.details.step_3" = "Отключите режим энергосбережения в Настройки > Аккумулятор.";
+"permissions.details.body_4" = "Микрофон нужен для голосовых и аудио-функций.";
+"permissions.details.step_4" = "Нажмите разрешить, когда iOS запросит доступ к микрофону.";
+"permissions.details.body_5" = "iOS не поддерживает Android-подобное разрешение статистики использования приложений.";
+"permissions.details.step_5" = "На iPhone никаких действий не нужно.";
+"permissions.details.body_6" = "Фоновое обновление нужно, чтобы локация и статус отправлялись даже в фоне.";
+"permissions.details.step_6" = "Включите Обновление контента в Настройки > Основные > Обновление контента.";
+"permissions.details.body_7" = "Уведомления нужны для сообщений от родителя, задач и предупреждений о блокировке.";
+"permissions.details.step_7" = "Разрешите уведомления: баннеры, звук и значки.";
+"permissions.action_allow_location" = "Разрешить геолокацию";
+"permissions.action_allow_location_always" = "Разрешить геолокацию всегда";
+"permissions.action_allow_notifications" = "Разрешить уведомления";
+"permissions.action_allow_microphone" = "Разрешить микрофон";
+"permissions.action_open_settings" = "Открыть Настройки";
+"permissions.action_disable_low_power" = "Открыть настройки аккумулятора";
 
 "templates.title" = "Шаблоны СМС";
 "templates.create" = "Создать шаблон";
@@ -94,6 +151,10 @@
 "templates.default_3" = "Я на улице";
 "templates.add" = "Добавить шаблон";
 "templates.edit_action" = "Редактировать шаблон";
+"templates.actions_title" = "Действия с шаблоном";
+"templates.delete" = "Удалить шаблон";
+"templates.delete_title" = "Удалить шаблон?";
+"templates.delete_message" = "Это действие нельзя отменить.";
 
 "tasks.title" = "Задания";
 "tasks.prize_title" = "Название приза";
@@ -106,6 +167,11 @@
 "tasks.start" = "Начать";
 "tasks.completed" = "Завершено";
 "tasks.updating" = "Обновление...";
+"tasks.no_pending_tasks" = "Для этой награды нет незавершенных задач.";
+"tasks.offline_cached" = "Офлайн-режим: показан сохраненный список задач.";
+"tasks.action_queued" = "Офлайн-режим: задача поставлена в очередь (%d).";
+"tasks.sync_pending" = "Ожидает синхронизации: %d обновл.";
+"tasks.sync_complete" = "Отложенные обновления задач синхронизированы.";
 
 "settings.title" = "Профиль";
 "settings.change_username" = "Изменить имя пользователя";
@@ -118,6 +184,9 @@
 "settings.language.en" = "EN";
 "settings.language.ru" = "RU";
 "settings.language.uz" = "UZ";
+"settings.diagnostics" = "Диагностика";
+"settings.permissions" = "Разрешения";
+"settings.permissions_subtitle" = "Включите все необходимые разрешения для стабильной фоновой работы и уведомлений.";
 "settings.connected_devices" = "Подключеные устройства:";
 "settings.no_connected_devices" = "Подключенных устройств пока нет.";
 "settings.edit_device" = "Редактировать подключенное устройство";
@@ -127,6 +196,9 @@
 "settings.delete_account" = "Удалить";
 "settings.delete_title" = "Удалить аккаунт";
 "settings.delete_message" = "Вы уверены что хотите удалить аккаунт?";
+"settings.unlink_device" = "Отключить";
+"settings.unlink_title" = "Отключить это устройство";
+"settings.unlink_message" = "Это удалит текущее детское устройство из аккаунта родителя и выполнит выход на этом телефоне.";
 "settings.edit_soon" = "Редактирование скоро будет доступно";
 "settings.enter_username" = "Введите имя пользователя";
 "settings.saved" = "Сохранено";
@@ -135,3 +207,49 @@
 "settings.device_renamed" = "Название устройства обновлено.";
 "settings.device_rename_failed" = "Не удалось обновить название устройства.";
 "settings.delete_failed" = "Не удалось удалить устройство на сервере.";
+"settings.unlink_failed" = "Не удалось отключить устройство на сервере.";
+"settings.edit_avatar" = "Изменить аватар";
+"settings.avatar_uploaded" = "Аватар обновлен.";
+"settings.avatar_upload_failed" = "Не удалось обновить аватар на сервере.";
+"settings.avatar_invalid_image" = "Не удалось прочитать выбранное изображение.";
+
+"notifications.title" = "Уведомления";
+"notifications.mark_all_read" = "Прочитать все";
+"notifications.empty" = "Уведомлений пока нет";
+"notifications.event_chat" = "Новое сообщение";
+"notifications.event_lock" = "Обновление блокировки";
+"notifications.event_task" = "Обновление заданий";
+"notifications.event_default" = "Новое событие";
+
+"diagnostics.section_session" = "Сессия";
+"diagnostics.section_network" = "Сеть";
+"diagnostics.section_geo" = "Geo websocket";
+"diagnostics.section_chat" = "Chat websocket";
+"diagnostics.section_permissions" = "Разрешения";
+"diagnostics.session_dsn" = "DSN";
+"diagnostics.session_profile" = "Профиль";
+"diagnostics.session_theme" = "Тема";
+"diagnostics.session_language" = "Язык";
+"diagnostics.api_base" = "API адрес";
+"diagnostics.ws_base" = "WS адрес";
+"diagnostics.ws_token_path" = "WS token path";
+"diagnostics.state" = "Состояние";
+"diagnostics.geo_dsn" = "Geo DSN";
+"diagnostics.chat_dsn" = "Chat DSN";
+"diagnostics.endpoint" = "Endpoint";
+"diagnostics.last_payload" = "Последний payload";
+"diagnostics.last_message" = "Последнее сообщение";
+"diagnostics.last_error" = "Последняя ошибка";
+"diagnostics.retries" = "Повторы соединения";
+"diagnostics.updated" = "Обновлено";
+"diagnostics.permission_location" = "Геолокация";
+"diagnostics.permission_notifications" = "Уведомления";
+"diagnostics.permission_microphone" = "Микрофон";
+"diagnostics.permission_background_refresh" = "Фоновое обновление";
+"diagnostics.permission_low_power" = "Энергосбережение";
+"diagnostics.permission_checklist" = "Чеклист";
+"diagnostics.value_on" = "Вкл";
+"diagnostics.value_off" = "Выкл";
+"diagnostics.value_ok" = "ОК";
+"diagnostics.value_incomplete" = "Не завершено";
+"diagnostics.open_settings" = "Настройки";

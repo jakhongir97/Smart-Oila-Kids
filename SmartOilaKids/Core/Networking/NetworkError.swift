@@ -24,4 +24,90 @@ enum NetworkError: LocalizedError {
             return error.localizedDescription
         }
     }
+
+    var userMessage: String {
+        switch self {
+        case .invalidURL, .invalidResponse:
+            return L10n.tr("error.request_failed")
+        case .decodingFailed, .unexpectedBody:
+            return L10n.tr("error.invalid_response")
+        case let .server(statusCode, body):
+            if let detail = Self.extractServerMessage(from: body) {
+                return detail
+            }
+            switch statusCode {
+            case 401, 403:
+                return L10n.tr("error.auth_required")
+            case 404:
+                return L10n.tr("error.not_found")
+            case 408:
+                return L10n.tr("error.timeout")
+            case 500 ... 599:
+                return L10n.tr("error.server_unavailable")
+            default:
+                return L10n.tr("error.request_failed")
+            }
+        case let .underlying(error):
+            return Self.userMessage(for: error)
+        }
+    }
+
+    static func userMessage(for error: Error) -> String {
+        if let networkError = error as? NetworkError {
+            return networkError.userMessage
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+                return L10n.tr("error.network_offline")
+            case .timedOut:
+                return L10n.tr("error.timeout")
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return L10n.tr("error.server_unavailable")
+            default:
+                break
+            }
+        }
+
+        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.isEmpty {
+            return L10n.tr("error.request_failed")
+        }
+        return message
+    }
+
+    private static func extractServerMessage(from body: String) -> String? {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.hasPrefix("<") else { return nil }
+
+        guard let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) else {
+            return trimmed
+        }
+
+        if let dictionary = json as? [String: Any] {
+            let candidates = [
+                dictionary["detail"],
+                dictionary["message"],
+                dictionary["error"]
+            ]
+            for candidate in candidates {
+                if let value = candidate as? String,
+                   let normalized = value.trimmedNonEmpty {
+                    return normalized
+                }
+            }
+            return nil
+        }
+
+        if let array = json as? [Any],
+           let first = array.first as? String,
+           let normalized = first.trimmedNonEmpty {
+            return normalized
+        }
+
+        return nil
+    }
 }

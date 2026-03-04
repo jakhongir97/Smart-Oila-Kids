@@ -35,6 +35,12 @@ struct TaskView: View {
         .task {
             await viewModel.load()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { notification in
+            guard shouldHandlePush(notification: notification) else { return }
+            Task {
+                await viewModel.load()
+            }
+        }
     }
 
     private func taskSurface(compact: Bool, sidePadding: CGFloat, bottomInset: CGFloat) -> some View {
@@ -82,6 +88,17 @@ struct TaskView: View {
                         }
                         .padding(.top, compact ? 34 : 50)
                     } else {
+                        if let messageText = viewModel.messageText?.trimmedNonEmpty {
+                            Text(messageText)
+                                .font(AppTypography.unbounded(12, weight: .medium))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color.black.opacity(0.2))
+                                .clipShape(Capsule())
+                        }
+
                         ForEach(viewModel.awards) { award in
                             taskCard(
                                 title: award.name,
@@ -225,4 +242,11 @@ struct TaskView: View {
         return [names[0], names[1]]
     }
 
+    private func shouldHandlePush(notification: Notification) -> Bool {
+        guard let currentDSN = viewModel.currentDSN?.trimmedNonEmpty else { return true }
+        guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
+            return true
+        }
+        return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
+    }
 }

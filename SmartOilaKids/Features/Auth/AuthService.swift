@@ -5,6 +5,8 @@ protocol AuthServicing {
         qrToken: String?,
         qrRefreshToken: String?,
         parentPhone: String?,
+        qrDSN: String?,
+        scannedDeviceName: String?,
         deviceName: String,
         appVersion: String
     ) async throws -> AuthRegistrationResult
@@ -20,14 +22,33 @@ final class AuthService: AuthServicing {
         qrToken: String?,
         qrRefreshToken: String?,
         parentPhone: String?,
+        qrDSN: String?,
+        scannedDeviceName: String?,
         deviceName: String,
         appVersion: String
     ) async throws -> AuthRegistrationResult {
         let normalizedToken = qrToken?.trimmedNonEmpty
         let normalizedRefreshToken = qrRefreshToken?.trimmedNonEmpty
         let normalizedPhone = normalizePhone(parentPhone)
+        let normalizedDSN = normalizeDSN(qrDSN)
+        let normalizedScannedDeviceName = normalizeDeviceName(scannedDeviceName)
+        let effectiveDeviceName = normalizedScannedDeviceName ?? normalizeDeviceName(deviceName) ?? "iPhone"
 
-        guard normalizedToken != nil || normalizedPhone != nil else {
+        if let normalizedDSN {
+            debugLog("Using pre-created DSN from QR payload: \(normalizedDSN)")
+            let result = AuthRegistrationResult(
+                dsn: normalizedDSN,
+                authorizationHeader: normalizedToken,
+                refreshToken: normalizedRefreshToken
+            )
+            await syncDeviceNameIfPossible(
+                scannedDeviceName: normalizedScannedDeviceName,
+                registration: result
+            )
+            return result
+        }
+
+        guard normalizedToken != nil || normalizedPhone != nil || normalizedDSN != nil else {
             throw NetworkError.unexpectedBody
         }
 
@@ -35,7 +56,7 @@ final class AuthService: AuthServicing {
             do {
                 let data = try await registerDeviceByQRClaim(
                     token: normalizedToken,
-                    deviceName: deviceName,
+                    deviceName: effectiveDeviceName,
                     appVersion: appVersion
                 )
 
@@ -53,40 +74,76 @@ final class AuthService: AuthServicing {
                 let legacyResult = try await registerDeviceByLegacyEndpoint(
                     token: normalizedToken,
                     parentPhone: normalizedPhone,
-                    deviceName: deviceName,
+                    deviceName: effectiveDeviceName,
                     appVersion: appVersion
                 )
-                return mergeAuthorization(
+                let merged = mergeAuthorization(
                     from: legacyResult,
                     fallbackToken: normalizedToken,
                     fallbackRefreshToken: normalizedRefreshToken
                 )
+                await syncDeviceNameIfPossible(
+                    scannedDeviceName: normalizedScannedDeviceName,
+                    registration: merged
+                )
+                return merged
             }
         }
 
-        return try await registerDeviceByLegacyEndpoint(
+        let result = try await registerDeviceByLegacyEndpoint(
             token: nil,
             parentPhone: normalizedPhone,
-            deviceName: deviceName,
+            deviceName: effectiveDeviceName,
             appVersion: appVersion
         )
+        await syncDeviceNameIfPossible(
+            scannedDeviceName: normalizedScannedDeviceName,
+            registration: result
+        )
+        return result
     }
 
     func verifyChildBinding(dsn: String) async throws -> Bool {
         let sanitized = dsn.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sanitized.isEmpty else { return false }
 
-        do {
-            _ = try await client.requestDataWithBaseFallback(
-                baseURLs: AppConfig.apiBaseCandidates,
-                path: "devices/dsn/\(sanitized)/full_lock_status",
-                method: .get,
-                headers: ["Accept": "application/json"]
-            )
-            return true
-        } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
-            return false
+        let maxAttempts = 5
+
+        for attempt in 1...maxAttempts {
+            do {
+                _ = try await client.requestDataWithBaseFallback(
+                    baseURLs: AppConfig.apiBaseCandidates,
+                    path: "devices/dsn/\(sanitized)/full_lock_status",
+                    method: .get,
+                    headers: ["Accept": "application/json"]
+                )
+                return true
+            } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
+                if attempt < maxAttempts {
+                    debugLog("Binding verification: DSN not ready yet (\(attempt)/\(maxAttempts)). Retrying...")
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                    continue
+                }
+                return false
+            } catch let error as URLError {
+                if attempt < maxAttempts,
+                   isRetryableNetworkError(error) {
+                    debugLog("Binding verification network issue (\(attempt)/\(maxAttempts)): \(error.code.rawValue). Retrying...")
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                    continue
+                }
+                throw error
+            } catch {
+                if attempt < maxAttempts {
+                    debugLog("Binding verification temporary failure (\(attempt)/\(maxAttempts)): \(error.localizedDescription). Retrying...")
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                    continue
+                }
+                throw error
+            }
         }
+
+        return false
     }
 
     private let client: APIClient
@@ -237,6 +294,26 @@ private extension AuthService {
         }
 
         return normalized
+    }
+
+    func normalizeDSN(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard trimmed.count >= 5, trimmed.count <= 64 else { return nil }
+
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let hasInvalid = trimmed.unicodeScalars.contains { !allowed.contains($0) }
+        guard !hasInvalid else { return nil }
+
+        return trimmed
+    }
+
+    func normalizeDeviceName(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(64))
     }
 
     func formURLEncodedBody(_ fields: [(String, String)]) -> Data {
@@ -416,4 +493,98 @@ private extension AuthService {
         print("[AuthService] \(message)")
 #endif
     }
+
+    func isRetryableNetworkError(_ error: URLError) -> Bool {
+        switch error.code {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .timedOut,
+             .cannotFindHost,
+             .cannotConnectToHost,
+             .dnsLookupFailed,
+             .dataNotAllowed,
+             .internationalRoamingOff:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func syncDeviceNameIfPossible(
+        scannedDeviceName: String?,
+        registration: AuthRegistrationResult
+    ) async {
+        guard let scannedDeviceName else { return }
+
+        let authorization = registration.authorizationHeader?.trimmedNonEmpty
+        var headers: [String: String] = ["Accept": "application/json"]
+        if let authorization {
+            headers["Authorization"] = authorization
+        }
+
+        do {
+            let devices: [RenamableDevice] = try await client.requestDecodableWithBaseFallback(
+                baseURLs: AppConfig.apiBaseCandidates,
+                path: "members/me/devices",
+                method: .get,
+                queryItems: [
+                    URLQueryItem(name: "offset", value: "0"),
+                    URLQueryItem(name: "limit", value: "100")
+                ],
+                headers: headers,
+                as: [RenamableDevice].self
+            )
+
+            guard let target = devices.first(where: { device in
+                guard let dsn = device.resolvedDSN?.trimmedNonEmpty else { return false }
+                return dsn.caseInsensitiveCompare(registration.dsn) == .orderedSame
+            }) else {
+                return
+            }
+
+            let body = try JSONEncoder().encode(DeviceRenamePayload(name: scannedDeviceName))
+            _ = try await client.requestDataWithBaseFallback(
+                baseURLs: AppConfig.apiBaseCandidates,
+                path: "devices/\(target.id)",
+                method: .put,
+                headers: headers,
+                body: body,
+                contentType: "application/json"
+            )
+
+            debugLog("Synced child name from QR payload for DSN \(registration.dsn).")
+        } catch {
+            debugLog("Skipping QR name sync: \(error.localizedDescription)")
+        }
+    }
+}
+
+private struct RenamableDevice: Decodable {
+    let id: Int
+    let dsn: String?
+    let deviceDSN: String?
+    let childrenDeviceDSN: String?
+
+    var resolvedDSN: String? {
+        dsn ?? deviceDSN ?? childrenDeviceDSN
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case dsn
+        case deviceDSN = "device_dsn"
+        case childrenDeviceDSN = "children_device_dsn"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decodeLossyIntIfPresent(forKey: .id) ?? 0
+        dsn = container.decodeLossyStringIfPresent(forKey: .dsn)
+        deviceDSN = container.decodeLossyStringIfPresent(forKey: .deviceDSN)
+        childrenDeviceDSN = container.decodeLossyStringIfPresent(forKey: .childrenDeviceDSN)
+    }
+}
+
+private struct DeviceRenamePayload: Encodable {
+    let name: String
 }

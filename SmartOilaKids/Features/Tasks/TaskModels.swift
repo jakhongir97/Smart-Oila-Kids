@@ -1,6 +1,6 @@
 import Foundation
 
-struct AwardsResponse: Codable, Identifiable {
+struct AwardsResponse: Decodable, Identifiable {
     var id: Int { awardID }
 
     let awardID: Int
@@ -20,9 +20,38 @@ struct AwardsResponse: Codable, Identifiable {
         case collectedCoins = "collected_coins"
         case tasks
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        awardID = container.decodeLossyIntIfPresent(forKey: .awardID) ?? 0
+        name = container.decodeLossyStringIfPresent(forKey: .name) ?? ""
+        imageURL = container.decodeLossyStringIfPresent(forKey: .imageURL)
+        neededPoints = container.decodeLossyIntIfPresent(forKey: .neededPoints) ?? 0
+        isCompleted = container.decodeLossyBoolIfPresent(forKey: .isCompleted) ?? false
+        collectedCoins = container.decodeLossyIntIfPresent(forKey: .collectedCoins) ?? 0
+        tasks = (try? container.decodeIfPresent([TaskItem].self, forKey: .tasks)) ?? []
+    }
+
+    init(
+        awardID: Int,
+        name: String,
+        imageURL: String?,
+        neededPoints: Int,
+        isCompleted: Bool,
+        collectedCoins: Int,
+        tasks: [TaskItem]
+    ) {
+        self.awardID = awardID
+        self.name = name
+        self.imageURL = imageURL
+        self.neededPoints = neededPoints
+        self.isCompleted = isCompleted
+        self.collectedCoins = collectedCoins
+        self.tasks = tasks
+    }
 }
 
-struct TaskItem: Codable, Identifiable {
+struct TaskItem: Decodable, Identifiable {
     var id: Int { taskID }
 
     let taskID: Int
@@ -36,6 +65,26 @@ struct TaskItem: Codable, Identifiable {
         case isFinished = "is_finished"
         case pointsAmount = "points_amount"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        taskID = container.decodeLossyIntIfPresent(forKey: .taskID) ?? 0
+        name = container.decodeLossyStringIfPresent(forKey: .name) ?? ""
+        isFinished = container.decodeLossyBoolIfPresent(forKey: .isFinished) ?? false
+        pointsAmount = container.decodeLossyIntIfPresent(forKey: .pointsAmount) ?? 0
+    }
+
+    init(
+        taskID: Int,
+        name: String,
+        isFinished: Bool,
+        pointsAmount: Int
+    ) {
+        self.taskID = taskID
+        self.name = name
+        self.isFinished = isFinished
+        self.pointsAmount = pointsAmount
+    }
 }
 
 struct ChangeTaskStatusResponse: Decodable {
@@ -47,5 +96,12 @@ struct ChangeTaskStatusResponse: Decodable {
         case taskStatus = "task_status"
         case awardCompleted = "award_completed"
         case completedAwardID = "completed_award_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        taskStatus = container.decodeLossyBoolIfPresent(forKey: .taskStatus) ?? false
+        awardCompleted = container.decodeLossyBoolIfPresent(forKey: .awardCompleted) ?? false
+        completedAwardID = container.decodeLossyIntIfPresent(forKey: .completedAwardID) ?? 0
     }
 }

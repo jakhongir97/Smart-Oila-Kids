@@ -2,6 +2,7 @@ import Foundation
 
 protocol DeviceLockServicing {
     func fetchFullLockStatus(dsn: String) async throws -> DeviceFullLockStatus
+    func fetchGlobalLockStatus(dsn: String) async throws -> Bool
 }
 
 final class DeviceLockService: DeviceLockServicing {
@@ -24,6 +25,47 @@ final class DeviceLockService: DeviceLockServicing {
         )
     }
 
+    func fetchGlobalLockStatus(dsn: String) async throws -> Bool {
+        let normalized = dsn.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            throw NetworkError.unexpectedBody
+        }
+
+        let data = try await client.requestDataWithBaseFallback(
+            baseURLs: AppConfig.apiBaseCandidates,
+            path: "devices/dsn/\(normalized)/global_application_lock",
+            method: .get,
+            headers: ["Accept": "application/json"]
+        )
+
+        if let value = try? JSONDecoder().decode(Bool.self, from: data) {
+            return value
+        }
+
+        if let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let boolValue = payload["is_locked"] as? Bool {
+                return boolValue
+            }
+            if let boolValue = payload["global_application_lock"] as? Bool {
+                return boolValue
+            }
+            if let boolValue = payload["value"] as? Bool {
+                return boolValue
+            }
+            if let number = payload["is_locked"] as? NSNumber {
+                return number.boolValue
+            }
+            if let number = payload["global_application_lock"] as? NSNumber {
+                return number.boolValue
+            }
+            if let number = payload["value"] as? NSNumber {
+                return number.boolValue
+            }
+        }
+
+        throw NetworkError.decodingFailed
+    }
+
     private let client: APIClient
 }
 
@@ -36,6 +78,13 @@ struct DeviceFullLockStatus: Decodable {
         case isLocked = "is_locked"
         case deviceLocalTime = "device_local_time"
         case schedule
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isLocked = container.decodeLossyBoolIfPresent(forKey: .isLocked) ?? false
+        deviceLocalTime = container.decodeLossyStringIfPresent(forKey: .deviceLocalTime)
+        schedule = try? container.decodeIfPresent(DeviceFullLockSchedule.self, forKey: .schedule)
     }
 
     var normalizedLocalTime: String? {
@@ -70,6 +119,13 @@ struct DeviceFullLockSchedule: Decodable {
         case startTime = "start_time"
         case endTime = "end_time"
         case isScheduleEnabled = "is_schedule_enabled"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startTime = container.decodeLossyStringIfPresent(forKey: .startTime)
+        endTime = container.decodeLossyStringIfPresent(forKey: .endTime)
+        isScheduleEnabled = container.decodeLossyBoolIfPresent(forKey: .isScheduleEnabled)
     }
 
     var normalizedRange: String? {
@@ -161,22 +217,41 @@ final class DeviceLockCoordinator: ObservableObject {
 
         do {
             let status = try await service.fetchFullLockStatus(dsn: dsn)
+            let globalLockStatus = (try? await service.fetchGlobalLockStatus(dsn: dsn)) ?? false
             guard currentDSN == dsn else { return }
 
             state = State(
-                isLocked: status.isLocked,
+                isLocked: status.isLocked || globalLockStatus,
                 deviceLocalTime: status.normalizedLocalTime,
                 scheduleRange: status.schedule?.normalizedRange
             )
             lastErrorText = nil
         } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
             guard currentDSN == dsn else { return }
-            state = .unlocked
-            lastErrorText = nil
+            if let globalLockStatus = try? await service.fetchGlobalLockStatus(dsn: dsn) {
+                state = State(
+                    isLocked: globalLockStatus,
+                    deviceLocalTime: nil,
+                    scheduleRange: nil
+                )
+                lastErrorText = nil
+            } else {
+                state = .unlocked
+                lastErrorText = nil
+            }
         } catch {
             guard currentDSN == dsn else { return }
-            // Keep current lock state on temporary network errors.
-            lastErrorText = error.localizedDescription
+            if let globalLockStatus = try? await service.fetchGlobalLockStatus(dsn: dsn) {
+                state = State(
+                    isLocked: globalLockStatus,
+                    deviceLocalTime: state.deviceLocalTime,
+                    scheduleRange: state.scheduleRange
+                )
+                lastErrorText = nil
+            } else {
+                // Keep current lock state on temporary network errors.
+                lastErrorText = error.localizedDescription
+            }
         }
     }
 

@@ -5,9 +5,17 @@ protocol TaskServicing {
     func changeTaskStatus(taskID: Int) async throws -> ChangeTaskStatusResponse
 }
 
-final class TaskService: TaskServicing {
-    init(client: APIClient = APIClient()) {
+protocol TaskSummaryServicing {
+    func fetchPendingTasksCount(dsn: String) async throws -> Int
+}
+
+final class TaskService: TaskServicing, TaskSummaryServicing {
+    init(
+        client: APIClient = APIClient(),
+        actionQueueStore: TaskActionQueueStoring = TaskActionQueueStore.shared
+    ) {
         self.client = client
+        self.actionQueueStore = actionQueueStore
     }
 
     func fetchTasks(dsn: String) async throws -> [AwardsResponse] {
@@ -39,5 +47,31 @@ final class TaskService: TaskServicing {
         )
     }
 
+    func fetchPendingTasksCount(dsn: String) async throws -> Int {
+        let awards = try await fetchTasks(dsn: dsn)
+        let pendingFromBackend = awards.reduce(into: 0) { count, award in
+            if award.isCompleted {
+                return
+            }
+            count += award.tasks.filter { !$0.isFinished }.count
+        }
+
+        let unfinishedTaskIDs = Set(
+            awards
+                .flatMap(\.tasks)
+                .filter { !$0.isFinished }
+                .map(\.taskID)
+        )
+
+        let queuedPendingCount = actionQueueStore.loadQueue(for: dsn).reduce(into: 0) { count, action in
+            if unfinishedTaskIDs.contains(action.taskID) {
+                count += 1
+            }
+        }
+
+        return max(0, pendingFromBackend - queuedPendingCount)
+    }
+
     private let client: APIClient
+    private let actionQueueStore: TaskActionQueueStoring
 }

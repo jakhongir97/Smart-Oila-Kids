@@ -1,8 +1,13 @@
 import Foundation
 
 protocol ChatServicing {
-    func fetchChatHistory(dsn: String, limit: Int) async throws -> ChatMessagesModel
+    func fetchChatHistory(dsn: String, limit: Int, page: Int) async throws -> ChatMessagesModel
     func sendMessage(sendFromID: String, text: String, attachments: [Data]) async throws -> WBSocketChat
+    func fetchParentDisplayName() async throws -> String?
+}
+
+extension ChatServicing {
+    func fetchParentDisplayName() async throws -> String? { nil }
 }
 
 final class ChatService: ChatServicing {
@@ -10,13 +15,13 @@ final class ChatService: ChatServicing {
         self.client = client
     }
 
-    func fetchChatHistory(dsn: String, limit: Int = 100) async throws -> ChatMessagesModel {
+    func fetchChatHistory(dsn: String, limit: Int = 100, page: Int = 1) async throws -> ChatMessagesModel {
         try await client.requestDecodableWithBaseFallback(
             baseURLs: AppConfig.apiBaseCandidates,
             path: "messages/\(dsn)",
             method: .get,
             queryItems: [
-                URLQueryItem(name: "page", value: "1"),
+                URLQueryItem(name: "page", value: "\(max(1, page))"),
                 URLQueryItem(name: "limit", value: "\(limit)")
             ],
             as: ChatMessagesModel.self
@@ -45,7 +50,47 @@ final class ChatService: ChatServicing {
         )
     }
 
+    func fetchParentDisplayName() async throws -> String? {
+        do {
+            let profile: MemberProfileNameResponse = try await client.requestDecodableWithBaseFallback(
+                baseURLs: AppConfig.apiBaseCandidates,
+                path: "members/me",
+                method: .get,
+                headers: ["Accept": "application/json"],
+                as: MemberProfileNameResponse.self
+            )
+
+            return profile.resolvedName?.trimmedNonEmpty
+        } catch let NetworkError.server(statusCode, _) where statusCode == 401 || statusCode == 403 || statusCode == 404 {
+            return nil
+        }
+    }
+
     private let client: APIClient
+}
+
+private struct MemberProfileNameResponse: Decodable {
+    let name: String?
+    let username: String?
+    let fullName: String?
+    let data: Nested?
+
+    struct Nested: Decodable {
+        let name: String?
+        let username: String?
+        let fullName: String?
+    }
+
+    var resolvedName: String? {
+        name ?? username ?? fullName ?? data?.name ?? data?.username ?? data?.fullName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case username
+        case fullName = "full_name"
+        case data
+    }
 }
 
 private extension ChatService {

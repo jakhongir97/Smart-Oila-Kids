@@ -5,6 +5,11 @@ import Network
 import UIKit
 
 final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerDelegate {
+    private struct PendingPayload: Codable {
+        let text: String
+        let summary: String
+    }
+
     @Published private(set) var debugStatus: String = "idle"
     @Published private(set) var debugEndpoint: String = "-"
     @Published private(set) var debugLastPayload: String = "-"
@@ -24,6 +29,8 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
         stop()
 
         currentDSN = dsn
+        pendingPayloads = []
+        restorePendingPayloads(for: dsn)
         isRunning = true
         isDisconnectRequested = false
         currentBaseIndex = 0
@@ -37,6 +44,9 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     }
 
     func stop() {
+        if let dsn = currentDSN {
+            persistPendingPayloads(for: dsn)
+        }
         isRunning = false
         isDisconnectRequested = true
         currentDSN = nil
@@ -198,6 +208,7 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
         updateDebug(status: "connected", endpoint: urlString, lastError: "-")
         debugLog("Websocket connected")
 
+        flushPendingPayloads()
         sendSystemInfo(force: true)
         sendLastKnownLocation()
         receiveLoop(baseIndex: currentBaseIndex)
@@ -307,21 +318,32 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     }
 
     private func sendPayload(_ payload: [String: Any], summary: String) {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+            guard let text = String(data: data, encoding: .utf8) else {
+                updateDebug(status: "serialize_failed", lastError: "payload encoding failed")
+                return
+            }
+            sendSerializedPayload(text, summary: summary)
+        } catch {
+            updateDebug(status: "serialize_failed", lastError: error.localizedDescription)
+            return
+        }
+    }
+
+    private func sendSerializedPayload(_ text: String, summary: String) {
         guard let webSocketTask else {
-            updateDebug(status: "waiting", lastError: "socket not connected")
-            debugLog("Socket is not connected. Payload skipped: \(summary)")
+            enqueuePendingPayload(text: text, summary: summary, reason: "socket not connected")
             return
         }
 
-        do {
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [])
-            guard let text = String(data: data, encoding: .utf8) else { return }
-
-            webSocketTask.send(.string(text)) { [weak self] error in
-                guard let self else { return }
+        webSocketTask.send(.string(text)) { [weak self] error in
+            guard let self else { return }
+            DispatchQueue.main.async {
                 if let error {
                     self.updateDebug(status: "send_failed", lastError: error.localizedDescription)
                     self.debugLog("Send failed: \(error.localizedDescription)")
+                    self.enqueuePendingPayload(text: text, summary: summary, reason: error.localizedDescription)
                 } else {
                     self.updateDebug(status: "connected", lastPayload: summary, lastError: "-")
                     self.debugLog("Sent payload: \(summary)")
@@ -331,10 +353,71 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
                     self.connectNextBaseOrRetry()
                 }
             }
-        } catch {
-            updateDebug(status: "serialize_failed", lastError: error.localizedDescription)
+        }
+    }
+
+    private func enqueuePendingPayload(text: String, summary: String, reason: String) {
+        if pendingPayloads.last?.text == text {
+            updateDebug(status: "queued", lastError: reason)
             return
         }
+
+        pendingPayloads.append(PendingPayload(text: text, summary: summary))
+        if pendingPayloads.count > maxPendingPayloads {
+            pendingPayloads.removeFirst(pendingPayloads.count - maxPendingPayloads)
+        }
+        if let dsn = currentDSN {
+            persistPendingPayloads(for: dsn)
+        }
+
+        updateDebug(status: "queued", lastError: reason)
+        debugLog("Queued payload (\(pendingPayloads.count)): \(summary)")
+    }
+
+    private func flushPendingPayloads() {
+        guard !pendingPayloads.isEmpty else { return }
+
+        let queued = pendingPayloads
+        pendingPayloads.removeAll()
+        if let dsn = currentDSN {
+            persistPendingPayloads(for: dsn)
+        }
+        debugLog("Flushing queued payloads: \(queued.count)")
+
+        for payload in queued {
+            sendSerializedPayload(payload.text, summary: payload.summary)
+        }
+    }
+
+    private func restorePendingPayloads(for dsn: String) {
+        guard let data = userDefaults.data(forKey: pendingPayloadsKey(for: dsn)),
+              let decoded = try? JSONDecoder().decode([PendingPayload].self, from: data) else {
+            return
+        }
+        pendingPayloads = Array(decoded.suffix(maxPendingPayloads))
+        if !pendingPayloads.isEmpty {
+            debugLog("Restored queued payloads: \(pendingPayloads.count)")
+        }
+    }
+
+    private func persistPendingPayloads(for dsn: String) {
+        let key = pendingPayloadsKey(for: dsn)
+        if pendingPayloads.isEmpty {
+            userDefaults.removeObject(forKey: key)
+            return
+        }
+
+        guard let data = try? JSONEncoder().encode(pendingPayloads) else { return }
+        userDefaults.set(data, forKey: key)
+    }
+
+    private func pendingPayloadsKey(for dsn: String) -> String {
+        let sanitized = dsn
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: ".", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+        return "GEO_PENDING_PAYLOADS_\(sanitized)"
     }
 
     private func batteryValue() -> Int {
@@ -388,6 +471,7 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     private let locationManager = CLLocationManager()
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "GeoBackgroundService.PathMonitor")
+    private let userDefaults = UserDefaults.standard
 
     private var webSocketTask: URLSessionWebSocketTask?
     private var locationTimer: Timer?
@@ -404,6 +488,8 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     private var lastBattery: Int?
     private var lastConnection: String?
     private var lastSoundMode: String?
+    private var pendingPayloads: [PendingPayload] = []
+    private let maxPendingPayloads = 40
 
     private func updateDebug(
         status: String? = nil,
@@ -427,6 +513,17 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
             }
             if let reconnectCount {
                 self.debugReconnectCount = reconnectCount
+            }
+
+            Task { @MainActor in
+                RuntimeDiagnosticsCenter.shared.updateGeo(
+                    status: self.debugStatus,
+                    endpoint: self.debugEndpoint,
+                    dsn: self.currentDSN ?? "-",
+                    lastPayload: self.debugLastPayload,
+                    lastError: self.debugLastError,
+                    reconnectCount: self.debugReconnectCount
+                )
             }
         }
     }
