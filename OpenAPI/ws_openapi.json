@@ -1,0 +1,377 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Smart Oila Production Websockets",
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/ws/{secretkey}/children/device/{dsn}/global_application_lock/": {
+      "get": {
+        "summary": "children_global_application_lock_websocket_endpoint",
+        "tags": [
+          "global_application_lock"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/applications/lock": {
+      "get": {
+        "summary": "children_device_applications_lock_websocket_endpoint",
+        "tags": [
+          "lock"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/parent/device/{dsn}/lock_status/": {
+      "get": {
+        "summary": "parent_lock_status_websocket_endpoint",
+        "tags": [
+          "lock_status"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/applications/sync": {
+      "get": {
+        "summary": "children_sync_applications_websocket_endpoint",
+        "tags": [
+          "sync"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/parent/device/{dsn}/applications/sync": {
+      "get": {
+        "summary": "parent_sync_applications_websocket_endpoint",
+        "tags": [
+          "sync"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/chat/": {
+      "get": {
+        "summary": "children_chat_websocket_endpoint",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/parent/device/{dsn}/chat/": {
+      "get": {
+        "summary": "parent_chat_websocket_endpoint",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/geo/": {
+      "get": {
+        "summary": "children_geo_websocket_endpoint",
+        "tags": [
+          "geo"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/parent/children_device/{dsn}/geo/": {
+      "get": {
+        "summary": "parent_geo_websocket_endpoint",
+        "tags": [
+          "geo"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/recordings/": {
+      "get": {
+        "summary": "children_receive_capture_video_websocket_endpoint",
+        "tags": [
+          "recordings"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/stream/status": {
+      "get": {
+        "summary": "children_audio_stream_status_websocket_endpoint",
+        "tags": [
+          "status"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/stream/audio": {
+      "get": {
+        "summary": "children_audio_stream_websocket_endpoint",
+        "tags": [
+          "audio"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/v2/children/device/{dsn}/stream/audio": {
+      "get": {
+        "summary": "children_audio_stream_websocket_endpoint_v2",
+        "tags": [
+          "audio"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/stream/camera": {
+      "get": {
+        "summary": "children_camera_stream_websocket_endpoint",
+        "tags": [
+          "camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/v2/children/device/{dsn}/stream/camera": {
+      "get": {
+        "summary": "children_camera_stream_websocket_endpoint_v2",
+        "tags": [
+          "camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/children/device/{dsn}/stream/front_camera": {
+      "get": {
+        "summary": "children_front_camera_stream_websocket_endpoint",
+        "tags": [
+          "front_camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/v2/children/device/{dsn}/stream/front_camera": {
+      "get": {
+        "summary": "children_front_camera_stream_websocket_endpoint_v2",
+        "tags": [
+          "front_camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/parent/device/{dsn}/stream/audio": {
+      "get": {
+        "summary": "parent_audio_stream_websocket_endpoint",
+        "tags": [
+          "audio"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/v2/parent/device/{dsn}/stream/audio": {
+      "get": {
+        "summary": "parent_audio_stream_websocket_endpoint_v2",
+        "tags": [
+          "audio"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/parent/device/{dsn}/stream/camera": {
+      "get": {
+        "summary": "parent_camera_stream_websocket_endpoint",
+        "tags": [
+          "camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/v2/parent/device/{dsn}/stream/camera": {
+      "get": {
+        "summary": "parent_camera_stream_websocket_endpoint_v2",
+        "tags": [
+          "camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/parent/device/{dsn}/stream/front_camera": {
+      "get": {
+        "summary": "parent_front_camera_stream_websocket_endpoint",
+        "tags": [
+          "front_camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/ws/{secretkey}/v2/parent/device/{dsn}/stream/front_camera": {
+      "get": {
+        "summary": "parent_front_camera_stream_websocket_endpoint_v2",
+        "tags": [
+          "front_camera"
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    }
+  }
+}
