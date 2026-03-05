@@ -4,13 +4,25 @@ final class ChatWebSocketService {
     var onMessage: ((Datum) -> Void)?
 
     func connect(dsn: String) {
+        let normalizedDSN = dsn.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedDSN.isEmpty else { return }
+
+        if let connectedDSN,
+           connectedDSN.caseInsensitiveCompare(normalizedDSN) == .orderedSame,
+           task != nil,
+           reconnectWorkItem == nil,
+           !isDisconnectRequested {
+            return
+        }
+
         disconnect()
 
         isDisconnectRequested = false
-        connectedDSN = dsn
+        connectedDSN = normalizedDSN
         currentBaseIndex = 0
         reconnectAttemptCount = 0
-        updateChatDiagnostics(status: "starting", dsn: dsn, lastError: "-", reconnectCount: 0)
+        didReceiveFrameAfterConnect = false
+        updateChatDiagnostics(status: "starting", dsn: normalizedDSN, lastError: "-", reconnectCount: 0)
         connectUsingCurrentBase()
     }
 
@@ -45,7 +57,7 @@ final class ChatWebSocketService {
 
         task = URLSession.shared.webSocketTask(with: url)
         task?.resume()
-        reconnectAttemptCount = 0
+        didReceiveFrameAfterConnect = false
         updateChatDiagnostics(status: "connected", endpoint: urlString, dsn: dsn, lastError: "-", reconnectCount: 0)
         receiveLoop(baseIndex: currentBaseIndex)
     }
@@ -69,17 +81,23 @@ final class ChatWebSocketService {
         updateChatDiagnostics(status: "reconnecting", reconnectCount: reconnectAttemptCount)
         reconnectWorkItem?.cancel()
 
+        let delay = reconnectDelay(forAttempt: reconnectAttemptCount)
         let item = DispatchWorkItem { [weak self] in
             self?.connectUsingCurrentBase()
         }
         reconnectWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + reconnectDelay, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
     private func receiveLoop(baseIndex: Int) {
         task?.receive { [weak self] result in
             switch result {
             case let .success(message):
+                if self?.didReceiveFrameAfterConnect == false {
+                    self?.didReceiveFrameAfterConnect = true
+                    self?.reconnectAttemptCount = 0
+                    self?.updateChatDiagnostics(reconnectCount: 0)
+                }
                 switch message {
                 case let .data(data):
                     self?.handleIncoming(data: data)
@@ -158,13 +176,21 @@ final class ChatWebSocketService {
         }
     }
 
+    private func reconnectDelay(forAttempt attempt: Int) -> TimeInterval {
+        let clamped = max(1, min(attempt, 6))
+        let backoff = pow(2.0, Double(clamped - 1))
+        return min(baseReconnectDelay * backoff, maxReconnectDelay)
+    }
+
     private var connectedDSN: String?
     private var currentBaseIndex = 0
     private var isDisconnectRequested = false
+    private var didReceiveFrameAfterConnect = false
     private var task: URLSessionWebSocketTask?
     private var reconnectWorkItem: DispatchWorkItem?
     private var reconnectAttemptCount = 0
-    private let reconnectDelay: TimeInterval = 3
+    private let baseReconnectDelay: TimeInterval = 2
+    private let maxReconnectDelay: TimeInterval = 20
     private lazy var shortTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

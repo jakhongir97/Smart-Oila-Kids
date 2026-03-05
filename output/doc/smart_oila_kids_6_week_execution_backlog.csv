@@ -1,0 +1,19 @@
+Week,Milestone,Task,Type,Owner,Dependency,Risk,Definition of Done
+1,Scope and contract freeze,Freeze child-only in/out feature list from repo + extraction spec,Product/Engineering,PM + iOS lead,Approved scope decision,Scope churn,Signed baseline scope document
+1,Scope and contract freeze,Confirm auth/chat/tasks/geo/lock endpoint contracts with backend,Backend/iOS,Backend lead + iOS lead,Backend availability,Contract drift,Published contract matrix with owners
+1,Scope and contract freeze,Close unresolved Settings node mapping and parity decision,Design/Product,Designer + PM,Figma access,UI rework late in cycle,Node IDs and acceptance screenshots approved
+2,Auth/session hardening,Regression test QR claim + legacy fallback + DSN verify paths,Engineering QA,iOS + QA,QR test payloads,Onboarding breakage,Test matrix complete with pass evidence
+2,Auth/session hardening,Harden auth error copy and retry gates for 401/404/network,Engineering,iOS,None,Retry loops,Error-state checklist passed
+2,Auth/session hardening,Validate token persistence/refresh/session clear flows,Engineering,iOS,Backend auth behavior,Session corruption,Session regression suite pass
+3,Core engagement reliability,Stabilize chat websocket reconnect + outbox replay behavior,Engineering,iOS + Backend,Stable WS env,Message duplication/reordering,48h reliability run without critical defects
+3,Core engagement reliability,Validate tasks queue replay and pending counter consistency,Engineering,iOS,None,State mismatch,Queued action replay scenarios pass
+3,Core engagement reliability,Verify main dashboard fallbacks (cached usage/status) under failures,Engineering,iOS,API responses,Blank dashboard in failure modes,Failure-mode UX pass
+4,Background correctness,Validate geo background sending cadence and reconnect behavior,Engineering/QA,iOS + QA,Real devices,Background throttling by iOS,Foreground/background matrix pass
+4,Background correctness,Verify lock overlay using full_lock_status + global lock fallback,Engineering/QA,iOS + Backend,Lock endpoint stability,False lock/unlock states,Lock acceptance test pass
+4,Background correctness,Test push inbox/deep-links badge reconciliation by DSN,Engineering/QA,iOS + QA,APNs setup,Wrong-thread navigation,Push E2E suite pass
+5,Settings/localization polish,Complete rename/avatar/delete flows for connected devices,Engineering,iOS + Backend,Endpoint permissions,Permission mismatch,Settings CRUD regression pass
+5,Settings/localization polish,Run full localization QA (en/ru/uz) and fix copy/layout,QA/Design,QA + Design,Translator availability,Inconsistent copy,Localization checklist sign-off
+5,Settings/localization polish,Regression test profile/session interactions after edits/deletes,QA,QA,None,Session side effects,No Sev1/Sev2 regressions
+6,Release readiness,Run parent-child integration scripts and smoke suite,Engineering/QA,iOS + QA,Parent repo path + schemes,Integration breakage before release,Smoke suite pass report
+6,Release readiness,Re-run OpenAPI audit and verify no child coverage regression,Engineering,iOS,None,Undetected route regressions,Baseline gate passes in CI
+6,Release readiness,Cut RC and execute go/no-go with rollback checklist,Release,PM + iOS + Backend,Cross-team signoff,Late blocking bugs,Go/no-go decision documented

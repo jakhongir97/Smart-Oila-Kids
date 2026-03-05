@@ -16,6 +16,7 @@ struct AuthView: View {
     @State private var pendingRegistration: AuthRegistrationResult?
     @State private var pendingProfileName: String?
     @State private var showScanner = false
+    @State private var inviteAttribution: InviteAttributionContext?
 
     init(viewModel: AuthViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -67,10 +68,14 @@ struct AuthView: View {
             }
         }
         .onAppear {
+            refreshInviteAttribution()
             guard stage == .splash else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
                 stage = .scan
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .inviteAttributionDidChange)) { _ in
+            refreshInviteAttribution()
         }
         .fullScreenCover(isPresented: $showScanner) {
             QRScannerSheet(
@@ -145,6 +150,12 @@ struct AuthView: View {
                     .lineSpacing(2)
                     .padding(.horizontal, horizontalPadding)
                     .padding(.top, compact ? 8 : 10)
+
+                if let inviteAttribution {
+                    inviteContextCard(inviteAttribution)
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.top, compact ? 10 : 12)
+                }
 
                 Spacer(minLength: compact ? 14 : 24)
 
@@ -880,6 +891,50 @@ struct AuthView: View {
 #if DEBUG
         print("[AuthView] \(message)")
 #endif
+    }
+
+    private func refreshInviteAttribution() {
+        let latest = InviteAttributionStore.shared.current()
+        let previousFingerprint = inviteAttributionFingerprint(inviteAttribution)
+        let latestFingerprint = inviteAttributionFingerprint(latest)
+        inviteAttribution = latest
+
+        if latestFingerprint != nil, latestFingerprint != previousFingerprint {
+            AppHaptics.success()
+        }
+    }
+
+    private func inviteAttributionFingerprint(_ value: InviteAttributionContext?) -> String? {
+        guard let value else { return nil }
+        return "\(value.inviterName)|\(value.inviterDSN ?? "-")|\(value.referralCode ?? "-")|\(value.openedAt.timeIntervalSince1970)"
+    }
+
+    private func inviteContextCard(_ context: InviteAttributionContext) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppColors.accentGreen)
+                Text(L10n.tr("auth.invite_received_title", context.inviterName))
+                    .font(AppTypography.unbounded(11, weight: .semibold))
+                    .foregroundStyle(AppColors.black)
+                    .lineLimit(2)
+            }
+
+            Text(L10n.tr("auth.invite_received_subtitle"))
+                .font(AppTypography.unbounded(10, weight: .regular))
+                .foregroundStyle(AppColors.textSecondary)
+                .lineLimit(3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppColors.accentGreen.opacity(0.55), lineWidth: 1)
+        }
     }
 }
 

@@ -13,6 +13,12 @@ Then run:
 ./scripts/check_openapi_coverage.py --rest-spec OpenAPI/rest_openapi.json --ws-spec OpenAPI/ws_openapi.json
 ```
 
+Child non-regression gate (baseline protection):
+
+```bash
+python3 scripts/check_child_openapi_baseline.py --rest-spec OpenAPI/rest_openapi.json --ws-spec OpenAPI/ws_openapi.json --min-rest 19 --min-ws 2
+```
+
 By default the script compares against:
 
 - Child source: `Smart Oila Kids/SmartOilaKids`

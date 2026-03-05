@@ -416,21 +416,15 @@ enum PushCommandRouter {
 
     private static func resolveEvent(from userInfo: [AnyHashable: Any]) -> String {
         let directKeys = ["event", "type", "action", "command", "topic", "channel", "name"]
-        for key in directKeys {
-            if let value = stringValue(userInfo[key]),
-               let normalized = value.trimmedNonEmpty?.lowercased() {
-                return normalized
-            }
+        if let direct = resolveFirstString(keys: directKeys, in: userInfo),
+           let normalized = direct.trimmedNonEmpty?.lowercased() {
+            return normalized
         }
 
-        if let payloadString = stringValue(userInfo["payload"]),
-           let payloadData = payloadString.data(using: .utf8),
-           let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
-            for key in directKeys {
-                if let value = stringValue(payload[key]),
-                   let normalized = value.trimmedNonEmpty?.lowercased() {
-                    return normalized
-                }
+        for payload in extractPayloadCandidates(from: userInfo) {
+            if let value = resolveFirstString(keys: directKeys, in: payload),
+               let normalized = value.trimmedNonEmpty?.lowercased() {
+                return normalized
             }
         }
 
@@ -438,22 +432,16 @@ enum PushCommandRouter {
     }
 
     private static func resolveDSN(from userInfo: [AnyHashable: Any]) -> String? {
-        let dsnKeys = ["dsn", "device_dsn", "children_device_dsn"]
-        for key in dsnKeys {
-            if let value = stringValue(userInfo[key]),
-               let normalized = value.trimmedNonEmpty {
-                return normalized
-            }
+        let dsnKeys = ["dsn", "device_dsn", "children_device_dsn", "child_dsn", "deviceDsn"]
+        if let direct = resolveFirstString(keys: dsnKeys, in: userInfo),
+           let normalized = direct.trimmedNonEmpty {
+            return normalized
         }
 
-        if let payloadString = stringValue(userInfo["payload"]),
-           let payloadData = payloadString.data(using: .utf8),
-           let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
-            for key in dsnKeys {
-                if let value = stringValue(payload[key]),
-                   let normalized = value.trimmedNonEmpty {
-                    return normalized
-                }
+        for payload in extractPayloadCandidates(from: userInfo) {
+            if let value = resolveFirstString(keys: dsnKeys, in: payload),
+               let normalized = value.trimmedNonEmpty {
+                return normalized
             }
         }
 
@@ -475,14 +463,12 @@ enum PushCommandRouter {
             }
         }
 
-        if let payloadString = stringValue(userInfo["payload"]),
-           let payloadData = payloadString.data(using: .utf8),
-           let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
-            let title = stringValue(payload["title"])?.trimmedNonEmpty
-                ?? stringValue(payload["notification_title"])?.trimmedNonEmpty
-            let body = stringValue(payload["body"])?.trimmedNonEmpty
-                ?? stringValue(payload["message"])?.trimmedNonEmpty
-                ?? stringValue(payload["text"])?.trimmedNonEmpty
+        for payload in extractPayloadCandidates(from: userInfo) {
+            let title = resolveFirstString(keys: ["title", "notification_title"], in: payload)?.trimmedNonEmpty
+            let body = resolveFirstString(
+                keys: ["body", "message", "text", "notification_body", "alert"],
+                in: payload
+            )?.trimmedNonEmpty
             if title != nil || body != nil {
                 return (title, body)
             }
@@ -495,6 +481,83 @@ enum PushCommandRouter {
             ?? stringValue(userInfo["text"])?.trimmedNonEmpty
 
         return (title, body)
+    }
+
+    private static func resolveFirstString(keys: [String], in userInfo: [AnyHashable: Any]) -> String? {
+        for key in keys {
+            if let value = stringValue(userInfo[key]) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func resolveFirstString(keys: [String], in dictionary: [String: Any]) -> String? {
+        for key in keys {
+            if let value = stringValue(dictionary[key]) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func extractPayloadCandidates(from userInfo: [AnyHashable: Any]) -> [[String: Any]] {
+        let nestedKeys = ["payload", "data", "custom", "meta", "extra"]
+        var candidates: [[String: Any]] = []
+
+        for key in nestedKeys {
+            if let dictionary = dictionaryValue(userInfo[key]) {
+                candidates.append(dictionary)
+            }
+
+            if let payloadString = stringValue(userInfo[key]),
+               let payload = jsonDictionary(from: payloadString) {
+                candidates.append(payload)
+            }
+        }
+
+        if let aps = dictionaryValue(userInfo["aps"]) {
+            candidates.append(aps)
+
+            for key in nestedKeys {
+                if let dictionary = dictionaryValue(aps[key]) {
+                    candidates.append(dictionary)
+                }
+                if let payloadString = stringValue(aps[key]),
+                   let payload = jsonDictionary(from: payloadString) {
+                    candidates.append(payload)
+                }
+            }
+        }
+
+        return candidates
+    }
+
+    private static func dictionaryValue(_ value: Any?) -> [String: Any]? {
+        if let dictionary = value as? [String: Any] {
+            return dictionary
+        }
+        if let dictionary = value as? [AnyHashable: Any] {
+            return normalizeDictionary(dictionary)
+        }
+        return nil
+    }
+
+    private static func normalizeDictionary(_ dictionary: [AnyHashable: Any]) -> [String: Any] {
+        var normalized: [String: Any] = [:]
+        normalized.reserveCapacity(dictionary.count)
+
+        for (key, value) in dictionary {
+            let keyText = (key as? String) ?? "\(key)"
+            normalized[keyText] = value
+        }
+
+        return normalized
+    }
+
+    private static func jsonDictionary(from string: String) -> [String: Any]? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     private static func stringValue(_ value: Any?) -> String? {

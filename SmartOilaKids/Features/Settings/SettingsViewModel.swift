@@ -178,6 +178,33 @@ final class SettingsViewModel: ObservableObject {
         return updated.name
     }
 
+    func deleteDevice(deviceID: Int) async throws -> Bool {
+        guard !isUpdatingDevice else { return false }
+        isUpdatingDevice = true
+        defer { isUpdatingDevice = false }
+
+        if !hasLoadedRemoteDeviceNames {
+            if let devices = try? await service.fetchConnectedDevices() {
+                connectedDevices = devices
+                hasLoadedRemoteDeviceNames = true
+            }
+        }
+
+        let target = connectedDevices.first { $0.id == deviceID }
+        try await service.deleteConnectedDevice(deviceID: deviceID)
+
+        connectedDevices.removeAll { $0.id == deviceID }
+        cacheStore.saveConnectedDevices(connectedDevices)
+
+        guard let target else { return false }
+        let deletedCurrentDevice = isCurrentDevice(target)
+        if deletedCurrentDevice {
+            remoteProfileName = nil
+            cacheStore.saveProfileName(nil)
+        }
+        return deletedCurrentDevice
+    }
+
     func uploadCurrentDeviceAvatar(dsn: String?, imageData: Data) async throws -> URL? {
         guard let dsn = dsn?.trimmingCharacters(in: .whitespacesAndNewlines), !dsn.isEmpty else {
             throw NetworkError.unexpectedBody
@@ -242,18 +269,30 @@ final class SettingsViewModel: ObservableObject {
             hasLoadedRemoteDeviceNames = true
         }
 
-        guard let target = connectedDevices.first(where: { device in
+        let target: ConnectedDevice
+        if let cached = connectedDevices.first(where: { device in
             guard let remoteDSN = device.dsn?.trimmingCharacters(in: .whitespacesAndNewlines) else {
                 return false
             }
             return remoteDSN.caseInsensitiveCompare(dsn) == .orderedSame
-        }) else {
+        }) {
+            target = cached
+        } else if let resolved = try? await service.resolveConnectedDevice(dsn: dsn) {
+            target = resolved
+            updateConnectedDeviceCache(with: resolved)
+        } else {
             return
         }
 
         try await service.deleteConnectedDevice(deviceID: target.id)
         connectedDevices.removeAll { $0.id == target.id }
         cacheStore.saveConnectedDevices(connectedDevices)
+
+        if let currentDSN = currentDSN?.trimmingCharacters(in: .whitespacesAndNewlines),
+           currentDSN.caseInsensitiveCompare(dsn) == .orderedSame {
+            remoteProfileName = nil
+            cacheStore.saveProfileName(nil)
+        }
     }
 
     private let service: SettingsServicing
@@ -261,6 +300,16 @@ final class SettingsViewModel: ObservableObject {
     private var didLoad = false
     private var hasLoadedRemoteDeviceNames = false
     private var currentDSN: String?
+
+    private func isCurrentDevice(_ device: ConnectedDevice) -> Bool {
+        guard let currentDSN = currentDSN?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !currentDSN.isEmpty,
+              let deviceDSN = device.dsn?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !deviceDSN.isEmpty else {
+            return false
+        }
+        return currentDSN.caseInsensitiveCompare(deviceDSN) == .orderedSame
+    }
 
     private func updateConnectedDeviceCache(with updated: ConnectedDevice) {
         if let index = connectedDevices.firstIndex(where: { $0.id == updated.id }) {

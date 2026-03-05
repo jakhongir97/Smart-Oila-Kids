@@ -307,6 +307,8 @@ final class TaskViewModel: ObservableObject {
 
         var remaining: [QueuedTaskAction] = []
         var appliedCount = 0
+        var nonRetryableFailures = 0
+        var lastNonRetryableMessage: String?
 
         for action in queuedActions {
             do {
@@ -315,6 +317,9 @@ final class TaskViewModel: ObservableObject {
             } catch {
                 if shouldQueue(error) {
                     remaining.append(action)
+                } else {
+                    nonRetryableFailures += 1
+                    lastNonRetryableMessage = NetworkError.userMessage(for: error)
                 }
             }
         }
@@ -323,9 +328,23 @@ final class TaskViewModel: ObservableObject {
         persistQueuedActions()
 
         if !remaining.isEmpty {
+            if nonRetryableFailures > 0,
+               let failureMessage = lastNonRetryableMessage?.trimmedNonEmpty {
+                return RetryQueuedActionsResult(
+                    appliedCount: appliedCount,
+                    message: "\(L10n.tr("tasks.sync_pending", remaining.count)) \(failureMessage)"
+                )
+            }
             return RetryQueuedActionsResult(
                 appliedCount: appliedCount,
                 message: L10n.tr("tasks.sync_pending", remaining.count)
+            )
+        }
+
+        if nonRetryableFailures > 0 {
+            return RetryQueuedActionsResult(
+                appliedCount: appliedCount,
+                message: lastNonRetryableMessage?.trimmedNonEmpty ?? L10n.tr("error.request_failed")
             )
         }
 
@@ -391,7 +410,11 @@ final class TaskViewModel: ObservableObject {
         if let networkError = error as? NetworkError {
             switch networkError {
             case let .server(statusCode, _):
-                return statusCode == 408 || statusCode == 429 || statusCode >= 500
+                return statusCode == 401
+                    || statusCode == 403
+                    || statusCode == 408
+                    || statusCode == 429
+                    || statusCode >= 500
             case .underlying(let nested):
                 return shouldQueue(nested)
             case .invalidURL, .invalidResponse, .decodingFailed, .unexpectedBody:

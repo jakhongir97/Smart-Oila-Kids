@@ -297,13 +297,17 @@ final class APIClient {
                     return nil
                 }
 
-                secureTokens.setAccessToken(accessToken)
+                let authorizationHeader = normalizedAuthorizationHeader(
+                    accessToken: accessToken,
+                    tokenType: response.tokenType
+                )
+                secureTokens.setAccessToken(authorizationHeader)
 
                 if let refreshed = response.refreshToken?.trimmedNonEmpty {
                     secureTokens.setRefreshToken(refreshed)
                 }
 
-                return accessToken
+                return authorizationHeader
             } catch let NetworkError.server(statusCode, _) where statusCode == 400 || statusCode == 401 || statusCode == 403 {
                 secureTokens.clear()
                 return nil
@@ -317,6 +321,20 @@ final class APIClient {
         }
 
         return nil
+    }
+
+    private func normalizedAuthorizationHeader(accessToken: String, tokenType: String?) -> String {
+        let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if token.contains(" ") {
+            return token
+        }
+
+        if let tokenType = tokenType?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !tokenType.isEmpty {
+            return "\(tokenType) \(token)"
+        }
+
+        return token
     }
 
     private func debugLogRequest(_ request: URLRequest) {

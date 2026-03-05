@@ -17,25 +17,27 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     @Published private(set) var debugReconnectCount: Int = 0
 
     func start(dsn: String) {
-        guard !dsn.isEmpty else {
+        guard let normalizedDSN = dsn.trimmedNonEmpty else {
             stop()
             return
         }
 
-        if isRunning, currentDSN == dsn {
+        if isRunning,
+           let currentDSN,
+           currentDSN.caseInsensitiveCompare(normalizedDSN) == .orderedSame {
             return
         }
 
         stop()
 
-        currentDSN = dsn
+        currentDSN = normalizedDSN
         pendingPayloads = []
-        restorePendingPayloads(for: dsn)
+        restorePendingPayloads(for: normalizedDSN)
         isRunning = true
         isDisconnectRequested = false
         currentBaseIndex = 0
         reconnectAttemptCount = 0
-        debugLog("start(dsn: \(dsn))")
+        debugLog("start(dsn: \(normalizedDSN))")
         updateDebug(status: "starting", endpoint: "-", lastError: "-")
 
         startLocationUpdatesIfAuthorized()
@@ -75,7 +77,7 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
 
         pathMonitor.pathUpdateHandler = { [weak self] _ in
             DispatchQueue.main.async {
-                self?.sendSystemInfoIfChanged()
+                self?.handlePathUpdate()
             }
         }
         pathMonitor.start(queue: pathMonitorQueue)
@@ -134,6 +136,25 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     @objc
     private func sendPeriodicSystemInfo() {
         sendSystemInfo(force: true)
+    }
+
+    private func handlePathUpdate() {
+        guard isRunning else { return }
+
+        sendSystemInfoIfChanged()
+
+        guard pathMonitor.currentPath.status == .satisfied else { return }
+
+        let needsReconnect = webSocketTask == nil
+            || debugStatus == "failed"
+            || debugStatus == "queued"
+            || debugStatus == "reconnecting"
+        guard needsReconnect else { return }
+
+        reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
+        currentBaseIndex = 0
+        connectUsingCurrentBase()
     }
 
     private func startLocationUpdatesIfAuthorized() {
@@ -231,15 +252,16 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
         guard isRunning, !isDisconnectRequested else { return }
 
         reconnectAttemptCount += 1
+        let delay = reconnectDelay(forAttempt: reconnectAttemptCount)
         updateDebug(status: "reconnecting", reconnectCount: reconnectAttemptCount)
-        debugLog("Scheduling reconnect attempt #\(reconnectAttemptCount) in \(Int(reconnectDelay))s")
+        debugLog("Scheduling reconnect attempt #\(reconnectAttemptCount) in \(Int(delay))s")
 
         reconnectWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             self?.connectUsingCurrentBase()
         }
         reconnectWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + reconnectDelay, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
     private func closeWebSocket() {
@@ -251,9 +273,14 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
         webSocketTask?.receive { [weak self] result in
             switch result {
             case .success:
+                if let self, self.reconnectAttemptCount > 0 {
+                    self.reconnectAttemptCount = 0
+                    self.updateDebug(reconnectCount: 0)
+                }
                 self?.receiveLoop(baseIndex: baseIndex)
             case .failure:
                 guard let self else { return }
+                self.webSocketTask = nil
                 self.updateDebug(status: "failed", lastError: "websocket receive failed")
                 self.debugLog("Receive loop failed. Rotating endpoint/reconnecting.")
                 if self.isRunning, !self.isDisconnectRequested, baseIndex == self.currentBaseIndex {
@@ -345,6 +372,10 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
                     self.debugLog("Send failed: \(error.localizedDescription)")
                     self.enqueuePendingPayload(text: text, summary: summary, reason: error.localizedDescription)
                 } else {
+                    if self.reconnectAttemptCount > 0 {
+                        self.reconnectAttemptCount = 0
+                        self.updateDebug(reconnectCount: 0)
+                    }
                     self.updateDebug(status: "connected", lastPayload: summary, lastError: "-")
                     self.debugLog("Sent payload: \(summary)")
                 }
@@ -414,10 +445,17 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     private func pendingPayloadsKey(for dsn: String) -> String {
         let sanitized = dsn
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
             .replacingOccurrences(of: " ", with: "_")
             .replacingOccurrences(of: ".", with: "_")
             .replacingOccurrences(of: "/", with: "_")
         return "GEO_PENDING_PAYLOADS_\(sanitized)"
+    }
+
+    private func reconnectDelay(forAttempt attempt: Int) -> TimeInterval {
+        let exponent = max(0, attempt - 1)
+        let scaled = reconnectBaseDelay * pow(2.0, Double(exponent))
+        return min(reconnectMaxDelay, scaled)
     }
 
     private func batteryValue() -> Int {
@@ -452,7 +490,8 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     private let minDistance: CLLocationDistance = 10
     private let periodicLocationInterval: TimeInterval = 180
     private let systemInfoInterval: TimeInterval = 60
-    private let reconnectDelay: TimeInterval = 5
+    private let reconnectBaseDelay: TimeInterval = 2
+    private let reconnectMaxDelay: TimeInterval = 20
 
     private lazy var shortTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()

@@ -21,6 +21,7 @@ struct SettingsView: View {
     @State private var showAvatarPicker = false
     @State private var avatarPickerItem: PhotosPickerItem?
     @State private var avatarPreviewImage: UIImage?
+    @State private var inviteSharePayload: InviteSharePayload?
     @StateObject private var permissionManager = LocationPermissionManager()
     @FocusState private var isNameFieldFocused: Bool
 
@@ -142,6 +143,26 @@ struct SettingsView: View {
                                     HStack(spacing: 8) {
                                         Image(systemName: "hand.raised.fill")
                                         Text(L10n.tr("settings.permissions"))
+                                            .lineLimit(1)
+                                    }
+                                    .font(AppTypography.unbounded(12, weight: .semibold))
+                                    .foregroundStyle(AppColors.primaryPurple)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 40)
+                                    .background(AppColors.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, sidePadding)
+                                .padding(.top, 8)
+
+                                Button {
+                                    AppHaptics.tap()
+                                    beginInviteShare()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "person.2.fill")
+                                        Text(L10n.tr("settings.invite_other_parent"))
                                             .lineLimit(1)
                                     }
                                     .font(AppTypography.unbounded(12, weight: .semibold))
@@ -285,6 +306,11 @@ struct SettingsView: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled(true)
 
+            Button(L10n.tr("settings.delete_device"), role: .destructive) {
+                deleteEditedDevice()
+            }
+            .disabled(viewModel.isUpdatingDevice)
+
             Button(L10n.tr("common.cancel"), role: .cancel) {
                 editingDevice = nil
             }
@@ -302,6 +328,11 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showPermissionsCenter) {
             SettingsPermissionsPanelView(manager: permissionManager)
+        }
+        .sheet(item: $inviteSharePayload) { payload in
+            ActivityShareSheet(activityItems: [payload.message]) { completed in
+                handleInviteShareCompletion(completed: completed)
+            }
         }
         .photosPicker(
             isPresented: $showAvatarPicker,
@@ -369,6 +400,9 @@ struct SettingsView: View {
         Task {
             do {
                 let updatedName = try await viewModel.renameDevice(deviceID: device.id, name: trimmed)
+                if updatedName != device.name {
+                    GrowthMetricsStore.shared.track(.deviceRenameCompleted, dsn: sessionStore.dsn)
+                }
                 AppHaptics.success()
                 showDeviceEditor = false
                 editingDevice = nil
@@ -377,6 +411,31 @@ struct SettingsView: View {
             } catch {
                 AppHaptics.warning()
                 banner(L10n.tr("settings.device_rename_failed"))
+            }
+        }
+    }
+
+    private func deleteEditedDevice() {
+        guard let device = editingDevice else { return }
+
+        Task {
+            do {
+                let deletedCurrentDevice = try await viewModel.deleteDevice(deviceID: device.id)
+                GrowthMetricsStore.shared.track(.deviceDeleteCompleted, dsn: sessionStore.dsn)
+                AppHaptics.success()
+                showDeviceEditor = false
+                editingDevice = nil
+                editingDeviceName = ""
+
+                if deletedCurrentDevice {
+                    sessionStore.clearSession()
+                    return
+                }
+
+                banner(L10n.tr("settings.device_deleted"))
+            } catch {
+                AppHaptics.warning()
+                banner(L10n.tr("settings.delete_failed"))
             }
         }
     }
@@ -420,6 +479,32 @@ struct SettingsView: View {
         }
     }
 
+    private func beginInviteShare() {
+        GrowthMetricsStore.shared.track(.inviteShareClicked, dsn: sessionStore.dsn)
+        inviteSharePayload = InviteSharePayload(message: inviteShareMessage())
+    }
+
+    private func inviteShareMessage() -> String {
+        let profileName = sessionStore.profileName.trimmedNonEmpty ?? L10n.tr("settings.invite_share_default_name")
+        let message = L10n.tr("settings.invite_share_message", profileName)
+        let inviteURL = InviteLinkBuilder.makeURL(
+            baseURL: AppConfig.inviteShareURL,
+            inviterName: profileName,
+            inviterDSN: sessionStore.dsn
+        )
+        return "\(message)\n\(inviteURL.absoluteString)"
+    }
+
+    private func handleInviteShareCompletion(completed: Bool) {
+        guard completed else { return }
+        GrowthMetricsStore.shared.track(.inviteShareCompleted, dsn: sessionStore.dsn)
+
+        DispatchQueue.main.async {
+            AppHaptics.success()
+            banner(L10n.tr("settings.invite_share_success"))
+        }
+    }
+
     private var themeBinding: Binding<AppTheme> {
         Binding(
             get: { sessionStore.appTheme },
@@ -455,6 +540,11 @@ struct SettingsView: View {
             return L10n.tr("settings.language.uz")
         }
     }
+}
+
+private struct InviteSharePayload: Identifiable {
+    let id = UUID()
+    let message: String
 }
 
 private struct SettingsPermissionsPanelView: View {
@@ -597,6 +687,7 @@ private struct DiagnosticsPanelView: View {
 
     @ObservedObject private var diagnostics = RuntimeDiagnosticsCenter.shared
     @StateObject private var permissionManager = LocationPermissionManager()
+    @State private var growthMetrics = GrowthMetricsSnapshot.empty
 
     var body: some View {
         NavigationStack {
@@ -618,6 +709,23 @@ private struct DiagnosticsPanelView: View {
                             (L10n.tr("diagnostics.api_base"), AppConfig.apiBaseURL.absoluteString),
                             (L10n.tr("diagnostics.ws_base"), AppConfig.websocketBaseCandidates.joined(separator: ", ")),
                             (L10n.tr("diagnostics.ws_token_path"), AppConfig.websocketTokenPath)
+                        ]
+                    )
+
+                    diagnosticsSection(
+                        title: L10n.tr("diagnostics.section_growth"),
+                        rows: [
+                            (L10n.tr("diagnostics.invite_share_clicked"), "\(growthMetrics.inviteShareClickedCount)"),
+                            (L10n.tr("diagnostics.invite_share_completed"), "\(growthMetrics.inviteShareCompletedCount)"),
+                            (L10n.tr("diagnostics.invite_link_opened"), "\(growthMetrics.inviteLinkOpenedCount)"),
+                            (L10n.tr("diagnostics.device_rename_completed"), "\(growthMetrics.deviceRenameCompletedCount)"),
+                            (L10n.tr("diagnostics.device_delete_completed"), "\(growthMetrics.deviceDeleteCompletedCount)"),
+                            (L10n.tr("diagnostics.invite_share_rate"), shareCompletionRateText()),
+                            (L10n.tr("diagnostics.invite_share_last_clicked"), formatTimestamp(growthMetrics.lastInviteShareClickedAt)),
+                            (L10n.tr("diagnostics.invite_share_last_completed"), formatTimestamp(growthMetrics.lastInviteShareCompletedAt)),
+                            (L10n.tr("diagnostics.invite_link_last_opened"), formatTimestamp(growthMetrics.lastInviteLinkOpenedAt)),
+                            (L10n.tr("diagnostics.device_rename_last_completed"), formatTimestamp(growthMetrics.lastDeviceRenameCompletedAt)),
+                            (L10n.tr("diagnostics.device_delete_last_completed"), formatTimestamp(growthMetrics.lastDeviceDeleteCompletedAt))
                         ]
                     )
 
@@ -678,6 +786,7 @@ private struct DiagnosticsPanelView: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         permissionManager.refreshStatuses()
+                        refreshGrowthMetrics()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                             .foregroundStyle(AppColors.primaryPurple)
@@ -693,6 +802,11 @@ private struct DiagnosticsPanelView: View {
             }
             .onAppear {
                 permissionManager.refreshStatuses()
+                refreshGrowthMetrics()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .growthMetricsDidChange)) { notification in
+                guard shouldRefreshGrowthMetrics(notification: notification) else { return }
+                refreshGrowthMetrics()
             }
         }
     }
@@ -749,6 +863,23 @@ private struct DiagnosticsPanelView: View {
                 .minute(.twoDigits)
                 .second(.twoDigits)
         )
+    }
+
+    private func refreshGrowthMetrics() {
+        growthMetrics = GrowthMetricsStore.shared.snapshot(for: sessionStore.dsn)
+    }
+
+    private func shareCompletionRateText() -> String {
+        let percentage = growthMetrics.inviteShareCompletionRate * 100
+        return String(format: "%.1f%%", percentage)
+    }
+
+    private func shouldRefreshGrowthMetrics(notification: Notification) -> Bool {
+        guard let currentDSN = sessionStore.dsn?.trimmedNonEmpty else { return true }
+        guard let changedDSN = (notification.userInfo?[GrowthMetricsUserInfoKey.dsn] as? String)?.trimmedNonEmpty else {
+            return true
+        }
+        return changedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
     }
 
     private func themeValue(_ theme: AppTheme) -> String {

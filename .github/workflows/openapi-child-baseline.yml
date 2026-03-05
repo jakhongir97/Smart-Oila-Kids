@@ -1,0 +1,42 @@
+name: Child OpenAPI Baseline
+
+on:
+  push:
+    paths:
+      - "SmartOilaKids/**"
+      - "OpenAPI/**"
+      - "scripts/check_openapi_coverage.py"
+      - "scripts/check_child_openapi_baseline.py"
+      - "scripts/tests/**"
+      - ".github/workflows/openapi-child-baseline.yml"
+  pull_request:
+    paths:
+      - "SmartOilaKids/**"
+      - "OpenAPI/**"
+      - "scripts/check_openapi_coverage.py"
+      - "scripts/check_child_openapi_baseline.py"
+      - "scripts/tests/**"
+      - ".github/workflows/openapi-child-baseline.yml"
+
+jobs:
+  child-openapi-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run scripts test suite
+        run: ./scripts/run_script_tests.sh
+
+      - name: Enforce child OpenAPI baseline
+        run: |
+          python3 scripts/check_child_openapi_baseline.py \
+            --rest-spec OpenAPI/rest_openapi.json \
+            --ws-spec OpenAPI/ws_openapi.json \
+            --min-rest 19 \
+            --min-ws 2

@@ -25,6 +25,7 @@
 		400A758957C156A1F14CDD66 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05B9F5B2C7CF0D953A9F336 /* ChatModels.swift */; };
 		418812598601080BD2833EBD /* TaskService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297586238AFBC241C5CE91C5 /* TaskService.swift */; };
 		44D865E6736791BEBCF4CC1F /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 011FE7B8FC094845A531DC28 /* AuthService.swift */; };
+		50B88251B0431D3F098B7EF5 /* ActivityShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A477DC58268B911BE8094F /* ActivityShareSheet.swift */; };
 		5A97564782C38B4656C7525D /* Date+Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B26323909457D23552B64D /* Date+Formatting.swift */; };
 		6D15073AFFF953D7A6610440 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BF28BB4858699994D286CFC /* AuthViewModel.swift */; };
 		72F6D3C5E18214B1604AD294 /* LocationPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1242F15864F04C95AF65E92C /* LocationPermissionManager.swift */; };
@@ -40,6 +41,7 @@
 		92A9C05B4589B3A66241AD23 /* GeoPermissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A720C659E66315F9CDC39003 /* GeoPermissionView.swift */; };
 		99DB3455B312C486D41DBDD6 /* SOSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113CDA2CA9A37AAA25876EF /* SOSService.swift */; };
 		9AF497E514A0F8B47147BF37 /* ChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11592711F6319D826FC9EA /* ChatService.swift */; };
+		A0F60B1A41788C79F4ED1A0B /* GrowthMetricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBD506491C43954D10DF0D6 /* GrowthMetricsStore.swift */; };
 		A40E9E9756993DEA0DB04A4D /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 773C5143FC368E6B3FA28423 /* InfoPlist.strings */; };
 		A6BA458727297D7F159F02E1 /* SmartOilaKidsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CDB01AA9B7B68ABB29FECE2 /* SmartOilaKidsApp.swift */; };
 		AA95BAE093CDEDE1DFC86580 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0896EA30F859C46916368E4C /* MainView.swift */; };
@@ -86,6 +88,7 @@
 		6882ACAFC1F3A67B34CF6668 /* SettingsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsComponents.swift; sourceTree = "<group>"; };
 		6BD36F902D011BB0825C0BCB /* SMSTemplatesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMSTemplatesStore.swift; sourceTree = "<group>"; };
 		6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		6FBD506491C43954D10DF0D6 /* GrowthMetricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrowthMetricsStore.swift; sourceTree = "<group>"; };
 		7CAE5B6E8D249B8A4954F61B /* Unbounded-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Unbounded-Variable.ttf"; sourceTree = "<group>"; };
 		7FBC40B6AFD8B53E2C220048 /* TaskModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskModels.swift; sourceTree = "<group>"; };
 		829055C541819D8137ACE39B /* TaskViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewModel.swift; sourceTree = "<group>"; };
@@ -118,6 +121,7 @@
 		F21DD84C2E71BD157050D64A /* ChatWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatWebSocketService.swift; sourceTree = "<group>"; };
 		F3642A198E04D3C7E8388312 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		F3856E652D5D319DC95A00A3 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		F3A477DC58268B911BE8094F /* ActivityShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityShareSheet.swift; sourceTree = "<group>"; };
 		F81358274D490DBDA4E66794 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		FCBB1073C8D888EFA17C2397 /* uz */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = uz; path = uz.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		FE11592711F6319D826FC9EA /* ChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatService.swift; sourceTree = "<group>"; };
@@ -280,6 +284,7 @@
 		9AC95EE7A705614E14CD50F1 /* Storage */ = {
 			isa = PBXGroup;
 			children = (
+				6FBD506491C43954D10DF0D6 /* GrowthMetricsStore.swift */,
 				6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */,
 				6BD36F902D011BB0825C0BCB /* SMSTemplatesStore.swift */,
 			);
@@ -388,6 +393,7 @@
 		FABE38EC3F4AF9CDC4E8200A /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				F3A477DC58268B911BE8094F /* ActivityShareSheet.swift */,
 				49B96B72022F9D428E01F263 /* ChildChrome.swift */,
 				D37DD714AF705AA9CF3DA42E /* GeoDebugOverlay.swift */,
 			);
@@ -463,6 +469,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				182DC08BA699BBA3BDADBF60 /* APIClient.swift in Sources */,
+				50B88251B0431D3F098B7EF5 /* ActivityShareSheet.swift in Sources */,
 				1802E26A36C0451F1831F065 /* AppColors.swift in Sources */,
 				BD96FDE910D0B24E8DF6AD59 /* AppConfig.swift in Sources */,
 				B6EDF71F39BD4BDDE5285B92 /* AppDependencies.swift in Sources */,
@@ -483,6 +490,7 @@
 				0471EB68BA714117949399DD /* GeoBackgroundService.swift in Sources */,
 				FA972FBA2EEB6519A7128699 /* GeoDebugOverlay.swift in Sources */,
 				92A9C05B4589B3A66241AD23 /* GeoPermissionView.swift in Sources */,
+				A0F60B1A41788C79F4ED1A0B /* GrowthMetricsStore.swift in Sources */,
 				F616424CC01DE567EE1A1EBE /* HTTPMethod.swift in Sources */,
 				CF094EFE3B06048BBA6C907E /* L10n.swift in Sources */,
 				72F6D3C5E18214B1604AD294 /* LocationPermissionManager.swift in Sources */,

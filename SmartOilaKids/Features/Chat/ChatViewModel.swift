@@ -419,6 +419,41 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    func refreshLatest() async {
+        guard !dsn.isEmpty else {
+            phase = .failed(L10n.tr("common.dsn_missing"))
+            return
+        }
+
+        do {
+            let history = try await service.fetchChatHistory(dsn: dsn, limit: pageSize, page: 1)
+            mergeGroupedMessages(history.data)
+            persistChatHistory()
+            updatePagination(with: history.pagination)
+
+            if let resolvedParentName = try? await service.fetchParentDisplayName()?.trimmedNonEmpty {
+                parentNameFallback = resolvedParentName
+                parentNameStore.saveParentName(resolvedParentName, for: dsn)
+            }
+
+            recomputeParentMetadata()
+            phase = .loaded
+
+            if isThreadActive {
+                markAllAsRead()
+            }
+
+            await retryQueuedMessages()
+        } catch {
+            let message = NetworkError.userMessage(for: error)
+            if groupedMessages.isEmpty {
+                phase = .failed(message)
+            } else {
+                sendStatusText = message
+            }
+        }
+    }
+
     func send() async -> Bool {
         guard canSend else { return false }
         let result = await sendMessage(
@@ -574,9 +609,11 @@ final class ChatViewModel: ObservableObject {
     private func append(_ datum: Datum) {
         let dateKey = Self.dateKey(from: datum.time)
         var items = groupedMessages[dateKey, default: []]
-        guard !items.contains(where: { $0.id == datum.id }) else { return }
+        guard !containsEquivalentMessage(items, candidate: datum) else { return }
         items.append(datum)
-        items.sort(by: { $0.time < $1.time })
+        items.sort { lhs, rhs in
+            compareTimestamps(lhs.time, rhs.time) == .orderedAscending
+        }
         groupedMessages[dateKey] = items
         persistChatHistory()
     }
@@ -584,7 +621,9 @@ final class ChatViewModel: ObservableObject {
     private func mergeGroupedMessages(_ incoming: [String: [Datum]]) {
         for key in incoming.keys.sorted() {
             let items = incoming[key] ?? []
-            for item in items.sorted(by: { $0.time < $1.time }) {
+            for item in items.sorted(by: { lhs, rhs in
+                compareTimestamps(lhs.time, rhs.time) == .orderedAscending
+            }) {
                 append(item)
             }
         }
@@ -594,11 +633,16 @@ final class ChatViewModel: ObservableObject {
         var normalized: [String: [Datum]] = [:]
         for key in grouped.keys.sorted() {
             let items = grouped[key] ?? []
-            for item in items.sorted(by: { $0.time < $1.time }) {
+            for item in items.sorted(by: { lhs, rhs in
+                compareTimestamps(lhs.time, rhs.time) == .orderedAscending
+            }) {
                 let dateKey = Self.dateKey(from: item.time)
                 var existing = normalized[dateKey, default: []]
-                if !existing.contains(where: { $0.id == item.id }) {
+                if !containsEquivalentMessage(existing, candidate: item) {
                     existing.append(item)
+                    existing.sort { lhs, rhs in
+                        compareTimestamps(lhs.time, rhs.time) == .orderedAscending
+                    }
                     normalized[dateKey] = existing
                 }
             }
@@ -652,7 +696,11 @@ final class ChatViewModel: ObservableObject {
         if let networkError = error as? NetworkError {
             switch networkError {
             case let .server(statusCode, _):
-                return statusCode == 408 || statusCode == 429 || statusCode >= 500
+                return statusCode == 401
+                    || statusCode == 403
+                    || statusCode == 408
+                    || statusCode == 429
+                    || statusCode >= 500
             case .underlying(let nested):
                 return shouldQueue(nested)
             case .invalidURL, .invalidResponse, .decodingFailed, .unexpectedBody:
@@ -677,6 +725,25 @@ final class ChatViewModel: ObservableObject {
         }
 
         return false
+    }
+
+    private func containsEquivalentMessage(_ items: [Datum], candidate: Datum) -> Bool {
+        let normalizedCandidateText = candidate.text?.trimmedNonEmpty ?? ""
+
+        return items.contains { existing in
+            if existing.id == candidate.id {
+                return true
+            }
+
+            let sameSender = existing.userType.caseInsensitiveCompare(candidate.userType) == .orderedSame
+            guard sameSender else { return false }
+
+            let existingText = existing.text?.trimmedNonEmpty ?? ""
+            guard existingText == normalizedCandidateText else { return false }
+            guard existing.attachments == candidate.attachments else { return false }
+
+            return compareTimestamps(existing.time, candidate.time) == .orderedSame
+        }
     }
 
     private func recomputeParentMetadata() {

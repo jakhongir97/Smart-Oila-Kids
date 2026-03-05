@@ -28,6 +28,8 @@
 "auth.verify_failed" = "Ulash bajarildi, lekin qurilma tasdiqlanmadi. QR kodni qayta skaner qiling.";
 "auth.qr_missing_auth_data" = "QR kodda ulash ma'lumotlari yo'q";
 "auth.qr_invalid_contract" = "QR kod formati noto'g'ri. Ota-ona ilovasida QR kodni qayta yarating.";
+"auth.invite_received_title" = "%@ dan taklif olindi";
+"auth.invite_received_subtitle" = "Qurilmani tez ulash uchun taklif yuborgan ota-ona telefonida Smart Oila ilovasini ochib, uning QR kodini skaner qiling.";
 
 "scanner.hint" = "Kamerani ota-onaning QR kodiga yo'naltiring";
 "scanner.unavailable_title" = "Skaner mavjud emas";
@@ -206,12 +208,18 @@
 "settings.save_failed" = "Mahalliy saqlandi. Serverni yangilab bo'lmadi.";
 "settings.device_renamed" = "Qurilma nomi yangilandi.";
 "settings.device_rename_failed" = "Qurilma nomini yangilab bo'lmadi.";
+"settings.delete_device" = "Qurilmani o'chirish";
+"settings.device_deleted" = "Qurilma o'chirildi.";
 "settings.delete_failed" = "Qurilmani serverdan o'chirib bo'lmadi.";
 "settings.unlink_failed" = "Qurilma ulanishini serverda uzib bo'lmadi.";
 "settings.edit_avatar" = "Avatarni o'zgartirish";
 "settings.avatar_uploaded" = "Avatar yangilandi.";
 "settings.avatar_upload_failed" = "Avatarni serverda yangilab bo'lmadi.";
 "settings.avatar_invalid_image" = "Tanlangan rasmni o'qib bo'lmadi.";
+"settings.invite_other_parent" = "Boshqa ota-onani taklif qilish";
+"settings.invite_share_success" = "Taklif yuborildi.";
+"settings.invite_share_message" = "%@ Smart Oila orqali bolalar xavfsizligini kuzatadi. Ilovani o'rnating va bolangiz qurilmasini bir necha daqiqada ulang.";
+"settings.invite_share_default_name" = "Bizning oilamiz";
 
 "notifications.title" = "Bildirishnomalar";
 "notifications.mark_all_read" = "Barchasini o'qish";
@@ -223,6 +231,7 @@
 
 "diagnostics.section_session" = "Sessiya";
 "diagnostics.section_network" = "Tarmoq";
+"diagnostics.section_growth" = "O'sish";
 "diagnostics.section_geo" = "Geo websocket";
 "diagnostics.section_chat" = "Chat websocket";
 "diagnostics.section_permissions" = "Ruxsatlar";
@@ -242,6 +251,17 @@
 "diagnostics.last_error" = "Oxirgi xato";
 "diagnostics.retries" = "Qayta ulanishlar";
 "diagnostics.updated" = "Yangilangan vaqti";
+"diagnostics.invite_share_clicked" = "invite_share_clicked";
+"diagnostics.invite_share_completed" = "invite_share_completed";
+"diagnostics.invite_link_opened" = "invite_link_opened";
+"diagnostics.invite_share_rate" = "invite_completion_rate";
+"diagnostics.invite_share_last_clicked" = "Oxirgi share bosilishi";
+"diagnostics.invite_share_last_completed" = "Oxirgi muvaffaqiyatli share";
+"diagnostics.invite_link_last_opened" = "Oxirgi invite havolasi ochilishi";
+"diagnostics.device_rename_completed" = "device_rename_completed";
+"diagnostics.device_delete_completed" = "device_delete_completed";
+"diagnostics.device_rename_last_completed" = "Qurilma nomini oxirgi o'zgartirish";
+"diagnostics.device_delete_last_completed" = "Qurilmani oxirgi o'chirish";
 "diagnostics.permission_location" = "Lokatsiya";
 "diagnostics.permission_notifications" = "Bildirishnomalar";
 "diagnostics.permission_microphone" = "Mikrofon";

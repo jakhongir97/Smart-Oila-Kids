@@ -1,0 +1,46 @@
+name: Localization Parity
+
+on:
+  push:
+    paths:
+      - "SmartOilaKids/Resources/Localization/**"
+      - "scripts/check_localization_parity.py"
+      - "scripts/check_localization_format_specifiers.py"
+      - "scripts/tests/**"
+      - ".github/workflows/localization-parity.yml"
+  pull_request:
+    paths:
+      - "SmartOilaKids/Resources/Localization/**"
+      - "scripts/check_localization_parity.py"
+      - "scripts/check_localization_format_specifiers.py"
+      - "scripts/tests/**"
+      - ".github/workflows/localization-parity.yml"
+
+jobs:
+  localization-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run scripts test suite
+        run: ./scripts/run_script_tests.sh
+
+      - name: Validate localization key parity
+        run: |
+          python3 scripts/check_localization_parity.py \
+            --base-dir SmartOilaKids/Resources/Localization \
+            --source-language en \
+            --languages en,ru,uz
+
+      - name: Validate localization format specifier parity
+        run: |
+          python3 scripts/check_localization_format_specifiers.py \
+            --base-dir SmartOilaKids/Resources/Localization \
+            --source-language en \
+            --languages en,ru,uz

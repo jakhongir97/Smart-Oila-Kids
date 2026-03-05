@@ -29,7 +29,31 @@ WS_TEMPLATE_PATH_RE = re.compile(r'path:\s*"(/ws/[^"]+)"')
 
 
 def normalize_interpolation(text: str) -> str:
-    return re.sub(r"\\\([^)]*\)", "{}", text)
+    # Handle nested parentheses inside Swift interpolation, e.g. \(String(dsn)).
+    output: List[str] = []
+    index = 0
+    text_length = len(text)
+
+    while index < text_length:
+        if text[index] == "\\" and index + 1 < text_length and text[index + 1] == "(":
+            depth = 1
+            cursor = index + 2
+            while cursor < text_length and depth > 0:
+                if text[cursor] == "(":
+                    depth += 1
+                elif text[cursor] == ")":
+                    depth -= 1
+                cursor += 1
+
+            if depth == 0:
+                output.append("{}")
+                index = cursor
+                continue
+
+        output.append(text[index])
+        index += 1
+
+    return "".join(output)
 
 
 def normalize_path(path: str) -> str:

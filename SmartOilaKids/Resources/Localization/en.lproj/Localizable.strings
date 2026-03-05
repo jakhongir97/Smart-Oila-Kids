@@ -28,6 +28,8 @@
 "auth.verify_failed" = "Linking succeeded, but device verification failed. Please scan again.";
 "auth.qr_missing_auth_data" = "QR code does not contain binding data";
 "auth.qr_invalid_contract" = "QR code format is invalid. Please regenerate QR from the parent app.";
+"auth.invite_received_title" = "Invite received from %@";
+"auth.invite_received_subtitle" = "Open Smart Oila on the inviter's phone and scan their QR code to link faster.";
 
 "scanner.hint" = "Point the camera at the parent's QR code";
 "scanner.unavailable_title" = "Scanner Unavailable";
@@ -206,12 +208,18 @@
 "settings.save_failed" = "Saved locally. Backend update failed.";
 "settings.device_renamed" = "Device name updated.";
 "settings.device_rename_failed" = "Couldn't update device name.";
+"settings.delete_device" = "Delete device";
+"settings.device_deleted" = "Device removed.";
 "settings.delete_failed" = "Couldn't delete device on server.";
 "settings.unlink_failed" = "Couldn't unlink device on server.";
 "settings.edit_avatar" = "Edit avatar";
 "settings.avatar_uploaded" = "Avatar updated.";
 "settings.avatar_upload_failed" = "Couldn't update avatar on server.";
 "settings.avatar_invalid_image" = "Could not read selected image.";
+"settings.invite_other_parent" = "Invite another parent";
+"settings.invite_share_success" = "Invite shared.";
+"settings.invite_share_message" = "%@ uses Smart Oila to keep kids safe. Install the app and pair your child device in minutes.";
+"settings.invite_share_default_name" = "Our family";
 
 "notifications.title" = "Notifications";
 "notifications.mark_all_read" = "Mark read";
@@ -223,6 +231,7 @@
 
 "diagnostics.section_session" = "Session";
 "diagnostics.section_network" = "Network";
+"diagnostics.section_growth" = "Growth";
 "diagnostics.section_geo" = "Geo websocket";
 "diagnostics.section_chat" = "Chat websocket";
 "diagnostics.section_permissions" = "Permissions";
@@ -242,6 +251,17 @@
 "diagnostics.last_error" = "Last error";
 "diagnostics.retries" = "Reconnect retries";
 "diagnostics.updated" = "Updated";
+"diagnostics.invite_share_clicked" = "invite_share_clicked";
+"diagnostics.invite_share_completed" = "invite_share_completed";
+"diagnostics.invite_link_opened" = "invite_link_opened";
+"diagnostics.invite_share_rate" = "invite_completion_rate";
+"diagnostics.invite_share_last_clicked" = "Last share tap";
+"diagnostics.invite_share_last_completed" = "Last share complete";
+"diagnostics.invite_link_last_opened" = "Last invite link open";
+"diagnostics.device_rename_completed" = "device_rename_completed";
+"diagnostics.device_delete_completed" = "device_delete_completed";
+"diagnostics.device_rename_last_completed" = "Last device rename";
+"diagnostics.device_delete_last_completed" = "Last device delete";
 "diagnostics.permission_location" = "Location";
 "diagnostics.permission_notifications" = "Notifications";
 "diagnostics.permission_microphone" = "Microphone";

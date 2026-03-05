@@ -178,7 +178,7 @@ final class SessionStore: ObservableObject {
 
         secureTokens.migrateFromUserDefaults(userDefaults)
 
-        self.dsn = userDefaults.string(forKey: Keys.dsn)
+        self.dsn = userDefaults.string(forKey: Keys.dsn)?.trimmedNonEmpty
         self.profileName = userDefaults.string(forKey: Keys.profileName) ?? "Пользователь"
         self.apiAccessToken = secureTokens.accessToken()
         self.apiRefreshToken = secureTokens.refreshToken()
@@ -189,9 +189,10 @@ final class SessionStore: ObservableObject {
     }
 
     func setDSN(_ value: String?) {
-        dsn = value
-        if let value {
-            userDefaults.set(value, forKey: Keys.dsn)
+        let normalized = value?.trimmedNonEmpty
+        dsn = normalized
+        if let normalized {
+            userDefaults.set(normalized, forKey: Keys.dsn)
         } else {
             userDefaults.removeObject(forKey: Keys.dsn)
         }
@@ -241,12 +242,11 @@ final class SessionStore: ObservableObject {
     private let secureTokens: SecureTokenStoring
 
     private func normalizeAccessToken(_ token: String?) -> String? {
-        guard var token = token?.trimmedNonEmpty else { return nil }
-
-        if token.lowercased().hasPrefix("bearer ") {
-            token = String(token.dropFirst("bearer ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        return token.isEmpty ? nil : token
+        guard let token = token?.trimmedNonEmpty else { return nil }
+        let parts = token
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: " ")
     }
 }

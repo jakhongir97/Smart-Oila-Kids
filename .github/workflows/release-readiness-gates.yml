@@ -1,0 +1,31 @@
+name: Release Readiness Gates
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "SmartOilaKids/**"
+      - "OpenAPI/**"
+      - "scripts/**"
+      - ".github/workflows/release-readiness-gates.yml"
+  pull_request:
+    paths:
+      - "SmartOilaKids/**"
+      - "OpenAPI/**"
+      - "scripts/**"
+      - ".github/workflows/release-readiness-gates.yml"
+
+jobs:
+  release-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run release readiness checks
+        run: ./scripts/run_release_readiness_checks.sh

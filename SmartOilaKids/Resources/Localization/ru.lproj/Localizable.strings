@@ -28,6 +28,8 @@
 "auth.verify_failed" = "Привязка выполнена, но проверка устройства не прошла. Отсканируйте QR снова.";
 "auth.qr_missing_auth_data" = "QR-код не содержит данных для привязки";
 "auth.qr_invalid_contract" = "Неверный формат QR-кода. Сгенерируйте QR заново в приложении родителя.";
+"auth.invite_received_title" = "Приглашение получено от %@";
+"auth.invite_received_subtitle" = "Откройте Smart Oila на телефоне пригласившего родителя и отсканируйте его QR-код для быстрой привязки.";
 
 "scanner.hint" = "Наведите камеру на QR-код родителя";
 "scanner.unavailable_title" = "Сканирование недоступно";
@@ -206,12 +208,18 @@
 "settings.save_failed" = "Сохранено локально. Обновить на сервере не удалось.";
 "settings.device_renamed" = "Название устройства обновлено.";
 "settings.device_rename_failed" = "Не удалось обновить название устройства.";
+"settings.delete_device" = "Удалить устройство";
+"settings.device_deleted" = "Устройство удалено.";
 "settings.delete_failed" = "Не удалось удалить устройство на сервере.";
 "settings.unlink_failed" = "Не удалось отключить устройство на сервере.";
 "settings.edit_avatar" = "Изменить аватар";
 "settings.avatar_uploaded" = "Аватар обновлен.";
 "settings.avatar_upload_failed" = "Не удалось обновить аватар на сервере.";
 "settings.avatar_invalid_image" = "Не удалось прочитать выбранное изображение.";
+"settings.invite_other_parent" = "Пригласить другого родителя";
+"settings.invite_share_success" = "Приглашение отправлено.";
+"settings.invite_share_message" = "%@ использует Smart Oila, чтобы заботиться о безопасности детей. Установите приложение и привяжите устройство ребенка за пару минут.";
+"settings.invite_share_default_name" = "Наша семья";
 
 "notifications.title" = "Уведомления";
 "notifications.mark_all_read" = "Прочитать все";
@@ -223,6 +231,7 @@
 
 "diagnostics.section_session" = "Сессия";
 "diagnostics.section_network" = "Сеть";
+"diagnostics.section_growth" = "Рост";
 "diagnostics.section_geo" = "Geo websocket";
 "diagnostics.section_chat" = "Chat websocket";
 "diagnostics.section_permissions" = "Разрешения";
@@ -242,6 +251,17 @@
 "diagnostics.last_error" = "Последняя ошибка";
 "diagnostics.retries" = "Повторы соединения";
 "diagnostics.updated" = "Обновлено";
+"diagnostics.invite_share_clicked" = "invite_share_clicked";
+"diagnostics.invite_share_completed" = "invite_share_completed";
+"diagnostics.invite_link_opened" = "invite_link_opened";
+"diagnostics.invite_share_rate" = "invite_completion_rate";
+"diagnostics.invite_share_last_clicked" = "Последний тап шаринга";
+"diagnostics.invite_share_last_completed" = "Последний успешный шаринг";
+"diagnostics.invite_link_last_opened" = "Последнее открытие invite-ссылки";
+"diagnostics.device_rename_completed" = "device_rename_completed";
+"diagnostics.device_delete_completed" = "device_delete_completed";
+"diagnostics.device_rename_last_completed" = "Последнее переименование устройства";
+"diagnostics.device_delete_last_completed" = "Последнее удаление устройства";
 "diagnostics.permission_location" = "Геолокация";
 "diagnostics.permission_notifications" = "Уведомления";
 "diagnostics.permission_microphone" = "Микрофон";

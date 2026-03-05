@@ -1,0 +1,3 @@
+timestamp_utc,rest_spec,rest_child_hits,rest_parent_hits,rest_child_pct,rest_parent_pct,rest_gap_with_parent,ws_spec,ws_child_hits,ws_parent_hits,ws_child_pct,ws_parent_pct,ws_gap_with_parent
+2026-03-05T00:14:56+00:00,85,19,78,22.4,91.8,65,23,2,23,8.7,100.0,21
+2026-03-05T00:15:18+00:00,85,19,78,22.4,91.8,65,23,2,23,8.7,100.0,21

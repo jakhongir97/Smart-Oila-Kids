@@ -1,0 +1,26 @@
+name: Script Tests
+
+on:
+  push:
+    paths:
+      - "scripts/**"
+      - ".github/workflows/script-tests.yml"
+  pull_request:
+    paths:
+      - "scripts/**"
+      - ".github/workflows/script-tests.yml"
+
+jobs:
+  test-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run script unit tests
+        run: ./scripts/run_script_tests.sh

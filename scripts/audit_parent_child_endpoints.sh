@@ -29,6 +29,10 @@ extract_rest_ops_from_path_method() {
           if (path !~ /^\/api\//) {
             path = "/api" path
           }
+          if (path ~ /^\/ws\// || path ~ /^\/api\/ws\//) {
+            path = ""
+            next
+          }
           print toupper(method) " " path
           path = ""
         }

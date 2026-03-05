@@ -183,6 +183,7 @@ final class DeviceLockCoordinator: ObservableObject {
         currentDSN = normalized
         state = .unlocked
         lastErrorText = nil
+        resetGlobalLockCache()
 
         pollingTask = Task { [weak self] in
             await self?.pollLoop(for: normalized)
@@ -195,6 +196,7 @@ final class DeviceLockCoordinator: ObservableObject {
         currentDSN = nil
         state = .unlocked
         lastErrorText = nil
+        resetGlobalLockCache()
     }
 
     func refreshNow() async {
@@ -217,7 +219,7 @@ final class DeviceLockCoordinator: ObservableObject {
 
         do {
             let status = try await service.fetchFullLockStatus(dsn: dsn)
-            let globalLockStatus = (try? await service.fetchGlobalLockStatus(dsn: dsn)) ?? false
+            let globalLockStatus = await resolveGlobalLockStatus(dsn: dsn) ?? false
             guard currentDSN == dsn else { return }
 
             state = State(
@@ -228,7 +230,7 @@ final class DeviceLockCoordinator: ObservableObject {
             lastErrorText = nil
         } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
             guard currentDSN == dsn else { return }
-            if let globalLockStatus = try? await service.fetchGlobalLockStatus(dsn: dsn) {
+            if let globalLockStatus = await resolveGlobalLockStatus(dsn: dsn) {
                 state = State(
                     isLocked: globalLockStatus,
                     deviceLocalTime: nil,
@@ -236,12 +238,12 @@ final class DeviceLockCoordinator: ObservableObject {
                 )
                 lastErrorText = nil
             } else {
-                state = .unlocked
+                // Keep current lock state when global fallback is unavailable.
                 lastErrorText = nil
             }
         } catch {
             guard currentDSN == dsn else { return }
-            if let globalLockStatus = try? await service.fetchGlobalLockStatus(dsn: dsn) {
+            if let globalLockStatus = await resolveGlobalLockStatus(dsn: dsn) {
                 state = State(
                     isLocked: globalLockStatus,
                     deviceLocalTime: state.deviceLocalTime,
@@ -255,8 +257,36 @@ final class DeviceLockCoordinator: ObservableObject {
         }
     }
 
+    private func resolveGlobalLockStatus(dsn: String) async -> Bool? {
+        do {
+            let value = try await service.fetchGlobalLockStatus(dsn: dsn)
+            lastKnownGlobalLockStatus = value
+            lastKnownGlobalLockUpdatedAt = Date()
+            return value
+        } catch {
+            return cachedGlobalLockStatus()
+        }
+    }
+
+    private func cachedGlobalLockStatus(referenceDate: Date = Date()) -> Bool? {
+        guard let value = lastKnownGlobalLockStatus,
+              let updatedAt = lastKnownGlobalLockUpdatedAt,
+              referenceDate.timeIntervalSince(updatedAt) <= globalLockCacheTTL else {
+            return nil
+        }
+        return value
+    }
+
+    private func resetGlobalLockCache() {
+        lastKnownGlobalLockStatus = nil
+        lastKnownGlobalLockUpdatedAt = nil
+    }
+
     private let service: DeviceLockServicing
     private var currentDSN: String?
     private var pollingTask: Task<Void, Never>?
     private let pollingIntervalNanoseconds: UInt64 = 15_000_000_000
+    private let globalLockCacheTTL: TimeInterval = 120
+    private var lastKnownGlobalLockStatus: Bool?
+    private var lastKnownGlobalLockUpdatedAt: Date?
 }
