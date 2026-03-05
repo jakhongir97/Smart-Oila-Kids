@@ -5,6 +5,6 @@
       location = "group:SmartOilaKids.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:../Smart Oila Parent/child-tracker-v2.xcodeproj">
+      location = "group:../Smart Oila Parent/SmartOilaParent.xcodeproj">
    </FileRef>
 </Workspace>

@@ -1,3 +1,4 @@
+"CFBundleDisplayName" = "Smart Oila Parent";
 "NSCameraUsageDescription" = "Camera access is required to scan the parent's QR code.";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Geolocation access is needed so that parent can know where the child is.";
 "NSLocationAlwaysUsageDescription" = "Geolocation access is needed so that parent can know where the child is.";

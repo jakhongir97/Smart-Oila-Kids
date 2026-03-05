@@ -9,7 +9,7 @@ CHILD_PROJECT="${CHILD_PROJECT_PATH:-$ROOT_DIR/SmartOilaKids.xcodeproj}"
 CHILD_SCHEME="${CHILD_SCHEME:-SmartOilaKids}"
 CHILD_APP_NAME="${CHILD_APP_NAME:-SmartOilaKids}"
 
-PARENT_PROJECT="${PARENT_PROJECT_PATH:-$DESKTOP_DIR/Smart Oila Parent/child-tracker-v2.xcodeproj}"
+PARENT_PROJECT="${PARENT_PROJECT_PATH:-$DESKTOP_DIR/Smart Oila Parent/SmartOilaParent.xcodeproj}"
 PARENT_SCHEME="${PARENT_SCHEME:-child-tracker-v2}"
 PARENT_APP_NAME="${PARENT_APP_NAME:-child-tracker-v2}"
 

@@ -6,7 +6,7 @@ This repository now includes a top-level workspace and scripts so parent and chi
 
 - `SmartOilaSuite.xcworkspace`
   - `SmartOilaKids.xcodeproj` (current child app)
-  - `../Smart Oila Parent/child-tracker-v2.xcodeproj` (real parent app on Desktop)
+  - `../Smart Oila Parent/SmartOilaParent.xcodeproj` (real parent app on Desktop)
 - `scripts/open_parent_child_workspace.sh`
   - Opens the shared workspace in Xcode.
 - `scripts/run_parent_child_simulators.sh`

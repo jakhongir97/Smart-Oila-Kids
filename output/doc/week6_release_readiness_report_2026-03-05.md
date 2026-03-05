@@ -60,7 +60,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 ## Dependencies Checked
 
 - Parent repository present at `/Users/jakhongirnematov/Desktop/Smart Oila Parent`
-- Parent project present at `/Users/jakhongirnematov/Desktop/Smart Oila Parent/child-tracker-v2.xcodeproj`
+- Parent project present at `/Users/jakhongirnematov/Desktop/Smart Oila Parent/SmartOilaParent.xcodeproj`
 - Parent source path available at `/Users/jakhongirnematov/Desktop/Smart Oila Parent/Source`
 
 ## Remaining Risks
