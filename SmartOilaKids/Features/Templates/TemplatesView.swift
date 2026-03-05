@@ -3,13 +3,8 @@ import SwiftUI
 struct TemplatesView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var templates: [String] = SMSTemplatesStore.load()
-    @State private var draftText: String = ""
-    @State private var editingIndex: Int?
-    @State private var selectedTemplateIndex: Int?
-    @State private var showEditor = false
-    @State private var showActionsDialog = false
-    @State private var showDeleteAlert = false
+    @StateObject private var templatesRepository = SMSTemplatesRepository()
+    @StateObject private var editorState = SMSTemplateEditorState()
     @FocusState private var isEditorFocused: Bool
 
     var body: some View {
@@ -30,9 +25,7 @@ struct TemplatesView: View {
                         trailing: {
                             Button {
                                 AppHaptics.tap()
-                                editingIndex = nil
-                                draftText = ""
-                                showEditor = true
+                                editorState.beginCreate()
                                 isEditorFocused = true
                             } label: {
                                 Image(systemName: "plus")
@@ -48,8 +41,8 @@ struct TemplatesView: View {
                     ChildPurpleSurface {
                         ScrollView(showsIndicators: false) {
                             VStack(spacing: 10) {
-                                ForEach(templates.indices, id: \.self) { index in
-                                    templateRow(text: templates[index], index: index)
+                                ForEach(templatesRepository.templates.indices, id: \.self) { index in
+                                    templateRow(text: templatesRepository.templates[index], index: index)
                                 }
                             }
                             .padding(.horizontal, sidePadding)
@@ -62,13 +55,13 @@ struct TemplatesView: View {
 
                 ChildWatermarkOverlay()
 
-                if showEditor {
+                if editorState.showEditor {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
                         .onTapGesture {
                             AppHaptics.tap()
-                            if draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                showEditor = false
+                            if editorState.isDraftEmpty {
+                                editorState.resetEditor()
                             } else {
                                 saveTemplate()
                             }
@@ -84,7 +77,7 @@ struct TemplatesView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .onChange(of: showEditor) { isPresented in
+        .onChange(of: editorState.showEditor) { isPresented in
             if isPresented {
                 DispatchQueue.main.async {
                     isEditorFocused = true
@@ -104,7 +97,7 @@ struct TemplatesView: View {
         }
         .confirmationDialog(
             L10n.tr("templates.actions_title"),
-            isPresented: $showActionsDialog,
+            isPresented: $editorState.showActionsDialog,
             titleVisibility: .visible
         ) {
             Button(L10n.tr("templates.edit")) {
@@ -112,19 +105,19 @@ struct TemplatesView: View {
             }
 
             Button(L10n.tr("templates.delete"), role: .destructive) {
-                showDeleteAlert = true
+                editorState.showDeleteAlert = true
             }
 
             Button(L10n.tr("common.cancel"), role: .cancel) {
-                selectedTemplateIndex = nil
+                editorState.selectedTemplateIndex = nil
             }
         }
-        .alert(L10n.tr("templates.delete_title"), isPresented: $showDeleteAlert) {
+        .alert(L10n.tr("templates.delete_title"), isPresented: $editorState.showDeleteAlert) {
             Button(L10n.tr("templates.delete"), role: .destructive) {
                 deleteSelectedTemplate()
             }
             Button(L10n.tr("common.cancel"), role: .cancel) {
-                selectedTemplateIndex = nil
+                editorState.selectedTemplateIndex = nil
             }
         } message: {
             Text(L10n.tr("templates.delete_message"))
@@ -143,8 +136,7 @@ struct TemplatesView: View {
 
             Button {
                 AppHaptics.selection()
-                selectedTemplateIndex = index
-                showActionsDialog = true
+                editorState.selectTemplate(at: index)
             } label: {
                 VStack(spacing: 2) {
                     Circle().fill(AppColors.black).frame(width: 4, height: 4)
@@ -164,11 +156,11 @@ struct TemplatesView: View {
 
     private func editorCard(width: CGFloat, height: CGFloat) -> some View {
         VStack(spacing: 14) {
-            Text(editingIndex == nil ? L10n.tr("templates.create") : L10n.tr("templates.edit"))
+            Text(editorState.editingIndex == nil ? L10n.tr("templates.create") : L10n.tr("templates.edit"))
                 .font(AppTypography.unbounded(20, weight: .semibold))
                 .foregroundStyle(AppColors.black)
 
-            TextField(L10n.tr("templates.input_placeholder"), text: $draftText)
+            TextField(L10n.tr("templates.input_placeholder"), text: $editorState.draftText)
                 .font(AppTypography.unbounded(16, weight: .medium))
                 .padding(.horizontal, 15)
                 .frame(height: 60)
@@ -190,46 +182,17 @@ struct TemplatesView: View {
     }
 
     private func saveTemplate() {
-        let value = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-
-        if let editingIndex {
-            templates[editingIndex] = value
-        } else {
-            templates.append(value)
-        }
-
-        SMSTemplatesStore.save(templates)
+        guard editorState.save(using: templatesRepository) else { return }
         AppHaptics.success()
-        showEditor = false
-        draftText = ""
-        editingIndex = nil
-        selectedTemplateIndex = nil
     }
 
     private func beginEditingSelectedTemplate() {
-        guard let selectedTemplateIndex,
-              templates.indices.contains(selectedTemplateIndex) else {
-            return
-        }
-
-        editingIndex = selectedTemplateIndex
-        draftText = templates[selectedTemplateIndex]
-        showEditor = true
+        editorState.beginEditingSelectedTemplate(from: templatesRepository.templates)
         isEditorFocused = true
     }
 
     private func deleteSelectedTemplate() {
-        guard let selectedTemplateIndex,
-              templates.indices.contains(selectedTemplateIndex) else {
-            return
-        }
-
-        templates.remove(at: selectedTemplateIndex)
-        SMSTemplatesStore.save(templates)
-        self.selectedTemplateIndex = nil
-        editingIndex = nil
-        draftText = ""
+        guard editorState.deleteSelectedTemplate(using: templatesRepository) else { return }
         AppHaptics.success()
     }
 }

@@ -37,7 +37,7 @@ struct Datum: Identifiable {
     let senderName: String?
 
     var dateKey: String {
-        Self.dateKey(from: time)
+        ChatTimestamp.dateKey(from: time)
     }
 
     init(userType: String, text: String?, attachments: [String], time: String, senderName: String? = nil) {
@@ -59,12 +59,6 @@ struct Datum: Identifiable {
         case parentName = "parent_name"
     }
 
-    private static func dateKey(from input: String) -> String {
-        if input.count >= 10 {
-            return String(input.prefix(10))
-        }
-        return input
-    }
 }
 
 extension Datum: Decodable {

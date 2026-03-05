@@ -1,57 +1,26 @@
 import Foundation
 
 final class APIClient {
-    private struct APIFailureEnvelope: Decodable {
-        let status: Bool?
-        let message: String?
-        let statusCode: Int?
-
-        enum CodingKeys: String, CodingKey {
-            case status
-            case message
-            case statusCode = "status_code"
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            status = container.decodeLossyBoolIfPresent(forKey: .status)
-            message = container.decodeLossyStringIfPresent(forKey: .message)
-            statusCode = container.decodeLossyIntIfPresent(forKey: .statusCode)
-        }
-    }
-
-    private struct TokenRefreshResponse: Decodable {
-        let refreshToken: String?
-        let accessToken: String?
-        let tokenType: String?
-
-        enum CodingKeys: String, CodingKey {
-            case refreshToken = "refresh_token"
-            case accessToken = "access_token"
-            case tokenType = "token_type"
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            refreshToken = container.decodeLossyStringIfPresent(forKey: .refreshToken)
-            accessToken = container.decodeLossyStringIfPresent(forKey: .accessToken)
-            tokenType = container.decodeLossyStringIfPresent(forKey: .tokenType)
-        }
-    }
-
     init(
         session: URLSession = .shared,
         decoder: JSONDecoder = APIClient.makeDecoder(),
         secureTokens: SecureTokenStoring = SecureTokenStore.shared
     ) {
         self.session = session
-        self.decoder = decoder
-        self.secureTokens = secureTokens
+        let requestFactory = APIRequestFactory(secureTokens: secureTokens)
+        let responseDecoder = APIResponseDecoder(decoder: decoder)
+        self.requestFactory = requestFactory
+        self.responseDecoder = responseDecoder
+        tokenRefreshService = APITokenRefreshService(
+            requestFactory: requestFactory,
+            responseDecoder: responseDecoder,
+            secureTokens: secureTokens
+        )
     }
 
     func requestDataResponse(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
         let startedAt = Date()
-        debugLogRequest(request)
+        APIClientDebugLogger.logRequest(request)
 
         do {
             let (data, response) = try await session.data(for: request)
@@ -59,7 +28,7 @@ final class APIClient {
                 throw NetworkError.invalidResponse
             }
 
-            debugLogResponse(
+            APIClientDebugLogger.logResponse(
                 request: request,
                 response: httpResponse,
                 data: data,
@@ -74,7 +43,7 @@ final class APIClient {
             return (data, httpResponse)
         } catch let error as NetworkError {
             if !error.isServerError {
-                debugLogFailure(
+                APIClientDebugLogger.logFailure(
                     request: request,
                     error: error,
                     duration: Date().timeIntervalSince(startedAt)
@@ -83,7 +52,7 @@ final class APIClient {
             throw error
         } catch {
             let wrappedError = NetworkError.underlying(error)
-            debugLogFailure(
+            APIClientDebugLogger.logFailure(
                 request: request,
                 error: wrappedError,
                 duration: Date().timeIntervalSince(startedAt)
@@ -98,10 +67,10 @@ final class APIClient {
 
     func requestDecodable<T: Decodable>(_ request: URLRequest, as type: T.Type) async throws -> T {
         let data = try await requestData(request)
-        if let apiError = detectEnvelopeError(in: data) {
+        if let apiError = responseDecoder.detectEnvelopeError(in: data) {
             throw apiError
         }
-        return try decode(type, from: data)
+        return try responseDecoder.decode(type, from: data)
     }
 
     func requestDataWithBaseFallback(
@@ -127,7 +96,7 @@ final class APIClient {
                     contentType: contentType
                 )
                 let data = try await requestData(request)
-                if let apiError = detectEnvelopeError(in: data) {
+                if let apiError = responseDecoder.detectEnvelopeError(in: data) {
                     throw apiError
                 }
                 return data
@@ -158,7 +127,7 @@ final class APIClient {
             body: body,
             contentType: contentType
         )
-        return try decode(type, from: data)
+        return try responseDecoder.decode(type, from: data)
     }
 
     func makeRequest(
@@ -170,64 +139,15 @@ final class APIClient {
         body: Data? = nil,
         contentType: String? = nil
     ) throws -> URLRequest {
-        guard var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false) else {
-            throw NetworkError.invalidURL
-        }
-
-        if !queryItems.isEmpty {
-            components.queryItems = queryItems
-        }
-
-        guard let url = components.url else {
-            throw NetworkError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = method.rawValue
-        request.httpBody = body
-        request.timeoutInterval = 30
-
-        if let contentType {
-            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        }
-
-        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-
-        if request.value(forHTTPHeaderField: "Authorization") == nil,
-           let token = secureTokens.accessToken() {
-            request.setValue(token, forHTTPHeaderField: "Authorization")
-        }
-        return request
-    }
-
-    private func detectEnvelopeError(in data: Data) -> NetworkError? {
-        guard let envelope = try? decoder.decode(APIFailureEnvelope.self, from: data) else {
-            return nil
-        }
-
-        guard envelope.status == false else {
-            return nil
-        }
-
-        let body = envelope.message?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return NetworkError.server(
-            statusCode: envelope.statusCode ?? 400,
-            body: (body?.isEmpty == false ? body! : "Request failed")
+        try requestFactory.makeRequest(
+            baseURL: baseURL,
+            path: path,
+            method: method,
+            queryItems: queryItems,
+            headers: headers,
+            body: body,
+            contentType: contentType
         )
-    }
-
-    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
-        do {
-            return try decoder.decode(type, from: data)
-        } catch {
-#if DEBUG
-            let payloadText = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
-            print("[APIClient] Decoding failed for \(String(describing: type))")
-            print("[APIClient] Decoder error: \(error.localizedDescription)")
-            print("[APIClient] Payload: \(payloadText)")
-#endif
-            throw NetworkError.decodingFailed
-        }
     }
 
     private static func makeDecoder() -> JSONDecoder {
@@ -260,184 +180,19 @@ final class APIClient {
 
     private func refreshAuthorizationHeaderIfPossible() async -> String? {
         do {
-            return try await Self.authRefreshCoordinator.refresh(using: self)
+            return try await Self.authRefreshCoordinator.refresh(using: tokenRefreshService) { [self] request in
+                try await requestData(request, allowAuthRefresh: false)
+            }
         } catch {
             return nil
         }
     }
 
-    fileprivate func performTokenRefreshIfPossible() async throws -> String? {
-        guard let refreshToken = secureTokens.refreshToken() else {
-            return nil
-        }
-
-        let payload = ["refresh_token": refreshToken]
-        let body = try JSONSerialization.data(withJSONObject: payload)
-
-        var lastError: Error?
-        for baseURL in AppConfig.apiBaseCandidates {
-            do {
-                var request = try makeRequest(
-                    baseURL: baseURL,
-                    path: "auth/refresh_token",
-                    method: .post,
-                    headers: ["Accept": "application/json"],
-                    body: body,
-                    contentType: "application/json"
-                )
-                request.setValue(nil, forHTTPHeaderField: "Authorization")
-
-                let data = try await requestData(request, allowAuthRefresh: false)
-                if let apiError = detectEnvelopeError(in: data) {
-                    throw apiError
-                }
-
-                let response = try decode(TokenRefreshResponse.self, from: data)
-                guard let accessToken = response.accessToken?.trimmedNonEmpty else {
-                    return nil
-                }
-
-                let authorizationHeader = normalizedAuthorizationHeader(
-                    accessToken: accessToken,
-                    tokenType: response.tokenType
-                )
-                secureTokens.setAccessToken(authorizationHeader)
-
-                if let refreshed = response.refreshToken?.trimmedNonEmpty {
-                    secureTokens.setRefreshToken(refreshed)
-                }
-
-                return authorizationHeader
-            } catch let NetworkError.server(statusCode, _) where statusCode == 400 || statusCode == 401 || statusCode == 403 {
-                secureTokens.clear()
-                return nil
-            } catch {
-                lastError = error
-            }
-        }
-
-        if let lastError {
-            throw lastError
-        }
-
-        return nil
-    }
-
-    private func normalizedAuthorizationHeader(accessToken: String, tokenType: String?) -> String {
-        let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        if token.contains(" ") {
-            return token
-        }
-
-        if let tokenType = tokenType?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !tokenType.isEmpty {
-            return "\(tokenType) \(token)"
-        }
-
-        return token
-    }
-
-    private func debugLogRequest(_ request: URLRequest) {
-#if DEBUG
-        guard let method = request.httpMethod,
-              let url = request.url?.absoluteString else { return }
-
-        print("$ curl -v \\")
-        print("\t-X \(method) \\")
-
-        let headers = request.allHTTPHeaderFields ?? [:]
-        for key in headers.keys.sorted() {
-            let value = headers[key] ?? ""
-            print("\t-H \"\(key): \(value)\" \\")
-        }
-
-        if let body = request.httpBody, !body.isEmpty {
-            if let bodyText = String(data: body, encoding: .utf8) {
-                print("\t-d \"\(escapeForShell(bodyText))\" \\")
-            } else {
-                print("\t--data-binary \"<\(body.count) bytes>\" \\")
-            }
-        }
-
-        print("\t\"\(url)\"")
-#endif
-    }
-
-    private func debugLogResponse(
-        request: URLRequest,
-        response: HTTPURLResponse,
-        data: Data,
-        duration: TimeInterval
-    ) {
-#if DEBUG
-        let statusCode = response.statusCode
-        let elapsed = String(format: "%.3f", duration)
-        let url = request.url?.absoluteString ?? response.url?.absoluteString ?? "unknown_url"
-        print("Response [\(statusCode)] (\(elapsed)s) from \(url)")
-
-        guard !data.isEmpty else {
-            print("Response body: <empty>")
-            return
-        }
-
-        if let jsonObject = try? JSONSerialization.jsonObject(with: data),
-           JSONSerialization.isValidJSONObject(jsonObject),
-           let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
-           let prettyText = String(data: prettyData, encoding: .utf8) {
-            print("Parsed JSON:\n\(prettyText)")
-            return
-        }
-
-        if let text = String(data: data, encoding: .utf8) {
-            print("Response body:\n\(text)")
-        } else {
-            print("Response body: <\(data.count) bytes, non-UTF8>")
-        }
-#endif
-    }
-
-    private func debugLogFailure(request: URLRequest, error: Error, duration: TimeInterval) {
-#if DEBUG
-        let method = request.httpMethod ?? "UNKNOWN_METHOD"
-        let url = request.url?.absoluteString ?? "unknown_url"
-        let elapsed = String(format: "%.3f", duration)
-        print("Request failed [\(method)] \(url) after \(elapsed)s")
-        print("Error: \(error.localizedDescription)")
-#endif
-    }
-
-    private func escapeForShell(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-    }
-
     private let session: URLSession
-    private let decoder: JSONDecoder
-    private let secureTokens: SecureTokenStoring
+    private let requestFactory: APIRequestFactory
+    private let responseDecoder: APIResponseDecoder
+    private let tokenRefreshService: APITokenRefreshService
     private static let authRefreshCoordinator = APIAuthRefreshCoordinator()
-}
-
-private actor APIAuthRefreshCoordinator {
-    private var inFlight: Task<String?, Error>?
-
-    func refresh(using client: APIClient) async throws -> String? {
-        if let inFlight {
-            return try await inFlight.value
-        }
-
-        let task = Task {
-            try await client.performTokenRefreshIfPossible()
-        }
-        inFlight = task
-
-        defer {
-            inFlight = nil
-        }
-
-        return try await task.value
-    }
 }
 
 private extension NetworkError {

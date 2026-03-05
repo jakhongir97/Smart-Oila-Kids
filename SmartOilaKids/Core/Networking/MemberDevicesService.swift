@@ -26,11 +26,13 @@ final class MemberDevicesService: MemberDevicesServicing {
     init(
         client: APIClient = APIClient(),
         secureTokens: SecureTokenStoring = SecureTokenStore.shared,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        mapper: MemberDevicesMapper = MemberDevicesMapper()
     ) {
         self.client = client
         self.secureTokens = secureTokens
         self.userDefaults = userDefaults
+        self.mapper = mapper
     }
 
     func fetchDevices(limit: Int) async throws -> [MemberDeviceRecord] {
@@ -51,26 +53,7 @@ final class MemberDevicesService: MemberDevicesServicing {
                 as: MembersDevicesResponse.self
             )
 
-            let sortedDevices = response.devices.sorted { lhs, rhs in
-                (lhs.id ?? 0) < (rhs.id ?? 0)
-            }
-
-            var visited = Set<Int>()
-            let records: [MemberDeviceRecord] = sortedDevices.compactMap { item -> MemberDeviceRecord? in
-                guard let id = item.id else { return nil }
-                guard visited.insert(id).inserted else { return nil }
-                let resolvedDSN = item.resolvedDSN?.trimmedNonEmpty
-                let name = item.resolvedName?.trimmedNonEmpty
-                    ?? resolvedDSN
-                    ?? "Device \(id)"
-                return MemberDeviceRecord(
-                    id: id,
-                    dsn: resolvedDSN,
-                    name: name,
-                    avatarURL: item.resolvedAvatarURL
-                )
-            }
-
+            let records = mapper.mapRecords(from: response)
             saveCachedRecords(records)
             return records
         } catch {
@@ -104,6 +87,7 @@ final class MemberDevicesService: MemberDevicesServicing {
     private let client: APIClient
     private let secureTokens: SecureTokenStoring
     private let userDefaults: UserDefaults
+    private let mapper: MemberDevicesMapper
 
     private var hasAuthorization: Bool {
         secureTokens.accessToken() != nil
@@ -150,90 +134,4 @@ final class MemberDevicesService: MemberDevicesServicing {
     }
 
     private var cacheKey: String { "MEMBER_DEVICES_CACHE_V1" }
-}
-
-private struct MemberDeviceDTO: Decodable {
-    let id: Int?
-    let dsn: String?
-    let deviceDSN: String?
-    let childrenDeviceDSN: String?
-    let name: String?
-    let username: String?
-    let fullName: String?
-    let avatarURL: String?
-
-    var resolvedDSN: String? {
-        dsn ?? deviceDSN ?? childrenDeviceDSN
-    }
-
-    var resolvedName: String? {
-        name ?? username ?? fullName
-    }
-
-    var resolvedAvatarURL: URL? {
-        guard let avatarURL = avatarURL?.trimmedNonEmpty else { return nil }
-        return URL(string: avatarURL)
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case dsn
-        case deviceDSN = "device_dsn"
-        case childrenDeviceDSN = "children_device_dsn"
-        case name
-        case username
-        case fullName = "full_name"
-        case avatarURL = "avatar_url"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = container.decodeLossyIntIfPresent(forKey: .id)
-        dsn = container.decodeLossyStringIfPresent(forKey: .dsn)
-        deviceDSN = container.decodeLossyStringIfPresent(forKey: .deviceDSN)
-        childrenDeviceDSN = container.decodeLossyStringIfPresent(forKey: .childrenDeviceDSN)
-        name = container.decodeLossyStringIfPresent(forKey: .name)
-        username = container.decodeLossyStringIfPresent(forKey: .username)
-        fullName = container.decodeLossyStringIfPresent(forKey: .fullName)
-        avatarURL = container.decodeLossyStringIfPresent(forKey: .avatarURL)
-    }
-}
-
-private enum MembersDevicesResponse: Decodable {
-    case array([MemberDeviceDTO])
-    case envelope(Envelope)
-
-    struct Envelope: Decodable {
-        let data: [MemberDeviceDTO]?
-        let results: [MemberDeviceDTO]?
-        let devices: [MemberDeviceDTO]?
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-
-        if let items = try? container.decode([MemberDeviceDTO].self) {
-            self = .array(items)
-            return
-        }
-
-        if let envelope = try? container.decode(Envelope.self) {
-            self = .envelope(envelope)
-            return
-        }
-
-        throw DecodingError.typeMismatch(
-            MembersDevicesResponse.self,
-            DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unsupported devices response shape")
-        )
-    }
-
-    var devices: [MemberDeviceDTO] {
-        switch self {
-        case let .array(items):
-            return items
-        case let .envelope(payload):
-            return payload.data ?? payload.results ?? payload.devices ?? []
-        }
-    }
 }

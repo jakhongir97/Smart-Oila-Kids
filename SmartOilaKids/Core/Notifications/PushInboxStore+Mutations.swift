@@ -1,0 +1,148 @@
+import Foundation
+import UIKit
+
+extension PushInboxStore {
+    func append(
+        title: String,
+        body: String,
+        event: String,
+        dsn: String?,
+        isRead: Bool
+    ) {
+        var items = storedItems()
+
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedEvent = event.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDSN = dsn?.trimmedNonEmpty
+        let now = Date()
+        let fingerprint = Self.makeFingerprint(
+            title: normalizedTitle,
+            body: normalizedBody,
+            event: normalizedEvent,
+            dsn: normalizedDSN
+        )
+
+        if let latest = items.first,
+           latest.fingerprint == fingerprint,
+           now.timeIntervalSince(latest.receivedAt) < duplicateWindow {
+            if latest.isRead == false, isRead == true {
+                var updated = latest
+                updated.isRead = true
+                items[0] = updated
+                persist(items)
+                postDidChange(dsn: normalizedDSN, unreadCount: resolvedBadgeCount(in: items))
+            }
+            return
+        }
+
+        let item = PushInboxItem(
+            id: UUID().uuidString,
+            title: normalizedTitle,
+            body: normalizedBody,
+            event: normalizedEvent,
+            dsn: normalizedDSN,
+            receivedAt: now,
+            isRead: isRead,
+            fingerprint: fingerprint
+        )
+
+        items.insert(item, at: 0)
+        if items.count > maxItems {
+            items = Array(items.prefix(maxItems))
+        }
+
+        persist(items)
+        postDidChange(dsn: normalizedDSN, unreadCount: resolvedBadgeCount(in: items))
+    }
+
+    func markAllRead(dsn: String?) {
+        let normalizedDSN = dsn?.trimmedNonEmpty?.lowercased()
+        var items = storedItems()
+        var hasChanges = false
+
+        for index in items.indices {
+            let matchesDSN: Bool
+            if let normalizedDSN {
+                if let itemDSN = items[index].dsn?.lowercased() {
+                    matchesDSN = itemDSN == normalizedDSN
+                } else {
+                    matchesDSN = true
+                }
+            } else {
+                matchesDSN = true
+            }
+
+            if matchesDSN, !items[index].isRead {
+                items[index].isRead = true
+                hasChanges = true
+            }
+        }
+
+        guard hasChanges else { return }
+        persist(items)
+        postDidChange(dsn: dsn, unreadCount: resolvedBadgeCount(in: items))
+    }
+
+    func markRead(itemID: String, dsn: String?) {
+        guard !itemID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let normalizedDSN = dsn?.trimmedNonEmpty?.lowercased()
+        var items = storedItems()
+        var hasChanges = false
+
+        for index in items.indices {
+            guard items[index].id == itemID else { continue }
+
+            if let normalizedDSN,
+               let itemDSN = items[index].dsn?.lowercased(),
+               itemDSN != normalizedDSN {
+                // Keep DSN-less notifications eligible for current active session.
+                continue
+            }
+
+            if !items[index].isRead {
+                items[index].isRead = true
+                hasChanges = true
+            }
+            break
+        }
+
+        guard hasChanges else { return }
+        persist(items)
+        postDidChange(dsn: dsn, unreadCount: resolvedBadgeCount(in: items))
+    }
+
+    func clear(dsn: String?) {
+        let normalizedDSN = dsn?.trimmedNonEmpty?.lowercased()
+        guard let normalizedDSN else {
+            clearAll()
+            return
+        }
+
+        let existing = storedItems()
+        let filtered = existing.filter { item in
+            guard let itemDSN = item.dsn?.lowercased() else {
+                // Clear ambiguous global notifications on DSN/account switch.
+                return false
+            }
+            return itemDSN != normalizedDSN
+        }
+
+        guard filtered.count != existing.count else { return }
+        persist(filtered)
+        postDidChange(dsn: dsn, unreadCount: resolvedBadgeCount(in: filtered))
+    }
+
+    func clearAll() {
+        guard !storedItems().isEmpty else {
+            Task { @MainActor in
+                UIApplication.shared.applicationIconBadgeNumber = 0
+            }
+            return
+        }
+
+        userDefaults.removeObject(forKey: storageKey)
+        postDidChange(dsn: nil, unreadCount: 0)
+    }
+}
