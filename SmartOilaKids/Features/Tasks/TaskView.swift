@@ -12,23 +12,26 @@ struct TaskView: View {
         GeometryReader { proxy in
             let compact = proxy.size.height < 760
             let sidePadding = min(24, max(14, proxy.size.width * 0.05))
-            let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
+            let bottomInset: CGFloat = 16
 
-            ZStack {
-                AppColors.primaryPurple.ignoresSafeArea()
+            ZStack(alignment: .bottomTrailing) {
+                AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(foreground: .white, background: AppColors.primaryPurple)
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: L10n.tr("tasks.title"),
-                        titleColor: .white,
-                        leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
+                        leading: { ChildTopBackButton { dismiss() } },
                         trailing: { Color.clear }
                     )
 
-                    taskSurface(compact: compact, sidePadding: sidePadding, bottomInset: bottomInset)
+                    ChildPurpleSurface {
+                        taskSurface(compact: compact, sidePadding: sidePadding, bottomInset: bottomInset)
+                    }
                 }
+
+                ChildWatermarkOverlay()
             }
         }
         .navigationBarBackButtonHidden(true)

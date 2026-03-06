@@ -1,182 +1,196 @@
 import SwiftUI
 
 extension TaskView {
+    @ViewBuilder
     func taskSurface(compact: Bool, sidePadding: CGFloat, bottomInset: CGFloat) -> some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: compact ? 12 : 15) {
-                switch viewModel.phase {
-                case .loading, .idle:
-                    ProgressView()
-                        .tint(AppColors.accentGreen)
-                        .padding(.top, compact ? 34 : 50)
+        switch viewModel.phase {
+        case .loading, .idle:
+            ProgressView()
+                .tint(AppColors.white)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-                case let .failed(text):
-                    VStack(spacing: 10) {
-                        Text(text)
-                            .font(AppTypography.unbounded(12, weight: .regular))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .multilineTextAlignment(.center)
+        case let .failed(text):
+            VStack(spacing: 10) {
+                Text(text)
+                    .font(AppTypography.unbounded(12, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
 
-                        Button(L10n.tr("common.retry")) {
-                            AppHaptics.tap()
-                            Task { await viewModel.load() }
-                        }
-                        .font(AppTypography.unbounded(14, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .background(AppColors.accentGreen)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .padding(.horizontal, 40)
-                    }
-                    .padding(.top, compact ? 28 : 40)
+                Button(L10n.tr("common.retry")) {
+                    AppHaptics.tap()
+                    Task { await viewModel.load() }
+                }
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 40)
+                .background(AppColors.accentGreen)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 40)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.horizontal, sidePadding)
 
-                case .loaded:
-                    if viewModel.isEmptyState {
-                        VStack(spacing: 10) {
-                            Text(L10n.tr("tasks.empty_title"))
-                                .font(AppTypography.unbounded(16, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .multilineTextAlignment(.center)
-
-                            Text(L10n.tr("tasks.empty_subtitle"))
-                                .font(AppTypography.unbounded(12, weight: .regular))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding(.top, compact ? 34 : 50)
-                    } else {
+        case .loaded:
+            if viewModel.isEmptyState {
+                taskEmptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .padding(.horizontal, sidePadding)
+            } else {
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 10) {
                         if let messageText = viewModel.messageText?.trimmedNonEmpty {
-                            Text(messageText)
-                                .font(AppTypography.unbounded(12, weight: .medium))
-                                .foregroundStyle(.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Color.black.opacity(0.2))
-                                .clipShape(Capsule())
+                            taskMessageBadge(messageText)
                         }
 
                         ForEach(viewModel.awards) { award in
-                            taskCard(
-                                title: award.name,
-                                taskTitle: L10n.tr("tasks.task_title"),
-                                details: taskDetails(for: award.tasks),
-                                completed: award.isCompleted,
-                                isUpdating: viewModel.isUpdating(awardID: award.awardID),
-                                compact: compact,
-                                action: {
-                                    Task {
-                                        await viewModel.toggleNextTask(for: award.awardID)
-                                    }
+                            let isUpdating = viewModel.isUpdating(awardID: award.awardID)
+                            let isActionable = hasPendingTasks(for: award)
+
+                            Button {
+                                AppHaptics.tap()
+                                Task {
+                                    await viewModel.toggleNextTask(for: award.awardID)
                                 }
-                            )
+                            } label: {
+                                taskRow(
+                                    award: award,
+                                    compact: compact,
+                                    isUpdating: isUpdating,
+                                    isActionable: isActionable
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isUpdating || !isActionable)
+                            .opacity((isUpdating || !isActionable) ? 0.9 : 1.0)
                         }
                     }
+                    .padding(.horizontal, sidePadding)
+                    .padding(.top, compact ? 14 : 20)
+                    .padding(.bottom, bottomInset)
+                }
+                .refreshable {
+                    await viewModel.load()
                 }
             }
-            .padding(.horizontal, sidePadding)
-            .padding(.top, compact ? 14 : 20)
-            .padding(.bottom, bottomInset + (compact ? 8 : 14))
-            .refreshable {
-                await viewModel.load()
-            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color(red: 0.31, green: 0.31, blue: 0.31)) // #4F4F4F
-        .clipShape(TopRoundedShape(radius: 30))
     }
 
-    func taskCard(
-        title: String,
-        taskTitle: String,
-        details: [String],
-        completed: Bool,
-        isUpdating: Bool,
+    private var taskEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "checklist")
+                .font(.system(size: 36, weight: .regular))
+                .foregroundStyle(AppColors.white.opacity(0.82))
+
+            Text(L10n.tr("tasks.empty_title"))
+                .font(AppTypography.unbounded(13, weight: .medium))
+                .foregroundStyle(AppColors.white.opacity(0.9))
+                .multilineTextAlignment(.center)
+
+            Text(L10n.tr("tasks.empty_subtitle"))
+                .font(AppTypography.unbounded(11, weight: .regular))
+                .foregroundStyle(AppColors.white.opacity(0.72))
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    private func taskMessageBadge(_ text: String) -> some View {
+        Text(text)
+            .font(AppTypography.unbounded(12, weight: .medium))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.2))
+            .clipShape(Capsule())
+    }
+
+    private func taskRow(
+        award: AwardsResponse,
         compact: Bool,
-        action: (() -> Void)?
+        isUpdating: Bool,
+        isActionable: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: compact ? 12 : 15) {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .fill(Color(red: 0.31, green: 0.31, blue: 0.31)) // #4F4F4F
-                    .frame(width: compact ? 72 : 80, height: compact ? 72 : 80)
-                    .overlay {
-                        if UIImage(named: "IconTrophy") != nil {
-                            Image("IconTrophy")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: compact ? 34 : 40, height: compact ? 34 : 40)
-                                .opacity(0.45)
-                        } else {
-                            Image(systemName: "trophy.fill")
-                                .font(.system(size: compact ? 28 : 34))
-                                .foregroundStyle(Color(red: 0.53, green: 0.53, blue: 0.53))
-                        }
-                    }
+        let previewLines = taskPreviewLines(for: award.tasks)
+        let rowBackground = award.isCompleted ? AppColors.neutral100 : AppColors.white
 
+        return VStack(alignment: .leading, spacing: compact ? 8 : 10) {
+            HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 0) {
-                        Text(title)
-                            .font(AppTypography.unbounded(16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-
-                        Spacer(minLength: 0)
-
-                        if UIImage(named: "IconPencil") != nil {
-                            Image("IconPencil")
-                                .resizable()
-                                .renderingMode(.template)
-                                .foregroundStyle(.white)
-                                .scaledToFit()
-                                .frame(width: 25, height: 25)
-                        } else {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 18, weight: .regular))
-                                .foregroundStyle(.white)
-                        }
-                    }
-
-                    Text(taskTitle)
-                        .font(AppTypography.unbounded(14, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.top, 2)
+                    Text(award.name)
+                        .font(AppTypography.unbounded(13, weight: .semibold))
+                        .foregroundStyle(AppColors.black)
                         .lineLimit(2)
 
-                    ForEach(details.filter { !$0.isEmpty }, id: \.self) { line in
-                        Text(line)
-                            .font(AppTypography.unbounded(12, weight: .regular))
-                            .foregroundStyle(Color(red: 0.53, green: 0.53, blue: 0.53)) // #868686
-                            .lineLimit(2)
-                    }
+                    Text(L10n.tr("tasks.task_title"))
+                        .font(AppTypography.unbounded(10, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer(minLength: 6)
+
+                taskStatusChip(completed: award.isCompleted, isUpdating: isUpdating)
             }
 
-            Spacer(minLength: 14)
-
-            Button {
-                AppHaptics.tap()
-                action?()
-            } label: {
-                Text(buttonTitle(completed: completed, isUpdating: isUpdating))
-                    .font(AppTypography.unbounded(16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: compact ? 42 : 45)
-                    .background(AppColors.accentGreen)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .padding(.horizontal, 20)
+            ForEach(Array(previewLines.enumerated()), id: \.offset) { item in
+                Text(item.element)
+                    .font(AppTypography.unbounded(11, weight: .regular))
+                    .foregroundStyle(AppColors.black.opacity(0.82))
+                    .lineLimit(2)
             }
-            .buttonStyle(.plain)
-            .disabled(completed || isUpdating || action == nil)
-            .opacity((completed || isUpdating || action == nil) ? 0.85 : 1.0)
+
+            HStack(alignment: .center, spacing: 8) {
+                if !award.tasks.isEmpty {
+                    Label(taskProgressText(for: award), systemImage: award.isCompleted ? "checkmark.circle.fill" : "circle.dotted")
+                        .font(AppTypography.unbounded(10, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                if isUpdating {
+                    ProgressView()
+                        .tint(AppColors.primaryPurple)
+                        .scaleEffect(0.8)
+                } else if isActionable {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColors.textSecondary.opacity(0.75))
+                }
+            }
         }
-        .padding(compact ? 12 : 15)
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: compact ? 176 : 190)
-        .background(Color(red: 0.26, green: 0.26, blue: 0.26)) // #424242
-        .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.vertical, compact ? 12 : 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(rowBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func taskStatusChip(completed: Bool, isUpdating: Bool) -> some View {
+        let title = buttonTitle(completed: completed, isUpdating: isUpdating)
+        let foreground: Color
+        let background: Color
+
+        if isUpdating {
+            foreground = .white
+            background = AppColors.primaryPurple
+        } else if completed {
+            foreground = AppColors.textSecondary
+            background = AppColors.neutral200
+        } else {
+            foreground = AppColors.black
+            background = AppColors.accentGreen.opacity(0.24)
+        }
+
+        return Text(title)
+            .font(AppTypography.unbounded(10, weight: .medium))
+            .foregroundStyle(foreground)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(background)
+            .clipShape(Capsule())
     }
 }

@@ -8,14 +8,12 @@ struct MainSurfaceView: View {
     let usagePhase: LoadPhase
     let pendingTasksCount: Int?
     let unreadChatCount: Int?
-    let isSendingSOS: Bool
     let onInfoTap: () -> Void
     let onNotificationTap: () -> Void
     let onSettingsTap: () -> Void
     let onRetryUsage: () -> Void
     let onTasksTap: () -> Void
     let onChatTap: () -> Void
-    let onSendSOS: () -> Void
 
     var body: some View {
         GeometryReader { proxy in
@@ -23,7 +21,7 @@ struct MainSurfaceView: View {
             let sectionSpacing = proxy.size.height < 760 ? 16.0 : 20.0
             let compact = proxy.size.height < 760
 
-            ZStack(alignment: .bottomTrailing) {
+            ZStack {
                 AppColors.surfacePurple
                     .ignoresSafeArea()
 
@@ -84,10 +82,6 @@ struct MainSurfaceView: View {
                 }
 
                 ChildWatermarkOverlay(opacity: 0.45)
-
-                MainSOSFloatingButton(isSending: isSendingSOS, action: onSendSOS)
-                    .padding(.trailing, horizontalPadding)
-                    .padding(.bottom, max(22, proxy.safeAreaInsets.bottom + 8))
             }
         }
     }

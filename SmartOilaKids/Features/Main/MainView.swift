@@ -27,7 +27,6 @@ struct MainView: View {
             usagePhase: viewModel.usagePhase,
             pendingTasksCount: viewModel.pendingTasksCount,
             unreadChatCount: viewModel.unreadChatCount,
-            isSendingSOS: viewModel.isSendingSOS,
             onInfoTap: { showTemplates = true },
             onNotificationTap: { showNotifications = true },
             onSettingsTap: { showSettings = true },
@@ -40,11 +39,6 @@ struct MainView: View {
             onChatTap: {
                 openChatThreadOnPresent = false
                 showChat = true
-            },
-            onSendSOS: {
-                Task {
-                    await viewModel.sendSOS(dsn: sessionStore.dsn)
-                }
             }
         )
         .refreshable {
