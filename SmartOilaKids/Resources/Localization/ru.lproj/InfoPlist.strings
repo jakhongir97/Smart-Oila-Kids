@@ -1,4 +1,4 @@
-"CFBundleDisplayName" = "Smart Oila Parent";
+"CFBundleDisplayName" = "Smart Oila Kids";
 "NSCameraUsageDescription" = "Доступ к камере нужен для сканирования QR-кода родителя.";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Доступ к геолокации нужен, чтобы родитель видел местоположение ребенка.";
 "NSLocationAlwaysUsageDescription" = "Доступ к геолокации нужен, чтобы родитель видел местоположение ребенка.";
