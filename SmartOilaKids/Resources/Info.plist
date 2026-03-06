@@ -4,22 +4,22 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
-	<key>CFBundleLocalizations</key>
-	<array>
-		<string>en</string>
-		<string>ru</string>
-		<string>uz</string>
-	</array>
+	<key>CFBundleDisplayName</key>
+	<string>Smart Oila Parent</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ru</string>
+		<string>uz</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundleDisplayName</key>
-	<string>Smart Oila Parent</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -36,10 +36,10 @@
 	<string>Geolocation access is needed so that parent can know where the child is.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Geolocation access is needed so that parent can know where the child is.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Photo library access is required to send chat attachments.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access is required for voice-related child safety features.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is required to send chat attachments.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Unbounded-Variable.ttf</string>
@@ -53,8 +53,6 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<key>UIRequiresFullScreen</key>
-	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
@@ -62,5 +60,18 @@
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
 </dict>
 </plist>

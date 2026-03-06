@@ -267,7 +267,7 @@
 		49977BBAAEBC200E5D08575F /* GeoConnectionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoConnectionStatus.swift; sourceTree = "<group>"; };
 		49EAE443DDF73B71557D58DE /* GeoServiceConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoServiceConfiguration.swift; sourceTree = "<group>"; };
 		4BF3D23614F7FCCCB7CAB058 /* AuthInputNormalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthInputNormalization.swift; sourceTree = "<group>"; };
-		4D0BC0423D576553D183CB83 /* SmartOilaKids.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SmartOilaKids.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D0BC0423D576553D183CB83 /* SmartOilaKids.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartOilaKids.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4DF6DBF6858AD49CC68DFE5A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		5067CE0B4251BE5369640F2A /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		50A4FBD238DCB41884D85305 /* MainDashboardWeekRange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDashboardWeekRange.swift; sourceTree = "<group>"; };
@@ -1124,14 +1124,17 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1143,14 +1146,17 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
