@@ -352,6 +352,26 @@
 "settings.invite_share_success" = "Taklif yuborildi.";
 "settings.invite_share_message" = "%@ Smart Oila orqali bolalar xavfsizligini kuzatadi. Ilovani o'rnating va bolangiz qurilmasini bir necha daqiqada ulang.";
 "settings.invite_share_default_name" = "Bizning oilamiz";
+"settings.control_protection" = "Boshqaruv himoyasi";
+"settings.control_protection_title_on" = "Muhim bo'limlar himoyalangan.";
+"settings.control_protection_title_off" = "Muhim bo'limlar ochiq.";
+"settings.control_protection_title_unavailable" = "Qurilma autentifikatsiyasi mavjud emas.";
+"settings.control_protection_subtitle_on" = "Ruxsatlar, ilova boshqaruvi, media tarixi va qurilma amallari faqat qurilma autentifikatsiyasidan keyin ochiladi.";
+"settings.control_protection_subtitle_off" = "Muhim boshqaruv bo'limlari Face ID, Touch ID yoki kod-parolsiz ochiladi.";
+"settings.control_protection_subtitle_unavailable" = "Smart Oila boshqaruvini himoyalash uchun ushbu iPhone'da Face ID, Touch ID yoki kod-parol sozlang.";
+"settings.control_protection_subtitle_unlocked" = "Himoyalangan bo'limlar yaqinda ochilgan va yana biroz vaqt ochiq qoladi.";
+"settings.control_protection_status_on" = "Yoqilgan";
+"settings.control_protection_status_off" = "O'chirilgan";
+"settings.control_protection_status_unavailable" = "Mavjud emas";
+"settings.control_protection_status_unlocked" = "Ochiq";
+"settings.control_protection_note" = "Autentifikatsiyadan keyin himoyalangan bo'limlar 2 daqiqa ochiq qoladi, agar ilova fon rejimiga o'tmasa.";
+"settings.control_protection_enable" = "Himoyani yoqish";
+"settings.control_protection_disable" = "Himoyani o'chirish";
+"settings.control_protection_enabled" = "Muhim bo'limlar endi himoyalangan.";
+"settings.control_protection_disabled" = "Muhim bo'limlar endi ochiq.";
+"settings.control_protection_unavailable" = "Avval ushbu iPhone'da Face ID, Touch ID yoki kod-parol sozlang.";
+"settings.control_protection_required" = "Bu bo'limni ochish uchun qurilma autentifikatsiyasi kerak.";
+"settings.control_protection_auth_reason" = "Himoyalangan Smart Oila boshqaruvini ochish uchun tasdiqlang.";
 
 "notifications.title" = "Bildirishnomalar";
 "notifications.mark_all_read" = "Barchasini o'qish";

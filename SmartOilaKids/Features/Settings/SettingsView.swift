@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State var inviteSharePayload: SettingsInviteSharePayload?
     @StateObject var bannerCenter = SettingsBannerCenter()
     @StateObject private var permissionManager = LocationPermissionManager()
+    @StateObject var settingsProtection = SettingsProtectionController.shared
     @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
     @FocusState private var isNameFieldFocused: Bool
 
@@ -59,6 +60,7 @@ struct SettingsView: View {
                                     userName: $userName,
                                     themeBinding: themeBinding,
                                     languageBinding: languageBinding,
+                                    protectionController: settingsProtection,
                                     connectedDevices: viewModel.connectedDevices,
                                     isSaving: viewModel.isSaving,
                                     nameFieldFocus: $isNameFieldFocused,
@@ -70,30 +72,60 @@ struct SettingsView: View {
                                     },
                                     onOpenDiagnostics: {
                                         AppHaptics.tap()
-                                        showDiagnostics = true
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                showDiagnostics = true
+                                            }
+                                        }
                                     },
                                     onOpenPermissions: {
                                         AppHaptics.tap()
-                                        permissionManager.refreshStatuses()
-                                        showPermissionsCenter = true
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                permissionManager.refreshStatuses()
+                                                showPermissionsCenter = true
+                                            }
+                                        }
                                     },
                                     onOpenAppLock: {
                                         AppHaptics.tap()
-                                        permissionManager.refreshStatuses()
-                                        appLockStore.activate(dsn: sessionStore.dsn)
-                                        showAppLockSetup = true
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                permissionManager.refreshStatuses()
+                                                appLockStore.activate(dsn: sessionStore.dsn)
+                                                showAppLockSetup = true
+                                            }
+                                        }
                                     },
                                     onOpenMediaHistory: {
                                         AppHaptics.tap()
-                                        permissionManager.refreshStatuses()
-                                        showMediaHistory = true
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                permissionManager.refreshStatuses()
+                                                showMediaHistory = true
+                                            }
+                                        }
                                     },
                                     onInviteParent: {
                                         AppHaptics.tap()
-                                        beginInviteShare()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                beginInviteShare()
+                                            }
+                                        }
                                     },
                                     onEditDevice: { device in
-                                        beginDeviceEditing(device)
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                beginDeviceEditing(device)
+                                            }
+                                        }
+                                    },
+                                    onToggleProtection: { shouldEnable in
+                                        AppHaptics.tap()
+                                        Task {
+                                            await updateSettingsProtection(shouldEnable)
+                                        }
                                     },
                                     onSave: {
                                         AppHaptics.tap()
@@ -101,11 +133,19 @@ struct SettingsView: View {
                                     },
                                     onLogout: {
                                         AppHaptics.tap()
-                                        sessionStore.clearSession()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                sessionStore.clearSession()
+                                            }
+                                        }
                                     },
                                     onUnlink: {
                                         AppHaptics.tap()
-                                        showUnlinkAlert = true
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                showUnlinkAlert = true
+                                            }
+                                        }
                                     }
                                 )
                             }
@@ -120,6 +160,7 @@ struct SettingsView: View {
         .navigationBarBackButtonHidden(true)
         .task {
             appLockStore.activate(dsn: sessionStore.dsn)
+            settingsProtection.refreshAvailability()
             await loadRemoteDataIfNeeded()
         }
         .toolbar {

@@ -2,6 +2,44 @@ import PhotosUI
 import SwiftUI
 
 extension SettingsView {
+    @MainActor
+    func performProtectedSettingsAction(_ action: () -> Void) async {
+        let isUnlocked = await settingsProtection.authenticateIfNeeded()
+        guard isUnlocked else {
+            AppHaptics.warning()
+            banner(L10n.tr("settings.control_protection_required"))
+            return
+        }
+
+        action()
+    }
+
+    @MainActor
+    func updateSettingsProtection(_ shouldEnable: Bool) async {
+        if shouldEnable {
+            let didEnable = settingsProtection.enableProtection()
+            if didEnable {
+                AppHaptics.success()
+                banner(L10n.tr("settings.control_protection_enabled"))
+            } else {
+                AppHaptics.warning()
+                banner(L10n.tr("settings.control_protection_unavailable"))
+            }
+            return
+        }
+
+        let isUnlocked = await settingsProtection.authenticateIfNeeded()
+        guard isUnlocked else {
+            AppHaptics.warning()
+            banner(L10n.tr("settings.control_protection_required"))
+            return
+        }
+
+        settingsProtection.disableProtection()
+        AppHaptics.success()
+        banner(L10n.tr("settings.control_protection_disabled"))
+    }
+
     func save() {
         let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

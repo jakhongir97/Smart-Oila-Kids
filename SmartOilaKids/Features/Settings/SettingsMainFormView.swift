@@ -11,6 +11,7 @@ struct SettingsMainFormView: View {
     @Binding var userName: String
     let themeBinding: Binding<AppTheme>
     let languageBinding: Binding<AppLanguage>
+    @ObservedObject var protectionController: SettingsProtectionController
     let connectedDevices: [ConnectedDevice]
     let isSaving: Bool
     let nameFieldFocus: FocusState<Bool>.Binding
@@ -22,6 +23,7 @@ struct SettingsMainFormView: View {
     let onOpenMediaHistory: () -> Void
     let onInviteParent: () -> Void
     let onEditDevice: (ConnectedDevice) -> Void
+    let onToggleProtection: (Bool) -> Void
     let onSave: () -> Void
     let onLogout: () -> Void
     let onUnlink: () -> Void
@@ -55,6 +57,13 @@ struct SettingsMainFormView: View {
                 onOpenAppLock: onOpenAppLock,
                 onOpenMediaHistory: onOpenMediaHistory,
                 onInviteParent: onInviteParent
+            )
+
+            SettingsProtectionSection(
+                compact: compact,
+                sidePadding: sidePadding,
+                controller: protectionController,
+                onToggleProtection: onToggleProtection
             )
 
             SettingsConnectedDevicesSection(

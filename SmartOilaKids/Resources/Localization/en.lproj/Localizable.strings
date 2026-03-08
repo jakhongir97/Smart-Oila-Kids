@@ -352,6 +352,26 @@
 "settings.invite_share_success" = "Invite shared.";
 "settings.invite_share_message" = "%@ uses Smart Oila to keep kids safe. Install the app and pair your child device in minutes.";
 "settings.invite_share_default_name" = "Our family";
+"settings.control_protection" = "Control protection";
+"settings.control_protection_title_on" = "Sensitive controls are protected.";
+"settings.control_protection_title_off" = "Sensitive controls are open.";
+"settings.control_protection_title_unavailable" = "Device authentication is unavailable.";
+"settings.control_protection_subtitle_on" = "Permissions, app controls, media history, and device actions require device authentication before they open.";
+"settings.control_protection_subtitle_off" = "Sensitive control areas can be opened without Face ID, Touch ID, or passcode.";
+"settings.control_protection_subtitle_unavailable" = "Set up Face ID, Touch ID, or a device passcode on this iPhone to protect Smart Oila controls.";
+"settings.control_protection_subtitle_unlocked" = "Protected controls were unlocked recently and will stay open for a short time.";
+"settings.control_protection_status_on" = "On";
+"settings.control_protection_status_off" = "Off";
+"settings.control_protection_status_unavailable" = "Unavailable";
+"settings.control_protection_status_unlocked" = "Unlocked";
+"settings.control_protection_note" = "After authentication, protected controls stay unlocked for 2 minutes unless the app goes to the background.";
+"settings.control_protection_enable" = "Turn on protection";
+"settings.control_protection_disable" = "Turn off protection";
+"settings.control_protection_enabled" = "Sensitive controls are protected now.";
+"settings.control_protection_disabled" = "Sensitive controls are open now.";
+"settings.control_protection_unavailable" = "Set up Face ID, Touch ID, or a device passcode on this iPhone first.";
+"settings.control_protection_required" = "Device authentication is required to open this area.";
+"settings.control_protection_auth_reason" = "Authenticate to open protected Smart Oila controls.";
 
 "notifications.title" = "Notifications";
 "notifications.mark_all_read" = "Mark read";

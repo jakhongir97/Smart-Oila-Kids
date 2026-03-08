@@ -215,21 +215,8 @@ private struct SettingsPermissionRow: View {
         Binding(
             get: { manager.isSatisfied(requirement) },
             set: { newValue in
-                guard manager.isInteractive(requirement) else { return }
-
-                // iOS permission toggles cannot be force-disabled in-app once granted.
-                // Ignore "off" attempts and refresh visual state.
-                guard newValue else {
-                    manager.refreshStatuses()
-                    return
-                }
-
                 AppHaptics.tap()
-                manager.performAction(for: requirement)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    manager.refreshStatuses()
-                }
+                manager.handleToggleChange(for: requirement, isEnabled: newValue)
             }
         )
     }

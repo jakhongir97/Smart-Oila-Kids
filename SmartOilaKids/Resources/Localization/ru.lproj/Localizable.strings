@@ -352,6 +352,26 @@
 "settings.invite_share_success" = "Приглашение отправлено.";
 "settings.invite_share_message" = "%@ использует Smart Oila, чтобы заботиться о безопасности детей. Установите приложение и привяжите устройство ребенка за пару минут.";
 "settings.invite_share_default_name" = "Наша семья";
+"settings.control_protection" = "Защита управления";
+"settings.control_protection_title_on" = "Чувствительные разделы защищены.";
+"settings.control_protection_title_off" = "Чувствительные разделы открыты.";
+"settings.control_protection_title_unavailable" = "Аутентификация устройства недоступна.";
+"settings.control_protection_subtitle_on" = "Разрешения, управление приложениями, медиаистория и действия с устройством открываются только после аутентификации устройства.";
+"settings.control_protection_subtitle_off" = "Чувствительные разделы управления можно открыть без Face ID, Touch ID или код-пароля.";
+"settings.control_protection_subtitle_unavailable" = "Настройте Face ID, Touch ID или код-пароль на этом iPhone, чтобы защитить управление Smart Oila.";
+"settings.control_protection_subtitle_unlocked" = "Защищённые разделы недавно были разблокированы и ещё недолго останутся открытыми.";
+"settings.control_protection_status_on" = "Вкл";
+"settings.control_protection_status_off" = "Выкл";
+"settings.control_protection_status_unavailable" = "Недоступно";
+"settings.control_protection_status_unlocked" = "Открыто";
+"settings.control_protection_note" = "После аутентификации защищённые разделы остаются открытыми 2 минуты, если приложение не ушло в фон.";
+"settings.control_protection_enable" = "Включить защиту";
+"settings.control_protection_disable" = "Выключить защиту";
+"settings.control_protection_enabled" = "Чувствительные разделы теперь защищены.";
+"settings.control_protection_disabled" = "Чувствительные разделы теперь открыты.";
+"settings.control_protection_unavailable" = "Сначала настройте Face ID, Touch ID или код-пароль на этом iPhone.";
+"settings.control_protection_required" = "Для открытия этого раздела нужна аутентификация устройства.";
+"settings.control_protection_auth_reason" = "Подтвердите личность, чтобы открыть защищённые разделы Smart Oila.";
 
 "notifications.title" = "Уведомления";
 "notifications.mark_all_read" = "Прочитать все";

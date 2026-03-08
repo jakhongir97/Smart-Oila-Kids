@@ -168,6 +168,145 @@ struct SettingsQuickActionsSection: View {
     }
 }
 
+struct SettingsProtectionSection: View {
+    let compact: Bool
+    let sidePadding: CGFloat
+    @ObservedObject var controller: SettingsProtectionController
+    let onToggleProtection: (Bool) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(L10n.tr("settings.control_protection"))
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, sidePadding)
+                .padding(.top, compact ? 16 : 20)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "lock.shield.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppColors.primaryPurple)
+                        .frame(width: 36, height: 36)
+                        .background(AppColors.secondaryPurple.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(statusTitle)
+                            .font(AppTypography.unbounded(12, weight: .semibold))
+                            .foregroundStyle(AppColors.black)
+
+                        Text(statusSubtitle)
+                            .font(AppTypography.unbounded(10, weight: .regular))
+                            .foregroundStyle(AppColors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Text(statusBadge)
+                        .font(AppTypography.unbounded(10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(statusBadgeColor)
+                        .clipShape(Capsule())
+                }
+
+                Text(L10n.tr("settings.control_protection_note"))
+                    .font(AppTypography.unbounded(10, weight: .regular))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(actionTitle) {
+                    onToggleProtection(!controller.isEnabled)
+                }
+                .buttonStyle(SettingsProtectionButtonStyle())
+                .disabled(!controller.isAuthenticationAvailable && !controller.isEnabled)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(AppColors.white)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.horizontal, sidePadding)
+            .padding(.top, compact ? 8 : 10)
+        }
+    }
+
+    private var statusTitle: String {
+        if !controller.isAuthenticationAvailable {
+            return L10n.tr("settings.control_protection_title_unavailable")
+        }
+
+        if controller.isEnabled {
+            return L10n.tr("settings.control_protection_title_on")
+        }
+
+        return L10n.tr("settings.control_protection_title_off")
+    }
+
+    private var statusSubtitle: String {
+        if !controller.isAuthenticationAvailable {
+            return L10n.tr("settings.control_protection_subtitle_unavailable")
+        }
+
+        if controller.isEnabled {
+            if controller.hasActiveUnlockSession {
+                return L10n.tr("settings.control_protection_subtitle_unlocked")
+            }
+            return L10n.tr("settings.control_protection_subtitle_on")
+        }
+
+        return L10n.tr("settings.control_protection_subtitle_off")
+    }
+
+    private var statusBadge: String {
+        if !controller.isAuthenticationAvailable {
+            return L10n.tr("settings.control_protection_status_unavailable")
+        }
+
+        if controller.isEnabled {
+            if controller.hasActiveUnlockSession {
+                return L10n.tr("settings.control_protection_status_unlocked")
+            }
+            return L10n.tr("settings.control_protection_status_on")
+        }
+
+        return L10n.tr("settings.control_protection_status_off")
+    }
+
+    private var statusBadgeColor: Color {
+        if !controller.isAuthenticationAvailable {
+            return AppColors.dangerRed
+        }
+
+        if controller.isEnabled {
+            return AppColors.accentGreen
+        }
+
+        return AppColors.primaryPurple
+    }
+
+    private var actionTitle: String {
+        controller.isEnabled
+            ? L10n.tr("settings.control_protection_disable")
+            : L10n.tr("settings.control_protection_enable")
+    }
+}
+
+private struct SettingsProtectionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(AppTypography.unbounded(12, weight: .semibold))
+            .foregroundStyle(AppColors.primaryPurple)
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(AppColors.secondaryPurple.opacity(configuration.isPressed ? 0.22 : 0.14))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
 struct SettingsSecondaryActionButton: View {
     let iconName: String
     let title: String

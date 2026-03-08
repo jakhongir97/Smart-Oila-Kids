@@ -189,19 +189,8 @@ struct GeoPermissionChecklistStageView: View {
         Binding(
             get: { manager.isSatisfied(requirement) },
             set: { newValue in
-                guard manager.isInteractive(requirement) else { return }
-
-                guard newValue else {
-                    manager.refreshStatuses()
-                    return
-                }
-
                 AppHaptics.tap()
-                manager.performAction(for: requirement)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    manager.refreshStatuses()
-                }
+                manager.handleToggleChange(for: requirement, isEnabled: newValue)
             }
         )
     }

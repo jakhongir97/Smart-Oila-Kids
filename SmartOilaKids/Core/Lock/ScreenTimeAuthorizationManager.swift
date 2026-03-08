@@ -57,6 +57,26 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
         refreshStatus()
     }
 
+    func revokeAuthorization() async {
+        lastErrorText = nil
+
+        await withCheckedContinuation { continuation in
+            AuthorizationCenter.shared.revokeAuthorization { [weak self] result in
+                Task { @MainActor in
+                    switch result {
+                    case .success:
+                        self?.markedUnavailable = false
+                    case .failure(let error):
+                        self?.lastErrorText = Self.errorText(for: error)
+                    }
+
+                    self?.refreshStatus()
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
     private init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         persistedStatus = userDefaults.string(forKey: Keys.persistedStatus).flatMap(ScreenTimePermissionStatus.init(rawValue:))

@@ -174,6 +174,7 @@
 		AA95BAE093CDEDE1DFC86580 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0896EA30F859C46916368E4C /* MainView.swift */; };
 		AB4B4C32719A8D784F730D7D /* DeviceRecordingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F26C5C6B3DA01F74B933DD /* DeviceRecordingModels.swift */; };
 		ABDC972206A0DD1BA72347C4 /* DeviceAppLockSelectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000EB148968CDFEE38501FBC /* DeviceAppLockSelectionStore.swift */; };
+		AC66ED9A739886DD1535E3E5 /* SettingsProtectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1315ADC2572DD71C45627D5 /* SettingsProtectionController.swift */; };
 		ACABC293E4AA58D4CA71C1B5 /* MainAdInfoCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33F198E77771344886E3DFB /* MainAdInfoCard.swift */; };
 		ACF90C412AB10A271B7BDFBB /* ScreenTimeUsageReportBridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50786F23B965A8D8ECF485A8 /* ScreenTimeUsageReportBridgeView.swift */; };
 		AD5C92AF95D7ADAAA7DF3D24 /* ChatPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5BA64796AAACBED381435DB /* ChatPersistence.swift */; };
@@ -520,6 +521,7 @@
 		CE9548B0248BF51FB0A4C40A /* DeviceApplicationLockPayloadParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceApplicationLockPayloadParser.swift; sourceTree = "<group>"; };
 		D040E408B09C57D035743023 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		D119B18D174C7731B54000FC /* DeviceLockScheduleMonitorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockScheduleMonitorController.swift; sourceTree = "<group>"; };
+		D1315ADC2572DD71C45627D5 /* SettingsProtectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsProtectionController.swift; sourceTree = "<group>"; };
 		D37DD714AF705AA9CF3DA42E /* GeoDebugOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoDebugOverlay.swift; sourceTree = "<group>"; };
 		D4C37FFA02757A5052BB236B /* MainViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewModel.swift; sourceTree = "<group>"; };
 		D5602C098BBE7616524A4DA1 /* ChatThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatThreadView.swift; sourceTree = "<group>"; };
@@ -843,6 +845,7 @@
 				6FF2AD85FF333FE162D41EE5 /* Media */,
 				C1555C3164EF0C23E9D187FC /* Networking */,
 				B6B434DC74D447F3371CF870 /* Notifications */,
+				C485208B51F45B66DE07EE6D /* Security */,
 				4374B512E56E3203B84EDB26 /* Socket */,
 				9AC95EE7A705614E14CD50F1 /* Storage */,
 				4AA5339A6BBCC84515881AAD /* Usage */,
@@ -979,6 +982,14 @@
 				E7613A83E34A4278DABAA4E3 /* NetworkError.swift */,
 			);
 			path = Networking;
+			sourceTree = "<group>";
+		};
+		C485208B51F45B66DE07EE6D /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				D1315ADC2572DD71C45627D5 /* SettingsProtectionController.swift */,
+			);
+			path = Security;
 			sourceTree = "<group>";
 		};
 		D4AB63EB01CEAB8CCC9B2E4F /* App */ = {
@@ -1470,6 +1481,7 @@
 				0259B31C4B6320BCFCE28738 /* SettingsMediaHistoryPanelView.swift in Sources */,
 				7D48CB8AAE557D95BD46BE0C /* SettingsMediaRecordingPreview.swift in Sources */,
 				687CC4C41518CF17765CD4EF /* SettingsPermissionsPanelView.swift in Sources */,
+				AC66ED9A739886DD1535E3E5 /* SettingsProtectionController.swift in Sources */,
 				409496E1BBB344D525F2DC15 /* SettingsService+Devices.swift in Sources */,
 				FAA7F679E032ACEC311C71D0 /* SettingsService+Helpers.swift in Sources */,
 				FDFF7733C266BFADE0EB2D51 /* SettingsService+Profile.swift in Sources */,
