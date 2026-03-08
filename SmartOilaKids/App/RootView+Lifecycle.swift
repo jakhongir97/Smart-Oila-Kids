@@ -2,9 +2,16 @@ import SwiftUI
 
 extension RootView {
     func handleAppear() {
+        let isInitialAppear = !didHandleInitialAppear
+        didHandleInitialAppear = true
+        let shouldArmLaunchRecovery = isInitialAppear && shouldArmLaunchRecoveryCheck(referenceDate: Date())
+
         lastSessionDSN = sessionStore.dsn?.trimmedNonEmpty
         syncGeoService(with: sessionStore.dsn)
-        syncLockService(with: sessionStore.dsn)
+        syncLockService(with: sessionStore.dsn, armRecoveryCheck: shouldArmLaunchRecovery)
+        syncMediaService(with: sessionStore.dsn)
+        clearPersistedBackgroundTimestamp()
+        lastBackgroundedAt = nil
         Task {
             await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
             await PushInboxStore.shared.reconcileAppBadge()
@@ -18,6 +25,7 @@ extension RootView {
 
         syncGeoService(with: newValue)
         syncLockService(with: newValue)
+        syncMediaService(with: newValue)
 
         Task {
             await PushTokenSyncCoordinator.shared.updateDSN(normalizedNewDSN)
@@ -38,10 +46,30 @@ extension RootView {
     }
 
     func handleScenePhaseChange(_ newValue: ScenePhase) {
+        if newValue == .background {
+            let now = Date()
+            lastBackgroundedAt = now
+            persistBackgroundTimestamp(now)
+            return
+        }
+
         guard newValue == .active else { return }
+
+        if shouldArmRecoveryCheck(referenceDate: Date()) {
+            lockCoordinator.armForegroundRecoveryCheck()
+        }
+        lastBackgroundedAt = nil
+        if didHandleInitialAppear {
+            clearPersistedBackgroundTimestamp()
+        }
+
         Task {
             await lockCoordinator.refreshNow()
+            await DeviceAppLockSyncCoordinator.shared.retryNow()
+            await ScreenTimeUsageCoordinator.shared.retryNow()
         }
+
+        syncMediaService(with: sessionStore.dsn)
     }
 
     func handleLockRefreshNotification(_ notification: Notification) {
@@ -61,12 +89,48 @@ private extension RootView {
         geoBackgroundService.start(dsn: dsn)
     }
 
-    func syncLockService(with dsn: String?) {
-        lockCoordinator.start(dsn: dsn)
+    func syncLockService(with dsn: String?, armRecoveryCheck: Bool = false) {
+        lockCoordinator.start(dsn: dsn, armRecoveryCheck: armRecoveryCheck)
+    }
+
+    func syncMediaService(with dsn: String?) {
+        DeviceRecordingCoordinator.shared.start(dsn: dsn)
     }
 
     func dsnEquals(_ lhs: String, _ rhs: String?) -> Bool {
         guard let rhs = rhs else { return false }
         return lhs.caseInsensitiveCompare(rhs) == .orderedSame
+    }
+
+    func shouldArmRecoveryCheck(referenceDate: Date) -> Bool {
+        guard let lastBackgroundedAt else { return false }
+        return referenceDate.timeIntervalSince(lastBackgroundedAt) >= recoveryResumeThreshold
+    }
+
+    func shouldArmLaunchRecoveryCheck(referenceDate: Date) -> Bool {
+        guard let lastBackgroundedAt = persistedBackgroundTimestamp else { return false }
+        return referenceDate.timeIntervalSince(lastBackgroundedAt) >= recoveryResumeThreshold
+    }
+
+    var recoveryResumeThreshold: TimeInterval {
+        45
+    }
+
+    var persistedBackgroundTimestamp: Date? {
+        let timestamp = UserDefaults.standard.double(forKey: lifecycleBackgroundTimestampKey)
+        guard timestamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    func persistBackgroundTimestamp(_ date: Date) {
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: lifecycleBackgroundTimestampKey)
+    }
+
+    func clearPersistedBackgroundTimestamp() {
+        UserDefaults.standard.removeObject(forKey: lifecycleBackgroundTimestampKey)
+    }
+
+    var lifecycleBackgroundTimestampKey: String {
+        "SMARTOILA_LAST_BACKGROUNDED_AT"
     }
 }

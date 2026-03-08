@@ -5,8 +5,10 @@ struct RootView: View {
     @Environment(\.appDependencies) var dependencies
     @EnvironmentObject var sessionStore: SessionStore
     @StateObject var geoBackgroundService = GeoBackgroundService()
-    @StateObject var lockCoordinator = DeviceLockCoordinator()
+    @StateObject var lockCoordinator = DeviceLockCoordinator.shared
     @State var lastSessionDSN: String?
+    @State var lastBackgroundedAt: Date?
+    @State var didHandleInitialAppear = false
 
     var body: some View {
         Group {
@@ -44,6 +46,11 @@ struct RootView: View {
                     scheduleRange: lockCoordinator.state.scheduleRange
                 )
                 .transition(.opacity)
+            }
+        }
+        .background(alignment: .topLeading) {
+            if AppRuntime.debugRoute == nil {
+                ScreenTimeUsageReportBridgeView(dsn: sessionStore.dsn)
             }
         }
     }

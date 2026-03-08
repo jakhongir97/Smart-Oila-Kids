@@ -48,6 +48,32 @@ final class GeoPayloadEncoder {
         )
     }
 
+    func encodeDeviceControlTelemetry(_ record: DeviceControlTelemetryRecord) throws -> GeoSerializedPayload {
+        var data: [String: Any] = [
+            "device_id": record.dsn,
+            "device_date": deviceDateFormatter.string(from: record.createdAt),
+            "telemetry_event": record.event
+        ]
+
+        if let packageName = record.packageName {
+            data["package_name"] = packageName
+        }
+
+        if let appName = record.appName {
+            data["app_name"] = appName
+        }
+
+        let payload: [String: Any] = [
+            "event": "device_control",
+            "data": data
+        ]
+        let summary = "device_control \(record.event) \(summaryTimeFormatter.string(from: record.createdAt))"
+        return GeoSerializedPayload(
+            text: try encodeText(payload),
+            summary: summary
+        )
+    }
+
     private lazy var summaryTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

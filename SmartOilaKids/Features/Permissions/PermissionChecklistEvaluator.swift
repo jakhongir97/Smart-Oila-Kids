@@ -3,10 +3,12 @@ import Foundation
 import UserNotifications
 
 enum PermissionChecklistEvaluator {
-    static func isInteractive(_ requirement: PermissionRequirement) -> Bool {
+    static func isInteractive(_ requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> Bool {
         switch requirement {
-        case .displayOverApps, .usageStats:
+        case .displayOverApps:
             return false
+        case .usageStats:
+            return snapshot.screenTimePermissionStatus != .unavailable
         default:
             return true
         }
@@ -23,7 +25,7 @@ enum PermissionChecklistEvaluator {
         case .microphone:
             return snapshot.microphonePermission == .granted
         case .usageStats:
-            return true
+            return snapshot.screenTimePermissionStatus == .granted
         case .backgroundTransfer:
             return snapshot.backgroundRefreshStatus == .available
         case .notifications:
@@ -33,8 +35,17 @@ enum PermissionChecklistEvaluator {
 
     static func statusText(for requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> String {
         switch requirement {
-        case .displayOverApps, .usageStats:
+        case .displayOverApps:
             return L10n.tr("permissions.status_not_required_ios")
+        case .usageStats:
+            switch snapshot.screenTimePermissionStatus {
+            case .granted:
+                return L10n.tr("permissions.status_granted")
+            case .unavailable:
+                return L10n.tr("permissions.status_unavailable")
+            case .notDetermined, .denied:
+                return L10n.tr("permissions.status_tap_to_allow")
+            }
         case .location:
             if isLocationSatisfied(snapshot.locationAuthorizationStatus) {
                 return L10n.tr("permissions.status_granted")
@@ -93,11 +104,13 @@ enum PermissionChecklistEvaluator {
     }
 
     static func primaryActionTitle(for requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> String? {
-        guard isInteractive(requirement), !isSatisfied(requirement, in: snapshot) else { return nil }
+        guard isInteractive(requirement, in: snapshot), !isSatisfied(requirement, in: snapshot) else { return nil }
 
         switch requirement {
-        case .displayOverApps, .usageStats:
+        case .displayOverApps:
             return nil
+        case .usageStats:
+            return L10n.tr("permissions.action_allow_screen_time")
         case .location:
             switch snapshot.locationAuthorizationStatus {
             case .notDetermined:
@@ -148,7 +161,9 @@ enum PermissionChecklistEvaluator {
     }
 
     static func allChecklistSatisfied(in snapshot: PermissionStatusSnapshot) -> Bool {
-        PermissionRequirement.allCases.allSatisfy { isSatisfied($0, in: snapshot) }
+        PermissionRequirement.allCases
+            .filter { $0 != .usageStats }
+            .allSatisfy { isSatisfied($0, in: snapshot) }
     }
 
     private static func isLocationSatisfied(_ status: CLAuthorizationStatus) -> Bool {

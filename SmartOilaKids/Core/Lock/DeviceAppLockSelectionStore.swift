@@ -1,0 +1,338 @@
+import Combine
+import FamilyControls
+import Foundation
+import ManagedSettings
+
+struct DeviceAppSelectionApplication: Equatable, Hashable {
+    let packageName: String
+    let appName: String
+}
+
+struct DeviceAppLockShieldConfiguration: Equatable {
+    let applicationTokens: Set<ApplicationToken>
+
+    var hasRestrictions: Bool {
+        !applicationTokens.isEmpty
+    }
+
+    static let empty = DeviceAppLockShieldConfiguration(
+        applicationTokens: []
+    )
+}
+
+struct DeviceAppLockSelectionSummary: Equatable {
+    let selectedApplicationCount: Int
+    let selectedCategoryCount: Int
+    let selectedWebDomainCount: Int
+    let activeLockedApplicationCount: Int
+    let activeLockedApplicationNames: [String]
+    let previewApplicationNames: [String]
+
+    var hasSelection: Bool {
+        selectedApplicationCount > 0 || selectedCategoryCount > 0 || selectedWebDomainCount > 0
+    }
+
+    static let empty = DeviceAppLockSelectionSummary(
+        selectedApplicationCount: 0,
+        selectedCategoryCount: 0,
+        selectedWebDomainCount: 0,
+        activeLockedApplicationCount: 0,
+        activeLockedApplicationNames: [],
+        previewApplicationNames: []
+    )
+}
+
+@MainActor
+final class DeviceAppLockSelectionStore: ObservableObject {
+    static let shared = DeviceAppLockSelectionStore()
+
+    @Published private(set) var currentDSN: String?
+    @Published private(set) var selection = FamilyActivitySelection()
+    @Published private(set) var activeLockedApplicationIdentifiers: Set<String> = []
+
+    func activate(dsn: String?) {
+        let normalizedDSN = normalizedDSN(dsn)
+        guard normalizedDSN != currentDSN else { return }
+
+        currentDSN = normalizedDSN
+
+        guard let normalizedDSN else {
+            selection = FamilyActivitySelection()
+            knownRemoteLockedApplicationIdentifiers = []
+            activeLockedApplicationIdentifiers = []
+            notifyConfigurationChanged()
+            return
+        }
+
+        selection = loadSelection(for: normalizedDSN)
+        activeLockedApplicationIdentifiers = loadLockedIdentifiers(for: normalizedDSN)
+        knownRemoteLockedApplicationIdentifiers = activeLockedApplicationIdentifiers
+        recalculateActiveLockedIdentifiers()
+        notifyConfigurationChanged()
+    }
+
+    func updateSelection(_ newSelection: FamilyActivitySelection) {
+        selection = newSelection
+        recalculateActiveLockedIdentifiers()
+        persistSelectionIfPossible()
+        persistLockedIdentifiersIfPossible()
+        notifyConfigurationChanged()
+    }
+
+    func clearSelection() {
+        updateSelection(FamilyActivitySelection())
+    }
+
+    func selectedApplications() -> [DeviceAppSelectionApplication] {
+        selection.applications
+            .compactMap { application -> DeviceAppSelectionApplication? in
+                guard let packageName = normalizedIdentifier(application.bundleIdentifier) else {
+                    return nil
+                }
+
+                let appName = application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? application.bundleIdentifier
+                    ?? packageName
+
+                return DeviceAppSelectionApplication(
+                    packageName: packageName,
+                    appName: appName
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
+            }
+    }
+
+    func unmatchedRemoteLockedApplications(
+        from remoteLockedApplications: [DeviceAppSelectionApplication]
+    ) -> [DeviceAppSelectionApplication] {
+        let selectedIdentifiers = Set(selectedApplications().map(\.packageName))
+        return remoteLockedApplications.filter { application in
+            !selectedIdentifiers.contains(application.packageName)
+        }
+    }
+
+    func applyRemoteUpdate(lockStatus: Bool, identifiers: some Sequence<String>) {
+        let normalizedIdentifiers = Set(identifiers.compactMap(normalizedIdentifier(_:)))
+        guard !normalizedIdentifiers.isEmpty else { return }
+
+        if lockStatus {
+            knownRemoteLockedApplicationIdentifiers.formUnion(normalizedIdentifiers)
+        } else {
+            knownRemoteLockedApplicationIdentifiers.subtract(normalizedIdentifiers)
+        }
+
+        recalculateActiveLockedIdentifiers()
+        persistLockedIdentifiersIfPossible()
+        notifyConfigurationChanged()
+    }
+
+    func reconcileRemoteLockedIdentifiers(_ identifiers: some Sequence<String>) {
+        let previousKnownIdentifiers = knownRemoteLockedApplicationIdentifiers
+        let previousActiveIdentifiers = activeLockedApplicationIdentifiers
+        knownRemoteLockedApplicationIdentifiers = Set(identifiers.compactMap(normalizedIdentifier(_:)))
+        recalculateActiveLockedIdentifiers()
+
+        guard knownRemoteLockedApplicationIdentifiers != previousKnownIdentifiers
+                || activeLockedApplicationIdentifiers != previousActiveIdentifiers else {
+            return
+        }
+
+        persistLockedIdentifiersIfPossible()
+        notifyConfigurationChanged()
+    }
+
+    func shieldConfiguration() -> DeviceAppLockShieldConfiguration {
+        let activeApplicationTokens = selection.applications.compactMap { application -> ApplicationToken? in
+            guard let bundleIdentifier = normalizedIdentifier(application.bundleIdentifier),
+                  activeLockedApplicationIdentifiers.contains(bundleIdentifier) else {
+                return nil
+            }
+            return application.token
+        }
+
+        guard !activeApplicationTokens.isEmpty else {
+            return .empty
+        }
+
+        return DeviceAppLockShieldConfiguration(
+            applicationTokens: Set(activeApplicationTokens)
+        )
+    }
+
+    func selectionSummary() -> DeviceAppLockSelectionSummary {
+        let sortedNames = selection.applications
+            .map { application in
+                application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? application.bundleIdentifier
+                    ?? "Unknown App"
+            }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+        let activeLockedApplicationNames = selection.applications.compactMap { application -> String? in
+            guard let bundleIdentifier = normalizedIdentifier(application.bundleIdentifier),
+                  activeLockedApplicationIdentifiers.contains(bundleIdentifier) else {
+                return nil
+            }
+
+            return application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? application.bundleIdentifier
+                ?? bundleIdentifier
+        }
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+        return DeviceAppLockSelectionSummary(
+            selectedApplicationCount: selection.applicationTokens.count,
+            selectedCategoryCount: selection.categoryTokens.count,
+            selectedWebDomainCount: selection.webDomainTokens.count,
+            activeLockedApplicationCount: activeLockedApplicationNames.count,
+            activeLockedApplicationNames: Array(activeLockedApplicationNames.prefix(previewApplicationLimit)),
+            previewApplicationNames: Array(sortedNames.prefix(previewApplicationLimit))
+        )
+    }
+
+    func syncEntries() -> [DeviceAppLockSyncEntry] {
+        selection.applications
+            .compactMap { application -> DeviceAppLockSyncEntry? in
+                guard let bundleIdentifier = normalizedIdentifier(application.bundleIdentifier) else {
+                    return nil
+                }
+
+                let appName = application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? application.bundleIdentifier
+                    ?? bundleIdentifier
+
+                return DeviceAppLockSyncEntry(
+                    packageName: bundleIdentifier,
+                    appName: appName,
+                    isLocked: activeLockedApplicationIdentifiers.contains(bundleIdentifier),
+                    usedTime: ScreenTimeUsageCoordinator.shared.usedTime(
+                        for: bundleIdentifier,
+                        dsn: currentDSN
+                    )
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.packageName.localizedCaseInsensitiveCompare(rhs.packageName) == .orderedAscending
+            }
+    }
+
+    private init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        snapshotObserver = NotificationCenter.default.addObserver(
+            forName: .screenTimeUsageSnapshotDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in
+                self?.handleUsageSnapshotDidChange(notification)
+            }
+        }
+    }
+
+    private let userDefaults: UserDefaults
+    private let previewApplicationLimit = 5
+    private var snapshotObserver: NSObjectProtocol? = nil
+    private var knownRemoteLockedApplicationIdentifiers: Set<String> = []
+}
+
+private extension DeviceAppLockSelectionStore {
+    enum Keys {
+        static let selection = "DEVICE_APP_LOCK_SELECTION_"
+        static let lockedIdentifiers = "DEVICE_APP_LOCK_LOCKED_IDENTIFIERS_"
+    }
+
+    func persistSelectionIfPossible() {
+        guard let currentDSN else { return }
+        let key = DSNScopedStorage.userDefaultsKey(prefix: Keys.selection, dsn: currentDSN, lowercased: true)
+
+        if let data = try? JSONEncoder().encode(selection) {
+            userDefaults.set(data, forKey: key)
+        } else {
+            userDefaults.removeObject(forKey: key)
+        }
+    }
+
+    func persistLockedIdentifiersIfPossible() {
+        guard let currentDSN else { return }
+        let key = DSNScopedStorage.userDefaultsKey(
+            prefix: Keys.lockedIdentifiers,
+            dsn: currentDSN,
+            lowercased: true
+        )
+
+        if activeLockedApplicationIdentifiers.isEmpty {
+            userDefaults.removeObject(forKey: key)
+            return
+        }
+
+        userDefaults.set(Array(activeLockedApplicationIdentifiers).sorted(), forKey: key)
+    }
+
+    func loadSelection(for dsn: String) -> FamilyActivitySelection {
+        let key = DSNScopedStorage.userDefaultsKey(prefix: Keys.selection, dsn: dsn, lowercased: true)
+        guard let data = userDefaults.data(forKey: key),
+              let selection = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else {
+            return FamilyActivitySelection()
+        }
+        return selection
+    }
+
+    func loadLockedIdentifiers(for dsn: String) -> Set<String> {
+        let key = DSNScopedStorage.userDefaultsKey(
+            prefix: Keys.lockedIdentifiers,
+            dsn: dsn,
+            lowercased: true
+        )
+        let values = userDefaults.stringArray(forKey: key) ?? []
+        return Set(values.compactMap(normalizedIdentifier(_:)))
+    }
+
+    func recalculateActiveLockedIdentifiers() {
+        let selectedIdentifiers = Set(selection.applications.compactMap { normalizedIdentifier($0.bundleIdentifier) })
+        activeLockedApplicationIdentifiers = knownRemoteLockedApplicationIdentifiers.intersection(selectedIdentifiers)
+    }
+
+    func notifyConfigurationChanged() {
+        NotificationCenter.default.post(name: .deviceAppLockConfigurationDidChange, object: nil)
+        let dsn = currentDSN
+        let entries = syncEntries()
+        Task {
+            await DeviceAppLockSyncCoordinator.shared.update(dsn: dsn, entries: entries)
+        }
+    }
+
+    func handleUsageSnapshotDidChange(_ notification: Notification) {
+        guard let currentDSN else { return }
+        guard let changedDSN = (notification.userInfo?[ScreenTimeUsageSnapshotUserInfoKey.dsn] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              changedDSN == currentDSN.lowercased() else {
+            return
+        }
+
+        notifyConfigurationChanged()
+    }
+
+    func normalizedDSN(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    func normalizedIdentifier(_ value: String?) -> String? {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .nilIfEmpty
+    }
+}
+
+extension Notification.Name {
+    static let deviceAppLockConfigurationDidChange = Notification.Name("smartoila.deviceAppLockConfigurationDidChange")
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}

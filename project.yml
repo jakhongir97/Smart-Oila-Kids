@@ -14,10 +14,54 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: SmartOilaKids
+      - path: Shared/ScreenTimeUsage
+      - path: Shared/DeviceLockSchedule
+      - path: Shared/DeviceAppLimits
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: uz.smartoila.kids
+        PRODUCT_BUNDLE_IDENTIFIER: uz.smartoila.kids.go
         DEVELOPMENT_TEAM: 7A9V4SQ8LR
         INFOPLIST_FILE: SmartOilaKids/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SmartOilaKids/Resources/SmartOilaKids.entitlements
+        INFOPLIST_KEY_CFBundleDisplayName: Smart Oila Kids
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    dependencies:
+      - target: SmartOilaKidsUsageReportExtension
+      - target: SmartOilaKidsScheduleMonitorExtension
+
+  SmartOilaKidsUsageReportExtension:
+    type: extensionkit-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SmartOilaKidsUsageReportExtension
+      - path: Shared/ScreenTimeUsage
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: uz.smartoila.kids.go.usagereport
+        DEVELOPMENT_TEAM: 7A9V4SQ8LR
+        INFOPLIST_FILE: SmartOilaKidsUsageReportExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+
+  SmartOilaKidsScheduleMonitorExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SmartOilaKidsScheduleMonitorExtension
+      - path: Shared/DeviceLockSchedule
+      - path: Shared/DeviceAppLimits
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: uz.smartoila.kids.go.schedulemonitor
+        DEVELOPMENT_TEAM: 7A9V4SQ8LR
+        INFOPLIST_FILE: SmartOilaKidsScheduleMonitorExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0

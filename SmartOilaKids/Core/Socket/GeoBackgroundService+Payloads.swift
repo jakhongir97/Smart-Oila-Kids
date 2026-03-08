@@ -2,6 +2,12 @@ import CoreLocation
 import Foundation
 
 extension GeoBackgroundService {
+    @objc
+    func handleDeviceControlTelemetryNotification(_ notification: Notification) {
+        guard let record = DeviceControlTelemetryRecord(notification: notification) else { return }
+        sendDeviceControlTelemetry(record)
+    }
+
     func sendLocation(_ location: CLLocation) {
         guard let dsn = state.currentDSN else { return }
         debugLog("Sending location lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
@@ -34,6 +40,28 @@ extension GeoBackgroundService {
             sendSerializedPayload(serialized.text, summary: serialized.summary)
         } catch {
             updateDebug(status: .serializeFailed, lastError: error.localizedDescription)
+        }
+    }
+
+    func sendDeviceControlTelemetry(_ record: DeviceControlTelemetryRecord) {
+        do {
+            let serialized = try payloadEncoder.encodeDeviceControlTelemetry(record)
+
+            if let currentDSN = state.currentDSN,
+               currentDSN.caseInsensitiveCompare(record.dsn) == .orderedSame {
+                debugLog("Sending \(serialized.summary)")
+                sendSerializedPayload(serialized.text, summary: serialized.summary)
+                return
+            }
+
+            let queuedPayloads = GeoPendingPayloadQueue()
+            queuedPayloads.restore(for: record.dsn)
+            _ = queuedPayloads.enqueue(text: serialized.text, summary: serialized.summary, dsn: record.dsn)
+        } catch {
+            if let currentDSN = state.currentDSN,
+               currentDSN.caseInsensitiveCompare(record.dsn) == .orderedSame {
+                updateDebug(status: .serializeFailed, lastError: error.localizedDescription)
+            }
         }
     }
 

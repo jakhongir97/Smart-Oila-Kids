@@ -119,6 +119,7 @@ struct SettingsQuickActionsSection: View {
     let sidePadding: CGFloat
     let onOpenDiagnostics: () -> Void
     let onOpenPermissions: () -> Void
+    let onOpenAppLock: () -> Void
     let onInviteParent: () -> Void
 
     var body: some View {
@@ -135,6 +136,14 @@ struct SettingsQuickActionsSection: View {
                 iconName: "hand.raised.fill",
                 title: L10n.tr("settings.permissions"),
                 action: onOpenPermissions
+            )
+            .padding(.horizontal, sidePadding)
+            .padding(.top, 8)
+
+            SettingsSecondaryActionButton(
+                iconName: "app.badge.checkmark",
+                title: L10n.tr("settings.app_lock"),
+                action: onOpenAppLock
             )
             .padding(.horizontal, sidePadding)
             .padding(.top, 8)

@@ -8,6 +8,7 @@ struct DiagnosticsPanelView: View {
 
     @ObservedObject private var diagnostics = RuntimeDiagnosticsCenter.shared
     @StateObject private var permissionManager = LocationPermissionManager()
+    @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
     @State private var growthMetrics = GrowthMetricsSnapshot.empty
 
     var body: some View {
@@ -37,6 +38,31 @@ struct DiagnosticsPanelView: View {
                     SettingsDiagnosticsSectionCard(
                         title: L10n.tr("diagnostics.section_chat"),
                         rows: chatRows
+                    )
+
+                    SettingsDiagnosticsSectionCard(
+                        title: L10n.tr("diagnostics.section_media"),
+                        rows: mediaRows
+                    )
+
+                    SettingsDiagnosticsSectionCard(
+                        title: L10n.tr("diagnostics.section_app_lock"),
+                        rows: appLockRows
+                    )
+
+                    SettingsDiagnosticsSectionCard(
+                        title: L10n.tr("diagnostics.section_app_limits"),
+                        rows: appLimitRows
+                    )
+
+                    SettingsDiagnosticsSectionCard(
+                        title: L10n.tr("diagnostics.section_lock_schedule"),
+                        rows: lockScheduleRows
+                    )
+
+                    SettingsDiagnosticsSectionCard(
+                        title: L10n.tr("diagnostics.section_screen_time_usage"),
+                        rows: screenTimeUsageRows
                     )
 
                     SettingsDiagnosticsSectionCard(
@@ -160,6 +186,19 @@ struct DiagnosticsPanelView: View {
         ]
     }
 
+    private var mediaRows: [(String, String)] {
+        [
+            (L10n.tr("diagnostics.state"), diagnostics.media.status),
+            (L10n.tr("diagnostics.media_dsn"), diagnostics.media.dsn),
+            (L10n.tr("diagnostics.endpoint"), diagnostics.media.endpoint),
+            (L10n.tr("diagnostics.media_last_event"), diagnostics.media.lastEvent),
+            (L10n.tr("diagnostics.media_last_recording_id"), diagnostics.media.lastRecordingID),
+            (L10n.tr("diagnostics.media_last_upload"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.media.lastUploadAt)),
+            (L10n.tr("diagnostics.last_error"), diagnostics.media.lastError),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.media.updatedAt))
+        ]
+    }
+
     private var permissionsRows: [(String, String)] {
         [
             (
@@ -173,6 +212,10 @@ struct DiagnosticsPanelView: View {
             (
                 L10n.tr("diagnostics.permission_microphone"),
                 SettingsDiagnosticsValueMapper.microphoneStatus(permissionManager.microphonePermission)
+            ),
+            (
+                L10n.tr("diagnostics.permission_screen_time"),
+                SettingsDiagnosticsValueMapper.screenTimeStatus(permissionManager.screenTimePermissionStatus)
             ),
             (
                 L10n.tr("diagnostics.permission_background_refresh"),
@@ -193,8 +236,82 @@ struct DiagnosticsPanelView: View {
         ]
     }
 
+    private var appLockRows: [(String, String)] {
+        let summary = appLockStore.selectionSummary()
+        let updatedAt = [
+            diagnostics.appLockSync.updatedAt,
+            diagnostics.appLockState.updatedAt,
+            diagnostics.appLockIntegrity.updatedAt
+        ]
+            .compactMap { $0 }
+            .max()
+        return [
+            (L10n.tr("diagnostics.state"), diagnostics.appLockSync.status),
+            (L10n.tr("diagnostics.app_lock_dsn"), diagnostics.appLockSync.dsn),
+            (L10n.tr("diagnostics.endpoint"), diagnostics.appLockSync.endpoint),
+            (L10n.tr("diagnostics.app_lock_reconcile_state"), diagnostics.appLockState.status),
+            (L10n.tr("diagnostics.app_lock_reconcile_endpoint"), diagnostics.appLockState.endpoint),
+            (L10n.tr("diagnostics.app_lock_remote_apps"), "\(diagnostics.appLockState.remoteApplicationCount)"),
+            (L10n.tr("diagnostics.app_lock_remote_locked"), "\(diagnostics.appLockState.remoteLockedCount)"),
+            (L10n.tr("diagnostics.app_lock_remote_unenforceable"), "\(diagnostics.appLockState.remoteUnenforceableCount)"),
+            (L10n.tr("diagnostics.app_lock_integrity_state"), diagnostics.appLockIntegrity.status),
+            (L10n.tr("diagnostics.app_lock_integrity_endpoint"), diagnostics.appLockIntegrity.endpoint),
+            (L10n.tr("diagnostics.app_lock_integrity_last_event"), diagnostics.appLockIntegrity.lastEvent),
+            (L10n.tr("diagnostics.app_lock_selected_apps"), "\(summary.selectedApplicationCount)"),
+            (L10n.tr("diagnostics.app_lock_active_remote_locks"), "\(summary.activeLockedApplicationCount)"),
+            (L10n.tr("diagnostics.app_lock_last_sync_payload"), diagnostics.appLockSync.lastPayload),
+            (L10n.tr("diagnostics.last_error"), diagnostics.appLockSync.lastError),
+            (L10n.tr("diagnostics.app_lock_reconcile_error"), diagnostics.appLockState.lastError),
+            (L10n.tr("diagnostics.app_lock_integrity_error"), diagnostics.appLockIntegrity.lastError),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(updatedAt))
+        ]
+    }
+
+    private var appLimitRows: [(String, String)] {
+        [
+            (L10n.tr("diagnostics.state"), diagnostics.appLimits.status),
+            (L10n.tr("diagnostics.app_limits_dsn"), diagnostics.appLimits.dsn),
+            (L10n.tr("diagnostics.app_limits_endpoint"), diagnostics.appLimits.endpoint),
+            (L10n.tr("diagnostics.app_limits_remote_count"), "\(diagnostics.appLimits.remoteCount)"),
+            (L10n.tr("diagnostics.app_limits_matched_count"), "\(diagnostics.appLimits.matchedCount)"),
+            (L10n.tr("diagnostics.app_limits_reached_count"), "\(diagnostics.appLimits.reachedCount)"),
+            (L10n.tr("diagnostics.app_limits_last_payload"), diagnostics.appLimits.lastPayload),
+            (L10n.tr("diagnostics.last_error"), diagnostics.appLimits.lastError),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.appLimits.updatedAt))
+        ]
+    }
+
+    private var lockScheduleRows: [(String, String)] {
+        [
+            (L10n.tr("diagnostics.state"), diagnostics.lockSchedule.status),
+            (L10n.tr("diagnostics.lock_schedule_dsn"), diagnostics.lockSchedule.dsn),
+            (L10n.tr("diagnostics.lock_schedule_window"), diagnostics.lockSchedule.schedule),
+            (L10n.tr("diagnostics.lock_schedule_activities"), "\(diagnostics.lockSchedule.activityCount)"),
+            (L10n.tr("diagnostics.last_error"), diagnostics.lockSchedule.lastError),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.lockSchedule.updatedAt))
+        ]
+    }
+
+    private var screenTimeUsageRows: [(String, String)] {
+        [
+            (L10n.tr("diagnostics.state"), diagnostics.screenTimeUsage.status),
+            (L10n.tr("diagnostics.screen_time_usage_dsn"), diagnostics.screenTimeUsage.dsn),
+            (L10n.tr("diagnostics.screen_time_usage_day"), diagnostics.screenTimeUsage.dayKey),
+            (L10n.tr("diagnostics.screen_time_usage_app_group"), diagnostics.screenTimeUsage.appGroupIdentifier),
+            (L10n.tr("diagnostics.screen_time_usage_selected_apps"), "\(diagnostics.screenTimeUsage.selectedApps)"),
+            (L10n.tr("diagnostics.screen_time_usage_last_snapshot"), diagnostics.screenTimeUsage.lastSnapshot),
+            (
+                L10n.tr("diagnostics.screen_time_usage_last_collected"),
+                SettingsDiagnosticsValueMapper.timestamp(diagnostics.screenTimeUsage.lastCollectedAt)
+            ),
+            (L10n.tr("diagnostics.last_error"), diagnostics.screenTimeUsage.lastError),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.screenTimeUsage.updatedAt))
+        ]
+    }
+
     private func refreshGrowthMetrics() {
         growthMetrics = GrowthMetricsStore.shared.snapshot(for: sessionStore.dsn)
+        appLockStore.activate(dsn: sessionStore.dsn)
     }
 
     private func shareCompletionRateText() -> String {

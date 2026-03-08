@@ -55,8 +55,8 @@ private struct SettingsPermissionRow: View {
     var body: some View {
         let isSatisfied = manager.isSatisfied(requirement)
         let borderColor = isSatisfied ? AppColors.accentGreen : AppColors.neutral200
-        let actionTitle = manager.primaryActionTitle(for: requirement) ?? L10n.tr("permissions.action_open_settings")
-        let canAct = manager.isInteractive(requirement) && !isSatisfied
+        let actionTitle = manager.primaryActionTitle(for: requirement)
+        let canAct = manager.isInteractive(requirement) && !isSatisfied && actionTitle != nil
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -79,7 +79,7 @@ private struct SettingsPermissionRow: View {
                 .lineLimit(3)
 
             HStack {
-                if canAct {
+                if canAct, let actionTitle {
                     Button(actionTitle) {
                         AppHaptics.tap()
                         manager.performAction(for: requirement)
@@ -90,13 +90,22 @@ private struct SettingsPermissionRow: View {
                     .frame(height: 32)
                     .background(AppColors.primaryPurple)
                     .clipShape(Capsule())
-                } else {
+                } else if isSatisfied {
                     Text(L10n.tr("permissions.status_granted"))
                         .font(AppTypography.unbounded(11, weight: .semibold))
                         .foregroundStyle(AppColors.accentGreen)
                         .padding(.horizontal, 12)
                         .frame(height: 32)
                         .background(AppColors.accentGreen.opacity(0.12))
+                        .clipShape(Capsule())
+                } else {
+                    Text(manager.statusText(for: requirement))
+                        .font(AppTypography.unbounded(11, weight: .semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .background(AppColors.neutral200.opacity(0.55))
                         .clipShape(Capsule())
                 }
 

@@ -20,6 +20,13 @@ extension GeoBackgroundService {
             name: AVAudioSession.silenceSecondaryAudioHintNotification,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDeviceControlTelemetryNotification(_:)),
+            name: .deviceControlTelemetryRecorded,
+            object: nil
+        )
     }
 
     func configureLocationManager() {

@@ -29,6 +29,7 @@ extension MainViewModel {
 
         await refreshUnreadChat(dsn: dsn)
         await refreshUnreadNotifications(dsn: dsn)
+        await refreshDeviceControlTimeline(dsn: dsn)
     }
 }
 
@@ -39,6 +40,7 @@ private extension MainViewModel {
         setPendingTasksCount(nil)
         setUnreadChatCount(nil)
         setUnreadNotificationCount(0)
+        setRecentDeviceControlItems([])
         setUsagePhase(.failed(L10n.tr("common.dsn_missing")))
     }
 

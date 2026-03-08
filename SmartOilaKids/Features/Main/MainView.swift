@@ -25,6 +25,7 @@ struct MainView: View {
             deviceStatus: viewModel.deviceStatus,
             usageHours: viewModel.weeklyUsageHours,
             usagePhase: viewModel.usagePhase,
+            deviceControlItems: viewModel.recentDeviceControlItems,
             pendingTasksCount: viewModel.pendingTasksCount,
             unreadChatCount: viewModel.unreadChatCount,
             onInfoTap: { showTemplates = true },
@@ -35,6 +36,7 @@ struct MainView: View {
                     await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
                 }
             },
+            onDeviceControlTap: { showNotifications = true },
             onTasksTap: { showTasks = true },
             onChatTap: {
                 openChatThreadOnPresent = false
@@ -89,6 +91,7 @@ struct MainView: View {
             guard shouldHandlePush(notification: notification) else { return }
             Task {
                 await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
+                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenChat)) { notification in

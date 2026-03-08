@@ -1,6 +1,9 @@
 import Foundation
 
 enum AuthInputNormalization {
+    private static let uzbekCountryCode = "998"
+    private static let uzbekNationalDigitsCount = 9
+
     static func extractPhoneFromJWT(_ token: String) -> String? {
         let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
@@ -57,6 +60,54 @@ enum AuthInputNormalization {
         }
 
         return normalized
+    }
+
+    static func normalizeAndroidParentPhone(_ value: String?) -> String? {
+        guard let value else { return nil }
+
+        let digits = value.filter(\.isNumber)
+        guard !digits.isEmpty else { return nil }
+
+        let normalizedDigits: String
+        if digits.hasPrefix(uzbekCountryCode) {
+            let expectedCount = uzbekCountryCode.count + uzbekNationalDigitsCount
+            guard digits.count == expectedCount else { return nil }
+            normalizedDigits = digits
+        } else {
+            guard digits.count == uzbekNationalDigitsCount else { return nil }
+            normalizedDigits = uzbekCountryCode + digits
+        }
+
+        return "+\(normalizedDigits)"
+    }
+
+    static func formatAndroidParentPhoneInput(_ value: String) -> String {
+        let digits = value.filter(\.isNumber)
+        guard !digits.isEmpty else { return "" }
+
+        let normalizedDigits: String
+        if digits.hasPrefix(uzbekCountryCode) {
+            normalizedDigits = String(digits.prefix(uzbekCountryCode.count + uzbekNationalDigitsCount))
+        } else {
+            normalizedDigits = uzbekCountryCode + String(digits.prefix(uzbekNationalDigitsCount))
+        }
+
+        let national = String(normalizedDigits.dropFirst(uzbekCountryCode.count))
+        var parts: [String] = []
+        var remainder = national[...]
+
+        for length in [2, 3, 2, 2] {
+            guard !remainder.isEmpty else { break }
+            let count = min(length, remainder.count)
+            parts.append(String(remainder.prefix(count)))
+            remainder = remainder.dropFirst(count)
+        }
+
+        if parts.isEmpty {
+            return "+\(uzbekCountryCode)"
+        }
+
+        return "+\(uzbekCountryCode) " + parts.joined(separator: " ")
     }
 
     static func normalizeDSN(_ value: String?) -> String? {

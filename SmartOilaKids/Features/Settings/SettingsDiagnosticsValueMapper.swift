@@ -66,6 +66,10 @@ enum SettingsDiagnosticsValueMapper {
         }
     }
 
+    static func screenTimeStatus(_ status: ScreenTimePermissionStatus) -> String {
+        status.rawValue
+    }
+
     static func backgroundRefreshStatus(_ status: UIBackgroundRefreshStatus) -> String {
         switch status {
         case .available: return "available"

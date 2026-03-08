@@ -37,6 +37,20 @@ extension MainViewModel {
         setUnreadNotificationCount(await dependencies.pushInboxStore.unreadCount(dsn: dsn))
     }
 
+    func refreshDeviceControlTimeline(dsn: String?) async {
+        guard let dsn, !dsn.isEmpty else {
+            setRecentDeviceControlItems([])
+            return
+        }
+
+        let items = await dependencies.pushInboxStore.loadItems(dsn: dsn)
+        let recentDeviceControlItems = items
+            .filter { Self.isDeviceControlEvent($0.event) }
+            .sorted { $0.receivedAt > $1.receivedAt }
+
+        setRecentDeviceControlItems(Array(recentDeviceControlItems.prefix(3)))
+    }
+
     func refreshPendingTasks(dsn: String?) async {
         guard let dsn, !dsn.isEmpty else {
             setPendingTasksCount(nil)

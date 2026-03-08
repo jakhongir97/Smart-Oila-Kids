@@ -7,6 +7,8 @@ extension LocationPermissionManager {
     func refreshStatuses() {
         setLocationAuthorizationStatus(currentLocationAuthorizationStatus())
         setMicrophonePermission(AVAudioSession.sharedInstance().recordPermission)
+        ScreenTimeAuthorizationManager.shared.refreshStatus()
+        setScreenTimePermissionStatus(ScreenTimeAuthorizationManager.shared.status)
         setBackgroundRefreshStatus(UIApplication.shared.backgroundRefreshStatus)
         setLowPowerModeEnabled(ProcessInfo.processInfo.isLowPowerModeEnabled)
         refreshLocationChecklistState()
@@ -21,7 +23,7 @@ extension LocationPermissionManager {
     }
 
     func isInteractive(_ requirement: PermissionRequirement) -> Bool {
-        PermissionChecklistEvaluator.isInteractive(requirement)
+        PermissionChecklistEvaluator.isInteractive(requirement, in: statusSnapshot())
     }
 
     func isSatisfied(_ requirement: PermissionRequirement) -> Bool {

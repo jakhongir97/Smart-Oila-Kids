@@ -19,9 +19,11 @@ extension LocationPermissionManager {
 
     func performAction(for requirement: PermissionRequirement) {
         switch requirement {
-        case .displayOverApps, .usageStats:
+        case .displayOverApps:
             // iOS does not expose these Android-style permissions.
             return
+        case .usageStats:
+            requestScreenTimePermission()
         case .location:
             requestLocationPermission()
         case .batteryOptimization:
@@ -55,6 +57,14 @@ private extension LocationPermissionManager {
             openSettings()
         @unknown default:
             openSettings()
+        }
+    }
+
+    func requestScreenTimePermission() {
+        Task { @MainActor [weak self] in
+            await ScreenTimeAuthorizationManager.shared.requestAuthorization()
+            self?.setScreenTimePermissionStatus(ScreenTimeAuthorizationManager.shared.status)
+            self?.refreshStatuses()
         }
     }
 

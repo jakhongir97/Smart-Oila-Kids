@@ -18,6 +18,7 @@ struct SettingsMainFormView: View {
     let onSaveName: () -> Void
     let onOpenDiagnostics: () -> Void
     let onOpenPermissions: () -> Void
+    let onOpenAppLock: () -> Void
     let onInviteParent: () -> Void
     let onEditDevice: (ConnectedDevice) -> Void
     let onSave: () -> Void
@@ -50,6 +51,7 @@ struct SettingsMainFormView: View {
                 sidePadding: sidePadding,
                 onOpenDiagnostics: onOpenDiagnostics,
                 onOpenPermissions: onOpenPermissions,
+                onOpenAppLock: onOpenAppLock,
                 onInviteParent: onInviteParent
             )
 

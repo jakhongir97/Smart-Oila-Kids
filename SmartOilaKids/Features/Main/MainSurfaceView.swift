@@ -6,12 +6,14 @@ struct MainSurfaceView: View {
     let deviceStatus: MainDeviceStatus?
     let usageHours: [Double]
     let usagePhase: LoadPhase
+    let deviceControlItems: [PushInboxItem]
     let pendingTasksCount: Int?
     let unreadChatCount: Int?
     let onInfoTap: () -> Void
     let onNotificationTap: () -> Void
     let onSettingsTap: () -> Void
     let onRetryUsage: () -> Void
+    let onDeviceControlTap: () -> Void
     let onTasksTap: () -> Void
     let onChatTap: () -> Void
 
@@ -45,6 +47,13 @@ struct MainSurfaceView: View {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: sectionSpacing) {
                             MainAdInfoCard(status: deviceStatus)
+
+                            if !deviceControlItems.isEmpty {
+                                MainDeviceControlTimelineCard(
+                                    items: deviceControlItems,
+                                    onTap: onDeviceControlTap
+                                )
+                            }
 
                             WeeklyUsageChartCard(
                                 compact: compact,

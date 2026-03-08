@@ -12,12 +12,14 @@ struct SettingsView: View {
     @State var deviceEditor = SettingsDeviceEditorState()
     @State private var showDiagnostics = false
     @State private var showPermissionsCenter = false
+    @State private var showAppLockSetup = false
     @State private var showAvatarPicker = false
     @State private var avatarPickerItem: PhotosPickerItem?
     @State var avatarPreviewImage: UIImage?
     @State var inviteSharePayload: SettingsInviteSharePayload?
     @StateObject var bannerCenter = SettingsBannerCenter()
     @StateObject private var permissionManager = LocationPermissionManager()
+    @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
     @FocusState private var isNameFieldFocused: Bool
 
     init(viewModel: SettingsViewModel? = nil) {
@@ -74,6 +76,12 @@ struct SettingsView: View {
                                         permissionManager.refreshStatuses()
                                         showPermissionsCenter = true
                                     },
+                                    onOpenAppLock: {
+                                        AppHaptics.tap()
+                                        permissionManager.refreshStatuses()
+                                        appLockStore.activate(dsn: sessionStore.dsn)
+                                        showAppLockSetup = true
+                                    },
                                     onInviteParent: {
                                         AppHaptics.tap()
                                         beginInviteShare()
@@ -105,6 +113,7 @@ struct SettingsView: View {
         }
         .navigationBarBackButtonHidden(true)
         .task {
+            appLockStore.activate(dsn: sessionStore.dsn)
             await loadRemoteDataIfNeeded()
         }
         .toolbar {
@@ -172,6 +181,12 @@ struct SettingsView: View {
         .sheet(isPresented: $showPermissionsCenter) {
             SettingsPermissionsPanelView(manager: permissionManager)
         }
+        .sheet(isPresented: $showAppLockSetup) {
+            SettingsAppLockPanelView(
+                permissionManager: permissionManager,
+                store: appLockStore
+            )
+        }
         .sheet(item: $inviteSharePayload) { payload in
             ActivityShareSheet(activityItems: [payload.message]) { completed in
                 handleInviteShareCompletion(completed: completed)
@@ -185,6 +200,9 @@ struct SettingsView: View {
         .onChange(of: avatarPickerItem) { newValue in
             guard let newValue else { return }
             uploadAvatar(from: newValue)
+        }
+        .onChange(of: sessionStore.dsn) { newValue in
+            appLockStore.activate(dsn: newValue)
         }
         .preferredColorScheme(sessionStore.appTheme.colorScheme)
     }

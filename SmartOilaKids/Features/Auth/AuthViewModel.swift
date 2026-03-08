@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
 final class AuthViewModel: ObservableObject {
@@ -8,6 +9,34 @@ final class AuthViewModel: ObservableObject {
 
     init(authService: AuthServicing) {
         self.authService = authService
+    }
+
+    func submit(parentPhone: String) async -> AuthRegistrationResult? {
+        guard !isLoading else { return nil }
+        guard let normalizedPhone = AuthInputNormalization.normalizeAndroidParentPhone(parentPhone) else {
+            errorText = L10n.tr("auth.phone_invalid")
+            return nil
+        }
+
+        isLoading = true
+        errorText = nil
+        defer { isLoading = false }
+
+        do {
+            let result = try await bindByParentPhone(normalizedPhone)
+
+            let isVerified = try await authService.verifyChildBinding(dsn: result.dsn)
+            guard isVerified else {
+                errorText = L10n.tr("auth.verify_failed")
+                return nil
+            }
+
+            return result
+        } catch {
+            errorText = NetworkError.userMessage(for: error)
+        }
+
+        return nil
     }
 
     func submit(scannedPayload: AuthScanPayload) async -> AuthRegistrationResult? {
@@ -47,6 +76,20 @@ final class AuthViewModel: ObservableObject {
             qrDSN: payload.dsn,
             scannedDeviceName: payload.deviceName,
             deviceName: preferredDeviceName,
+            appVersion: appVersion
+        )
+    }
+
+    private func bindByParentPhone(_ parentPhone: String) async throws -> AuthRegistrationResult {
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let deviceName = UIDevice.current.name
+        return try await authService.registerDevice(
+            qrToken: nil,
+            qrRefreshToken: nil,
+            parentPhone: parentPhone,
+            qrDSN: nil,
+            scannedDeviceName: nil,
+            deviceName: deviceName,
             appVersion: appVersion
         )
     }

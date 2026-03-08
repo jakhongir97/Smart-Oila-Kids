@@ -1,10 +1,10 @@
 import SwiftUI
+import UIKit
 
 struct AuthView: View {
     private enum Stage {
         case splash
-        case scan
-        case failed
+        case entry
         case success
     }
 
@@ -14,9 +14,8 @@ struct AuthView: View {
     @State private var stage: Stage = .splash
     @State private var pendingRegistration: AuthRegistrationResult?
     @State private var pendingProfileName: String?
-    @State private var showScanner = false
+    @State private var parentPhone = ""
     @State private var inviteAttribution: InviteAttributionContext?
-    private let qrPayloadParser = AuthQRCodePayloadParser()
 
     init(viewModel: AuthViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -35,31 +34,25 @@ struct AuthView: View {
             switch stage {
             case .splash:
                 AuthSplashStageView(title: L10n.tr("auth.welcome"))
-            case .scan:
-                AuthScanStageView(
+            case .entry:
+                AuthPhoneStageView(
                     title: L10n.tr("auth.welcome"),
-                    missionText: L10n.tr("auth.company_mission"),
-                    hintText: L10n.tr("auth.scan_qr_hint"),
-                    buttonTitle: viewModel.isLoading ? L10n.tr("auth.connecting") : L10n.tr("auth.scan_qr_button"),
+                    subtitle: L10n.tr("auth.phone_hint"),
+                    phoneNumber: parentPhone,
+                    buttonTitle: viewModel.isLoading ? L10n.tr("auth.connecting") : L10n.tr("auth.phone_button"),
                     inviteAttribution: inviteAttribution,
                     isLoading: viewModel.isLoading,
-                    onOpenScanner: {
-                        AppHaptics.tap()
-                        showScanner = true
+                    errorText: viewModel.errorText,
+                    onPhoneChange: { value in
+                        let formatted = AuthInputNormalization.formatAndroidParentPhoneInput(value)
+                        parentPhone = formatted
+                        if viewModel.errorText != nil {
+                            viewModel.errorText = nil
+                        }
                     }
-                )
-            case .failed:
-                AuthStatusStageView(
-                    title: L10n.tr("auth.error_title"),
-                    subtitle: viewModel.errorText ?? L10n.tr("auth.error_bind_failed"),
-                    buttonTitle: L10n.tr("common.retry"),
-                    buttonColor: AppColors.dangerRed,
-                    trailingArrow: false,
-                    action: {
-                        AppHaptics.tap()
-                        stage = .scan
-                    }
-                )
+                ) {
+                    submitParentPhone()
+                }
             case .success:
                 AuthStatusStageView(
                     title: L10n.tr("auth.success_title"),
@@ -84,59 +77,25 @@ struct AuthView: View {
             refreshInviteAttribution()
             guard stage == .splash else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-                stage = .scan
+                stage = .entry
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .inviteAttributionDidChange)) { _ in
             refreshInviteAttribution()
         }
-        .fullScreenCover(isPresented: $showScanner) {
-            QRScannerSheet(
-                onCodeDetected: { code in
-                    showScanner = false
-                    handleScannedCode(code)
-                },
-                onClose: {
-                    showScanner = false
-                }
-            )
-        }
     }
 
-    private func bindByScannedPayload(_ payload: AuthScanPayload) {
-        pendingProfileName = payload.deviceName?.trimmedNonEmpty
+    private func submitParentPhone() {
+        pendingProfileName = UIDevice.current.name.trimmedNonEmpty
         Task {
-            if let result = await viewModel.submit(scannedPayload: payload) {
+            if let result = await viewModel.submit(parentPhone: parentPhone) {
                 pendingRegistration = result
                 AppHaptics.success()
                 stage = .success
             } else {
                 AppHaptics.warning()
-                stage = .failed
             }
         }
-    }
-
-    private func handleScannedCode(_ rawCode: String) {
-        let parsed = qrPayloadParser.parse(from: rawCode)
-        guard parsed.payload.hasAuthData else {
-            viewModel.errorText = parsed.isContractV1
-                ? L10n.tr("auth.qr_invalid_contract")
-                : L10n.tr("auth.qr_missing_auth_data")
-            stage = .failed
-            return
-        }
-
-        debugLog(parsed.isContractV1
-            ? "QR contract v1 detected."
-            : "Legacy QR payload detected (no contract marker).")
-        bindByScannedPayload(parsed.payload)
-    }
-
-    private func debugLog(_ message: String) {
-#if DEBUG
-        print("[AuthView] \(message)")
-#endif
     }
 
     private func refreshInviteAttribution() {
@@ -163,9 +122,9 @@ private extension AuthView {
         case .splash:
             return .splash
         case .scan:
-            return .scan
+            return .entry
         case .failed:
-            return .failed
+            return .entry
         case .success:
             return .success
         case nil:

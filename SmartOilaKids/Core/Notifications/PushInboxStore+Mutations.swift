@@ -7,7 +7,8 @@ extension PushInboxStore {
         body: String,
         event: String,
         dsn: String?,
-        isRead: Bool
+        isRead: Bool,
+        receivedAt: Date = Date()
     ) {
         var items = storedItems()
 
@@ -15,7 +16,7 @@ extension PushInboxStore {
         let normalizedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedEvent = event.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedDSN = dsn?.trimmedNonEmpty
-        let now = Date()
+        let now = receivedAt
         let fingerprint = Self.makeFingerprint(
             title: normalizedTitle,
             body: normalizedBody,
@@ -42,7 +43,7 @@ extension PushInboxStore {
             body: normalizedBody,
             event: normalizedEvent,
             dsn: normalizedDSN,
-            receivedAt: now,
+            receivedAt: receivedAt,
             isRead: isRead,
             fingerprint: fingerprint
         )
