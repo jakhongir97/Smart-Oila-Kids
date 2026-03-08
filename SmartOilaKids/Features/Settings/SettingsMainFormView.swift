@@ -19,6 +19,7 @@ struct SettingsMainFormView: View {
     let onOpenDiagnostics: () -> Void
     let onOpenPermissions: () -> Void
     let onOpenAppLock: () -> Void
+    let onOpenMediaHistory: () -> Void
     let onInviteParent: () -> Void
     let onEditDevice: (ConnectedDevice) -> Void
     let onSave: () -> Void
@@ -52,6 +53,7 @@ struct SettingsMainFormView: View {
                 onOpenDiagnostics: onOpenDiagnostics,
                 onOpenPermissions: onOpenPermissions,
                 onOpenAppLock: onOpenAppLock,
+                onOpenMediaHistory: onOpenMediaHistory,
                 onInviteParent: onInviteParent
             )
 

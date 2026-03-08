@@ -8,6 +8,12 @@ extension GeoBackgroundService {
         sendDeviceControlTelemetry(record)
     }
 
+    @objc
+    func handleMediaTelemetryNotification(_ notification: Notification) {
+        guard let record = MediaTelemetryRecord(notification: notification) else { return }
+        sendMediaTelemetry(record)
+    }
+
     func sendLocation(_ location: CLLocation) {
         guard let dsn = state.currentDSN else { return }
         debugLog("Sending location lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
@@ -46,6 +52,28 @@ extension GeoBackgroundService {
     func sendDeviceControlTelemetry(_ record: DeviceControlTelemetryRecord) {
         do {
             let serialized = try payloadEncoder.encodeDeviceControlTelemetry(record)
+
+            if let currentDSN = state.currentDSN,
+               currentDSN.caseInsensitiveCompare(record.dsn) == .orderedSame {
+                debugLog("Sending \(serialized.summary)")
+                sendSerializedPayload(serialized.text, summary: serialized.summary)
+                return
+            }
+
+            let queuedPayloads = GeoPendingPayloadQueue()
+            queuedPayloads.restore(for: record.dsn)
+            _ = queuedPayloads.enqueue(text: serialized.text, summary: serialized.summary, dsn: record.dsn)
+        } catch {
+            if let currentDSN = state.currentDSN,
+               currentDSN.caseInsensitiveCompare(record.dsn) == .orderedSame {
+                updateDebug(status: .serializeFailed, lastError: error.localizedDescription)
+            }
+        }
+    }
+
+    func sendMediaTelemetry(_ record: MediaTelemetryRecord) {
+        do {
+            let serialized = try payloadEncoder.encodeMediaTelemetry(record)
 
             if let currentDSN = state.currentDSN,
                currentDSN.caseInsensitiveCompare(record.dsn) == .orderedSame {

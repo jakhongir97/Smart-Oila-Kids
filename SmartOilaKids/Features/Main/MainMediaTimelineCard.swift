@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct MainDeviceControlTimelineCard: View {
+struct MainMediaTimelineCard: View {
     let items: [PushInboxItem]
     let onTap: () -> Void
 
@@ -20,11 +20,11 @@ struct MainDeviceControlTimelineCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.tr("main.device_control_title"))
+                        Text(L10n.tr("main.media_title"))
                             .font(AppTypography.unbounded(13, weight: .semibold))
                             .foregroundStyle(AppColors.black)
 
-                        Text(L10n.tr("main.device_control_subtitle"))
+                        Text(L10n.tr("main.media_subtitle"))
                             .font(AppTypography.unbounded(10, weight: .regular))
                             .foregroundStyle(AppColors.textSecondary)
                     }
@@ -52,7 +52,7 @@ struct MainDeviceControlTimelineCard: View {
                     }
                 }
 
-                Text(L10n.tr("main.device_control_open"))
+                Text(L10n.tr("main.media_open"))
                     .font(AppTypography.unbounded(10, weight: .semibold))
                     .foregroundStyle(AppColors.primaryPurple)
             }
@@ -105,26 +105,32 @@ struct MainDeviceControlTimelineCard: View {
 
     private func fallbackTitle(for item: PushInboxItem) -> String {
         switch item.event {
-        case DeviceControlEventKind.scheduleStarted.rawValue:
-            return L10n.tr("notifications.device_control.schedule_started_title")
-        case DeviceControlEventKind.scheduleEnded.rawValue:
-            return L10n.tr("notifications.device_control.schedule_ended_title")
-        case DeviceControlEventKind.appLimitReached.rawValue:
-            return L10n.tr("notifications.device_control.app_limit_reached_title_fallback")
-        case DeviceControlIntegrityEvent.appTargetsRemoved.rawValue:
-            return L10n.tr("notifications.device_control.app_targets_removed_title_fallback")
-        case DeviceControlIntegrityEvent.screenTimeRevoked.rawValue:
-            return L10n.tr("notifications.device_control.screen_time_revoked_title")
-        case DeviceControlIntegrityEvent.remoteLocksUnenforceable.rawValue:
-            return L10n.tr("notifications.device_control.remote_lock_unenforceable_title_fallback")
-        case DeviceControlRecoveryEvent.appLockRestored.rawValue:
-            return L10n.tr("notifications.device_control.app_lock_restored_title_fallback")
-        case DeviceControlRecoveryEvent.lockRestored.rawValue:
-            return L10n.tr("notifications.device_control.lock_restored_title")
-        case DeviceControlRecoveryEvent.appLimitRestored.rawValue:
-            return L10n.tr("notifications.device_control.app_limit_restored_title_fallback")
+        case MediaTelemetryEvent.recordingStarted.rawValue:
+            return L10n.tr("notifications.media.recording_started_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.recordingCompleted.rawValue:
+            return L10n.tr("notifications.media.recording_completed_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.recordingUploadQueued.rawValue:
+            return L10n.tr("notifications.media.recording_upload_queued_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.recordingDiscarded.rawValue:
+            return L10n.tr("notifications.media.recording_discarded_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.recordingFailed.rawValue:
+            return L10n.tr("notifications.media.recording_failed_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.recordingCancelled.rawValue:
+            return L10n.tr("notifications.media.recording_cancelled_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.streamStarted.rawValue:
+            return L10n.tr("notifications.media.stream_started_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.streamStopped.rawValue:
+            return L10n.tr("notifications.media.stream_stopped_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.streamFailed.rawValue:
+            return L10n.tr("notifications.media.stream_failed_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.streamDeliveryFailed.rawValue:
+            return L10n.tr("notifications.media.stream_delivery_failed_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.permissionRevoked.rawValue:
+            return L10n.tr("notifications.media.permission_revoked_title", L10n.tr("main.media_title"))
+        case MediaTelemetryEvent.foregroundInterrupted.rawValue:
+            return L10n.tr("notifications.media.foreground_interrupted_title", L10n.tr("main.media_title"))
         default:
-            return L10n.tr("notifications.event_lock")
+            return L10n.tr("main.media_title")
         }
     }
 }

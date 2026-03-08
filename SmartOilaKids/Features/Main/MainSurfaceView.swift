@@ -7,6 +7,7 @@ struct MainSurfaceView: View {
     let usageHours: [Double]
     let usagePhase: LoadPhase
     let deviceControlItems: [PushInboxItem]
+    let mediaItems: [PushInboxItem]
     let pendingTasksCount: Int?
     let unreadChatCount: Int?
     let onInfoTap: () -> Void
@@ -14,6 +15,7 @@ struct MainSurfaceView: View {
     let onSettingsTap: () -> Void
     let onRetryUsage: () -> Void
     let onDeviceControlTap: () -> Void
+    let onMediaTap: () -> Void
     let onTasksTap: () -> Void
     let onChatTap: () -> Void
 
@@ -52,6 +54,13 @@ struct MainSurfaceView: View {
                                 MainDeviceControlTimelineCard(
                                     items: deviceControlItems,
                                     onTap: onDeviceControlTap
+                                )
+                            }
+
+                            if !mediaItems.isEmpty {
+                                MainMediaTimelineCard(
+                                    items: mediaItems,
+                                    onTap: onMediaTap
                                 )
                             }
 

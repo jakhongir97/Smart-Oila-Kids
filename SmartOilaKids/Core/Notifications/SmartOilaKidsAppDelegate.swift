@@ -9,6 +9,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
+        MediaTelemetryInboxBridge.shared.start()
         notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             guard granted else { return }
             DispatchQueue.main.async {
@@ -43,6 +44,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     func applicationDidBecomeActive(_ application: UIApplication) {
         Task {
             await DeviceControlEventBridge.shared.syncNow()
+            await MediaTelemetryInboxBridge.shared.syncNow()
             await PushInboxStore.shared.reconcileAppBadge()
         }
     }
@@ -64,6 +66,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         PushCommandRouter.handle(userInfo: notification.request.content.userInfo)
         Task {
             await DeviceControlEventBridge.shared.syncNow()
+            await MediaTelemetryInboxBridge.shared.syncNow()
         }
         completionHandler([.banner, .sound, .badge])
     }
@@ -79,6 +82,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         )
         Task {
             await DeviceControlEventBridge.shared.syncNow()
+            await MediaTelemetryInboxBridge.shared.syncNow()
         }
         completionHandler()
     }

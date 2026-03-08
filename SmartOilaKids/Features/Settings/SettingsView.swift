@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var showDiagnostics = false
     @State private var showPermissionsCenter = false
     @State private var showAppLockSetup = false
+    @State private var showMediaHistory = false
     @State private var showAvatarPicker = false
     @State private var avatarPickerItem: PhotosPickerItem?
     @State var avatarPreviewImage: UIImage?
@@ -81,6 +82,11 @@ struct SettingsView: View {
                                         permissionManager.refreshStatuses()
                                         appLockStore.activate(dsn: sessionStore.dsn)
                                         showAppLockSetup = true
+                                    },
+                                    onOpenMediaHistory: {
+                                        AppHaptics.tap()
+                                        permissionManager.refreshStatuses()
+                                        showMediaHistory = true
                                     },
                                     onInviteParent: {
                                         AppHaptics.tap()
@@ -186,6 +192,10 @@ struct SettingsView: View {
                 permissionManager: permissionManager,
                 store: appLockStore
             )
+        }
+        .sheet(isPresented: $showMediaHistory) {
+            SettingsMediaHistoryPanelView(manager: permissionManager)
+                .environmentObject(sessionStore)
         }
         .sheet(item: $inviteSharePayload) { payload in
             ActivityShareSheet(activityItems: [payload.message]) { completed in

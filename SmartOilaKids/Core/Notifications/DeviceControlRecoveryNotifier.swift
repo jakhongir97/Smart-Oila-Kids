@@ -3,6 +3,7 @@ import UserNotifications
 
 enum DeviceControlRecoveryEvent: String {
     case lockRestored = "device_control_lock_restored"
+    case appLockRestored = "device_control_app_lock_restored"
     case appLimitRestored = "device_control_app_limit_restored"
 }
 
@@ -52,6 +53,21 @@ actor DeviceControlRecoveryNotifier {
             dsn: dsn,
             packageName: packageName,
             appName: appName
+        )
+    }
+
+    func recordAppLockRestored(
+        dsn: String,
+        applications: [DeviceAppSelectionApplication]
+    ) async {
+        let normalizedApplications = normalizedApplications(applications)
+        guard !normalizedApplications.isEmpty else { return }
+
+        await record(
+            event: .appLockRestored,
+            dsn: dsn,
+            packageName: normalizedApplications.first?.packageName,
+            appName: localizedApplicationRecoveryName(for: normalizedApplications)
         )
     }
 
@@ -119,6 +135,11 @@ private extension DeviceControlRecoveryNotifier {
         switch event {
         case .lockRestored:
             return L10n.tr("notifications.device_control.lock_restored_title")
+        case .appLockRestored:
+            if let appName {
+                return L10n.tr("notifications.device_control.app_lock_restored_title", appName)
+            }
+            return L10n.tr("notifications.device_control.app_lock_restored_title_fallback")
         case .appLimitRestored:
             if let appName {
                 return L10n.tr("notifications.device_control.app_limit_restored_title", appName)
@@ -131,6 +152,11 @@ private extension DeviceControlRecoveryNotifier {
         switch event {
         case .lockRestored:
             return L10n.tr("notifications.device_control.lock_restored_body")
+        case .appLockRestored:
+            if let appName {
+                return L10n.tr("notifications.device_control.app_lock_restored_body", appName)
+            }
+            return L10n.tr("notifications.device_control.app_lock_restored_body_fallback")
         case .appLimitRestored:
             if let appName {
                 return L10n.tr("notifications.device_control.app_limit_restored_body", appName)
@@ -211,6 +237,28 @@ private extension DeviceControlRecoveryNotifier {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .nilIfEmpty
+    }
+
+    func normalizedApplications(_ applications: [DeviceAppSelectionApplication]) -> [DeviceAppSelectionApplication] {
+        let uniqueApplications = Set(applications.compactMap { application -> DeviceAppSelectionApplication? in
+            guard let packageName = normalizedIdentifier(application.packageName),
+                  let appName = application.appName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty else {
+                return nil
+            }
+            return DeviceAppSelectionApplication(packageName: packageName, appName: appName)
+        })
+
+        return uniqueApplications.sorted { lhs, rhs in
+            lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
+        }
+    }
+
+    func localizedApplicationRecoveryName(for applications: [DeviceAppSelectionApplication]) -> String? {
+        guard !applications.isEmpty else { return nil }
+        if applications.count == 1 {
+            return applications[0].appName
+        }
+        return L10n.tr("notifications.device_control.app_lock_restored_count", "\(applications.count)")
     }
 }
 

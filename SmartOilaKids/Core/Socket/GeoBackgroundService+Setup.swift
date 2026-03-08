@@ -27,6 +27,13 @@ extension GeoBackgroundService {
             name: .deviceControlTelemetryRecorded,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMediaTelemetryNotification(_:)),
+            name: .mediaTelemetryRecorded,
+            object: nil
+        )
     }
 
     func configureLocationManager() {

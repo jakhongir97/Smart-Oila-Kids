@@ -1,4 +1,5 @@
 import AVFAudio
+import AVFoundation
 import Foundation
 import UIKit
 import UserNotifications
@@ -32,6 +33,8 @@ extension LocationPermissionManager {
             }
         case .microphone:
             requestMicrophonePermission()
+        case .camera:
+            requestCameraPermission()
         case .backgroundTransfer:
             if backgroundRefreshStatus != .available {
                 openSettings()
@@ -54,6 +57,23 @@ private extension LocationPermissionManager {
                 }
             }
         case .denied:
+            openSettings()
+        @unknown default:
+            openSettings()
+        }
+    }
+
+    func requestCameraPermission() {
+        switch cameraAuthorizationStatus {
+        case .authorized:
+            break
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] _ in
+                Task { @MainActor in
+                    self?.refreshStatuses()
+                }
+            }
+        case .denied, .restricted:
             openSettings()
         @unknown default:
             openSettings()

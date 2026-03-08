@@ -12,6 +12,7 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var unreadChatCount: Int?
     @Published private(set) var unreadNotificationCount = 0
     @Published private(set) var recentDeviceControlItems: [PushInboxItem] = []
+    @Published private(set) var recentMediaItems: [PushInboxItem] = []
 
     init(
         sosService: SOSServicing,
@@ -64,6 +65,10 @@ final class MainViewModel: ObservableObject {
 
     func setRecentDeviceControlItems(_ value: [PushInboxItem]) {
         recentDeviceControlItems = value
+    }
+
+    func setRecentMediaItems(_ value: [PushInboxItem]) {
+        recentMediaItems = value
     }
 
     let dependencies: MainViewModelDependencies

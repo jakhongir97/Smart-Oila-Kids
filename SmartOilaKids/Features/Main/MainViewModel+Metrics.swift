@@ -32,4 +32,9 @@ extension MainViewModel {
         let normalized = event.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.hasPrefix("device_control_")
     }
+
+    static func isMediaEvent(_ event: String) -> Bool {
+        let normalized = event.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("media_")
+    }
 }

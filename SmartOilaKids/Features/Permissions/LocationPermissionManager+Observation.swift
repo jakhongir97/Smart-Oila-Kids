@@ -22,6 +22,16 @@ extension LocationPermissionManager {
             }
         }
 
+        let willResignActive = center.addObserver(
+            forName: UIApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshStatuses()
+            }
+        }
+
         let powerStateChanged = center.addObserver(
             forName: Notification.Name.NSProcessInfoPowerStateDidChange,
             object: nil,
@@ -32,7 +42,19 @@ extension LocationPermissionManager {
             }
         }
 
+        let screenCaptureChanged = center.addObserver(
+            forName: UIScreen.capturedDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshStatuses()
+            }
+        }
+
         addObserverToken(didBecomeActive)
+        addObserverToken(willResignActive)
         addObserverToken(powerStateChanged)
+        addObserverToken(screenCaptureChanged)
     }
 }

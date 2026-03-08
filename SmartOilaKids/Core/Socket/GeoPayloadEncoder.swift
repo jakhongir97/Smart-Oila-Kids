@@ -74,6 +74,33 @@ final class GeoPayloadEncoder {
         )
     }
 
+    func encodeMediaTelemetry(_ record: MediaTelemetryRecord) throws -> GeoSerializedPayload {
+        var data: [String: Any] = [
+            "device_id": record.dsn,
+            "device_date": deviceDateFormatter.string(from: record.createdAt),
+            "telemetry_event": record.event,
+            "media_type": record.mediaType
+        ]
+
+        if let recordingID = record.recordingID {
+            data["recording_id"] = recordingID
+        }
+
+        if let reason = record.reason {
+            data["reason"] = reason
+        }
+
+        let payload: [String: Any] = [
+            "event": "media_control",
+            "data": data
+        ]
+        let summary = "media_control \(record.event) \(summaryTimeFormatter.string(from: record.createdAt))"
+        return GeoSerializedPayload(
+            text: try encodeText(payload),
+            summary: summary
+        )
+    }
+
     private lazy var summaryTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

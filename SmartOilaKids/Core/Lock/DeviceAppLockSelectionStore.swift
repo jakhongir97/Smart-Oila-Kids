@@ -42,6 +42,17 @@ struct DeviceAppLockSelectionSummary: Equatable {
     )
 }
 
+enum DeviceAppLockConfigurationChangeReason: String {
+    case activationChanged = "activation_changed"
+    case selectionChanged = "selection_changed"
+    case remoteStateChanged = "remote_state_changed"
+    case usageSnapshotChanged = "usage_snapshot_changed"
+}
+
+enum DeviceAppLockConfigurationChangeUserInfoKey {
+    static let reason = "reason"
+}
+
 @MainActor
 final class DeviceAppLockSelectionStore: ObservableObject {
     static let shared = DeviceAppLockSelectionStore()
@@ -60,7 +71,7 @@ final class DeviceAppLockSelectionStore: ObservableObject {
             selection = FamilyActivitySelection()
             knownRemoteLockedApplicationIdentifiers = []
             activeLockedApplicationIdentifiers = []
-            notifyConfigurationChanged()
+            notifyConfigurationChanged(reason: .activationChanged)
             return
         }
 
@@ -68,7 +79,7 @@ final class DeviceAppLockSelectionStore: ObservableObject {
         activeLockedApplicationIdentifiers = loadLockedIdentifiers(for: normalizedDSN)
         knownRemoteLockedApplicationIdentifiers = activeLockedApplicationIdentifiers
         recalculateActiveLockedIdentifiers()
-        notifyConfigurationChanged()
+        notifyConfigurationChanged(reason: .activationChanged)
     }
 
     func updateSelection(_ newSelection: FamilyActivitySelection) {
@@ -76,7 +87,7 @@ final class DeviceAppLockSelectionStore: ObservableObject {
         recalculateActiveLockedIdentifiers()
         persistSelectionIfPossible()
         persistLockedIdentifiersIfPossible()
-        notifyConfigurationChanged()
+        notifyConfigurationChanged(reason: .selectionChanged)
     }
 
     func clearSelection() {
@@ -125,7 +136,7 @@ final class DeviceAppLockSelectionStore: ObservableObject {
 
         recalculateActiveLockedIdentifiers()
         persistLockedIdentifiersIfPossible()
-        notifyConfigurationChanged()
+        notifyConfigurationChanged(reason: .remoteStateChanged)
     }
 
     func reconcileRemoteLockedIdentifiers(_ identifiers: some Sequence<String>) {
@@ -140,7 +151,7 @@ final class DeviceAppLockSelectionStore: ObservableObject {
         }
 
         persistLockedIdentifiersIfPossible()
-        notifyConfigurationChanged()
+        notifyConfigurationChanged(reason: .remoteStateChanged)
     }
 
     func shieldConfiguration() -> DeviceAppLockShieldConfiguration {
@@ -294,8 +305,12 @@ private extension DeviceAppLockSelectionStore {
         activeLockedApplicationIdentifiers = knownRemoteLockedApplicationIdentifiers.intersection(selectedIdentifiers)
     }
 
-    func notifyConfigurationChanged() {
-        NotificationCenter.default.post(name: .deviceAppLockConfigurationDidChange, object: nil)
+    func notifyConfigurationChanged(reason: DeviceAppLockConfigurationChangeReason) {
+        NotificationCenter.default.post(
+            name: .deviceAppLockConfigurationDidChange,
+            object: nil,
+            userInfo: [DeviceAppLockConfigurationChangeUserInfoKey.reason: reason.rawValue]
+        )
         let dsn = currentDSN
         let entries = syncEntries()
         Task {
@@ -312,7 +327,7 @@ private extension DeviceAppLockSelectionStore {
             return
         }
 
-        notifyConfigurationChanged()
+        notifyConfigurationChanged(reason: .usageSnapshotChanged)
     }
 
     func normalizedDSN(_ value: String?) -> String? {

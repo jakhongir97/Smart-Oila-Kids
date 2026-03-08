@@ -13,6 +13,8 @@ struct SettingsPermissionsPanelView: View {
                         .foregroundStyle(AppColors.textSecondary)
                         .padding(.top, 4)
 
+                    SettingsMediaReadinessCard(manager: manager)
+
                     ForEach(PermissionRequirement.allCases) { requirement in
                         SettingsPermissionRow(requirement: requirement, manager: manager)
                     }
@@ -45,6 +47,93 @@ struct SettingsPermissionsPanelView: View {
                 manager.refreshStatuses()
             }
         }
+    }
+}
+
+struct SettingsMediaReadinessCard: View {
+    @ObservedObject var manager: LocationPermissionManager
+
+    var body: some View {
+        let isReady = manager.mediaReadinessSatisfied
+        let accentColor = isReady ? AppColors.accentGreen : AppColors.dangerRed
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.tr("permissions.media_readiness_title"))
+                .font(AppTypography.unbounded(12, weight: .semibold))
+                .foregroundStyle(AppColors.textPrimary)
+
+            Text(manager.mediaReadinessMessage())
+                .font(AppTypography.unbounded(10, weight: .regular))
+                .foregroundStyle(AppColors.textSecondary)
+                .lineSpacing(2)
+
+            VStack(spacing: 8) {
+                ForEach(manager.mediaCapabilityStatuses) { capability in
+                    capabilityRow(capability)
+                }
+            }
+            .padding(.top, 2)
+
+            Text(
+                isReady
+                    ? L10n.tr("permissions.media_readiness_status_ready")
+                    : L10n.tr("permissions.media_readiness_status_incomplete")
+            )
+            .font(AppTypography.unbounded(10, weight: .semibold))
+            .foregroundStyle(accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(accentColor.opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(accentColor.opacity(0.35), lineWidth: 2)
+        }
+    }
+
+    private func capabilityRow(_ capability: MediaCapabilityStatus) -> some View {
+        let accentColor: Color
+        switch capability.state {
+        case .ready:
+            accentColor = AppColors.accentGreen
+        case .inactive:
+            accentColor = AppColors.primaryPurple
+        case .actionNeeded, .unavailable:
+            accentColor = AppColors.dangerRed
+        }
+
+        return HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(capability.title)
+                    .font(AppTypography.unbounded(10, weight: .semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+
+                Text(capability.detail)
+                    .font(AppTypography.unbounded(9, weight: .regular))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineSpacing(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(capability.badgeText)
+                .font(AppTypography.unbounded(8, weight: .semibold))
+                .foregroundStyle(accentColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(accentColor.opacity(0.12))
+                .clipShape(Capsule())
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(AppColors.white.opacity(0.65))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

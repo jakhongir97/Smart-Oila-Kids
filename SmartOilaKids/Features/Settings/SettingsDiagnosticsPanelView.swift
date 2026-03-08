@@ -190,10 +190,23 @@ struct DiagnosticsPanelView: View {
         [
             (L10n.tr("diagnostics.state"), diagnostics.media.status),
             (L10n.tr("diagnostics.media_dsn"), diagnostics.media.dsn),
-            (L10n.tr("diagnostics.endpoint"), diagnostics.media.endpoint),
+            (L10n.tr("diagnostics.media_recordings_endpoint"), diagnostics.media.endpoint),
+            (L10n.tr("diagnostics.media_stream_status_endpoint"), diagnostics.media.streamStatusEndpoint),
+            (L10n.tr("diagnostics.media_stream_audio_endpoint"), diagnostics.media.streamAudioEndpoint),
+            (L10n.tr("diagnostics.media_stream_video_endpoint"), diagnostics.media.streamVideoEndpoint),
+            (L10n.tr("diagnostics.media_transport_state"), diagnostics.media.transportState),
+            (L10n.tr("diagnostics.media_pending_actions"), "\(diagnostics.media.pendingActions)"),
+            (L10n.tr("diagnostics.media_audio_stream_state"), diagnostics.media.streamState),
+            (L10n.tr("diagnostics.media_audio_stream_frames"), "\(diagnostics.media.streamFramesSent)"),
+            (L10n.tr("diagnostics.media_last_audio_stream"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.media.lastStreamAt)),
+            (L10n.tr("diagnostics.media_video_stream_state"), diagnostics.media.videoStreamState),
+            (L10n.tr("diagnostics.media_video_stream_source"), diagnostics.media.videoStreamSource),
+            (L10n.tr("diagnostics.media_video_stream_frames"), "\(diagnostics.media.videoFramesSent)"),
+            (L10n.tr("diagnostics.media_last_video_stream"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.media.lastVideoStreamAt)),
             (L10n.tr("diagnostics.media_last_event"), diagnostics.media.lastEvent),
             (L10n.tr("diagnostics.media_last_recording_id"), diagnostics.media.lastRecordingID),
             (L10n.tr("diagnostics.media_last_upload"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.media.lastUploadAt)),
+            (L10n.tr("diagnostics.media_last_cleanup"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.media.lastCleanupAt)),
             (L10n.tr("diagnostics.last_error"), diagnostics.media.lastError),
             (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.media.updatedAt))
         ]
@@ -212,6 +225,14 @@ struct DiagnosticsPanelView: View {
             (
                 L10n.tr("diagnostics.permission_microphone"),
                 SettingsDiagnosticsValueMapper.microphoneStatus(permissionManager.microphonePermission)
+            ),
+            (
+                L10n.tr("diagnostics.permission_camera"),
+                SettingsDiagnosticsValueMapper.cameraStatus(permissionManager.cameraAuthorizationStatus)
+            ),
+            (
+                L10n.tr("diagnostics.permission_display_capture"),
+                SettingsDiagnosticsValueMapper.displayCaptureStatus(permissionManager.displayCaptureAvailabilityStatus)
             ),
             (
                 L10n.tr("diagnostics.permission_screen_time"),

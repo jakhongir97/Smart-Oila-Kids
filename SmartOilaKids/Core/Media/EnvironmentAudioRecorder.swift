@@ -6,6 +6,7 @@ import UIKit
 final class EnvironmentAudioRecorder: NSObject, @preconcurrency AVAudioRecorderDelegate {
     enum RecorderError: LocalizedError {
         case busy
+        case cancelled
         case permissionDenied
         case permissionPromptUnavailable
         case failedToConfigureSession
@@ -18,6 +19,8 @@ final class EnvironmentAudioRecorder: NSObject, @preconcurrency AVAudioRecorderD
             switch self {
             case .busy:
                 return "an environment recording is already in progress"
+            case .cancelled:
+                return "the environment recording was cancelled before completion"
             case .permissionDenied:
                 return "microphone permission is not granted"
             case .permissionPromptUnavailable:
@@ -41,6 +44,7 @@ final class EnvironmentAudioRecorder: NSObject, @preconcurrency AVAudioRecorderD
             throw RecorderError.busy
         }
 
+        wasCancelled = false
         try await requestPermissionIfNeeded()
 
         let session = AVAudioSession.sharedInstance()
@@ -99,8 +103,18 @@ final class EnvironmentAudioRecorder: NSObject, @preconcurrency AVAudioRecorderD
         }
 
         self.continuation = nil
+        let wasCancelled = self.wasCancelled
+        self.wasCancelled = false
         let outputURL = self.outputURL
         cleanup()
+
+        if wasCancelled {
+            if let outputURL {
+                try? FileManager.default.removeItem(at: outputURL)
+            }
+            continuation.resume(throwing: RecorderError.cancelled)
+            return
+        }
 
         guard flag else {
             continuation.resume(throwing: RecorderError.failedToFinish)
@@ -122,13 +136,29 @@ final class EnvironmentAudioRecorder: NSObject, @preconcurrency AVAudioRecorderD
         }
 
         self.continuation = nil
+        self.wasCancelled = false
         cleanup()
         continuation.resume(throwing: error ?? RecorderError.failedToFinish)
+    }
+
+    func cancelRecording() {
+        guard recorder != nil else {
+            let continuation = self.continuation
+            self.continuation = nil
+            self.wasCancelled = false
+            cleanup()
+            continuation?.resume(throwing: RecorderError.cancelled)
+            return
+        }
+
+        wasCancelled = true
+        recorder?.stop()
     }
 
     private var continuation: CheckedContinuation<URL, Error>?
     private var recorder: AVAudioRecorder?
     private var outputURL: URL?
+    private var wasCancelled = false
 
     private func requestPermissionIfNeeded() async throws {
         switch AVAudioSession.sharedInstance().recordPermission {

@@ -8,6 +8,7 @@ enum PermissionRequirement: Int, CaseIterable, Identifiable {
     case usageStats
     case backgroundTransfer
     case notifications
+    case camera
 
     var id: Int { rawValue }
 

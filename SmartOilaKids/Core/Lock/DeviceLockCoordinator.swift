@@ -72,10 +72,9 @@ final class DeviceLockCoordinator: ObservableObject {
             forName: .deviceAppLockConfigurationDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             Task { @MainActor in
-                self?.applyCurrentShieldState()
-                self?.recalculateAppLockMismatchState()
+                self?.handleAppLockConfigurationChanged(notification)
             }
         }
     }
@@ -362,6 +361,32 @@ final class DeviceLockCoordinator: ObservableObject {
         )
     }
 
+    private func handleAppLockConfigurationChanged(_ notification: Notification) {
+        let previousMismatchState = appLockMismatchState
+        let previousActiveLockedIdentifiers = appLockStore.activeLockedApplicationIdentifiers
+
+        applyCurrentShieldState()
+        recalculateAppLockMismatchState()
+
+        guard configurationChangeReason(from: notification) == .selectionChanged,
+              let currentDSN,
+              !previousMismatchState.unenforceableApplications.isEmpty else {
+            return
+        }
+
+        let mismatchImproved = appLockMismatchState.count < previousMismatchState.count
+        let activeLocksIncreased = appLockStore.activeLockedApplicationIdentifiers.count > previousActiveLockedIdentifiers.count
+        guard mismatchImproved || activeLocksIncreased else { return }
+
+        let previousMismatchApplications = previousMismatchState.unenforceableApplications
+        Task { [weak self] in
+            await self?.recoverSelectionEnforcedLocksIfNeeded(
+                dsn: currentDSN,
+                previousMismatchApplications: previousMismatchApplications
+            )
+        }
+    }
+
     private let service: DeviceLockServicing
     private let applicationStateService: DeviceApplicationStateServicing
     private let shieldController: DeviceLockShieldController
@@ -496,5 +521,40 @@ private extension DeviceLockCoordinator {
             remoteLockedApplications: remoteLockedApplications,
             shouldNotify: event.lockStatus
         )
+    }
+
+    func recoverSelectionEnforcedLocksIfNeeded(
+        dsn: String,
+        previousMismatchApplications: [DeviceAppSelectionApplication]
+    ) async {
+        guard currentDSN == dsn,
+              !previousMismatchApplications.isEmpty else {
+            return
+        }
+
+        let didRefresh = await refreshApplicationStateIfNeeded(for: dsn, force: true)
+        guard didRefresh, currentDSN == dsn else { return }
+
+        let currentMismatchIdentifiers = Set(appLockMismatchState.unenforceableApplications.map(\.packageName))
+        let activeLockedIdentifiers = appLockStore.activeLockedApplicationIdentifiers
+        let restoredApplications = previousMismatchApplications.filter { application in
+            !currentMismatchIdentifiers.contains(application.packageName)
+                && activeLockedIdentifiers.contains(application.packageName)
+        }
+        guard !restoredApplications.isEmpty else { return }
+
+        await DeviceControlRecoveryNotifier.shared.recordAppLockRestored(
+            dsn: dsn,
+            applications: restoredApplications
+        )
+    }
+
+    func configurationChangeReason(from notification: Notification) -> DeviceAppLockConfigurationChangeReason {
+        guard let rawValue = (notification.userInfo?[DeviceAppLockConfigurationChangeUserInfoKey.reason] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              let reason = DeviceAppLockConfigurationChangeReason(rawValue: rawValue) else {
+            return .remoteStateChanged
+        }
+        return reason
     }
 }

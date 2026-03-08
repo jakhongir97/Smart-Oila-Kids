@@ -120,6 +120,7 @@ struct SettingsQuickActionsSection: View {
     let onOpenDiagnostics: () -> Void
     let onOpenPermissions: () -> Void
     let onOpenAppLock: () -> Void
+    let onOpenMediaHistory: () -> Void
     let onInviteParent: () -> Void
 
     var body: some View {
@@ -144,6 +145,14 @@ struct SettingsQuickActionsSection: View {
                 iconName: "app.badge.checkmark",
                 title: L10n.tr("settings.app_lock"),
                 action: onOpenAppLock
+            )
+            .padding(.horizontal, sidePadding)
+            .padding(.top, 8)
+
+            SettingsSecondaryActionButton(
+                iconName: "film.stack",
+                title: L10n.tr("settings.media_history"),
+                action: onOpenMediaHistory
             )
             .padding(.horizontal, sidePadding)
             .padding(.top, 8)

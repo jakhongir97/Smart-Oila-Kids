@@ -26,6 +26,7 @@ struct MainView: View {
             usageHours: viewModel.weeklyUsageHours,
             usagePhase: viewModel.usagePhase,
             deviceControlItems: viewModel.recentDeviceControlItems,
+            mediaItems: viewModel.recentMediaItems,
             pendingTasksCount: viewModel.pendingTasksCount,
             unreadChatCount: viewModel.unreadChatCount,
             onInfoTap: { showTemplates = true },
@@ -37,6 +38,7 @@ struct MainView: View {
                 }
             },
             onDeviceControlTap: { showNotifications = true },
+            onMediaTap: { showNotifications = true },
             onTasksTap: { showTasks = true },
             onChatTap: {
                 openChatThreadOnPresent = false
@@ -92,6 +94,7 @@ struct MainView: View {
             Task {
                 await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
                 await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenChat)) { notification in
@@ -128,6 +131,8 @@ struct MainView: View {
         .fullScreenCover(isPresented: $showNotifications, onDismiss: {
             Task {
                 await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
+                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
             }
         }) {
             NavigationStack {

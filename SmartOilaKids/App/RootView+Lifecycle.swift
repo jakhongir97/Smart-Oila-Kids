@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 extension RootView {
     func handleAppear() {
@@ -7,6 +8,7 @@ extension RootView {
         let shouldArmLaunchRecovery = isInitialAppear && shouldArmLaunchRecoveryCheck(referenceDate: Date())
 
         lastSessionDSN = sessionStore.dsn?.trimmedNonEmpty
+        DeviceRecordingCoordinator.shared.setApplicationActive(UIApplication.shared.applicationState == .active)
         syncGeoService(with: sessionStore.dsn)
         syncLockService(with: sessionStore.dsn, armRecoveryCheck: shouldArmLaunchRecovery)
         syncMediaService(with: sessionStore.dsn)
@@ -50,10 +52,17 @@ extension RootView {
             let now = Date()
             lastBackgroundedAt = now
             persistBackgroundTimestamp(now)
+            DeviceRecordingCoordinator.shared.setApplicationActive(false)
+            return
+        }
+
+        if newValue == .inactive {
+            DeviceRecordingCoordinator.shared.setApplicationActive(false)
             return
         }
 
         guard newValue == .active else { return }
+        DeviceRecordingCoordinator.shared.setApplicationActive(true)
 
         if shouldArmRecoveryCheck(referenceDate: Date()) {
             lockCoordinator.armForegroundRecoveryCheck()

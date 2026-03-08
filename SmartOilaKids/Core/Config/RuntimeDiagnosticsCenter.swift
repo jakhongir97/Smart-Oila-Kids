@@ -79,10 +79,23 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         status: String? = nil,
         dsn: String? = nil,
         endpoint: String? = nil,
+        streamStatusEndpoint: String? = nil,
+        streamAudioEndpoint: String? = nil,
+        streamVideoEndpoint: String? = nil,
+        transportState: String? = nil,
+        pendingActions: Int? = nil,
+        streamState: String? = nil,
+        streamFramesSent: Int? = nil,
+        lastStreamAt: Date? = nil,
+        videoStreamState: String? = nil,
+        videoStreamSource: String? = nil,
+        videoFramesSent: Int? = nil,
+        lastVideoStreamAt: Date? = nil,
         lastEvent: String? = nil,
         lastRecordingID: String? = nil,
         lastError: String? = nil,
-        lastUploadAt: Date? = nil
+        lastUploadAt: Date? = nil,
+        lastCleanupAt: Date? = nil
     ) {
         if let status {
             media.status = status
@@ -92,6 +105,42 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         }
         if let endpoint {
             media.endpoint = endpoint
+        }
+        if let streamStatusEndpoint {
+            media.streamStatusEndpoint = streamStatusEndpoint
+        }
+        if let streamAudioEndpoint {
+            media.streamAudioEndpoint = streamAudioEndpoint
+        }
+        if let streamVideoEndpoint {
+            media.streamVideoEndpoint = streamVideoEndpoint
+        }
+        if let transportState {
+            media.transportState = transportState
+        }
+        if let pendingActions {
+            media.pendingActions = pendingActions
+        }
+        if let streamState {
+            media.streamState = streamState
+        }
+        if let streamFramesSent {
+            media.streamFramesSent = streamFramesSent
+        }
+        if let lastStreamAt {
+            media.lastStreamAt = lastStreamAt
+        }
+        if let videoStreamState {
+            media.videoStreamState = videoStreamState
+        }
+        if let videoStreamSource {
+            media.videoStreamSource = videoStreamSource
+        }
+        if let videoFramesSent {
+            media.videoFramesSent = videoFramesSent
+        }
+        if let lastVideoStreamAt {
+            media.lastVideoStreamAt = lastVideoStreamAt
         }
         if let lastEvent {
             media.lastEvent = lastEvent
@@ -104,6 +153,9 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         }
         if let lastUploadAt {
             media.lastUploadAt = lastUploadAt
+        }
+        if let lastCleanupAt {
+            media.lastCleanupAt = lastCleanupAt
         }
         media.updatedAt = Date()
     }
@@ -319,10 +371,23 @@ struct MediaDiagnosticsSnapshot {
     var status: String = "idle"
     var endpoint: String = "-"
     var dsn: String = "-"
+    var streamStatusEndpoint: String = "-"
+    var streamAudioEndpoint: String = "-"
+    var streamVideoEndpoint: String = "-"
+    var transportState: String = "idle"
+    var pendingActions: Int = 0
+    var streamState: String = "idle"
+    var streamFramesSent: Int = 0
+    var lastStreamAt: Date? = nil
+    var videoStreamState: String = "idle"
+    var videoStreamSource: String = "-"
+    var videoFramesSent: Int = 0
+    var lastVideoStreamAt: Date? = nil
     var lastEvent: String = "-"
     var lastRecordingID: String = "-"
     var lastError: String = "-"
     var lastUploadAt: Date? = nil
+    var lastCleanupAt: Date? = nil
     var updatedAt: Date? = nil
 }
 

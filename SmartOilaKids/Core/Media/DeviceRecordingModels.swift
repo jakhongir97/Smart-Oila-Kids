@@ -1,6 +1,6 @@
 import Foundation
 
-enum DeviceRecordingTaskType: String, Decodable, Equatable {
+enum DeviceRecordingTaskType: String, Codable, Equatable {
     case camera
     case display
     case environment
