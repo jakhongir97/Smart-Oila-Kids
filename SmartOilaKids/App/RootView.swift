@@ -49,7 +49,8 @@ struct RootView: View {
             }
         }
         .background(alignment: .topLeading) {
-            if AppRuntime.debugRoute == nil {
+            if AppRuntime.debugRoute == nil,
+               AppRuntime.screenTimeFeaturesEnabled {
                 ScreenTimeUsageReportBridgeView(dsn: sessionStore.dsn)
             }
         }

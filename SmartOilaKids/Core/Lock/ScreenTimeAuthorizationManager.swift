@@ -16,6 +16,12 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
     @Published private(set) var lastErrorText: String?
 
     func refreshStatus() {
+        guard AppRuntime.screenTimeFeaturesEnabled else {
+            status = .unavailable
+            persistStatus(status)
+            return
+        }
+
         let previousStatus = persistedStatus ?? status
 
         switch AuthorizationCenter.shared.authorizationStatus {
@@ -42,6 +48,12 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
     }
 
     func requestAuthorization() async {
+        guard AppRuntime.screenTimeFeaturesEnabled else {
+            lastErrorText = nil
+            refreshStatus()
+            return
+        }
+
         lastErrorText = nil
 
         do {
@@ -58,6 +70,12 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
     }
 
     func revokeAuthorization() async {
+        guard AppRuntime.screenTimeFeaturesEnabled else {
+            lastErrorText = nil
+            refreshStatus()
+            return
+        }
+
         lastErrorText = nil
 
         await withCheckedContinuation { continuation in

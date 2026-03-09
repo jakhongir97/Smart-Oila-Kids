@@ -3,6 +3,13 @@ import Foundation
 enum AppRuntime {
     private static let environment = ProcessInfo.processInfo.environment
 
+    static var screenTimeFeaturesEnabled: Bool {
+        if let configured = Bundle.main.object(forInfoDictionaryKey: "SMARTOILA_SCREEN_TIME_FEATURES_ENABLED") as? NSNumber {
+            return configured.boolValue
+        }
+        return false
+    }
+
     static var debugRoute: DebugRoute? {
 #if DEBUG
         guard let value = trimmed("SMARTOILA_DEBUG_ROUTE") else { return nil }
