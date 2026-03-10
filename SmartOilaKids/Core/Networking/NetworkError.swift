@@ -1,6 +1,11 @@
 import Foundation
 
 enum NetworkError: LocalizedError {
+    enum RetryPolicy {
+        case queueDelivery
+        case bindingVerification
+    }
+
     case invalidURL
     case invalidResponse
     case server(statusCode: Int, body: String)
@@ -75,6 +80,56 @@ enum NetworkError: LocalizedError {
             return L10n.tr("error.request_failed")
         }
         return message
+    }
+
+    static func shouldRetry(_ error: Error, policy: RetryPolicy) -> Bool {
+        if let networkError = error as? NetworkError {
+            switch networkError {
+            case let .server(statusCode, _):
+                return shouldRetry(statusCode: statusCode, policy: policy)
+            case let .underlying(nested):
+                return shouldRetry(nested, policy: policy)
+            case .invalidURL, .invalidResponse, .decodingFailed, .unexpectedBody:
+                return false
+            }
+        }
+
+        if let urlError = error as? URLError {
+            return shouldRetry(urlError, policy: policy)
+        }
+
+        return false
+    }
+
+    static func shouldRetry(statusCode: Int, policy: RetryPolicy) -> Bool {
+        switch policy {
+        case .queueDelivery:
+            return statusCode == 401
+                || statusCode == 403
+                || statusCode == 408
+                || statusCode == 429
+                || statusCode >= 500
+        case .bindingVerification:
+            return statusCode == 404
+                || statusCode == 429
+                || statusCode >= 500
+        }
+    }
+
+    static func shouldRetry(_ error: URLError, policy: RetryPolicy) -> Bool {
+        switch error.code {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .timedOut,
+             .cannotFindHost,
+             .cannotConnectToHost,
+             .dnsLookupFailed,
+             .dataNotAllowed,
+             .internationalRoamingOff:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func extractServerMessage(from body: String) -> String? {

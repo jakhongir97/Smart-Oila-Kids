@@ -4,11 +4,55 @@ import ManagedSettings
 
 @MainActor
 final class DeviceLockScheduleMonitorController {
-    func applySchedule(_ schedule: DeviceFullLockSchedule?, dsn: String?) {
-        ScreenTimeAuthorizationManager.shared.refreshStatus()
+    typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
+    typealias StartMonitoringAction = (_ activityName: DeviceActivityName, _ schedule: DeviceActivitySchedule) throws -> Void
+    typealias StopMonitoringAction = (_ activityNames: [DeviceActivityName]) -> Void
+    typealias VoidAction = () -> Void
+    typealias DiagnosticsAction = (
+        _ status: String?,
+        _ dsn: String?,
+        _ schedule: String?,
+        _ activityCount: Int?,
+        _ lastError: String?
+    ) -> Void
 
+    init(
+        authorizationStatus: AuthorizationStatusAction? = nil,
+        startMonitoring: StartMonitoringAction? = nil,
+        stopMonitoring: StopMonitoringAction? = nil,
+        clearMonitoringStore: VoidAction? = nil,
+        diagnosticsUpdater: DiagnosticsAction? = nil
+    ) {
+        let activityCenter = DeviceActivityCenter()
+        let scheduleStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.schedule))
+
+        self.authorizationStatus = authorizationStatus ?? {
+            ScreenTimeAuthorizationManager.shared.refreshStatus()
+            return ScreenTimeAuthorizationManager.shared.status
+        }
+        self.startMonitoring = startMonitoring ?? { activityName, schedule in
+            try activityCenter.startMonitoring(activityName, during: schedule)
+        }
+        self.stopMonitoring = stopMonitoring ?? { activityNames in
+            activityCenter.stopMonitoring(activityNames)
+        }
+        self.clearMonitoringStore = clearMonitoringStore ?? {
+            scheduleStore.clearAllSettings()
+        }
+        self.diagnosticsUpdater = diagnosticsUpdater ?? { status, dsn, schedule, activityCount, lastError in
+            RuntimeDiagnosticsCenter.shared.updateLockSchedule(
+                status: status,
+                dsn: dsn,
+                schedule: schedule,
+                activityCount: activityCount,
+                lastError: lastError
+            )
+        }
+    }
+
+    func applySchedule(_ schedule: DeviceFullLockSchedule?, dsn: String?) {
         let normalizedDSN = normalizedDSN(dsn)
-        let authorizationStatus = ScreenTimeAuthorizationManager.shared.status
+        let authorizationStatus = authorizationStatus()
         let configuration = makeConfiguration(schedule: schedule, dsn: normalizedDSN)
         let newSignature = configuration?.signature
 
@@ -60,7 +104,7 @@ final class DeviceLockScheduleMonitorController {
 
         do {
             for activity in configuration.activities {
-                try activityCenter.startMonitoring(activity.name, during: activity.schedule)
+                try startMonitoring(activity.name, activity.schedule)
             }
 
             currentSignature = configuration.signature
@@ -95,8 +139,11 @@ final class DeviceLockScheduleMonitorController {
         )
     }
 
-    private let activityCenter = DeviceActivityCenter()
-    private let scheduleStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.schedule))
+    private let authorizationStatus: AuthorizationStatusAction
+    private let startMonitoring: StartMonitoringAction
+    private let stopMonitoring: StopMonitoringAction
+    private let clearMonitoringStore: VoidAction
+    private let diagnosticsUpdater: DiagnosticsAction
     private var currentSignature: String?
     private var currentActivities: [DeviceActivityName] = []
 }
@@ -217,11 +264,11 @@ private extension DeviceLockScheduleMonitorController {
 
     func stopCurrentMonitoring() {
         if !currentActivities.isEmpty {
-            activityCenter.stopMonitoring(currentActivities)
+            stopMonitoring(currentActivities)
         }
         currentActivities = []
         currentSignature = nil
-        scheduleStore.clearAllSettings()
+        clearMonitoringStore()
     }
 
     func normalizedDSN(_ value: String?) -> String? {
@@ -235,12 +282,12 @@ private extension DeviceLockScheduleMonitorController {
         activityCount: Int? = nil,
         lastError: String? = nil
     ) {
-        RuntimeDiagnosticsCenter.shared.updateLockSchedule(
-            status: status,
-            dsn: dsn,
-            schedule: schedule,
-            activityCount: activityCount,
-            lastError: lastError
+        diagnosticsUpdater(
+            status,
+            dsn,
+            schedule,
+            activityCount,
+            lastError
         )
     }
 }

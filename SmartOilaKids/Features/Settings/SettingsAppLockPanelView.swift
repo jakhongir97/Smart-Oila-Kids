@@ -4,34 +4,35 @@ import SwiftUI
 struct SettingsAppLockPanelView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @ObservedObject var permissionManager: LocationPermissionManager
-    @ObservedObject var store: DeviceAppLockSelectionStore
-    @ObservedObject private var lockCoordinator = DeviceLockCoordinator.shared
-    @ObservedObject private var appLimitMonitor = DeviceAppLimitMonitorController.shared
-    @ObservedObject private var diagnostics = RuntimeDiagnosticsCenter.shared
-    @ObservedObject private var usageCoordinator = ScreenTimeUsageCoordinator.shared
+    @StateObject private var controller: SettingsAppLockPanelController
 
-    @State private var showPicker = false
-    @State private var usagePeriod: ScreenTimeUsageActivityPeriod = .daily
-    @State private var usageSummary = ScreenTimeUsageActivitySummary.empty(period: .daily)
-    @State private var pickerBaselineApplications: [DeviceAppSelectionApplication] = []
+    init(
+        permissionManager: LocationPermissionManager,
+        store: DeviceAppLockSelectionStore
+    ) {
+        _controller = StateObject(
+            wrappedValue: SettingsAppLockPanelController(
+                permissionManager: permissionManager,
+                store: store
+            )
+        )
+    }
 
     var body: some View {
-        let summary = store.selectionSummary()
-        let appLimitState = appLimitMonitor.presentationState
-        let scheduleDiagnostics = diagnostics.lockSchedule
-        let mismatchState = lockCoordinator.appLockMismatchState
-        let screenTimeRequirement = PermissionRequirement.usageStats
-        let isScreenTimeReady = permissionManager.isSatisfied(screenTimeRequirement)
-        let actionTitle = permissionManager.primaryActionTitle(for: screenTimeRequirement)
+        let summary = controller.summary
+        let appLimitState = controller.appLimitState
+        let scheduleDiagnostics = controller.scheduleDiagnostics
+        let mismatchState = controller.mismatchState
+        let isScreenTimeReady = controller.isScreenTimeReady
+        let actionTitle = controller.actionTitle
 
         return NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
                     SettingsAppLockStatusCard(
                         title: L10n.tr("settings.app_lock"),
-                        subtitle: statusSubtitle(summary: summary),
-                        badgeText: permissionManager.statusText(for: screenTimeRequirement),
+                        subtitle: controller.statusSubtitle(),
+                        badgeText: controller.permissionManager.statusText(for: .usageStats),
                         badgeAccent: isScreenTimeReady ? AppColors.accentGreen : AppColors.primaryPurple
                     )
 
@@ -49,64 +50,37 @@ struct SettingsAppLockPanelView: View {
                         SettingsAppLockPreviewCard(summary: summary)
                     }
 
-                    if shouldShowAppLimits(state: appLimitState, isScreenTimeReady: isScreenTimeReady) {
+                    if controller.shouldShowAppLimits() {
                         SettingsAppLimitCard(state: appLimitState)
                     }
 
                     SettingsAppUsageActivityCard(
-                        summary: usageSummary,
-                        period: $usagePeriod,
+                        summary: controller.usageSummary,
+                        period: $controller.usagePeriod,
                         isScreenTimeReady: isScreenTimeReady,
                         actionTitle: actionTitle,
-                        onAllowScreenTime: {
-                            AppHaptics.tap()
-                            permissionManager.performAction(for: screenTimeRequirement)
-                        },
-                        onRefresh: {
-                            AppHaptics.tap()
-                            Task {
-                                await usageCoordinator.retryNow()
-                                reloadUsageSummary()
-                            }
-                        }
+                        onAllowScreenTime: controller.requestScreenTimeAccess,
+                        onRefresh: controller.refreshUsage
                     )
 
-                    if shouldShowLockSchedule(state: lockCoordinator.state, diagnostics: scheduleDiagnostics) {
+                    if controller.shouldShowLockSchedule() {
                         SettingsLockScheduleCard(
-                            lockState: lockCoordinator.state,
+                            lockState: controller.lockState,
                             scheduleDiagnostics: scheduleDiagnostics
                         )
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
                         if isScreenTimeReady {
-                            Button(L10n.tr("settings.app_lock_button_choose")) {
-                                AppHaptics.tap()
-                                pickerBaselineApplications = store.selectedApplications()
-                                showPicker = true
-                            }
+                            Button(L10n.tr("settings.app_lock_button_choose"), action: controller.openPicker)
                             .buttonStyle(SettingsAppLockPrimaryButtonStyle())
                         } else if let actionTitle {
-                            Button(actionTitle) {
-                                AppHaptics.tap()
-                                permissionManager.performAction(for: screenTimeRequirement)
-                            }
+                            Button(actionTitle, action: controller.requestScreenTimeAccess)
                             .buttonStyle(SettingsAppLockPrimaryButtonStyle())
                         }
 
                         if summary.hasSelection {
-                            Button(L10n.tr("settings.app_lock_button_clear")) {
-                                AppHaptics.tap()
-                                let removedApplications = store.selectedApplications()
-                                store.clearSelection()
-                                Task {
-                                    await DeviceControlIntegrityNotifier.shared.recordAppProtectionRemoved(
-                                        dsn: store.currentDSN,
-                                        applications: removedApplications
-                                    )
-                                    await lockCoordinator.refreshNow()
-                                }
-                            }
+                            Button(L10n.tr("settings.app_lock_button_clear"), action: controller.clearSelection)
                             .buttonStyle(SettingsAppLockSecondaryButtonStyle())
                         }
                     }
@@ -133,10 +107,7 @@ struct SettingsAppLockPanelView: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        permissionManager.refreshStatuses()
-                        Task {
-                            await lockCoordinator.refreshNow()
-                        }
+                        controller.refreshProtectionState()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                             .foregroundStyle(AppColors.primaryPurple)
@@ -144,107 +115,13 @@ struct SettingsAppLockPanelView: View {
                 }
             }
             .onAppear {
-                permissionManager.refreshStatuses()
-                appLimitMonitor.activate(dsn: store.currentDSN)
-                reloadUsageSummary()
-                Task {
-                    await lockCoordinator.refreshNow()
-                }
-            }
-            .onChange(of: store.currentDSN) { newValue in
-                appLimitMonitor.activate(dsn: newValue)
-                reloadUsageSummary()
-                Task {
-                    await lockCoordinator.refreshNow()
-                }
-            }
-            .onChange(of: usagePeriod) { _ in
-                reloadUsageSummary()
-            }
-            .onChange(of: permissionManager.screenTimePermissionStatus) { _ in
-                reloadUsageSummary()
-            }
-            .onChange(of: appLimitMonitor.presentationState) { _ in
-                reloadUsageSummary()
-            }
-            .onChange(of: usageCoordinator.latestSnapshot) { _ in
-                reloadUsageSummary()
-            }
-            .onChange(of: showPicker) { isPresented in
-                guard !isPresented else { return }
-                reportRemovedApplications(comparedTo: pickerBaselineApplications)
-                pickerBaselineApplications = []
-                Task {
-                    await lockCoordinator.refreshNow()
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .deviceAppLockConfigurationDidChange)) { _ in
-                reloadUsageSummary()
+                controller.handleAppear()
             }
             .familyActivityPicker(
                 headerText: L10n.tr("settings.app_lock_picker_header"),
                 footerText: L10n.tr("settings.app_lock_picker_footer"),
-                isPresented: $showPicker,
-                selection: selectionBinding
-            )
-        }
-    }
-
-    private var selectionBinding: Binding<FamilyActivitySelection> {
-        Binding(
-            get: { store.selection },
-            set: { store.updateSelection($0) }
-        )
-    }
-
-    private func statusSubtitle(summary: DeviceAppLockSelectionSummary) -> String {
-        if summary.hasSelection {
-            return L10n.tr("settings.app_lock_subtitle")
-        }
-        return L10n.tr("settings.app_lock_no_selection")
-    }
-
-    private func shouldShowAppLimits(
-        state: DeviceAppLimitPresentationState,
-        isScreenTimeReady: Bool
-    ) -> Bool {
-        guard isScreenTimeReady else { return false }
-        return !state.items.isEmpty || state.remoteLimitCount > 0
-    }
-
-    private func shouldShowLockSchedule(
-        state: DeviceLockCoordinator.State,
-        diagnostics: LockScheduleMonitorDiagnosticsSnapshot
-    ) -> Bool {
-        if let scheduleRange = state.scheduleRange, !scheduleRange.isEmpty {
-            return true
-        }
-
-        return diagnostics.status != "idle"
-    }
-
-    private func reloadUsageSummary() {
-        usageSummary = ScreenTimeUsageActivitySummaryBuilder.build(
-            dsn: store.currentDSN,
-            period: usagePeriod,
-            selectionStore: store,
-            appLimitState: appLimitMonitor.presentationState
-        )
-    }
-
-    private func reportRemovedApplications(comparedTo baseline: [DeviceAppSelectionApplication]) {
-        guard !baseline.isEmpty else { return }
-
-        let currentIdentifiers = Set(store.selectedApplications().map(\.packageName))
-        let removedApplications = baseline.filter { application in
-            !currentIdentifiers.contains(application.packageName)
-        }
-        guard !removedApplications.isEmpty else { return }
-
-        Task {
-            await DeviceControlIntegrityNotifier.shared.recordAppProtectionRemoved(
-                dsn: store.currentDSN,
-                applications: removedApplications
+                isPresented: $controller.showPicker,
+                selection: controller.selectionBinding
             )
         }
     }

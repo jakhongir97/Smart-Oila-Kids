@@ -2,6 +2,13 @@ import Foundation
 
 @MainActor
 final class DeviceLockCoordinator: ObservableObject {
+    typealias ConnectAction = (String) -> Void
+    typealias OptionalDSNAction = (String?) -> Void
+    typealias VoidAction = () -> Void
+    typealias AsyncVoidAction = () async -> Void
+    typealias ScheduleApplyAction = (DeviceFullLockSchedule?, String?) -> Void
+    typealias ShieldApplyAction = (Bool, DeviceAppLockShieldConfiguration) -> Void
+
     static let shared = DeviceLockCoordinator()
 
     struct AppLockMismatchState: Equatable {
@@ -42,17 +49,67 @@ final class DeviceLockCoordinator: ObservableObject {
         appLockStore: DeviceAppLockSelectionStore? = nil,
         appLockWebSocketService: DeviceApplicationLockWebSocketService = DeviceApplicationLockWebSocketService(),
         scheduleMonitorController: DeviceLockScheduleMonitorController? = nil,
-        appLimitMonitorController: DeviceAppLimitMonitorController? = nil
+        appLimitMonitorController: DeviceAppLimitMonitorController? = nil,
+        connectGlobalLockWebSocket: ConnectAction? = nil,
+        disconnectGlobalLockWebSocket: VoidAction? = nil,
+        connectAppLockWebSocket: ConnectAction? = nil,
+        disconnectAppLockWebSocket: VoidAction? = nil,
+        applyScheduleMonitoring: ScheduleApplyAction? = nil,
+        stopScheduleMonitoring: VoidAction? = nil,
+        activateAppLimitMonitoring: OptionalDSNAction? = nil,
+        stopAppLimitMonitoring: VoidAction? = nil,
+        refreshAppLimitMonitoring: AsyncVoidAction? = nil,
+        armAppLimitRecoveryCheck: VoidAction? = nil,
+        applyShield: ShieldApplyAction? = nil,
+        clearShield: VoidAction? = nil,
+        shouldStartPolling: Bool = true
     ) {
+        let resolvedShieldController = shieldController ?? DeviceLockShieldController()
+        let resolvedAppLockStore = appLockStore ?? .shared
+        let resolvedScheduleMonitorController = scheduleMonitorController ?? DeviceLockScheduleMonitorController()
+        let resolvedAppLimitMonitorController = appLimitMonitorController ?? .shared
+
         self.service = service
         self.applicationStateService = applicationStateService
-        self.shieldController = shieldController ?? DeviceLockShieldController()
-        self.webSocketService = webSocketService
-        self.appLockStore = appLockStore ?? .shared
-        self.appLockWebSocketService = appLockWebSocketService
-        self.scheduleMonitorController = scheduleMonitorController ?? DeviceLockScheduleMonitorController()
-        self.appLimitMonitorController = appLimitMonitorController ?? .shared
-        self.webSocketService.onGlobalLockStatusChange = { [weak self] isLocked, isReconnectDelivery in
+        self.appLockStore = resolvedAppLockStore
+        self.connectGlobalLockWebSocket = connectGlobalLockWebSocket ?? { [webSocketService] in
+            webSocketService.connect(dsn: $0)
+        }
+        self.disconnectGlobalLockWebSocket = disconnectGlobalLockWebSocket ?? { [webSocketService] in
+            webSocketService.disconnect()
+        }
+        self.connectAppLockWebSocket = connectAppLockWebSocket ?? { [appLockWebSocketService] in
+            appLockWebSocketService.connect(dsn: $0)
+        }
+        self.disconnectAppLockWebSocket = disconnectAppLockWebSocket ?? { [appLockWebSocketService] in
+            appLockWebSocketService.disconnect()
+        }
+        self.applyScheduleMonitoring = applyScheduleMonitoring ?? { [resolvedScheduleMonitorController] schedule, dsn in
+            resolvedScheduleMonitorController.applySchedule(schedule, dsn: dsn)
+        }
+        self.stopScheduleMonitoring = stopScheduleMonitoring ?? { [resolvedScheduleMonitorController] in
+            resolvedScheduleMonitorController.stop()
+        }
+        self.activateAppLimitMonitoring = activateAppLimitMonitoring ?? { [resolvedAppLimitMonitorController] in
+            resolvedAppLimitMonitorController.activate(dsn: $0)
+        }
+        self.stopAppLimitMonitoring = stopAppLimitMonitoring ?? { [resolvedAppLimitMonitorController] in
+            resolvedAppLimitMonitorController.stop()
+        }
+        self.refreshAppLimitMonitoring = refreshAppLimitMonitoring ?? { [resolvedAppLimitMonitorController] in
+            await resolvedAppLimitMonitorController.refreshNow()
+        }
+        self.armAppLimitRecoveryCheck = armAppLimitRecoveryCheck ?? { [resolvedAppLimitMonitorController] in
+            resolvedAppLimitMonitorController.armForegroundRecoveryCheck()
+        }
+        self.applyShield = applyShield ?? { [resolvedShieldController] isLocked, configuration in
+            resolvedShieldController.applyLockState(isLocked, appLockConfiguration: configuration)
+        }
+        self.clearShield = clearShield ?? { [resolvedShieldController] in
+            resolvedShieldController.clearAllRestrictions()
+        }
+        self.shouldStartPolling = shouldStartPolling
+        webSocketService.onGlobalLockStatusChange = { [weak self] isLocked, isReconnectDelivery in
             Task { @MainActor in
                 self?.handleRealtimeGlobalLockStatus(
                     isLocked,
@@ -60,7 +117,7 @@ final class DeviceLockCoordinator: ObservableObject {
                 )
             }
         }
-        self.appLockWebSocketService.onLockEvent = { [weak self] event, isReconnectDelivery in
+        appLockWebSocketService.onLockEvent = { [weak self] event, isReconnectDelivery in
             Task { @MainActor in
                 self?.handleRealtimeApplicationLockEvent(
                     event,
@@ -95,7 +152,7 @@ final class DeviceLockCoordinator: ObservableObject {
 
         pollingTask?.cancel()
         pollingTask = nil
-        scheduleMonitorController.stop()
+        stopScheduleMonitoring()
         currentDSN = normalized
         pendingForegroundRecoveryCheck = armRecoveryCheck
         resetGlobalLockCache()
@@ -113,13 +170,15 @@ final class DeviceLockCoordinator: ObservableObject {
         )
         appLockStore.activate(dsn: normalized)
         if armRecoveryCheck {
-            appLimitMonitorController.armForegroundRecoveryCheck()
+            armAppLimitRecoveryCheck()
         }
-        appLimitMonitorController.activate(dsn: normalized)
+        activateAppLimitMonitoring(normalized)
         updateState(.unlocked)
         lastErrorText = nil
-        webSocketService.connect(dsn: normalized)
-        appLockWebSocketService.connect(dsn: normalized)
+        connectGlobalLockWebSocket(normalized)
+        connectAppLockWebSocket(normalized)
+
+        guard shouldStartPolling else { return }
 
         pollingTask = Task { [weak self] in
             await self?.pollLoop(for: normalized)
@@ -131,9 +190,9 @@ final class DeviceLockCoordinator: ObservableObject {
         pollingTask = nil
         currentDSN = nil
         pendingForegroundRecoveryCheck = false
-        appLockWebSocketService.disconnect()
-        scheduleMonitorController.stop()
-        appLimitMonitorController.stop()
+        disconnectAppLockWebSocket()
+        stopScheduleMonitoring()
+        stopAppLimitMonitoring()
         appLockStore.activate(dsn: nil)
         updateState(.unlocked)
         lastErrorText = nil
@@ -150,19 +209,19 @@ final class DeviceLockCoordinator: ObservableObject {
             remoteUnenforceableCount: 0,
             lastError: "-"
         )
-        webSocketService.disconnect()
-        shieldController.clearAllRestrictions()
+        disconnectGlobalLockWebSocket()
+        clearShield()
     }
 
     func refreshNow() async {
         guard let dsn = currentDSN else { return }
         await refreshStatus(for: dsn, forceApplicationStateRefresh: true)
-        await appLimitMonitorController.refreshNow()
+        await refreshAppLimitMonitoring()
     }
 
     func armForegroundRecoveryCheck() {
         pendingForegroundRecoveryCheck = true
-        appLimitMonitorController.armForegroundRecoveryCheck()
+        armAppLimitRecoveryCheck()
     }
 
     private func pollLoop(for dsn: String) async {
@@ -192,7 +251,7 @@ final class DeviceLockCoordinator: ObservableObject {
                 deviceLocalTime: status.normalizedLocalTime,
                 scheduleRange: status.schedule?.normalizedRange
             ))
-            scheduleMonitorController.applySchedule(status.schedule, dsn: dsn)
+            applyScheduleMonitoring(status.schedule, dsn)
             lastErrorText = nil
             await evaluateForegroundRecoveryIfNeeded(
                 dsn: dsn,
@@ -200,7 +259,7 @@ final class DeviceLockCoordinator: ObservableObject {
             )
         } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
             guard currentDSN == dsn else { return }
-            scheduleMonitorController.applySchedule(nil, dsn: dsn)
+            applyScheduleMonitoring(nil, dsn)
             let didRefreshApplicationState = await refreshApplicationStateIfNeeded(
                 for: dsn,
                 force: forceApplicationStateRefresh || pendingForegroundRecoveryCheck
@@ -355,10 +414,7 @@ final class DeviceLockCoordinator: ObservableObject {
     }
 
     private func applyCurrentShieldState() {
-        shieldController.applyLockState(
-            state.isLocked,
-            appLockConfiguration: appLockStore.shieldConfiguration()
-        )
+        applyShield(state.isLocked, appLockStore.shieldConfiguration())
     }
 
     private func handleAppLockConfigurationChanged(_ notification: Notification) {
@@ -389,12 +445,20 @@ final class DeviceLockCoordinator: ObservableObject {
 
     private let service: DeviceLockServicing
     private let applicationStateService: DeviceApplicationStateServicing
-    private let shieldController: DeviceLockShieldController
-    private let webSocketService: DeviceLockWebSocketService
     private let appLockStore: DeviceAppLockSelectionStore
-    private let appLockWebSocketService: DeviceApplicationLockWebSocketService
-    private let scheduleMonitorController: DeviceLockScheduleMonitorController
-    private let appLimitMonitorController: DeviceAppLimitMonitorController
+    private let connectGlobalLockWebSocket: ConnectAction
+    private let disconnectGlobalLockWebSocket: VoidAction
+    private let connectAppLockWebSocket: ConnectAction
+    private let disconnectAppLockWebSocket: VoidAction
+    private let applyScheduleMonitoring: ScheduleApplyAction
+    private let stopScheduleMonitoring: VoidAction
+    private let activateAppLimitMonitoring: OptionalDSNAction
+    private let stopAppLimitMonitoring: VoidAction
+    private let refreshAppLimitMonitoring: AsyncVoidAction
+    private let armAppLimitRecoveryCheck: VoidAction
+    private let applyShield: ShieldApplyAction
+    private let clearShield: VoidAction
+    private let shouldStartPolling: Bool
     private var currentDSN: String?
     private var pollingTask: Task<Void, Never>?
     private let pollingIntervalNanoseconds: UInt64 = 15_000_000_000

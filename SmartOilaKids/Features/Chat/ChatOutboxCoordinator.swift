@@ -70,37 +70,6 @@ final class ChatOutboxCoordinator {
     }
 
     private func shouldQueue(_ error: Error) -> Bool {
-        if let networkError = error as? NetworkError {
-            switch networkError {
-            case let .server(statusCode, _):
-                return statusCode == 401
-                    || statusCode == 403
-                    || statusCode == 408
-                    || statusCode == 429
-                    || statusCode >= 500
-            case .underlying(let nested):
-                return shouldQueue(nested)
-            case .invalidURL, .invalidResponse, .decodingFailed, .unexpectedBody:
-                return false
-            }
-        }
-
-        if let urlError = error as? URLError {
-            switch urlError.code {
-            case .notConnectedToInternet,
-                 .networkConnectionLost,
-                 .timedOut,
-                 .cannotFindHost,
-                 .cannotConnectToHost,
-                 .dnsLookupFailed,
-                 .dataNotAllowed,
-                 .internationalRoamingOff:
-                return true
-            default:
-                return false
-            }
-        }
-
-        return false
+        NetworkError.shouldRetry(error, policy: .queueDelivery)
     }
 }

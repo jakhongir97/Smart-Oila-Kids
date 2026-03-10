@@ -70,6 +70,7 @@
 		47558A4FAD645F9FCBABCA1F /* GeoSystemInfoSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C37EE11B869C4E95CA2DD64F /* GeoSystemInfoSnapshot.swift */; };
 		486041E4E237913705E7FF3F /* MainNotificationsInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35C14E0E29CA4E3BDA34D432 /* MainNotificationsInboxView.swift */; };
 		491CD988E505A78417F9A20C /* SettingsAppLockPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B822C0BFEC24DD6406A7D25 /* SettingsAppLockPanelView.swift */; };
+		C04F8DA41024451490FDDE1C /* SettingsAppLockPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18E85045B1843458E485FC3 /* SettingsAppLockPanelController.swift */; };
 		491DF9A5242617255281D9B5 /* ChatTemplatesEditorSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B92ED84F6AAE977B6DC637C0 /* ChatTemplatesEditorSection.swift */; };
 		4B4E1FF589C595FD088F8B62 /* DeviceApplicationStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C45ED121A102053D74358C91 /* DeviceApplicationStateService.swift */; };
 		4D835BC4403A3627B4CD5564 /* DeviceAppLimitMonitorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611DF2DB1B84CE6845E61F65 /* DeviceAppLimitMonitorController.swift */; };
@@ -253,7 +254,79 @@
 		FDFF7733C266BFADE0EB2D51 /* SettingsService+Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585C70FB672238EE163107D5 /* SettingsService+Profile.swift */; };
 		FE60833FB1DB5314E6E4EF80 /* APIResponseDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A2A9B66F50FB7AB78D6204 /* APIResponseDecoder.swift */; };
 		FEA4706D43796BAF3BF44289 /* DeviceApplicationLockPayloadParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9548B0248BF51FB0A4C40A /* DeviceApplicationLockPayloadParser.swift */; };
+		355135034B1D473C93D2645F /* SmartOilaKidsUsageReportExtension.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		18137A4C4BB0408A9C545206 /* SmartOilaKidsScheduleMonitorExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A473F051843443EE93423757 /* SmartOilaKidsUsageReportExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3AE0F8316C44BC78E962C07 /* SmartOilaKidsUsageReportExtension.swift */; };
+		4E0C31E83F3E48D0964937D2 /* SmartOilaUsageReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6A7F416F8F47B5A633F74E /* SmartOilaUsageReport.swift */; };
+		EB85C6EA7609448E81B7CCEE /* SmartOilaUsageReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6C933CA55D47C1BE4CB81B /* SmartOilaUsageReportView.swift */; };
+		942E3A223251455EACACA6F1 /* ScreenTimeUsageAppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B23147D0A5327CED850D5FA /* ScreenTimeUsageAppGroup.swift */; };
+		1BAA26AFBC94468B99A31FED /* ScreenTimeUsageSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C1A8005C2E6130F0254562 /* ScreenTimeUsageSharedModels.swift */; };
+		AB12EDC2467F4FE3AEBB40B0 /* ScreenTimeUsageSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */; };
+		C0E98A711DFE4543A7BA3C20 /* SmartOilaKidsDeviceActivityMonitorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85956B25DDB545FE94EF8499 /* SmartOilaKidsDeviceActivityMonitorExtension.swift */; };
+		B1346442FED346C1AE4965C6 /* DeviceAppLimitSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F30C4E774EB78FB3C02B179 /* DeviceAppLimitSharedStore.swift */; };
+		21CD5BDD52E44B109A0B7C87 /* DeviceControlEventSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CB267462E8296CE7B50CDD /* DeviceControlEventSharedStore.swift */; };
+		3C465EFD824F4F06990EA633 /* DeviceLockScheduleSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */; };
+		F1A0B1C2D3E4F50617283940 /* NetworkErrorRetryPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */; };
+		F1A0B1C2D3E4F50617283950 /* QueueCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */; };
+		F1A0B1C2D3E4F50617283952 /* SettingsAppLockPanelControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */; };
+		F1A0B1C2D3E4F50617283960 /* AuthBindingVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283961 /* AuthBindingVerifierTests.swift */; };
+		F1A0B1C2D3E4F50617283962 /* AuthViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283963 /* AuthViewModelTests.swift */; };
+		F1A0B1C2D3E4F50617283964 /* DeviceLockCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */; };
+		F1A0B1C2D3E4F50617283966 /* DeviceAppLimitMonitorControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283967 /* DeviceAppLimitMonitorControllerTests.swift */; };
+		F1A0B1C2D3E4F50617283968 /* DeviceLockScheduleMonitorControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283969 /* DeviceLockScheduleMonitorControllerTests.swift */; };
+		F1A0B1C2D3E4F50617283970 /* DeviceLockShieldControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283971 /* DeviceLockShieldControllerTests.swift */; };
+		F1A0B1C2D3E4F50617283972 /* DeviceRecordingTransportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283973 /* DeviceRecordingTransportCoordinatorTests.swift */; };
+		F1A0B1C2D3E4F50617283974 /* DeviceRecordingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283975 /* DeviceRecordingCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		78F79099D12B4777B8859201 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D7FAB55786594D5A927B96E4;
+			remoteInfo = SmartOilaKidsUsageReportExtension;
+		};
+		76E2F70D3D944EBB87613BDC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FC18D17BD5B7480387B00D20;
+			remoteInfo = SmartOilaKidsScheduleMonitorExtension;
+		};
+		F1A0B1C2D3E4F50617283941 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 92844C8577B27B0138F9A882;
+			remoteInfo = SmartOilaKids;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DFBA81DFB7D14C2A9EB31C25 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				18137A4C4BB0408A9C545206 /* SmartOilaKidsScheduleMonitorExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4FE78EC1D0284E2AAD829B05 /* Embed ExtensionKit Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				355135034B1D473C93D2645F /* SmartOilaKidsUsageReportExtension.appex in Embed ExtensionKit Extensions */,
+			);
+			name = "Embed ExtensionKit Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000EB148968CDFEE38501FBC /* DeviceAppLockSelectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLockSelectionStore.swift; sourceTree = "<group>"; };
@@ -394,6 +467,16 @@
 		905F42DACE8A0D7E411277EE /* PermissionChecklistEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionChecklistEvaluator.swift; sourceTree = "<group>"; };
 		91561FEA14C1BF3F1F367FF7 /* DeviceRecordingTransportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRecordingTransportCoordinator.swift; sourceTree = "<group>"; };
 		92868689073A7FB20751DE55 /* GeoBackgroundService+Setup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeoBackgroundService+Setup.swift"; sourceTree = "<group>"; };
+		79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.extensionkit-extension; includeInIndex = 0; path = SmartOilaKidsUsageReportExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SmartOilaKidsScheduleMonitorExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9624025CFAF4D5BB40E0534 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		6F2B0DC3B30C434F83993B11 /* SmartOilaKidsUsageReportExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKidsUsageReportExtension.entitlements; sourceTree = "<group>"; };
+		F3AE0F8316C44BC78E962C07 /* SmartOilaKidsUsageReportExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaKidsUsageReportExtension.swift; sourceTree = "<group>"; };
+		2F6A7F416F8F47B5A633F74E /* SmartOilaUsageReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaUsageReport.swift; sourceTree = "<group>"; };
+		BF6C933CA55D47C1BE4CB81B /* SmartOilaUsageReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaUsageReportView.swift; sourceTree = "<group>"; };
+		9BE5577AC7D949BB8D31E0B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E9F06F9BD5EC4846BBEB1E43 /* SmartOilaKidsScheduleMonitorExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKidsScheduleMonitorExtension.entitlements; sourceTree = "<group>"; };
+		85956B25DDB545FE94EF8499 /* SmartOilaKidsDeviceActivityMonitorExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaKidsDeviceActivityMonitorExtension.swift; sourceTree = "<group>"; };
 		94392F4357B26A080E1CF387 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
 		95A091E783A9E295D35421E5 /* DeviceAudioStreamWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAudioStreamWebSocketService.swift; sourceTree = "<group>"; };
 		95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockScheduleSupport.swift; sourceTree = "<group>"; };
@@ -402,6 +485,7 @@
 		98D120F82B2D862255E144CE /* DeviceLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockService.swift; sourceTree = "<group>"; };
 		9B35C83F2A4F548512EB20FB /* ChildChromeBranding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildChromeBranding.swift; sourceTree = "<group>"; };
 		9B822C0BFEC24DD6406A7D25 /* SettingsAppLockPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAppLockPanelView.swift; sourceTree = "<group>"; };
+		F18E85045B1843458E485FC3 /* SettingsAppLockPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAppLockPanelController.swift; sourceTree = "<group>"; };
 		9CBD93216102589F60B615CF /* SettingsActionFlows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsActionFlows.swift; sourceTree = "<group>"; };
 		9EC8BB2D0929B442FDAF455A /* SettingsViewModel+Loading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsViewModel+Loading.swift"; sourceTree = "<group>"; };
 		9EF532791C5DAE3BB5FE6335 /* MediaTelemetryNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaTelemetryNotifier.swift; sourceTree = "<group>"; };
@@ -494,6 +578,18 @@
 		EE5059CB7695B1358A8AC465 /* DeviceAppLockSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLockSyncCoordinator.swift; sourceTree = "<group>"; };
 		EF660B1FA8F225ADFB2A09E8 /* ChatOutboxCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatOutboxCoordinator.swift; sourceTree = "<group>"; };
 		EFDAC27DF29466EDA313D2C5 /* String+Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Formatting.swift"; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283942 /* SmartOilaKidsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmartOilaKidsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkErrorRetryPolicyTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueCoordinatorTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAppLockPanelControllerTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283961 /* AuthBindingVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthBindingVerifierTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283963 /* AuthViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModelTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockCoordinatorTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283967 /* DeviceAppLimitMonitorControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLimitMonitorControllerTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283969 /* DeviceLockScheduleMonitorControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockScheduleMonitorControllerTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283971 /* DeviceLockShieldControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockShieldControllerTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283973 /* DeviceRecordingTransportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRecordingTransportCoordinatorTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283975 /* DeviceRecordingCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRecordingCoordinatorTests.swift; sourceTree = "<group>"; };
 		F0AE799676C73350959F5938 /* SettingsBannerCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsBannerCenter.swift; sourceTree = "<group>"; };
 		F21DD84C2E71BD157050D64A /* ChatWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatWebSocketService.swift; sourceTree = "<group>"; };
 		F33F198E77771344886E3DFB /* MainAdInfoCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainAdInfoCard.swift; sourceTree = "<group>"; };
@@ -544,8 +640,23 @@
 			children = (
 				3259826AA2818E7D2DAA8C16 /* Shared */,
 				72A82078E66BE4CC33084B37 /* SmartOilaKids */,
+				1C454AAD40464E05A0321D36 /* SmartOilaKidsUsageReportExtension */,
+				87DBFEFC58E64E618B8FA3B3 /* SmartOilaKidsScheduleMonitorExtension */,
+				F1A0B1C2D3E4F50617283944 /* SmartOilaKidsTests */,
 				636D6521AAF7E23CDDCA2C68 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		1C454AAD40464E05A0321D36 /* SmartOilaKidsUsageReportExtension */ = {
+			isa = PBXGroup;
+			children = (
+				F3AE0F8316C44BC78E962C07 /* SmartOilaKidsUsageReportExtension.swift */,
+				2F6A7F416F8F47B5A633F74E /* SmartOilaUsageReport.swift */,
+				BF6C933CA55D47C1BE4CB81B /* SmartOilaUsageReportView.swift */,
+				C9624025CFAF4D5BB40E0534 /* Info.plist */,
+				6F2B0DC3B30C434F83993B11 /* SmartOilaKidsUsageReportExtension.entitlements */,
+			);
+			path = SmartOilaKidsUsageReportExtension;
 			sourceTree = "<group>";
 		};
 		3259826AA2818E7D2DAA8C16 /* Shared */ = {
@@ -678,6 +789,7 @@
 			isa = PBXGroup;
 			children = (
 				9CBD93216102589F60B615CF /* SettingsActionFlows.swift */,
+				F18E85045B1843458E485FC3 /* SettingsAppLockPanelController.swift */,
 				9B822C0BFEC24DD6406A7D25 /* SettingsAppLockPanelView.swift */,
 				101DEC919BD658045AE250D4 /* SettingsAvatarUploadPayloadBuilder.swift */,
 				F0AE799676C73350959F5938 /* SettingsBannerCenter.swift */,
@@ -714,6 +826,9 @@
 			isa = PBXGroup;
 			children = (
 				4D0BC0423D576553D183CB83 /* SmartOilaKids.app */,
+				79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */,
+				3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */,
+				F1A0B1C2D3E4F50617283942 /* SmartOilaKidsTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -744,6 +859,34 @@
 				D8B0ED79208F15C51B779B79 /* QRScannerView.swift */,
 			);
 			path = Auth;
+			sourceTree = "<group>";
+		};
+		87DBFEFC58E64E618B8FA3B3 /* SmartOilaKidsScheduleMonitorExtension */ = {
+			isa = PBXGroup;
+			children = (
+				85956B25DDB545FE94EF8499 /* SmartOilaKidsDeviceActivityMonitorExtension.swift */,
+				9BE5577AC7D949BB8D31E0B3 /* Info.plist */,
+				E9F06F9BD5EC4846BBEB1E43 /* SmartOilaKidsScheduleMonitorExtension.entitlements */,
+			);
+			path = SmartOilaKidsScheduleMonitorExtension;
+			sourceTree = "<group>";
+		};
+		F1A0B1C2D3E4F50617283944 /* SmartOilaKidsTests */ = {
+			isa = PBXGroup;
+			children = (
+				F1A0B1C2D3E4F50617283961 /* AuthBindingVerifierTests.swift */,
+				F1A0B1C2D3E4F50617283963 /* AuthViewModelTests.swift */,
+				F1A0B1C2D3E4F50617283967 /* DeviceAppLimitMonitorControllerTests.swift */,
+				F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */,
+				F1A0B1C2D3E4F50617283969 /* DeviceLockScheduleMonitorControllerTests.swift */,
+				F1A0B1C2D3E4F50617283971 /* DeviceLockShieldControllerTests.swift */,
+				F1A0B1C2D3E4F50617283975 /* DeviceRecordingCoordinatorTests.swift */,
+				F1A0B1C2D3E4F50617283973 /* DeviceRecordingTransportCoordinatorTests.swift */,
+				F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */,
+				F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */,
+				F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */,
+			);
+			path = SmartOilaKidsTests;
 			sourceTree = "<group>";
 		};
 		683624BDED461EF2C0E928CD /* Core */ = {
@@ -1040,10 +1183,14 @@
 			buildPhases = (
 				EEA838EAC925999ADC328F04 /* Sources */,
 				28887B92E3F6E1CFF7D811DA /* Resources */,
+				DFBA81DFB7D14C2A9EB31C25 /* Embed App Extensions */,
+				4FE78EC1D0284E2AAD829B05 /* Embed ExtensionKit Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				CAB2722D60C7457FBC28958D /* PBXTargetDependency */,
+				50708B381AC44D979E65C171 /* PBXTargetDependency */,
 			);
 			name = SmartOilaKids;
 			packageProductDependencies = (
@@ -1051,6 +1198,61 @@
 			productName = SmartOilaKids;
 			productReference = 4D0BC0423D576553D183CB83 /* SmartOilaKids.app */;
 			productType = "com.apple.product-type.application";
+		};
+		D7FAB55786594D5A927B96E4 /* SmartOilaKidsUsageReportExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5D15E3D4B83144709B4A6609 /* Build configuration list for PBXNativeTarget "SmartOilaKidsUsageReportExtension" */;
+			buildPhases = (
+				9F0F610DF1124227956C1DF1 /* Sources */,
+				D82C186C479D4647B0838E96 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SmartOilaKidsUsageReportExtension;
+			packageProductDependencies = (
+			);
+			productName = SmartOilaKidsUsageReportExtension;
+			productReference = 79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */;
+			productType = "com.apple.product-type.extensionkit-extension";
+		};
+		FC18D17BD5B7480387B00D20 /* SmartOilaKidsScheduleMonitorExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3A1916603E6F4D1BAF62FF3B /* Build configuration list for PBXNativeTarget "SmartOilaKidsScheduleMonitorExtension" */;
+			buildPhases = (
+				74C668DDF1D44CEBADBAF1C0 /* Sources */,
+				016FEE1A47E64DDB987343BB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SmartOilaKidsScheduleMonitorExtension;
+			packageProductDependencies = (
+			);
+			productName = SmartOilaKidsScheduleMonitorExtension;
+			productReference = 3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		F1A0B1C2D3E4F50617283946 /* SmartOilaKidsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1A0B1C2D3E4F5061728394C /* Build configuration list for PBXNativeTarget "SmartOilaKidsTests" */;
+			buildPhases = (
+				F1A0B1C2D3E4F50617283948 /* Sources */,
+				F1A0B1C2D3E4F50617283947 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F1A0B1C2D3E4F50617283949 /* PBXTargetDependency */,
+			);
+			name = SmartOilaKidsTests;
+			packageProductDependencies = (
+			);
+			productName = SmartOilaKidsTests;
+			productReference = F1A0B1C2D3E4F50617283942 /* SmartOilaKidsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -1063,6 +1265,16 @@
 				TargetAttributes = {
 					92844C8577B27B0138F9A882 = {
 						DevelopmentTeam = 7A9V4SQ8LR;
+					};
+					D7FAB55786594D5A927B96E4 = {
+						DevelopmentTeam = 7A9V4SQ8LR;
+					};
+					FC18D17BD5B7480387B00D20 = {
+						DevelopmentTeam = 7A9V4SQ8LR;
+					};
+					F1A0B1C2D3E4F50617283946 = {
+						DevelopmentTeam = 7A9V4SQ8LR;
+						TestTargetID = 92844C8577B27B0138F9A882;
 					};
 				};
 			};
@@ -1082,6 +1294,9 @@
 			projectRoot = "";
 			targets = (
 				92844C8577B27B0138F9A882 /* SmartOilaKids */,
+				D7FAB55786594D5A927B96E4 /* SmartOilaKidsUsageReportExtension */,
+				FC18D17BD5B7480387B00D20 /* SmartOilaKidsScheduleMonitorExtension */,
+				F1A0B1C2D3E4F50617283946 /* SmartOilaKidsTests */,
 			);
 		};
 /* End PBXProject section */
@@ -1097,6 +1312,27 @@
 				744F9E5B5EFBC07D9F74D386 /* Roboto-Variable.ttf in Resources */,
 				DA5A04AB90266C29EF7FB093 /* Sora-Variable.ttf in Resources */,
 				C9FAF7708A0415756DB7EB8E /* Unbounded-Variable.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D82C186C479D4647B0838E96 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		016FEE1A47E64DDB987343BB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F1A0B1C2D3E4F50617283947 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1306,6 +1542,7 @@
 				61B80B9F1BC6B50E2B10DED8 /* SecureTokenStore.swift in Sources */,
 				02A2F11140840028AD044865 /* SessionStore.swift in Sources */,
 				33B5586D579CA5DF23507F32 /* SettingsActionFlows.swift in Sources */,
+				C04F8DA41024451490FDDE1C /* SettingsAppLockPanelController.swift in Sources */,
 				491CD988E505A78417F9A20C /* SettingsAppLockPanelView.swift in Sources */,
 				DF8C2B7B20A39B8195B45C9B /* SettingsAvatarUploadPayloadBuilder.swift in Sources */,
 				CD5FE274BEF2445D4D9857CA /* SettingsBannerCenter.swift in Sources */,
@@ -1350,7 +1587,67 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		9F0F610DF1124227956C1DF1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A473F051843443EE93423757 /* SmartOilaKidsUsageReportExtension.swift in Sources */,
+				4E0C31E83F3E48D0964937D2 /* SmartOilaUsageReport.swift in Sources */,
+				EB85C6EA7609448E81B7CCEE /* SmartOilaUsageReportView.swift in Sources */,
+				942E3A223251455EACACA6F1 /* ScreenTimeUsageAppGroup.swift in Sources */,
+				1BAA26AFBC94468B99A31FED /* ScreenTimeUsageSharedModels.swift in Sources */,
+				AB12EDC2467F4FE3AEBB40B0 /* ScreenTimeUsageSharedStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		74C668DDF1D44CEBADBAF1C0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0E98A711DFE4543A7BA3C20 /* SmartOilaKidsDeviceActivityMonitorExtension.swift in Sources */,
+				B1346442FED346C1AE4965C6 /* DeviceAppLimitSharedStore.swift in Sources */,
+				21CD5BDD52E44B109A0B7C87 /* DeviceControlEventSharedStore.swift in Sources */,
+				3C465EFD824F4F06990EA633 /* DeviceLockScheduleSupport.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F1A0B1C2D3E4F50617283948 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F1A0B1C2D3E4F50617283960 /* AuthBindingVerifierTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283962 /* AuthViewModelTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283966 /* DeviceAppLimitMonitorControllerTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283964 /* DeviceLockCoordinatorTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283968 /* DeviceLockScheduleMonitorControllerTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283970 /* DeviceLockShieldControllerTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283974 /* DeviceRecordingCoordinatorTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283972 /* DeviceRecordingTransportCoordinatorTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283940 /* NetworkErrorRetryPolicyTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283950 /* QueueCoordinatorTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283952 /* SettingsAppLockPanelControllerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		50708B381AC44D979E65C171 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D7FAB55786594D5A927B96E4 /* SmartOilaKidsUsageReportExtension */;
+			targetProxy = 78F79099D12B4777B8859201 /* PBXContainerItemProxy */;
+		};
+		CAB2722D60C7457FBC28958D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC18D17BD5B7480387B00D20 /* SmartOilaKidsScheduleMonitorExtension */;
+			targetProxy = 76E2F70D3D944EBB87613BDC /* PBXContainerItemProxy */;
+		};
+		F1A0B1C2D3E4F50617283949 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 92844C8577B27B0138F9A882 /* SmartOilaKids */;
+			targetProxy = F1A0B1C2D3E4F50617283941 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		773C5143FC368E6B3FA28423 /* InfoPlist.strings */ = {
@@ -1419,6 +1716,159 @@
 				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		EF547A24D1B84AD7B691A878 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.usage-report;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		27643A66E9D248AEA6501478 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.usage-report;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		10CF93DEB7724EFD99390308 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.schedule-monitor;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		57987690BF77480FA87C10C9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.schedule-monitor;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		F1A0B1C2D3E4F5061728394A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SmartOilaKids.app/SmartOilaKids";
+				TEST_TARGET_NAME = SmartOilaKids;
+			};
+			name = Debug;
+		};
+		F1A0B1C2D3E4F5061728394B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SmartOilaKids.app/SmartOilaKids";
+				TEST_TARGET_NAME = SmartOilaKids;
 			};
 			name = Release;
 		};
@@ -1549,6 +1999,33 @@
 			buildConfigurations = (
 				577ACE46E9FA3D18917BF280 /* Debug */,
 				9C9208C1A3024BB37BF4AF82 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5D15E3D4B83144709B4A6609 /* Build configuration list for PBXNativeTarget "SmartOilaKidsUsageReportExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EF547A24D1B84AD7B691A878 /* Debug */,
+				27643A66E9D248AEA6501478 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3A1916603E6F4D1BAF62FF3B /* Build configuration list for PBXNativeTarget "SmartOilaKidsScheduleMonitorExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				10CF93DEB7724EFD99390308 /* Debug */,
+				57987690BF77480FA87C10C9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F1A0B1C2D3E4F5061728394C /* Build configuration list for PBXNativeTarget "SmartOilaKidsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1A0B1C2D3E4F5061728394A /* Debug */,
+				F1A0B1C2D3E4F5061728394B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

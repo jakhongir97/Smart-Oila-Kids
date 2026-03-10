@@ -21,6 +21,20 @@
                ReferencedContainer = "container:SmartOilaKids.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F1A0B1C2D3E4F50617283946"
+               BuildableName = "SmartOilaKidsTests.xctest"
+               BlueprintName = "SmartOilaKidsTests"
+               ReferencedContainer = "container:SmartOilaKids.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -39,6 +53,16 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "F1A0B1C2D3E4F50617283946"
+               BuildableName = "SmartOilaKidsTests.xctest"
+               BlueprintName = "SmartOilaKidsTests"
+               ReferencedContainer = "container:SmartOilaKids.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

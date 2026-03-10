@@ -55,6 +55,8 @@ enum DeviceAppLockConfigurationChangeUserInfoKey {
 
 @MainActor
 final class DeviceAppLockSelectionStore: ObservableObject {
+    typealias SyncUpdateAction = (String?, [DeviceAppLockSyncEntry]) async -> Void
+
     static let shared = DeviceAppLockSelectionStore()
 
     @Published private(set) var currentDSN: String?
@@ -229,8 +231,14 @@ final class DeviceAppLockSelectionStore: ObservableObject {
             }
     }
 
-    private init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        syncUpdate: SyncUpdateAction? = nil
+    ) {
         self.userDefaults = userDefaults
+        self.syncUpdate = syncUpdate ?? { dsn, entries in
+            await DeviceAppLockSyncCoordinator.shared.update(dsn: dsn, entries: entries)
+        }
         snapshotObserver = NotificationCenter.default.addObserver(
             forName: .screenTimeUsageSnapshotDidChange,
             object: nil,
@@ -243,6 +251,7 @@ final class DeviceAppLockSelectionStore: ObservableObject {
     }
 
     private let userDefaults: UserDefaults
+    private let syncUpdate: SyncUpdateAction
     private let previewApplicationLimit = 5
     private var snapshotObserver: NSObjectProtocol? = nil
     private var knownRemoteLockedApplicationIdentifiers: Set<String> = []
@@ -314,7 +323,7 @@ private extension DeviceAppLockSelectionStore {
         let dsn = currentDSN
         let entries = syncEntries()
         Task {
-            await DeviceAppLockSyncCoordinator.shared.update(dsn: dsn, entries: entries)
+            await syncUpdate(dsn, entries)
         }
     }
 

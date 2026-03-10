@@ -42,25 +42,61 @@ protocol DeviceRecordingTransportServicing {
 extension DeviceRecordingUploadService: DeviceRecordingTransportServicing {}
 
 actor DeviceRecordingTransportCoordinator {
+    typealias TelemetryRecorder = @Sendable (
+        MediaTelemetryEvent,
+        String?,
+        MediaTelemetryType,
+        String?,
+        String?,
+        TimeInterval?
+    ) async -> Void
+    typealias DiagnosticsUpdater = @Sendable (
+        String?,
+        String?,
+        Int?,
+        String?,
+        String?,
+        Date?,
+        Date?
+    ) -> Void
+    typealias RetryScheduler = @Sendable (
+        TimeInterval,
+        @escaping @Sendable () async -> Void
+    ) -> Task<Void, Never>
+
     static let shared = DeviceRecordingTransportCoordinator()
 
     init(
         service: DeviceRecordingTransportServicing = DeviceRecordingUploadService(),
         fileManager: FileManager = .default,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        initialRetryDelay: TimeInterval = 5,
+        maxRetryDelay: TimeInterval = 300,
+        telemetryRecorder: TelemetryRecorder? = nil,
+        diagnosticsUpdater: DiagnosticsUpdater? = nil,
+        retryScheduler: RetryScheduler? = nil
     ) {
         self.service = service
         self.fileManager = fileManager
         self.userDefaults = userDefaults
+        self.initialRetryDelay = initialRetryDelay
+        self.maxRetryDelay = maxRetryDelay
+        self.nextRetryDelay = initialRetryDelay
+        self.telemetryRecorder = telemetryRecorder ?? Self.defaultTelemetryRecorder
+        self.diagnosticsUpdater = diagnosticsUpdater ?? Self.defaultDiagnosticsUpdater
+        self.retryScheduler = retryScheduler ?? Self.defaultRetryScheduler
         pendingActions = Self.loadPendingActions(userDefaults: userDefaults, storageKey: Self.storageKey)
         let initialTransportState = pendingActions.isEmpty ? "idle" : "queued"
         let initialPendingActionCount = pendingActions.count
-        Task { @MainActor in
-            RuntimeDiagnosticsCenter.shared.updateMedia(
-                transportState: initialTransportState,
-                pendingActions: initialPendingActionCount
-            )
-        }
+        self.diagnosticsUpdater(
+            nil,
+            initialTransportState,
+            initialPendingActionCount,
+            nil,
+            nil,
+            nil,
+            nil
+        )
     }
 
     func updateDSN(_ dsn: String?) async {
@@ -83,7 +119,7 @@ actor DeviceRecordingTransportCoordinator {
         do {
             let response = try await service.completeRecording(recordingID: recordingID, fileURL: fileURL)
             try? fileManager.removeItem(at: fileURL)
-            await MediaTelemetryNotifier.shared.record(
+            await recordTelemetry(
                 .recordingCompleted,
                 dsn: normalizedDSN,
                 mediaType: telemetryType(for: type),
@@ -101,7 +137,7 @@ actor DeviceRecordingTransportCoordinator {
         } catch {
             if error.isRecordingTaskMissing {
                 try? fileManager.removeItem(at: fileURL)
-                await MediaTelemetryNotifier.shared.record(
+                await recordTelemetry(
                     .recordingDiscarded,
                     dsn: normalizedDSN,
                     mediaType: telemetryType(for: type),
@@ -126,7 +162,7 @@ actor DeviceRecordingTransportCoordinator {
                 dsn: normalizedDSN,
                 type: type
             )
-            await MediaTelemetryNotifier.shared.record(
+            await recordTelemetry(
                 .recordingUploadQueued,
                 dsn: normalizedDSN,
                 mediaType: telemetryType(for: type),
@@ -164,7 +200,7 @@ actor DeviceRecordingTransportCoordinator {
 
         do {
             _ = try await service.deleteRecording(recordingID: recordingID)
-            await MediaTelemetryNotifier.shared.record(
+            await recordTelemetry(
                 .recordingCancelled,
                 dsn: normalizedDSN,
                 mediaType: telemetryType(for: type),
@@ -182,7 +218,7 @@ actor DeviceRecordingTransportCoordinator {
             )
         } catch {
             if error.isRecordingTaskMissing {
-                await MediaTelemetryNotifier.shared.record(
+                await recordTelemetry(
                     .recordingCancelled,
                     dsn: normalizedDSN,
                     mediaType: telemetryType(for: type),
@@ -279,7 +315,7 @@ actor DeviceRecordingTransportCoordinator {
                     _ = try await service.completeRecording(recordingID: action.recordingID, fileURL: fileURL)
                     dropAction(at: 0, shouldRemovePendingFile: true)
                     nextRetryDelay = initialRetryDelay
-                    await MediaTelemetryNotifier.shared.record(
+                    await recordTelemetry(
                         .recordingCompleted,
                         dsn: action.dsn,
                         mediaType: telemetryType(for: action.type),
@@ -296,7 +332,7 @@ actor DeviceRecordingTransportCoordinator {
                 } catch {
                     if error.isRecordingTaskMissing {
                         dropAction(at: 0, shouldRemovePendingFile: true)
-                        await MediaTelemetryNotifier.shared.record(
+                        await recordTelemetry(
                             .recordingDiscarded,
                             dsn: action.dsn,
                             mediaType: telemetryType(for: action.type),
@@ -331,7 +367,7 @@ actor DeviceRecordingTransportCoordinator {
                     _ = try await service.deleteRecording(recordingID: action.recordingID)
                     dropAction(at: 0, shouldRemovePendingFile: false)
                     nextRetryDelay = initialRetryDelay
-                    await MediaTelemetryNotifier.shared.record(
+                    await recordTelemetry(
                         .recordingCancelled,
                         dsn: action.dsn,
                         mediaType: telemetryType(for: action.type),
@@ -350,7 +386,7 @@ actor DeviceRecordingTransportCoordinator {
                 } catch {
                     if error.isRecordingTaskMissing {
                         dropAction(at: 0, shouldRemovePendingFile: false)
-                        await MediaTelemetryNotifier.shared.record(
+                        await recordTelemetry(
                             .recordingCancelled,
                             dsn: action.dsn,
                             mediaType: telemetryType(for: action.type),
@@ -499,8 +535,7 @@ actor DeviceRecordingTransportCoordinator {
         nextRetryDelay = min(nextRetryDelay * 2, maxRetryDelay)
 
         retryTask?.cancel()
-        retryTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        retryTask = retryScheduler(delay) {
             await self.handleRetry()
         }
     }
@@ -535,6 +570,17 @@ actor DeviceRecordingTransportCoordinator {
         }
     }
 
+    private func recordTelemetry(
+        _ event: MediaTelemetryEvent,
+        dsn: String?,
+        mediaType: MediaTelemetryType,
+        recordingID: String? = nil,
+        reason: String? = nil,
+        cooldown: TimeInterval? = nil
+    ) async {
+        await telemetryRecorder(event, dsn, mediaType, recordingID, reason, cooldown)
+    }
+
     private func updateDiagnostics(
         dsn: String? = nil,
         transportState: String? = nil,
@@ -544,6 +590,69 @@ actor DeviceRecordingTransportCoordinator {
         lastUploadAt: Date? = nil,
         lastCleanupAt: Date? = nil
     ) {
+        diagnosticsUpdater(
+            dsn,
+            transportState,
+            pendingActions,
+            lastEvent,
+            lastError,
+            lastUploadAt,
+            lastCleanupAt
+        )
+    }
+
+    private let service: DeviceRecordingTransportServicing
+    private let fileManager: FileManager
+    private let userDefaults: UserDefaults
+    private let telemetryRecorder: TelemetryRecorder
+    private let diagnosticsUpdater: DiagnosticsUpdater
+    private let retryScheduler: RetryScheduler
+    private var currentDSN: String?
+    private var pendingActions: [DeviceRecordingTransportAction] = []
+    private var isProcessing = false
+    private var retryTask: Task<Void, Never>?
+    private let initialRetryDelay: TimeInterval
+    private let maxRetryDelay: TimeInterval
+    private var nextRetryDelay: TimeInterval
+
+    private static let storageKey = "SMARTOILA_MEDIA_PENDING_TRANSPORT_ACTIONS"
+
+    private static func loadPendingActions(
+        userDefaults: UserDefaults,
+        storageKey: String
+    ) -> [DeviceRecordingTransportAction] {
+        guard let data = userDefaults.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode([DeviceRecordingTransportAction].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    private static let defaultTelemetryRecorder: TelemetryRecorder = {
+        event,
+        dsn,
+        mediaType,
+        recordingID,
+        reason,
+        cooldown in
+        await MediaTelemetryNotifier.shared.record(
+            event,
+            dsn: dsn,
+            mediaType: mediaType,
+            recordingID: recordingID,
+            reason: reason,
+            cooldown: cooldown
+        )
+    }
+
+    private static let defaultDiagnosticsUpdater: DiagnosticsUpdater = {
+        dsn,
+        transportState,
+        pendingActions,
+        lastEvent,
+        lastError,
+        lastUploadAt,
+        lastCleanupAt in
         Task { @MainActor in
             RuntimeDiagnosticsCenter.shared.updateMedia(
                 dsn: dsn,
@@ -557,28 +666,11 @@ actor DeviceRecordingTransportCoordinator {
         }
     }
 
-    private let service: DeviceRecordingTransportServicing
-    private let fileManager: FileManager
-    private let userDefaults: UserDefaults
-    private var currentDSN: String?
-    private var pendingActions: [DeviceRecordingTransportAction] = []
-    private var isProcessing = false
-    private var retryTask: Task<Void, Never>?
-    private let initialRetryDelay: TimeInterval = 5
-    private let maxRetryDelay: TimeInterval = 300
-    private var nextRetryDelay: TimeInterval = 5
-
-    private static let storageKey = "SMARTOILA_MEDIA_PENDING_TRANSPORT_ACTIONS"
-
-    private static func loadPendingActions(
-        userDefaults: UserDefaults,
-        storageKey: String
-    ) -> [DeviceRecordingTransportAction] {
-        guard let data = userDefaults.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode([DeviceRecordingTransportAction].self, from: data) else {
-            return []
+    private static let defaultRetryScheduler: RetryScheduler = { delay, operation in
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            await operation()
         }
-        return decoded
     }
 }
 

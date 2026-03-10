@@ -31,6 +31,13 @@ struct DeviceAppLimitPresentationState: Equatable {
 
 @MainActor
 final class DeviceAppLimitMonitorController: ObservableObject {
+    typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
+    typealias UsedTimeAction = (_ packageName: String, _ dsn: String?) -> Int
+    typealias MatchedConfigurationsAction = (_ limits: [DeviceAppLimitResponse]) -> [DeviceAppLimitConfiguration]
+    typealias MonitorStartAction = (_ dsn: String, _ configurations: [DeviceAppLimitConfiguration]) throws -> Void
+    typealias MonitorStopAction = (_ activityName: DeviceActivityName) -> Void
+    typealias SnapshotAction = (_ snapshot: DeviceAppLimitSnapshot) -> Void
+
     static let shared = DeviceAppLimitMonitorController()
 
     @Published private(set) var presentationState = DeviceAppLimitPresentationState()
@@ -38,11 +45,51 @@ final class DeviceAppLimitMonitorController: ObservableObject {
     init(
         service: DeviceAppLimitServicing = DeviceAppLimitService(),
         selectionStore: DeviceAppLockSelectionStore? = nil,
-        sharedStore: DeviceAppLimitSharedStore = DeviceAppLimitSharedStore()
+        sharedStore: DeviceAppLimitSharedStore = DeviceAppLimitSharedStore(),
+        authorizationStatus: AuthorizationStatusAction? = nil,
+        usedTime: UsedTimeAction? = nil,
+        matchedConfigurationsFromLimits: MatchedConfigurationsAction? = nil,
+        startMonitoring: MonitorStartAction? = nil,
+        stopMonitoring: MonitorStopAction? = nil,
+        applyShield: SnapshotAction? = nil,
+        clearShield: (() -> Void)? = nil,
+        reportRecovery: SnapshotAction? = nil
     ) {
+        let resolvedSelectionStore = selectionStore ?? .shared
+        let activityCenter = DeviceActivityCenter()
+        let limitStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.limit))
+
         self.service = service
-        self.selectionStore = selectionStore ?? .shared
+        self.selectionStore = resolvedSelectionStore
         self.sharedStore = sharedStore
+        self.authorizationStatus = authorizationStatus ?? {
+            Self.defaultAuthorizationStatus()
+        }
+        self.usedTime = usedTime ?? { packageName, dsn in
+            Self.defaultUsedTime(for: packageName, dsn: dsn)
+        }
+        self.matchedConfigurationsFromLimits = matchedConfigurationsFromLimits ?? { limits in
+            Self.defaultMatchedConfigurations(from: limits, selectionStore: resolvedSelectionStore)
+        }
+        self.startMonitoring = startMonitoring ?? { dsn, configurations in
+            try activityCenter.startMonitoring(
+                DeviceActivityName(DeviceAppLimitActivityIdentifier.rawValue(dsn: dsn)),
+                during: Self.makeDailySchedule(),
+                events: Self.defaultMonitoringEvents(for: configurations)
+            )
+        }
+        self.stopMonitoring = stopMonitoring ?? { activityName in
+            activityCenter.stopMonitoring([activityName])
+        }
+        self.applyShield = applyShield ?? { snapshot in
+            Self.defaultApplyLimitShield(using: snapshot, store: limitStore)
+        }
+        self.clearShield = clearShield ?? {
+            limitStore.clearAllSettings()
+        }
+        self.reportRecovery = reportRecovery ?? { snapshot in
+            Self.defaultReportRecovery(using: snapshot)
+        }
         configurationObserver = NotificationCenter.default.addObserver(
             forName: .deviceAppLockConfigurationDidChange,
             object: nil,
@@ -120,16 +167,10 @@ final class DeviceAppLimitMonitorController: ObservableObject {
                         packageName: configuration.packageName,
                         dailyLimitMinutes: configuration.dailyLimitMinutes,
                         isLimitEnabled: true,
-                        usedTodaySeconds: ScreenTimeUsageCoordinator.shared.usedTime(
-                            for: configuration.packageName,
-                            dsn: normalizedDSN
-                        ),
+                        usedTodaySeconds: usedTime(configuration.packageName, normalizedDSN),
                         remainingTodaySeconds: max(
                             0,
-                            (configuration.dailyLimitMinutes * 60) - ScreenTimeUsageCoordinator.shared.usedTime(
-                                for: configuration.packageName,
-                                dsn: normalizedDSN
-                            )
+                            (configuration.dailyLimitMinutes * 60) - usedTime(configuration.packageName, normalizedDSN)
                         ),
                         isLimitReached: snapshot.reachedPackageNames.contains(configuration.packageName)
                     )
@@ -195,8 +236,7 @@ final class DeviceAppLimitMonitorController: ObservableObject {
     func refreshNow() async {
         guard let currentDSN else { return }
 
-        ScreenTimeAuthorizationManager.shared.refreshStatus()
-        let authorizationStatus = ScreenTimeAuthorizationManager.shared.status
+        let authorizationStatus = authorizationStatus()
         guard authorizationStatus == .granted else {
             stopCurrentMonitoring()
             publishState(
@@ -263,13 +303,14 @@ final class DeviceAppLimitMonitorController: ObservableObject {
     private let service: DeviceAppLimitServicing
     private let selectionStore: DeviceAppLockSelectionStore
     private let sharedStore: DeviceAppLimitSharedStore
-    private let activityCenter = DeviceActivityCenter()
-    private let limitStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.limit))
-    private let dailySchedule = DeviceActivitySchedule(
-        intervalStart: DateComponents(hour: 0, minute: 0),
-        intervalEnd: DateComponents(hour: 23, minute: 59, second: 59),
-        repeats: true
-    )
+    private let authorizationStatus: AuthorizationStatusAction
+    private let usedTime: UsedTimeAction
+    private let matchedConfigurationsFromLimits: MatchedConfigurationsAction
+    private let startMonitoring: MonitorStartAction
+    private let stopMonitoring: MonitorStopAction
+    private let applyShield: SnapshotAction
+    private let clearShield: () -> Void
+    private let reportRecovery: SnapshotAction
 
     private var currentDSN: String?
     private var latestFetchResult: DeviceAppLimitFetchResult?
@@ -301,10 +342,7 @@ private extension DeviceAppLimitMonitorController {
             dsn: currentDSN,
             endpoint: presentationState.endpoint,
             remoteLimits: snapshot.configurations.map { configuration in
-                let usedTodaySeconds = ScreenTimeUsageCoordinator.shared.usedTime(
-                    for: configuration.packageName,
-                    dsn: currentDSN
-                )
+                let usedTodaySeconds = usedTime(configuration.packageName, currentDSN)
                 return DeviceAppLimitResponse(
                     packageName: configuration.packageName,
                     dailyLimitMinutes: configuration.dailyLimitMinutes,
@@ -327,8 +365,7 @@ private extension DeviceAppLimitMonitorController {
     func handleSelectionChange() {
         guard let currentDSN else { return }
 
-        ScreenTimeAuthorizationManager.shared.refreshStatus()
-        guard ScreenTimeAuthorizationManager.shared.status == .granted else {
+        guard authorizationStatus() == .granted else {
             stopCurrentMonitoring()
             publishState(
                 status: "not_authorized",
@@ -471,7 +508,7 @@ private extension DeviceAppLimitMonitorController {
                 guard let packageName = normalizedIdentifier(limit.packageName) else {
                     return nil
                 }
-                let usedTodaySeconds = ScreenTimeUsageCoordinator.shared.usedTime(for: packageName, dsn: dsn)
+                let usedTodaySeconds = usedTime(packageName, dsn)
                 return usedTodaySeconds >= (max(1, min(limit.dailyLimitMinutes, 1440)) * 60)
                     ? packageName
                     : nil
@@ -498,12 +535,9 @@ private extension DeviceAppLimitMonitorController {
         if signature != currentSignature || currentActivityName == nil {
             stopCurrentMonitoring()
             do {
-                try activityCenter.startMonitoring(
-                    DeviceActivityName(DeviceAppLimitActivityIdentifier.rawValue(dsn: dsn)),
-                    during: dailySchedule,
-                    events: monitoringEvents(for: snapshot.configurations)
-                )
-                currentActivityName = DeviceActivityName(DeviceAppLimitActivityIdentifier.rawValue(dsn: dsn))
+                let activityName = DeviceActivityName(DeviceAppLimitActivityIdentifier.rawValue(dsn: dsn))
+                try startMonitoring(dsn, snapshot.configurations)
+                currentActivityName = activityName
                 currentSignature = signature
             } catch {
                 stopCurrentMonitoring()
@@ -571,65 +605,26 @@ private extension DeviceAppLimitMonitorController {
 
     func stopCurrentMonitoring() {
         if let currentActivityName {
-            activityCenter.stopMonitoring([currentActivityName])
+            stopMonitoring(currentActivityName)
         }
         currentActivityName = nil
         currentSignature = nil
         pendingForegroundRecoveryCheck = false
-        limitStore.clearAllSettings()
+        clearShield()
     }
 
     func matchedConfigurations(from limits: [DeviceAppLimitResponse]) -> [DeviceAppLimitConfiguration] {
-        let selectedApplications = selectionStore.selection.applications.reduce(into: [String: ManagedSettings.Application]()) {
-            result, application in
-            guard let packageName = normalizedIdentifier(application.bundleIdentifier) else { return }
-            result[packageName] = application
-        }
-
-        return limits.compactMap { limit in
-            guard let packageName = normalizedIdentifier(limit.packageName),
-                  let application = selectedApplications[packageName],
-                  let applicationToken = application.token else {
-                return nil
-            }
-
-            return DeviceAppLimitConfiguration(
-                packageName: packageName,
-                appName: application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? application.bundleIdentifier
-                    ?? packageName,
-                applicationToken: applicationToken,
-                dailyLimitMinutes: max(1, min(limit.dailyLimitMinutes, 1440))
-            )
-        }
-        .sorted { lhs, rhs in
-            lhs.packageName.localizedCaseInsensitiveCompare(rhs.packageName) == .orderedAscending
-        }
+        matchedConfigurationsFromLimits(limits)
     }
 
     func monitoringEvents(
         for configurations: [DeviceAppLimitConfiguration]
     ) -> [DeviceActivityEvent.Name: DeviceActivityEvent] {
-        configurations.reduce(into: [DeviceActivityEvent.Name: DeviceActivityEvent]()) { result, configuration in
-            let name = DeviceActivityEvent.Name(
-                DeviceAppLimitEventIdentifier.rawValue(packageName: configuration.packageName)
-            )
-            result[name] = DeviceActivityEvent(
-                applications: [configuration.applicationToken],
-                threshold: thresholdComponents(for: configuration.dailyLimitMinutes)
-            )
-        }
+        Self.defaultMonitoringEvents(for: configurations)
     }
 
     func thresholdComponents(for minutes: Int) -> DateComponents {
-        let normalizedMinutes = max(1, min(minutes, 1440))
-        if normalizedMinutes == 1440 {
-            return DateComponents(day: 1)
-        }
-        return DateComponents(
-            hour: normalizedMinutes / 60,
-            minute: normalizedMinutes % 60
-        )
+        Self.defaultThresholdComponents(for: minutes)
     }
 
     func monitoringSignature(for snapshot: DeviceAppLimitSnapshot) -> String {
@@ -643,36 +638,11 @@ private extension DeviceAppLimitMonitorController {
     func reportRecoveryIfNeeded(using snapshot: DeviceAppLimitSnapshot) {
         guard pendingForegroundRecoveryCheck else { return }
         pendingForegroundRecoveryCheck = false
-
-        let reachedIdentifiers = snapshot.reachedPackageNames.compactMap(normalizedIdentifier(_:))
-        guard !reachedIdentifiers.isEmpty else { return }
-
-        let singledOutConfiguration = snapshot.configurations.first { configuration in
-            reachedIdentifiers.count == 1 && reachedIdentifiers.contains(configuration.packageName)
-        }
-
-        Task {
-            await DeviceControlRecoveryNotifier.shared.recordAppLimitRestored(
-                dsn: snapshot.dsn,
-                packageName: singledOutConfiguration?.packageName,
-                appName: singledOutConfiguration?.appName
-            )
-        }
+        reportRecovery(snapshot)
     }
 
     func applyLimitShield(using snapshot: DeviceAppLimitSnapshot) {
-        let reachedIdentifiers = Set(snapshot.reachedPackageNames)
-        let tokens = snapshot.configurations.compactMap { configuration -> ApplicationToken? in
-            reachedIdentifiers.contains(configuration.packageName) ? configuration.applicationToken : nil
-        }
-
-        limitStore.clearAllSettings()
-        guard !tokens.isEmpty else { return }
-
-        limitStore.shield.applications = Set(tokens)
-        limitStore.shield.applicationCategories = nil
-        limitStore.shield.webDomains = nil
-        limitStore.shield.webDomainCategories = nil
+        applyShield(snapshot)
     }
 
     func matchedCount(from limits: [DeviceAppLimitResponse]) -> Int {
@@ -699,10 +669,7 @@ private extension DeviceAppLimitMonitorController {
         return configurations.map { configuration in
             let remoteResponse = responseByPackage[configuration.packageName]
             let limitSeconds = configuration.dailyLimitMinutes * 60
-            let localUsedSeconds = ScreenTimeUsageCoordinator.shared.usedTime(
-                for: configuration.packageName,
-                dsn: dsn
-            )
+            let localUsedSeconds = usedTime(configuration.packageName, dsn)
             let usedTodaySeconds = max(remoteResponse?.usedTodaySeconds ?? 0, localUsedSeconds)
             let isLimitReached = normalizedReachedIdentifiers.contains(configuration.packageName)
                 || (remoteResponse?.isLimitReached ?? false)
@@ -766,14 +733,11 @@ private extension DeviceAppLimitMonitorController {
     }
 
     func normalizedDSN(_ value: String?) -> String? {
-        value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        Self.defaultNormalizedDSN(value)
     }
 
     func normalizedIdentifier(_ value: String?) -> String? {
-        value?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .nilIfEmpty
+        Self.defaultNormalizedIdentifier(value)
     }
 
     func isCurrent(dsn: String) -> Bool {
@@ -801,6 +765,128 @@ private extension DeviceAppLimitMonitorController {
             lastPayload: lastPayload,
             lastError: lastError
         )
+    }
+}
+
+private extension DeviceAppLimitMonitorController {
+    static func defaultAuthorizationStatus() -> ScreenTimePermissionStatus {
+        ScreenTimeAuthorizationManager.shared.refreshStatus()
+        return ScreenTimeAuthorizationManager.shared.status
+    }
+
+    static func defaultUsedTime(for packageName: String, dsn: String?) -> Int {
+        ScreenTimeUsageCoordinator.shared.usedTime(for: packageName, dsn: dsn)
+    }
+
+    static func defaultMatchedConfigurations(
+        from limits: [DeviceAppLimitResponse],
+        selectionStore: DeviceAppLockSelectionStore
+    ) -> [DeviceAppLimitConfiguration] {
+        let selectedApplications = selectionStore.selection.applications.reduce(
+            into: [String: ManagedSettings.Application]()
+        ) { result, application in
+            guard let packageName = defaultNormalizedIdentifier(application.bundleIdentifier) else { return }
+            result[packageName] = application
+        }
+
+        return limits.compactMap { limit in
+            guard let packageName = defaultNormalizedIdentifier(limit.packageName),
+                  let application = selectedApplications[packageName],
+                  let applicationToken = application.token else {
+                return nil
+            }
+
+            return DeviceAppLimitConfiguration(
+                packageName: packageName,
+                appName: application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? application.bundleIdentifier
+                    ?? packageName,
+                applicationToken: applicationToken,
+                dailyLimitMinutes: max(1, min(limit.dailyLimitMinutes, 1440))
+            )
+        }
+        .sorted { lhs, rhs in
+            lhs.packageName.localizedCaseInsensitiveCompare(rhs.packageName) == .orderedAscending
+        }
+    }
+
+    static func makeDailySchedule() -> DeviceActivitySchedule {
+        DeviceActivitySchedule(
+            intervalStart: DateComponents(hour: 0, minute: 0),
+            intervalEnd: DateComponents(hour: 23, minute: 59, second: 59),
+            repeats: true
+        )
+    }
+
+    static func defaultMonitoringEvents(
+        for configurations: [DeviceAppLimitConfiguration]
+    ) -> [DeviceActivityEvent.Name: DeviceActivityEvent] {
+        configurations.reduce(into: [DeviceActivityEvent.Name: DeviceActivityEvent]()) { result, configuration in
+            let name = DeviceActivityEvent.Name(
+                DeviceAppLimitEventIdentifier.rawValue(packageName: configuration.packageName)
+            )
+            result[name] = DeviceActivityEvent(
+                applications: [configuration.applicationToken],
+                threshold: defaultThresholdComponents(for: configuration.dailyLimitMinutes)
+            )
+        }
+    }
+
+    static func defaultThresholdComponents(for minutes: Int) -> DateComponents {
+        let normalizedMinutes = max(1, min(minutes, 1440))
+        if normalizedMinutes == 1440 {
+            return DateComponents(day: 1)
+        }
+        return DateComponents(
+            hour: normalizedMinutes / 60,
+            minute: normalizedMinutes % 60
+        )
+    }
+
+    static func defaultReportRecovery(using snapshot: DeviceAppLimitSnapshot) {
+        let reachedIdentifiers = snapshot.reachedPackageNames.compactMap(defaultNormalizedIdentifier(_:))
+        guard !reachedIdentifiers.isEmpty else { return }
+
+        let singledOutConfiguration = snapshot.configurations.first { configuration in
+            reachedIdentifiers.count == 1 && reachedIdentifiers.contains(configuration.packageName)
+        }
+
+        Task {
+            await DeviceControlRecoveryNotifier.shared.recordAppLimitRestored(
+                dsn: snapshot.dsn,
+                packageName: singledOutConfiguration?.packageName,
+                appName: singledOutConfiguration?.appName
+            )
+        }
+    }
+
+    static func defaultApplyLimitShield(
+        using snapshot: DeviceAppLimitSnapshot,
+        store: ManagedSettingsStore
+    ) {
+        let reachedIdentifiers = Set(snapshot.reachedPackageNames)
+        let tokens = snapshot.configurations.compactMap { configuration -> ApplicationToken? in
+            reachedIdentifiers.contains(configuration.packageName) ? configuration.applicationToken : nil
+        }
+
+        store.clearAllSettings()
+        guard !tokens.isEmpty else { return }
+
+        store.shield.applications = Set(tokens)
+        store.shield.applicationCategories = nil
+        store.shield.webDomains = nil
+        store.shield.webDomainCategories = nil
+    }
+
+    static func defaultNormalizedDSN(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    static func defaultNormalizedIdentifier(_ value: String?) -> String? {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .nilIfEmpty
     }
 }
 

@@ -87,10 +87,12 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         streamState: String? = nil,
         streamFramesSent: Int? = nil,
         lastStreamAt: Date? = nil,
+        clearLastStreamAt: Bool = false,
         videoStreamState: String? = nil,
         videoStreamSource: String? = nil,
         videoFramesSent: Int? = nil,
         lastVideoStreamAt: Date? = nil,
+        clearLastVideoStreamAt: Bool = false,
         lastEvent: String? = nil,
         lastRecordingID: String? = nil,
         lastError: String? = nil,
@@ -127,7 +129,9 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         if let streamFramesSent {
             media.streamFramesSent = streamFramesSent
         }
-        if let lastStreamAt {
+        if clearLastStreamAt {
+            media.lastStreamAt = nil
+        } else if let lastStreamAt {
             media.lastStreamAt = lastStreamAt
         }
         if let videoStreamState {
@@ -139,7 +143,9 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         if let videoFramesSent {
             media.videoFramesSent = videoFramesSent
         }
-        if let lastVideoStreamAt {
+        if clearLastVideoStreamAt {
+            media.lastVideoStreamAt = nil
+        } else if let lastVideoStreamAt {
             media.lastVideoStreamAt = lastVideoStreamAt
         }
         if let lastEvent {

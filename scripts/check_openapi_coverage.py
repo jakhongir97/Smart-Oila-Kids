@@ -26,6 +26,9 @@ REST_URL_RE = re.compile(r'https?://[^/"\']+/api/[^"\'\s]+')
 WS_URL_RE = re.compile(r'wss?://[^/"\']+/ws/[^"\'\s]+')
 WS_INTERPOLATED_PATH_RE = re.compile(r'/ws/[^"\'\s]+')
 WS_TEMPLATE_PATH_RE = re.compile(r'path:\s*"(/ws/[^"]+)"')
+WS_APP_CONFIG_SUFFIX_RE = re.compile(
+    r'AppConfig\.websocketTokenPath\)(/[^"\n]+)"'
+)
 
 
 def normalize_interpolation(text: str) -> str:
@@ -130,13 +133,17 @@ def collect_ws_paths_from_urls(source_dir: Path) -> Set[str]:
             normalized = normalize_path(path)
             if normalized.startswith("/ws/"):
                 paths.add(normalized)
+        for suffix in WS_APP_CONFIG_SUFFIX_RE.findall(text):
+            normalized = normalize_path("/ws/{dynamic}" + suffix)
+            if normalized.startswith("/ws/"):
+                paths.add(normalized)
     return paths
 
 
 def collect_current_child_ws_paths(child_dir: Path) -> Set[str]:
     ws_paths = set()
     chat = child_dir / "Features/Chat/ChatWebSocketService.swift"
-    geo = child_dir / "Core/Socket/GeoBackgroundService.swift"
+    geo = child_dir / "Core/Socket/GeoBackgroundService+Connection.swift"
 
     if chat.exists():
         text = chat.read_text(encoding="utf-8", errors="ignore")
