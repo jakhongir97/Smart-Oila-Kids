@@ -13,7 +13,7 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
         var statusDisconnects = 0
         var audioConnects: [String] = []
         var audioDisconnects = 0
-        var videoConnects: [String] = []
+        var videoConnects: [VideoConnectRequest] = []
         var videoDisconnects = 0
         var transportDSNs: [String?] = []
 
@@ -26,7 +26,7 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
             disconnectStatusWebSocket: { statusDisconnects += 1 },
             connectAudioStreamWebSocket: { audioConnects.append($0) },
             disconnectAudioStreamWebSocket: { audioDisconnects += 1 },
-            connectVideoStreamWebSocket: { videoConnects.append($0) },
+            connectVideoStreamWebSocket: { videoConnects.append(VideoConnectRequest(dsn: $0, streamType: $1)) },
             disconnectVideoStreamWebSocket: { videoDisconnects += 1 },
             updateTransportDSN: { transportDSNs.append($0) }
         )
@@ -37,7 +37,7 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
         XCTAssertEqual(recordingConnects, ["child-1"])
         XCTAssertEqual(statusConnects, ["child-1"])
         XCTAssertEqual(audioConnects, ["child-1"])
-        XCTAssertEqual(videoConnects, ["child-1"])
+        XCTAssertEqual(videoConnects, [VideoConnectRequest(dsn: "child-1", streamType: .camera)])
         XCTAssertEqual(transportDSNs, ["child-1"])
 
         coordinator.stop()
@@ -709,13 +709,13 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
     func testInactiveVideoStreamStartRecordsForegroundInterruptionAndDoesNotReconnect() async {
         let statusWebSocketService = DeviceMediaStreamStatusWebSocketService()
 
-        var videoConnects: [String] = []
+        var videoConnects: [VideoConnectRequest] = []
         var foregroundInterruptions: [IntegrityRecord] = []
         var telemetryEvents: [TelemetryRecord] = []
 
         let coordinator = makeCoordinator(
             statusWebSocketService: statusWebSocketService,
-            connectVideoStreamWebSocket: { videoConnects.append($0) },
+            connectVideoStreamWebSocket: { videoConnects.append(VideoConnectRequest(dsn: $0, streamType: $1)) },
             foregroundInterruptionRecorder: { dsn, mediaType, recordingID in
                 foregroundInterruptions.append(
                     IntegrityRecord(dsn: dsn, mediaType: mediaType, recordingID: recordingID)
@@ -744,7 +744,7 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
         )
         await flushTasks()
 
-        XCTAssertEqual(videoConnects, ["child-1"])
+        XCTAssertEqual(videoConnects, [VideoConnectRequest(dsn: "child-1", streamType: .camera)])
         XCTAssertEqual(
             foregroundInterruptions,
             [IntegrityRecord(dsn: "child-1", mediaType: .cameraStream, recordingID: nil)]
@@ -908,13 +908,13 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
     func testVideoStreamPermissionFailureRecordsPermissionRevocation() async {
         let statusWebSocketService = DeviceMediaStreamStatusWebSocketService()
 
-        var videoConnects: [String] = []
+        var videoConnects: [VideoConnectRequest] = []
         var permissionRevocations: [PermissionIntegrityRecord] = []
         var telemetryEvents: [TelemetryRecord] = []
 
         let coordinator = makeCoordinator(
             statusWebSocketService: statusWebSocketService,
-            connectVideoStreamWebSocket: { videoConnects.append($0) },
+            connectVideoStreamWebSocket: { videoConnects.append(VideoConnectRequest(dsn: $0, streamType: $1)) },
             permissionRevocationRecorder: { dsn, mediaType in
                 permissionRevocations.append(
                     PermissionIntegrityRecord(dsn: dsn, mediaType: mediaType)
@@ -946,7 +946,7 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
         )
         await flushTasks()
 
-        XCTAssertEqual(videoConnects, ["child-1"])
+        XCTAssertEqual(videoConnects, [VideoConnectRequest(dsn: "child-1", streamType: .camera)])
         XCTAssertEqual(
             permissionRevocations,
             [PermissionIntegrityRecord(dsn: "child-1", mediaType: .frontCameraStream)]
@@ -1686,10 +1686,12 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
 
         var startedCameras: [LiveVideoStreamCamera] = []
         var stopVideoCaptureCalls = 0
+        var videoConnects: [VideoConnectRequest] = []
         var telemetryEvents: [TelemetryRecord] = []
 
         let coordinator = makeCoordinator(
             statusWebSocketService: statusWebSocketService,
+            connectVideoStreamWebSocket: { videoConnects.append(VideoConnectRequest(dsn: $0, streamType: $1)) },
             mediaTelemetryRecorder: { event, dsn, mediaType, recordingID, reason, cooldown in
                 telemetryEvents.append(
                     TelemetryRecord(
@@ -1727,9 +1729,17 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
         let media = RuntimeDiagnosticsCenter.shared.media
         XCTAssertEqual(startedCameras, [.back, .front])
         XCTAssertEqual(stopVideoCaptureCalls, 1)
+        XCTAssertEqual(
+            videoConnects,
+            [
+                VideoConnectRequest(dsn: "child-1", streamType: .camera),
+                VideoConnectRequest(dsn: "child-1", streamType: .frontCamera),
+            ]
+        )
         XCTAssertEqual(media.status, "streaming")
         XCTAssertEqual(media.videoStreamState, "streaming")
         XCTAssertEqual(media.videoStreamSource, "front_camera")
+        XCTAssertEqual(media.streamVideoEndpoint, "/children/device/child-1/stream/front_camera")
         XCTAssertEqual(media.lastEvent, "front_camera:start:streaming")
         XCTAssertTrue(
             telemetryEvents.contains(
@@ -2348,7 +2358,7 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
         disconnectStatusWebSocket: DeviceRecordingCoordinator.VoidAction? = nil,
         connectAudioStreamWebSocket: DeviceRecordingCoordinator.AsyncConnectAction? = nil,
         disconnectAudioStreamWebSocket: DeviceRecordingCoordinator.AsyncVoidAction? = nil,
-        connectVideoStreamWebSocket: DeviceRecordingCoordinator.AsyncConnectAction? = nil,
+        connectVideoStreamWebSocket: DeviceRecordingCoordinator.AsyncVideoConnectAction? = nil,
         disconnectVideoStreamWebSocket: DeviceRecordingCoordinator.AsyncVoidAction? = nil,
         updateTransportDSN: DeviceRecordingCoordinator.OptionalDSNAsyncAction? = nil,
         hasPendingTransportAction: DeviceRecordingCoordinator.PendingTransportActionLookup? = nil,
@@ -2385,7 +2395,7 @@ final class DeviceRecordingCoordinatorTests: XCTestCase {
             disconnectStatusWebSocket: disconnectStatusWebSocket ?? {},
             connectAudioStreamWebSocket: connectAudioStreamWebSocket ?? { _ in },
             disconnectAudioStreamWebSocket: disconnectAudioStreamWebSocket ?? {},
-            connectVideoStreamWebSocket: connectVideoStreamWebSocket ?? { _ in },
+            connectVideoStreamWebSocket: connectVideoStreamWebSocket ?? { _, _ in },
             disconnectVideoStreamWebSocket: disconnectVideoStreamWebSocket ?? {},
             updateTransportDSN: updateTransportDSN ?? { _ in },
             hasPendingTransportAction: hasPendingTransportAction ?? { _ in false },
@@ -2450,6 +2460,11 @@ private struct TelemetryRecord: Equatable {
     let recordingID: String?
     let reason: String?
     let cooldown: TimeInterval?
+}
+
+private struct VideoConnectRequest: Equatable {
+    let dsn: String
+    let streamType: DeviceMediaStreamType
 }
 
 private actor Suspension {

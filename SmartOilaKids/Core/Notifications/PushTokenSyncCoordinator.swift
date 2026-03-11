@@ -2,9 +2,14 @@ import Foundation
 
 protocol PushTokenServicing {
     func syncToken(_ token: String, dsn: String) async throws
+    func fetchRemoteToken(dsn: String) async throws -> String?
 }
 
 final class PushTokenService: PushTokenServicing {
+    private struct FirebaseTokenResponse: Decodable {
+        let token: String?
+    }
+
     init(client: APIClient = APIClient()) {
         self.client = client
     }
@@ -23,6 +28,17 @@ final class PushTokenService: PushTokenServicing {
             body: body,
             contentType: "application/json"
         )
+    }
+
+    func fetchRemoteToken(dsn: String) async throws -> String? {
+        let response: FirebaseTokenResponse = try await client.requestDecodableWithBaseFallback(
+            baseURLs: AppConfig.apiBaseCandidates,
+            path: "devices/dsn/\(dsn)/firebase_notification_token",
+            method: .get,
+            headers: ["Accept": "application/json"],
+            as: FirebaseTokenResponse.self
+        )
+        return response.token?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private let client: APIClient
@@ -49,12 +65,14 @@ actor PushTokenSyncCoordinator {
         if currentDSN == nil {
             currentDSN = userDefaults.string(forKey: Keys.dsn)
         }
+        await refreshDiagnostics()
         await syncIfNeeded()
     }
 
     func updateDSN(_ dsn: String?) async {
         currentDSN = dsn
         lastSyncedSignature = nil
+        await refreshDiagnostics()
         await syncIfNeeded()
     }
 
@@ -70,6 +88,7 @@ actor PushTokenSyncCoordinator {
         }
 
         lastSyncedSignature = nil
+        await refreshDiagnostics()
         await syncIfNeeded()
     }
 
@@ -83,14 +102,40 @@ actor PushTokenSyncCoordinator {
             return
         }
 
+        let endpoint = pushTokenEndpoint(for: dsn)
         let signature = "\(dsn)|\(token)"
         guard signature != lastSyncedSignature else { return }
+
+        await updateDiagnostics(
+            status: "syncing",
+            endpoint: endpoint,
+            dsn: dsn,
+            localToken: summarizeToken(token),
+            remoteToken: nil,
+            lastError: "-"
+        )
 
         do {
             try await service.syncToken(token, dsn: dsn)
             lastSyncedSignature = signature
             resetRetryState()
+            await updateDiagnostics(
+                status: "synced",
+                endpoint: endpoint,
+                dsn: dsn,
+                localToken: summarizeToken(token),
+                lastError: "-"
+            )
+            await refreshRemoteToken(dsn: dsn, localToken: token)
         } catch {
+            await updateDiagnostics(
+                status: "sync_failed",
+                endpoint: endpoint,
+                dsn: dsn,
+                localToken: summarizeToken(token),
+                remoteToken: "-",
+                lastError: error.localizedDescription
+            )
             scheduleRetry(expectedSignature: signature)
         }
     }
@@ -134,6 +179,90 @@ actor PushTokenSyncCoordinator {
         retryTask?.cancel()
         retryTask = nil
         nextRetryDelay = initialRetryDelay
+    }
+
+    private func refreshRemoteToken(dsn: String, localToken: String) async {
+        do {
+            let remoteToken = try await service.fetchRemoteToken(dsn: dsn)
+            let remoteSummary = summarizeToken(remoteToken)
+            let normalizedRemoteToken = remoteToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let status: String
+            if let normalizedRemoteToken, !normalizedRemoteToken.isEmpty {
+                status = normalizedRemoteToken == localToken ? "verified" : "mismatch"
+            } else {
+                status = "synced"
+            }
+
+            await updateDiagnostics(
+                status: status,
+                endpoint: pushTokenEndpoint(for: dsn),
+                dsn: dsn,
+                localToken: summarizeToken(localToken),
+                remoteToken: remoteSummary,
+                lastError: "-"
+            )
+        } catch {
+            await updateDiagnostics(
+                status: "synced",
+                endpoint: pushTokenEndpoint(for: dsn),
+                dsn: dsn,
+                localToken: summarizeToken(localToken),
+                remoteToken: "-",
+                lastError: "Readback failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func refreshDiagnostics() async {
+        let dsn = currentDSN?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = cachedToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasDSN = dsn?.isEmpty == false
+        let hasToken = token?.isEmpty == false
+        let status = (hasDSN && hasToken) ? "ready" : "idle"
+
+        await updateDiagnostics(
+            status: status,
+            endpoint: hasDSN ? pushTokenEndpoint(for: dsn!) : "-",
+            dsn: dsn ?? "-",
+            localToken: summarizeToken(token),
+            remoteToken: "-",
+            lastError: status == "idle" ? "-" : nil
+        )
+    }
+
+    private func pushTokenEndpoint(for dsn: String) -> String {
+        "/devices/dsn/\(dsn)/firebase_notification_token"
+    }
+
+    private func summarizeToken(_ token: String?) -> String {
+        guard let token = token?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
+            return "-"
+        }
+
+        if token.count <= 10 {
+            return "\(token.prefix(3))...\(token.suffix(2)) (\(token.count))"
+        }
+
+        return "\(token.prefix(6))...\(token.suffix(4)) (\(token.count))"
+    }
+
+    @MainActor
+    private func updateDiagnostics(
+        status: String? = nil,
+        endpoint: String? = nil,
+        dsn: String? = nil,
+        localToken: String? = nil,
+        remoteToken: String? = nil,
+        lastError: String? = nil
+    ) {
+        RuntimeDiagnosticsCenter.shared.updatePushToken(
+            status: status,
+            endpoint: endpoint,
+            dsn: dsn,
+            localToken: localToken,
+            remoteToken: remoteToken,
+            lastError: lastError
+        )
     }
 
     private let service: PushTokenServicing

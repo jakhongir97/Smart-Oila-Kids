@@ -1044,13 +1044,24 @@ final class PushDeepLinkStoreTests: XCTestCase {
         let suiteName = "PushDeepLinkStoreConsumeTests.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        await MainActor.run { RuntimeDiagnosticsCenter.shared.resetPush() }
 
         let store = PushDeepLinkStore(userDefaults: userDefaults)
 
         await store.save(destination: .chat, dsn: " Child-1 ")
+        let savedDiagnostics = await waitForPushDiagnosticsForTests {
+            $0.pendingDeepLink == "chat" && $0.pendingDeepLinkDSN == "Child-1"
+        }
+        XCTAssertEqual(savedDiagnostics.pendingDeepLink, "chat")
+        XCTAssertEqual(savedDiagnostics.pendingDeepLinkDSN, "Child-1")
 
         let consumed = await store.consume(matching: "child-1")
         XCTAssertEqual(consumed, .chat)
+        let consumedDiagnostics = await waitForPushDiagnosticsForTests {
+            $0.pendingDeepLink == "-" && $0.pendingDeepLinkDSN == "-"
+        }
+        XCTAssertEqual(consumedDiagnostics.pendingDeepLink, "-")
+        XCTAssertEqual(consumedDiagnostics.pendingDeepLinkDSN, "-")
 
         let cleared = await store.consume(matching: "child-1")
         XCTAssertNil(cleared)
@@ -1185,6 +1196,7 @@ final class PushCommandRouterTests: XCTestCase {
     func testHandleOpenedFromInteractionRoutesAllRelevantDomainsAndSavesChatDeepLink() async {
         await PushInboxStore.shared.clearAll()
         await PushDeepLinkStore.shared.clearAll()
+        await MainActor.run { RuntimeDiagnosticsCenter.shared.resetPush() }
         defer {
             Task {
                 await PushInboxStore.shared.clearAll()
@@ -1221,11 +1233,21 @@ final class PushCommandRouterTests: XCTestCase {
                 "title": " Task message ",
                 "body": " Location update and lock state "
             ],
-            openedFromInteraction: true
+            openedFromInteraction: true,
+            deliveryContext: .userResponse
         )
 
         let items = await waitForPushInboxItemsMatchingDSNForTests(count: 1, dsn: "child-5")
+        let diagnosticsBeforeConsume = await waitForPushDiagnosticsForTests {
+            $0.pendingDeepLink == "chat"
+                && $0.pendingDeepLinkDSN == "child-5"
+                && $0.inboxTotalCount >= 1
+                && $0.lastRoute.contains("chat_open")
+        }
         let deepLink = await waitForPushDeepLinkForTests(dsn: "child-5")
+        let diagnosticsAfterConsume = await waitForPushDiagnosticsForTests {
+            $0.pendingDeepLink == "-" && $0.pendingDeepLinkDSN == "-"
+        }
 
         XCTAssertEqual(Set(received), Set(names))
         XCTAssertTrue(receivedDSNs.allSatisfy { $0 == "child-5" })
@@ -1233,6 +1255,20 @@ final class PushCommandRouterTests: XCTestCase {
         XCTAssertEqual(items.first?.event, "message_task_lock")
         XCTAssertEqual(items.first?.dsn, "child-5")
         XCTAssertTrue(items.first?.isRead ?? false)
+        XCTAssertEqual(diagnosticsBeforeConsume.dsn, "child-5")
+        XCTAssertEqual(diagnosticsBeforeConsume.deliveryContext, "user_response")
+        XCTAssertEqual(diagnosticsBeforeConsume.lastEvent, "message_task_lock")
+        XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("dashboard_refresh"))
+        XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("lock_refresh"))
+        XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("tasks_refresh"))
+        XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("tasks_open"))
+        XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("chat_refresh"))
+        XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("chat_open"))
+        XCTAssertEqual(diagnosticsBeforeConsume.pendingDeepLink, "chat")
+        XCTAssertEqual(diagnosticsBeforeConsume.pendingDeepLinkDSN, "child-5")
+        XCTAssertEqual(diagnosticsBeforeConsume.inboxTotalCount, 1)
+        XCTAssertEqual(diagnosticsAfterConsume.pendingDeepLink, "-")
+        XCTAssertEqual(diagnosticsAfterConsume.pendingDeepLinkDSN, "-")
         XCTAssertEqual(deepLink, .chat)
     }
 
@@ -1273,10 +1309,14 @@ final class PushCommandRouterTests: XCTestCase {
                 "children_device_dsn": " child-6 ",
                 "body": " New task assigned "
             ],
-            openedFromInteraction: false
+            openedFromInteraction: false,
+            deliveryContext: .backgroundFetch
         )
 
         let items = await waitForPushInboxItemsMatchingDSNForTests(count: 1, dsn: "child-6")
+        let diagnostics = await waitForPushDiagnosticsForTests {
+            $0.dsn == "child-6" && $0.deliveryContext == "background_fetch"
+        }
         try? await Task.sleep(nanoseconds: 50_000_000)
         let deepLink = await PushDeepLinkStore.shared.consume(matching: "child-6")
 
@@ -1284,6 +1324,8 @@ final class PushCommandRouterTests: XCTestCase {
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.event, "award_update")
         XCTAssertFalse(items.first?.isRead ?? true)
+        XCTAssertEqual(diagnostics.deliveryContext, "background_fetch")
+        XCTAssertEqual(diagnostics.lastRoute, "tasks_refresh")
         XCTAssertNil(deepLink)
     }
 }
@@ -2894,6 +2936,25 @@ final class PushTokenServiceTests: XCTestCase {
 
         XCTAssertEqual(TestHTTPURLProtocol.recordedRequests.count, 1)
     }
+
+    func testFetchRemoteTokenBuildsAuthorizedRequestAndDecodesResponse() async throws {
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/devices/dsn/child-1/firebase_notification_token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            return (
+                makeHTTPResponse(for: request.url!, statusCode: 200),
+                Data(#"{"token":"0123456789abcdef"}"#.utf8)
+            )
+        }
+
+        let service = PushTokenService(client: makeTestAPIClient(accessToken: "Bearer access"))
+        let token = try await service.fetchRemoteToken(dsn: "child-1")
+
+        XCTAssertEqual(token, "0123456789abcdef")
+        XCTAssertEqual(TestHTTPURLProtocol.recordedRequests.count, 1)
+    }
 }
 
 final class PushTokenSyncCoordinatorTests: XCTestCase {
@@ -2965,6 +3026,32 @@ final class PushTokenSyncCoordinatorTests: XCTestCase {
                 PushTokenSyncCall(token: "retry-token", dsn: "child-2")
             ]
         )
+    }
+
+    func testSuccessfulSyncFetchesRemoteTokenAndUpdatesDiagnostics() async {
+        let suiteName = "PushTokenSyncCoordinatorDiagnosticsTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let service = PushTokenServiceSpy(fetchResults: [.success("0123456789abcdef")])
+        let coordinator = PushTokenSyncCoordinator(service: service, userDefaults: userDefaults)
+
+        await coordinator.updateDSN("child-3")
+        await coordinator.updateToken("0123456789abcdef")
+
+        let syncCalls = await service.recordedCalls()
+        let fetchCalls = await service.recordedFetchDSNs()
+        let diagnostics = await MainActor.run { RuntimeDiagnosticsCenter.shared.pushToken }
+
+        XCTAssertEqual(syncCalls, [PushTokenSyncCall(token: "0123456789abcdef", dsn: "child-3")])
+        XCTAssertEqual(fetchCalls, ["child-3"])
+        XCTAssertEqual(diagnostics.status, "verified")
+        XCTAssertEqual(diagnostics.dsn, "child-3")
+        XCTAssertEqual(diagnostics.endpoint, "/devices/dsn/child-3/firebase_notification_token")
+        XCTAssertEqual(diagnostics.localToken, "012345...cdef (16)")
+        XCTAssertEqual(diagnostics.remoteToken, "012345...cdef (16)")
+        XCTAssertEqual(diagnostics.lastError, "-")
+        XCTAssertNotNil(diagnostics.updatedAt)
     }
 }
 
@@ -3806,6 +3893,147 @@ final class SettingsDiagnosticsValueMapperTests: XCTestCase {
 }
 
 @MainActor
+final class RuntimeDiagnosticsHistoryTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        RuntimeDiagnosticsCenter.shared.resetLifecycle()
+        RuntimeDiagnosticsCenter.shared.resetPush()
+    }
+
+    override func tearDown() {
+        RuntimeDiagnosticsCenter.shared.resetLifecycle()
+        RuntimeDiagnosticsCenter.shared.resetPush()
+        super.tearDown()
+    }
+
+    func testLifecycleHistoryKeepsMostRecentEightEntries() {
+        for index in 0..<10 {
+            let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 5, minute: index, second: 0)
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(
+                scenePhase: index.isMultiple(of: 2) ? "active" : "background",
+                applicationState: index.isMultiple(of: 2) ? "active" : "background",
+                lastEvent: "scene_transition_\(index)",
+                lastForegroundAt: index.isMultiple(of: 2) ? date : nil,
+                lastBackgroundAt: index.isMultiple(of: 2) ? nil : date,
+                eventDate: date
+            )
+        }
+
+        let snapshot = RuntimeDiagnosticsCenter.shared.lifecycle
+
+        XCTAssertEqual(snapshot.lastEvent, "scene_transition_9")
+        XCTAssertEqual(snapshot.lastBackgroundAt, makeUTCDate(year: 2026, month: 3, day: 12, hour: 5, minute: 9, second: 0))
+        XCTAssertEqual(snapshot.recentEvents.count, 8)
+        XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("scene_transition_0") }))
+        XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("scene_transition_1") }))
+        XCTAssertTrue(snapshot.recentEvents.first?.contains("scene_transition_2") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("scene_transition_9") ?? false)
+    }
+
+    func testPushHistoryKeepsMostRecentEightEntries() {
+        for index in 0..<10 {
+            let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 6, minute: index, second: 0)
+            RuntimeDiagnosticsCenter.shared.updatePush(
+                status: "routed",
+                dsn: "child-\(index)",
+                lastEvent: "burst_\(index)",
+                lastRoute: "chat_refresh",
+                deliveryContext: "background_fetch",
+                inboxTotalCount: index + 1,
+                sessionUnreadCount: index,
+                badgeCount: index,
+                eventDate: date
+            )
+        }
+
+        let snapshot = RuntimeDiagnosticsCenter.shared.push
+
+        XCTAssertEqual(snapshot.lastEvent, "burst_9")
+        XCTAssertEqual(snapshot.recentEvents.count, 8)
+        XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("burst_0") }))
+        XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("burst_1") }))
+        XCTAssertTrue(snapshot.recentEvents.first?.contains("burst_2") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("burst_9") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("badge=9") ?? false)
+    }
+
+    func testGeoHistoryKeepsMostRecentEightEntries() {
+        for index in 0..<10 {
+            let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 7, minute: index, second: 0)
+            RuntimeDiagnosticsCenter.shared.updateGeo(
+                status: index.isMultiple(of: 2) ? "connected" : "reconnecting",
+                endpoint: "/children/device/child-geo/geo/\(index)",
+                dsn: "child-geo",
+                lastPayload: "location \(index)",
+                lastError: index.isMultiple(of: 2) ? "-" : "socket not connected",
+                reconnectCount: index,
+                eventDate: date
+            )
+        }
+
+        let snapshot = RuntimeDiagnosticsCenter.shared.geo
+
+        XCTAssertEqual(snapshot.reconnectCount, 9)
+        XCTAssertEqual(snapshot.recentEvents.count, 8)
+        XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("location 0") }))
+        XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("location 1") }))
+        XCTAssertTrue(snapshot.recentEvents.first?.contains("location 2") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("location 9") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("retries=9") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("error=socket not connected") ?? false)
+    }
+}
+
+final class DiagnosticsExportArtifactTests: XCTestCase {
+    func testMakeFilenameUsesSanitizedDSNAndStableTimestamp() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 4, minute: 7, second: 9)
+
+        let filename = DiagnosticsExportArtifact.makeFilename(
+            dsn: " Child 5 / QA ",
+            now: date
+        )
+
+        XCTAssertEqual(
+            filename,
+            "smart_oila_kids_diagnostics_child-5-qa_2026-03-12_04-07-09Z.txt"
+        )
+    }
+
+    func testMakeFilenameFallsBackWhenDSNIsMissing() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 4, minute: 7, second: 9)
+
+        let filename = DiagnosticsExportArtifact.makeFilename(
+            dsn: "   ",
+            now: date
+        )
+
+        XCTAssertEqual(
+            filename,
+            "smart_oila_kids_diagnostics_no-dsn_2026-03-12_04-07-09Z.txt"
+        )
+    }
+
+    func testCreateWritesNamedUTF8Artifact() throws {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 4, minute: 7, second: 9)
+        let text = "Smart Oila Kids Diagnostics Snapshot\nstate: ok"
+
+        let artifact = try DiagnosticsExportArtifact.create(
+            text: text,
+            dsn: "Child-7",
+            now: date
+        )
+        defer { try? FileManager.default.removeItem(at: artifact.fileURL) }
+
+        XCTAssertEqual(
+            artifact.fileURL.lastPathComponent,
+            "smart_oila_kids_diagnostics_child-7_2026-03-12_04-07-09Z.txt"
+        )
+        XCTAssertEqual(artifact.text, text)
+        XCTAssertEqual(try String(contentsOf: artifact.fileURL, encoding: .utf8), text)
+    }
+}
+
+@MainActor
 final class SettingsBannerCenterTests: XCTestCase {
     func testShowSetsBannerTextAndHidesAfterDuration() async {
         let center = SettingsBannerCenter()
@@ -4234,6 +4462,7 @@ final class PushInboxStoreMutationTests: XCTestCase {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         userDefaults.set("child-1", forKey: "DSN")
+        await MainActor.run { RuntimeDiagnosticsCenter.shared.resetPush() }
 
         let store = PushInboxStore(userDefaults: userDefaults)
         let receivedAt = Date(timeIntervalSince1970: 100)
@@ -4256,12 +4485,18 @@ final class PushInboxStoreMutationTests: XCTestCase {
         )
 
         let items = await store.loadItems(dsn: "child-1")
+        waitForMainQueue()
+        let diagnostics = await MainActor.run { RuntimeDiagnosticsCenter.shared.push }
 
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.title, "Hello")
         XCTAssertEqual(items.first?.body, "World")
         XCTAssertEqual(items.first?.event, "message_new")
         XCTAssertTrue(items.first?.isRead == true)
+        XCTAssertEqual(diagnostics.dsn, "child-1")
+        XCTAssertEqual(diagnostics.inboxTotalCount, 1)
+        XCTAssertEqual(diagnostics.sessionUnreadCount, 0)
+        XCTAssertEqual(diagnostics.badgeCount, 0)
     }
 
     func testAppendTrimsStoredItemsToMaximumCount() async {
@@ -4517,9 +4752,15 @@ private struct PushTokenSyncCall: Equatable {
 private actor PushTokenServiceSpy: PushTokenServicing {
     private var calls: [PushTokenSyncCall] = []
     private var syncResults: [Result<Void, Error>]
+    private var fetchResults: [Result<String?, Error>]
+    private var fetchDSNs: [String] = []
 
-    init(syncResults: [Result<Void, Error>] = [.success(())]) {
+    init(
+        syncResults: [Result<Void, Error>] = [.success(())],
+        fetchResults: [Result<String?, Error>] = [.success(nil)]
+    ) {
         self.syncResults = syncResults
+        self.fetchResults = fetchResults
     }
 
     func syncToken(_ token: String, dsn: String) async throws {
@@ -4532,8 +4773,22 @@ private actor PushTokenServiceSpy: PushTokenServicing {
         return try syncResults.first?.get() ?? ()
     }
 
+    func fetchRemoteToken(dsn: String) async throws -> String? {
+        fetchDSNs.append(dsn)
+
+        if fetchResults.count > 1 {
+            return try fetchResults.removeFirst().get()
+        }
+
+        return try fetchResults.first?.get() ?? nil
+    }
+
     func recordedCalls() -> [PushTokenSyncCall] {
         calls
+    }
+
+    func recordedFetchDSNs() -> [String] {
+        fetchDSNs
     }
 }
 
@@ -4775,6 +5030,24 @@ func waitForPushDeepLinkForTests(
     }
 
     return await PushDeepLinkStore.shared.consume(matching: dsn)
+}
+
+func waitForPushDiagnosticsForTests(
+    timeout: TimeInterval = 1,
+    predicate: @escaping @Sendable (PushDiagnosticsSnapshot) -> Bool
+) async -> PushDiagnosticsSnapshot {
+    let deadline = Date().addingTimeInterval(timeout)
+
+    while Date() < deadline {
+        let snapshot = await MainActor.run { RuntimeDiagnosticsCenter.shared.push }
+        if predicate(snapshot) {
+            return snapshot
+        }
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+
+    return await MainActor.run { RuntimeDiagnosticsCenter.shared.push }
 }
 
 private func waitForPushTokenSyncCallCount(

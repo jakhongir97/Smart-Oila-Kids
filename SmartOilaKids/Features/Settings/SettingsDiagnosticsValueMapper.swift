@@ -36,6 +36,24 @@ enum SettingsDiagnosticsValueMapper {
         }
     }
 
+    static func scenePhase(_ phase: ScenePhase) -> String {
+        switch phase {
+        case .active: return "active"
+        case .inactive: return "inactive"
+        case .background: return "background"
+        @unknown default: return "unknown"
+        }
+    }
+
+    static func applicationState(_ state: UIApplication.State) -> String {
+        switch state {
+        case .active: return "active"
+        case .inactive: return "inactive"
+        case .background: return "background"
+        @unknown default: return "unknown"
+        }
+    }
+
     static func locationStatus(_ status: CLAuthorizationStatus) -> String {
         switch status {
         case .authorizedAlways: return "authorizedAlways"
@@ -92,5 +110,10 @@ enum SettingsDiagnosticsValueMapper {
         case .restricted: return "restricted"
         @unknown default: return "unknown"
         }
+    }
+
+    static func timeline(_ entries: [String]) -> String {
+        guard !entries.isEmpty else { return "-" }
+        return entries.joined(separator: " | ")
     }
 }

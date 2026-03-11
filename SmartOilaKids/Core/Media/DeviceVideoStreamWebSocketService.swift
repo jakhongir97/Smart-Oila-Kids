@@ -1,12 +1,14 @@
 import Foundation
 
 actor DeviceVideoStreamWebSocketService {
-    func connect(dsn: String) {
+    func connect(dsn: String, streamType: DeviceMediaStreamType = .camera) {
         let normalizedDSN = dsn.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedDSN.isEmpty else { return }
 
         if let connectedDSN,
+           let connectedStreamType,
            connectedDSN.caseInsensitiveCompare(normalizedDSN) == .orderedSame,
+           connectedStreamType == streamType,
            task != nil,
            reconnectTask == nil,
            !isDisconnectRequested {
@@ -17,6 +19,7 @@ actor DeviceVideoStreamWebSocketService {
 
         isDisconnectRequested = false
         connectedDSN = normalizedDSN
+        connectedStreamType = streamType
         currentBaseIndex = 0
         reconnectAttemptCount = 0
         connectUsingCurrentBase()
@@ -25,6 +28,7 @@ actor DeviceVideoStreamWebSocketService {
     func disconnect() {
         isDisconnectRequested = true
         connectedDSN = nil
+        connectedStreamType = nil
         reconnectTask?.cancel()
         reconnectTask = nil
         task?.cancel(with: .goingAway, reason: nil)
@@ -51,7 +55,7 @@ actor DeviceVideoStreamWebSocketService {
     }
 
     private func connectUsingCurrentBase() {
-        guard let dsn = connectedDSN else { return }
+        guard let dsn = connectedDSN, let streamType = connectedStreamType else { return }
 
         guard currentBaseIndex < AppConfig.websocketBaseCandidates.count else {
             scheduleReconnect()
@@ -59,7 +63,7 @@ actor DeviceVideoStreamWebSocketService {
         }
 
         let base = AppConfig.websocketBaseCandidates[currentBaseIndex]
-        let urlString = "\(base)\(AppConfig.websocketTokenPath)/children/device/\(dsn)/stream/camera"
+        let urlString = "\(base)\(AppConfig.websocketTokenPath)/children/device/\(dsn)/stream/\(streamType.rawValue)"
         guard let url = URL(string: urlString) else {
             connectNextBase()
             return
@@ -132,6 +136,7 @@ actor DeviceVideoStreamWebSocketService {
     }
 
     private var connectedDSN: String?
+    private var connectedStreamType: DeviceMediaStreamType?
     private var currentBaseIndex = 0
     private var isDisconnectRequested = false
     private var task: URLSessionWebSocketTask?

@@ -137,6 +137,7 @@ extension PushInboxStore {
 
     func clearAll() {
         guard !storedItems().isEmpty else {
+            updateDiagnostics(items: [], dsn: activeSessionDSN(), status: "inbox_cleared")
             Task { @MainActor in
                 UIApplication.shared.applicationIconBadgeNumber = 0
             }
@@ -144,6 +145,7 @@ extension PushInboxStore {
         }
 
         userDefaults.removeObject(forKey: storageKey)
+        updateDiagnostics(items: [], dsn: activeSessionDSN(), status: "inbox_cleared")
         postDidChange(dsn: nil, unreadCount: 0)
     }
 }

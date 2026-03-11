@@ -1,9 +1,17 @@
 import unittest
 
-from scripts.check_child_parent_gap_budget import compute_gap_budget_result
+from scripts.check_child_parent_gap_budget import (
+    DEFAULT_MAX_REST_GAP_WITH_PARENT,
+    DEFAULT_MAX_WS_GAP_WITH_PARENT,
+    compute_gap_budget_result,
+)
 
 
 class CheckChildParentGapBudgetTests(unittest.TestCase):
+    def test_default_gap_budget_matches_current_repo_snapshot(self):
+        self.assertEqual(DEFAULT_MAX_REST_GAP_WITH_PARENT, 56)
+        self.assertEqual(DEFAULT_MAX_WS_GAP_WITH_PARENT, 14)
+
     def test_compute_gap_budget_result_counts_parent_parity_gap(self):
         spec_rest = [
             ("GET", "/api/a"),

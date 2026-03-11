@@ -18,6 +18,11 @@ actor PushDeepLinkStore {
         let payload = PendingPushDeepLink(destination: destination, dsn: normalizedDSN, createdAt: Date())
         guard let data = try? JSONEncoder().encode(payload) else { return }
         userDefaults.set(data, forKey: storageKey)
+        updateDiagnostics(
+            status: "deeplink_saved",
+            pendingDeepLink: destination.rawValue,
+            pendingDeepLinkDSN: normalizedDSN ?? "-"
+        )
     }
 
     func consume(matching dsn: String?) -> PushDeepLinkDestination? {
@@ -29,6 +34,11 @@ actor PushDeepLinkStore {
         // Drop stale deep-link intents after 20 minutes.
         if Date().timeIntervalSince(payload.createdAt) > maxAgeSeconds {
             clearAll()
+            updateDiagnostics(
+                status: "deeplink_expired",
+                pendingDeepLink: "-",
+                pendingDeepLinkDSN: "-"
+            )
             return nil
         }
 
@@ -39,11 +49,20 @@ actor PushDeepLinkStore {
         }
 
         clearAll()
+        updateDiagnostics(
+            status: "deeplink_consumed",
+            pendingDeepLink: "-",
+            pendingDeepLinkDSN: "-"
+        )
         return payload.destination
     }
 
     func clearAll() {
         userDefaults.removeObject(forKey: storageKey)
+        updateDiagnostics(
+            pendingDeepLink: "-",
+            pendingDeepLinkDSN: "-"
+        )
     }
 
     func clear(matching dsn: String?) {
@@ -60,6 +79,20 @@ actor PushDeepLinkStore {
         let payloadDSN = payload.dsn?.lowercased()
         if payloadDSN == nil || payloadDSN == current {
             clearAll()
+        }
+    }
+
+    private func updateDiagnostics(
+        status: String? = nil,
+        pendingDeepLink: String? = nil,
+        pendingDeepLinkDSN: String? = nil
+    ) {
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updatePush(
+                status: status,
+                pendingDeepLink: pendingDeepLink,
+                pendingDeepLinkDSN: pendingDeepLinkDSN
+            )
         }
     }
 

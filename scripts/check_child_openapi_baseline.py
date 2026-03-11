@@ -19,6 +19,8 @@ coverage = load_coverage_module()
 
 
 RestOperation = Tuple[str, str]
+DEFAULT_MIN_REST = 28
+DEFAULT_MIN_WS = 9
 
 
 def count_rest_hits(
@@ -71,14 +73,14 @@ def main() -> None:
     parser.add_argument(
         "--min-rest",
         type=int,
-        default=19,
-        help="Minimum child REST coverage hit count required to pass (default: 19)",
+        default=DEFAULT_MIN_REST,
+        help=f"Minimum child REST coverage hit count required to pass (default: {DEFAULT_MIN_REST})",
     )
     parser.add_argument(
         "--min-ws",
         type=int,
-        default=2,
-        help="Minimum child WebSocket coverage hit count required to pass (default: 2)",
+        default=DEFAULT_MIN_WS,
+        help=f"Minimum child WebSocket coverage hit count required to pass (default: {DEFAULT_MIN_WS})",
     )
     args = parser.parse_args()
 

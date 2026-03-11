@@ -30,6 +30,8 @@ def load_coverage_module() -> object:
 
 
 coverage = load_coverage_module()
+DEFAULT_MAX_REST_GAP_WITH_PARENT = 56
+DEFAULT_MAX_WS_GAP_WITH_PARENT = 14
 
 
 def resolve_rest_hits(spec_ops: Iterable[RestOperation], implemented_ops: Set[RestOperation]) -> Set[RestOperation]:
@@ -92,14 +94,20 @@ def main() -> int:
     parser.add_argument(
         "--max-rest-gap-with-parent",
         type=int,
-        default=65,
-        help="Maximum allowed REST operations missing in child but present in parent",
+        default=DEFAULT_MAX_REST_GAP_WITH_PARENT,
+        help=(
+            "Maximum allowed REST operations missing in child but present in parent "
+            f"(default: {DEFAULT_MAX_REST_GAP_WITH_PARENT})"
+        ),
     )
     parser.add_argument(
         "--max-ws-gap-with-parent",
         type=int,
-        default=21,
-        help="Maximum allowed WS routes missing in child but present in parent",
+        default=DEFAULT_MAX_WS_GAP_WITH_PARENT,
+        help=(
+            "Maximum allowed WS routes missing in child but present in parent "
+            f"(default: {DEFAULT_MAX_WS_GAP_WITH_PARENT})"
+        ),
     )
     args = parser.parse_args()
 

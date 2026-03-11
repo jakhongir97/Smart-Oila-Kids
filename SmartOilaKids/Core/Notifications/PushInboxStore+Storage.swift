@@ -16,6 +16,8 @@ extension PushInboxStore {
     }
 
     func postDidChange(dsn: String?, unreadCount: Int) {
+        let items = storedItems()
+        updateDiagnostics(items: items, dsn: dsn, status: "inbox_updated")
         Task { @MainActor in
             UIApplication.shared.applicationIconBadgeNumber = unreadCount
             NotificationCenter.default.post(
@@ -48,5 +50,27 @@ extension PushInboxStore {
         dsn: String?
     ) -> String {
         "\(event.lowercased())|\((dsn ?? "").lowercased())|\(title.lowercased())|\(body.lowercased())"
+    }
+
+    func updateDiagnostics(items: [PushInboxItem], dsn: String?, status: String) {
+        let activeDSN = activeSessionDSN()
+        let sessionUnreadCount = items.reduce(into: 0) { count, item in
+            guard !item.isRead else { return }
+            let itemDSN = item.dsn?.lowercased()
+            if activeDSN == nil || itemDSN == nil || itemDSN == activeDSN {
+                count += 1
+            }
+        }
+        let badgeCount = activeDSN == nil ? 0 : resolvedBadgeCount(in: items)
+
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updatePush(
+                status: status,
+                dsn: dsn?.trimmedNonEmpty ?? activeDSN ?? "-",
+                inboxTotalCount: items.count,
+                sessionUnreadCount: sessionUnreadCount,
+                badgeCount: badgeCount
+            )
+        }
     }
 }

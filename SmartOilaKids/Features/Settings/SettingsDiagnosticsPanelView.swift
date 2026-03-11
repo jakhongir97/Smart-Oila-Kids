@@ -10,6 +10,7 @@ struct DiagnosticsPanelView: View {
     @StateObject private var permissionManager = LocationPermissionManager()
     @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
     @State private var growthMetrics = GrowthMetricsSnapshot.empty
+    @State private var diagnosticsSharePayload: DiagnosticsSharePayload?
 
     var body: some View {
         NavigationStack {
@@ -21,8 +22,18 @@ struct DiagnosticsPanelView: View {
                     )
 
                     SettingsDiagnosticsSectionCard(
+                        title: L10n.tr("diagnostics.section_lifecycle"),
+                        rows: lifecycleRows
+                    )
+
+                    SettingsDiagnosticsSectionCard(
                         title: L10n.tr("diagnostics.section_network"),
                         rows: networkRows
+                    )
+
+                    SettingsDiagnosticsSectionCard(
+                        title: L10n.tr("diagnostics.section_push"),
+                        rows: pushRows
                     )
 
                     SettingsDiagnosticsSectionCard(
@@ -88,6 +99,14 @@ struct DiagnosticsPanelView: View {
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        diagnosticsSharePayload = makeDiagnosticsSharePayload()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundStyle(AppColors.primaryPurple)
+                    }
+                    .accessibilityLabel(L10n.tr("diagnostics.export"))
+
+                    Button {
                         permissionManager.refreshStatuses()
                         refreshGrowthMetrics()
                     } label: {
@@ -106,6 +125,9 @@ struct DiagnosticsPanelView: View {
             .onAppear {
                 permissionManager.refreshStatuses()
                 refreshGrowthMetrics()
+            }
+            .sheet(item: $diagnosticsSharePayload) { payload in
+                ActivityShareSheet(activityItems: payload.activityItems)
             }
             .onReceive(NotificationCenter.default.publisher(for: .growthMetricsDidChange)) { notification in
                 guard shouldRefreshGrowthMetrics(notification: notification) else { return }
@@ -127,7 +149,35 @@ struct DiagnosticsPanelView: View {
         [
             (L10n.tr("diagnostics.api_base"), AppConfig.apiBaseURL.absoluteString),
             (L10n.tr("diagnostics.ws_base"), AppConfig.websocketBaseCandidates.joined(separator: ", ")),
-            (L10n.tr("diagnostics.ws_token_path"), AppConfig.websocketTokenPath)
+            (L10n.tr("diagnostics.ws_token_path"), AppConfig.websocketTokenPath),
+            (L10n.tr("diagnostics.push_token_status"), diagnostics.pushToken.status),
+            (L10n.tr("diagnostics.push_token_dsn"), diagnostics.pushToken.dsn),
+            (L10n.tr("diagnostics.push_token_endpoint"), diagnostics.pushToken.endpoint),
+            (L10n.tr("diagnostics.push_token_local"), diagnostics.pushToken.localToken),
+            (L10n.tr("diagnostics.push_token_remote"), diagnostics.pushToken.remoteToken),
+            (L10n.tr("diagnostics.last_error"), diagnostics.pushToken.lastError),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.pushToken.updatedAt))
+        ]
+    }
+
+    private var lifecycleRows: [(String, String)] {
+        [
+            (L10n.tr("diagnostics.lifecycle_scene_phase"), diagnostics.lifecycle.scenePhase),
+            (L10n.tr("diagnostics.lifecycle_app_state"), diagnostics.lifecycle.applicationState),
+            (L10n.tr("diagnostics.lifecycle_last_event"), diagnostics.lifecycle.lastEvent),
+            (
+                L10n.tr("diagnostics.lifecycle_last_foreground"),
+                SettingsDiagnosticsValueMapper.timestamp(diagnostics.lifecycle.lastForegroundAt)
+            ),
+            (
+                L10n.tr("diagnostics.lifecycle_last_background"),
+                SettingsDiagnosticsValueMapper.timestamp(diagnostics.lifecycle.lastBackgroundAt)
+            ),
+            (
+                L10n.tr("diagnostics.lifecycle_recent_events"),
+                SettingsDiagnosticsValueMapper.timeline(diagnostics.lifecycle.recentEvents)
+            ),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.lifecycle.updatedAt))
         ]
     }
 
@@ -162,6 +212,26 @@ struct DiagnosticsPanelView: View {
         ]
     }
 
+    private var pushRows: [(String, String)] {
+        [
+            (L10n.tr("diagnostics.state"), diagnostics.push.status),
+            (L10n.tr("diagnostics.push_dsn"), diagnostics.push.dsn),
+            (L10n.tr("diagnostics.push_context"), diagnostics.push.deliveryContext),
+            (L10n.tr("diagnostics.push_event"), diagnostics.push.lastEvent),
+            (L10n.tr("diagnostics.push_route"), diagnostics.push.lastRoute),
+            (L10n.tr("diagnostics.push_pending_deeplink"), diagnostics.push.pendingDeepLink),
+            (L10n.tr("diagnostics.push_pending_deeplink_dsn"), diagnostics.push.pendingDeepLinkDSN),
+            (L10n.tr("diagnostics.push_inbox_total"), "\(diagnostics.push.inboxTotalCount)"),
+            (L10n.tr("diagnostics.push_unread_count"), "\(diagnostics.push.sessionUnreadCount)"),
+            (L10n.tr("diagnostics.push_badge_count"), "\(diagnostics.push.badgeCount)"),
+            (
+                L10n.tr("diagnostics.push_recent_events"),
+                SettingsDiagnosticsValueMapper.timeline(diagnostics.push.recentEvents)
+            ),
+            (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.push.updatedAt))
+        ]
+    }
+
     private var geoRows: [(String, String)] {
         [
             (L10n.tr("diagnostics.state"), diagnostics.geo.status),
@@ -170,6 +240,10 @@ struct DiagnosticsPanelView: View {
             (L10n.tr("diagnostics.last_payload"), diagnostics.geo.lastPayload),
             (L10n.tr("diagnostics.last_error"), diagnostics.geo.lastError),
             (L10n.tr("diagnostics.retries"), "\(diagnostics.geo.reconnectCount)"),
+            (
+                L10n.tr("diagnostics.geo_recent_events"),
+                SettingsDiagnosticsValueMapper.timeline(diagnostics.geo.recentEvents)
+            ),
             (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.geo.updatedAt))
         ]
     }
@@ -335,6 +409,64 @@ struct DiagnosticsPanelView: View {
         appLockStore.activate(dsn: sessionStore.dsn)
     }
 
+    private func diagnosticsExportText() -> String {
+        let sections: [(String, [(String, String)])] = [
+            (L10n.tr("diagnostics.section_session"), sessionRows),
+            (L10n.tr("diagnostics.section_lifecycle"), lifecycleRows),
+            (L10n.tr("diagnostics.section_network"), networkRows),
+            (L10n.tr("diagnostics.section_push"), pushRows),
+            (L10n.tr("diagnostics.section_growth"), growthRows),
+            (L10n.tr("diagnostics.section_geo"), geoRows),
+            (L10n.tr("diagnostics.section_chat"), chatRows),
+            (L10n.tr("diagnostics.section_media"), mediaRows),
+            (L10n.tr("diagnostics.section_app_lock"), appLockRows),
+            (L10n.tr("diagnostics.section_app_limits"), appLimitRows),
+            (L10n.tr("diagnostics.section_lock_schedule"), lockScheduleRows),
+            (L10n.tr("diagnostics.section_screen_time_usage"), screenTimeUsageRows),
+            (L10n.tr("diagnostics.section_permissions"), permissionsRows)
+        ]
+
+        let body = sections
+            .map(formatExportSection(title:rows:))
+            .joined(separator: "\n\n")
+
+        let header = [
+            "Smart Oila Kids Diagnostics Snapshot",
+            "\(L10n.tr("diagnostics.export_generated")): \(SettingsDiagnosticsValueMapper.timestamp(Date()))",
+            "\(L10n.tr("diagnostics.export_app_version")): \(exportAppVersionText())",
+            "\(L10n.tr("diagnostics.export_bundle_id")): \(Bundle.main.bundleIdentifier ?? "-")",
+            "\(L10n.tr("diagnostics.export_device")): \(UIDevice.current.name)",
+            "\(L10n.tr("diagnostics.export_os")): \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
+        ].joined(separator: "\n")
+
+        return [header, body].joined(separator: "\n\n")
+    }
+
+    private func makeDiagnosticsSharePayload() -> DiagnosticsSharePayload {
+        let text = diagnosticsExportText()
+        if let artifact = try? DiagnosticsExportArtifact.create(
+            text: text,
+            dsn: sessionStore.dsn
+        ) {
+            return DiagnosticsSharePayload(activityItems: [artifact.fileURL])
+        }
+        return DiagnosticsSharePayload(activityItems: [text])
+    }
+
+    private func formatExportSection(title: String, rows: [(String, String)]) -> String {
+        let lines = rows.map { row in
+            "- \(row.0): \(row.1)"
+        }
+        return ([title] + lines).joined(separator: "\n")
+    }
+
+    private func exportAppVersionText() -> String {
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "-"
+        let build = info?["CFBundleVersion"] as? String ?? "-"
+        return "\(shortVersion) (\(build))"
+    }
+
     private func shareCompletionRateText() -> String {
         let percentage = growthMetrics.inviteShareCompletionRate * 100
         return String(format: "%.1f%%", percentage)
@@ -347,4 +479,58 @@ struct DiagnosticsPanelView: View {
         }
         return changedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
     }
+}
+
+private struct DiagnosticsSharePayload: Identifiable {
+    let id = UUID()
+    let activityItems: [Any]
+}
+
+struct DiagnosticsExportArtifact {
+    let fileURL: URL
+    let text: String
+
+    static func create(
+        text: String,
+        dsn: String?,
+        now: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> DiagnosticsExportArtifact {
+        let filename = makeFilename(dsn: dsn, now: now)
+        let fileURL = fileManager.temporaryDirectory.appendingPathComponent(filename)
+        try text.write(to: fileURL, atomically: true, encoding: .utf8)
+        return DiagnosticsExportArtifact(fileURL: fileURL, text: text)
+    }
+
+    static func makeFilename(dsn: String?, now: Date) -> String {
+        let sanitizedDSN = sanitizeFilenameComponent(dsn)
+        let timestamp = filenameTimestampFormatter.string(from: now)
+        return "smart_oila_kids_diagnostics_\(sanitizedDSN)_\(timestamp).txt"
+    }
+
+    static func sanitizeFilenameComponent(_ value: String?) -> String {
+        let trimmed = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard let trimmed, !trimmed.isEmpty else {
+            return "no-dsn"
+        }
+
+        let collapsed = trimmed.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: "-",
+            options: .regularExpression
+        )
+        let normalized = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return normalized.isEmpty ? "no-dsn" : normalized
+    }
+
+    private static let filenameTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss'Z'"
+        return formatter
+    }()
 }

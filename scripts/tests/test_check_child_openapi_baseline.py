@@ -11,6 +11,10 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ChildCoverageGateTests(unittest.TestCase):
+    def test_default_baseline_matches_current_repo_snapshot(self) -> None:
+        self.assertEqual(MODULE.DEFAULT_MIN_REST, 28)
+        self.assertEqual(MODULE.DEFAULT_MIN_WS, 9)
+
     def test_count_rest_hits_matches_with_path_variables(self) -> None:
         spec_ops = [
             ("GET", "/api/messages/{}"),

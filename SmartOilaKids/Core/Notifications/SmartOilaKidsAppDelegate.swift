@@ -6,6 +6,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        let launchDate = Date()
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
@@ -18,7 +19,20 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         }
 
         if let remoteInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
-            PushCommandRouter.handle(userInfo: remoteInfo, openedFromInteraction: true)
+            PushCommandRouter.handle(
+                userInfo: remoteInfo,
+                openedFromInteraction: true,
+                deliveryContext: .launch
+            )
+        }
+
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(
+                applicationState: SettingsDiagnosticsValueMapper.applicationState(application.applicationState),
+                lastEvent: launchOptions?[.remoteNotification] == nil ? "launch" : "launch_remote_notification",
+                lastForegroundAt: application.applicationState == .active ? launchDate : nil,
+                eventDate: launchDate
+            )
         }
 
         return true
@@ -42,10 +56,31 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        let now = Date()
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(
+                applicationState: SettingsDiagnosticsValueMapper.applicationState(application.applicationState),
+                lastEvent: "app_delegate_did_become_active",
+                lastForegroundAt: now,
+                eventDate: now
+            )
+        }
         Task {
             await DeviceControlEventBridge.shared.syncNow()
             await MediaTelemetryInboxBridge.shared.syncNow()
             await PushInboxStore.shared.reconcileAppBadge()
+        }
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        let now = Date()
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(
+                applicationState: SettingsDiagnosticsValueMapper.applicationState(application.applicationState),
+                lastEvent: "app_delegate_did_enter_background",
+                lastBackgroundAt: now,
+                eventDate: now
+            )
         }
     }
 
@@ -54,7 +89,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        PushCommandRouter.handle(userInfo: userInfo)
+        PushCommandRouter.handle(userInfo: userInfo, deliveryContext: .backgroundFetch)
         completionHandler(.newData)
     }
 
@@ -63,7 +98,10 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        PushCommandRouter.handle(userInfo: notification.request.content.userInfo)
+        PushCommandRouter.handle(
+            userInfo: notification.request.content.userInfo,
+            deliveryContext: .foregroundPresentation
+        )
         Task {
             await DeviceControlEventBridge.shared.syncNow()
             await MediaTelemetryInboxBridge.shared.syncNow()
@@ -78,7 +116,8 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     ) {
         PushCommandRouter.handle(
             userInfo: response.notification.request.content.userInfo,
-            openedFromInteraction: true
+            openedFromInteraction: true,
+            deliveryContext: .userResponse
         )
         Task {
             await DeviceControlEventBridge.shared.syncNow()

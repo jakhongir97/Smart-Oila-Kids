@@ -6,6 +6,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
     typealias ConnectAction = (String) -> Void
     typealias VoidAction = () -> Void
     typealias AsyncConnectAction = (String) async -> Void
+    typealias AsyncVideoConnectAction = (String, DeviceMediaStreamType) async -> Void
     typealias AsyncVoidAction = () async -> Void
     typealias OptionalDSNAsyncAction = (String?) async -> Void
     typealias PendingTransportActionLookup = (String) async -> Bool
@@ -54,7 +55,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
         disconnectStatusWebSocket: VoidAction? = nil,
         connectAudioStreamWebSocket: AsyncConnectAction? = nil,
         disconnectAudioStreamWebSocket: AsyncVoidAction? = nil,
-        connectVideoStreamWebSocket: AsyncConnectAction? = nil,
+        connectVideoStreamWebSocket: AsyncVideoConnectAction? = nil,
         disconnectVideoStreamWebSocket: AsyncVoidAction? = nil,
         updateTransportDSN: OptionalDSNAsyncAction? = nil,
         hasPendingTransportAction: PendingTransportActionLookup? = nil,
@@ -113,8 +114,8 @@ final class DeviceRecordingCoordinator: ObservableObject {
         self.disconnectAudioStreamWebSocket = disconnectAudioStreamWebSocket ?? { [audioStreamWebSocketService] in
             await audioStreamWebSocketService.disconnect()
         }
-        self.connectVideoStreamWebSocket = connectVideoStreamWebSocket ?? { [videoStreamWebSocketService] in
-            await videoStreamWebSocketService.connect(dsn: $0)
+        self.connectVideoStreamWebSocket = connectVideoStreamWebSocket ?? { [videoStreamWebSocketService] dsn, streamType in
+            await videoStreamWebSocketService.connect(dsn: dsn, streamType: streamType)
         }
         self.disconnectVideoStreamWebSocket = disconnectVideoStreamWebSocket ?? { [videoStreamWebSocketService] in
             await videoStreamWebSocketService.disconnect()
@@ -227,6 +228,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
         }
 
         currentDSN = normalizedDSN
+        currentVideoStreamEndpointType = .camera
         Task { [updateTransportDSN] in
             await updateTransportDSN(normalizedDSN)
         }
@@ -254,7 +256,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
             await connectAudioStreamWebSocket(normalizedDSN)
         }
         Task { [connectVideoStreamWebSocket] in
-            await connectVideoStreamWebSocket(normalizedDSN)
+            await connectVideoStreamWebSocket(normalizedDSN, .camera)
         }
     }
 
@@ -277,6 +279,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
             await updateTransportDSN(nil)
         }
         currentDSN = nil
+        currentVideoStreamEndpointType = nil
         activeRecordingID = nil
         activeRecordingType = nil
         audioStream.reset()
@@ -328,7 +331,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
     private let disconnectStatusWebSocket: VoidAction
     private let connectAudioStreamWebSocket: AsyncConnectAction
     private let disconnectAudioStreamWebSocket: AsyncVoidAction
-    private let connectVideoStreamWebSocket: AsyncConnectAction
+    private let connectVideoStreamWebSocket: AsyncVideoConnectAction
     private let disconnectVideoStreamWebSocket: AsyncVoidAction
     private let updateTransportDSN: OptionalDSNAsyncAction
     private let hasPendingTransportAction: PendingTransportActionLookup
@@ -353,6 +356,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
     private let videoStreamLimit: TimeInterval
     private let duplicateSuppressionWindow: TimeInterval
     private var currentDSN: String?
+    private var currentVideoStreamEndpointType: DeviceMediaStreamType?
     private var activeRecordingID: String?
     private var activeRecordingType: DeviceRecordingTaskType?
     private var audioStream = AudioStreamRuntimeState()
@@ -762,8 +766,11 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 }
             }
             videoStream.markStarted(streamType: streamType)
-            Task { [connectVideoStreamWebSocket] in
-                await connectVideoStreamWebSocket(dsn)
+            if currentVideoStreamEndpointType != streamType {
+                currentVideoStreamEndpointType = streamType
+                Task { [connectVideoStreamWebSocket] in
+                    await connectVideoStreamWebSocket(dsn, streamType)
+                }
             }
             scheduleVideoStreamLimit(dsn: dsn)
             recordMediaTelemetry(
@@ -976,13 +983,14 @@ final class DeviceRecordingCoordinator: ObservableObject {
         lastEvent: String,
         lastError: String
     ) {
+        let streamType = DeviceMediaStreamType(rawValue: source)
         updateDiagnostics(
             status: status,
             dsn: dsn,
             endpoint: recordingsEndpoint(for: dsn),
             streamStatusEndpoint: streamStatusEndpoint(for: dsn),
             streamAudioEndpoint: streamAudioEndpoint(for: dsn),
-            streamVideoEndpoint: streamVideoEndpoint(for: dsn),
+            streamVideoEndpoint: streamVideoEndpoint(for: dsn, streamType: streamType),
             videoStreamState: streamState,
             videoStreamSource: source,
             videoFramesSent: videoStream.framesSent,
@@ -1442,8 +1450,12 @@ final class DeviceRecordingCoordinator: ObservableObject {
         "/children/device/\(dsn)/stream/audio"
     }
 
-    private func streamVideoEndpoint(for dsn: String) -> String {
-        "/children/device/\(dsn)/stream/camera"
+    private func streamVideoEndpoint(
+        for dsn: String,
+        streamType: DeviceMediaStreamType? = nil
+    ) -> String {
+        let resolvedStreamType = streamType ?? currentVideoStreamEndpointType ?? .camera
+        return "/children/device/\(dsn)/stream/\(resolvedStreamType.rawValue)"
     }
 
     private func pruneCompletedRecordingIDs(referenceDate: Date) {

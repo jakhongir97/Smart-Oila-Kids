@@ -6,9 +6,17 @@ extension RootView {
         let isInitialAppear = !didHandleInitialAppear
         didHandleInitialAppear = true
         let shouldArmLaunchRecovery = isInitialAppear && shouldArmLaunchRecoveryCheck(referenceDate: Date())
+        let now = Date()
 
         lastSessionDSN = sessionStore.dsn?.trimmedNonEmpty
         DeviceRecordingCoordinator.shared.setApplicationActive(UIApplication.shared.applicationState == .active)
+        RuntimeDiagnosticsCenter.shared.updateLifecycle(
+            scenePhase: "appeared",
+            applicationState: SettingsDiagnosticsValueMapper.applicationState(UIApplication.shared.applicationState),
+            lastEvent: isInitialAppear ? "root_view_initial_appear" : "root_view_reappear",
+            lastForegroundAt: UIApplication.shared.applicationState == .active ? now : nil,
+            eventDate: now
+        )
         syncGeoService(with: sessionStore.dsn)
         syncLockService(with: sessionStore.dsn, armRecoveryCheck: shouldArmLaunchRecovery)
         syncMediaService(with: sessionStore.dsn)
@@ -48,21 +56,44 @@ extension RootView {
     }
 
     func handleScenePhaseChange(_ newValue: ScenePhase) {
+        let now = Date()
+        let phase = SettingsDiagnosticsValueMapper.scenePhase(newValue)
+        let applicationState = SettingsDiagnosticsValueMapper.applicationState(UIApplication.shared.applicationState)
+
         if newValue == .background {
-            let now = Date()
             lastBackgroundedAt = now
             persistBackgroundTimestamp(now)
             DeviceRecordingCoordinator.shared.setApplicationActive(false)
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(
+                scenePhase: phase,
+                applicationState: applicationState,
+                lastEvent: "scene_background",
+                lastBackgroundAt: now,
+                eventDate: now
+            )
             return
         }
 
         if newValue == .inactive {
             DeviceRecordingCoordinator.shared.setApplicationActive(false)
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(
+                scenePhase: phase,
+                applicationState: applicationState,
+                lastEvent: "scene_inactive",
+                eventDate: now
+            )
             return
         }
 
         guard newValue == .active else { return }
         DeviceRecordingCoordinator.shared.setApplicationActive(true)
+        RuntimeDiagnosticsCenter.shared.updateLifecycle(
+            scenePhase: phase,
+            applicationState: applicationState,
+            lastEvent: "scene_active",
+            lastForegroundAt: now,
+            eventDate: now
+        )
 
         if shouldArmRecoveryCheck(referenceDate: Date()) {
             lockCoordinator.armForegroundRecoveryCheck()

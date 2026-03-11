@@ -23,7 +23,9 @@ extension PushInboxStore {
     }
 
     func reconcileAppBadge() {
-        let unread = resolvedBadgeCount(in: storedItems())
+        let items = storedItems()
+        let unread = resolvedBadgeCount(in: items)
+        updateDiagnostics(items: items, dsn: activeSessionDSN(), status: "badge_reconciled")
         Task { @MainActor in
             UIApplication.shared.applicationIconBadgeNumber = unread
         }

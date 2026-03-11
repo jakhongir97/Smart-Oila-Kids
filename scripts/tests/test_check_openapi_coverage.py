@@ -21,6 +21,48 @@ class NormalizePathTests(unittest.TestCase):
         self.assertEqual(actual, "/api/devices/{}/full_lock_status")
 
 
+class RestCoverageTests(unittest.TestCase):
+    def test_collect_rest_ops_resolves_local_path_variables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "DeviceApplicationStateService.swift").write_text(
+                """
+                final class DeviceApplicationStateService {
+                    func fetchState(deviceID: Int, client: APIClient) async throws {
+                        let applicationsEndpoint = "members/device/\\(deviceID)/applications"
+                        let lockedEndpoint = "members/device/\\(deviceID)/applications/locked"
+                        let scheduleEndpoint = "members/device/\\(deviceID)/full_lock_schedule"
+
+                        _ = try await client.requestDecodableWithBaseFallback(
+                            baseURLs: [],
+                            path: applicationsEndpoint,
+                            method: .get,
+                            as: [String].self
+                        )
+                        _ = try await client.requestDecodableWithBaseFallback(
+                            baseURLs: [],
+                            path: lockedEndpoint,
+                            method: .get,
+                            as: [String].self
+                        )
+                        _ = try await client.requestDataWithBaseFallback(
+                            baseURLs: [],
+                            path: scheduleEndpoint,
+                            method: .delete
+                        )
+                    }
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            actual = MODULE.collect_rest_ops_from_path_method(root)
+
+            self.assertIn(("GET", "/api/members/device/{}/applications"), actual)
+            self.assertIn(("GET", "/api/members/device/{}/applications/locked"), actual)
+            self.assertIn(("DELETE", "/api/members/device/{}/full_lock_schedule"), actual)
+
+
 class WebSocketCoverageTests(unittest.TestCase):
     def test_collect_ws_paths_from_dynamic_app_config_urls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
