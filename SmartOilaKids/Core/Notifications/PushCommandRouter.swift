@@ -33,6 +33,7 @@ private extension PushCommandRouter {
 
     static func applyRouting(_ payload: PushCommandPayload, openedFromInteraction: Bool) {
         let haystack = payload.routingHaystack
+        var deepLinkDestination: PushDeepLinkDestination?
 
         if containsAny(in: haystack, tokens: RoutingTokens.dashboard) {
             post(.pushShouldRefreshDashboard, dsn: payload.dsn)
@@ -46,7 +47,7 @@ private extension PushCommandRouter {
             post(.pushShouldRefreshTasks, dsn: payload.dsn)
             if openedFromInteraction {
                 post(.pushShouldOpenTasks, dsn: payload.dsn)
-                saveDeepLink(destination: .tasks, dsn: payload.dsn)
+                deepLinkDestination = .tasks
             }
         }
 
@@ -54,8 +55,12 @@ private extension PushCommandRouter {
             post(.pushShouldRefreshChat, dsn: payload.dsn)
             if openedFromInteraction {
                 post(.pushShouldOpenChat, dsn: payload.dsn)
-                saveDeepLink(destination: .chat, dsn: payload.dsn)
+                deepLinkDestination = .chat
             }
+        }
+
+        if let deepLinkDestination {
+            saveDeepLink(destination: deepLinkDestination, dsn: payload.dsn)
         }
     }
 

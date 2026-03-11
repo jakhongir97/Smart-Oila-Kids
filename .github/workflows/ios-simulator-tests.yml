@@ -1,4 +1,4 @@
-name: Release Readiness Gates
+name: iOS Simulator Tests
 
 on:
   workflow_dispatch:
@@ -7,37 +7,30 @@ on:
       - "SmartOilaKids/**"
       - "SmartOilaKidsTests/**"
       - "Shared/**"
+      - "SmartOilaKidsUsageReportExtension/**"
+      - "SmartOilaKidsScheduleMonitorExtension/**"
       - "SmartOilaKids.xcodeproj/**"
-      - "OpenAPI/**"
-      - "scripts/**"
-      - ".github/workflows/release-readiness-gates.yml"
+      - "project.yml"
+      - "scripts/run_ios_tests.sh"
+      - ".github/workflows/ios-simulator-tests.yml"
   pull_request:
     paths:
       - "SmartOilaKids/**"
       - "SmartOilaKidsTests/**"
       - "Shared/**"
+      - "SmartOilaKidsUsageReportExtension/**"
+      - "SmartOilaKidsScheduleMonitorExtension/**"
       - "SmartOilaKids.xcodeproj/**"
-      - "OpenAPI/**"
-      - "scripts/**"
-      - ".github/workflows/release-readiness-gates.yml"
+      - "project.yml"
+      - "scripts/run_ios_tests.sh"
+      - ".github/workflows/ios-simulator-tests.yml"
+
+concurrency:
+  group: ios-simulator-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  release-readiness:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Run release readiness checks
-        run: ./scripts/run_release_readiness_checks.sh
-
-  ios-release-readiness:
-    needs: release-readiness
+  ios-simulator-tests:
     runs-on: macos-latest
     timeout-minutes: 45
     permissions:
@@ -46,27 +39,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Print Xcode Version
         run: xcodebuild -version
 
       - name: List Available iOS Simulators
         run: xcrun simctl list devices available
 
-      - name: Run macOS Release Readiness Checks
-        run: ./scripts/run_release_readiness_checks.sh
-        env:
-          RUN_IOS_SIMULATOR_TESTS: "1"
+      - name: Run SmartOilaKids Simulator Tests
+        run: ./scripts/run_ios_tests.sh
 
       - name: Upload Xcode Result Bundle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smartoila-release-readiness-xcresult
+          name: smartoila-kids-xcresult
           path: .build/test-results/SmartOilaKids.xcresult
           if-no-files-found: ignore
 
@@ -74,6 +60,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smartoila-release-readiness-xcodebuild-log
+          name: smartoila-kids-xcodebuild-log
           path: .build/test-results/ios-tests.log
           if-no-files-found: ignore

@@ -10,6 +10,12 @@ struct MemberProfile: Decodable {
         let name: String?
         let username: String?
         let fullName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case username
+            case fullName = "full_name"
+        }
     }
 
     var resolvedName: String? {

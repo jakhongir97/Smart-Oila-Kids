@@ -35,7 +35,7 @@ extension GeoBackgroundService {
         connectUsingCurrentBase()
     }
 
-    func stop() {
+    func stop(shouldUpdateDebug: Bool = true) {
         if let dsn = state.currentDSN {
             pendingPayloadQueue.persist(for: dsn)
         }
@@ -53,7 +53,9 @@ extension GeoBackgroundService {
         timers.stop()
         webSocketClient.disconnect()
 
-        updateDebug(status: .stopped, endpoint: "-", lastError: "-")
+        if shouldUpdateDebug {
+            updateDebug(status: .stopped, endpoint: "-", lastError: "-")
+        }
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

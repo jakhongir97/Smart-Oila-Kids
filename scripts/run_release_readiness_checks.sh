@@ -74,4 +74,16 @@ if [[ "${RUN_PARENT_CHILD_SIMULATORS:-0}" == "1" ]]; then
   echo
 fi
 
+if [[ "${RUN_IOS_SIMULATOR_TESTS:-0}" == "1" ]]; then
+  echo "== SmartOilaKids iOS simulator tests =="
+  ./scripts/run_ios_tests.sh
+  echo
+
+  echo "== SmartOilaKids build warning gate =="
+  python3 scripts/check_build_warnings.py \
+    --log .build/test-results/ios-tests.log \
+    --max-unapproved 0
+  echo
+fi
+
 echo "Release readiness checks completed."

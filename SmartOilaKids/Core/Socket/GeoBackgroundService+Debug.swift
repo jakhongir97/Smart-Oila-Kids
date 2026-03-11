@@ -24,7 +24,9 @@ extension GeoBackgroundService {
         lastError: String? = nil,
         reconnectCount: Int? = nil
     ) {
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
             var snapshot = self.debugSnapshot
             if let status {
                 snapshot.status = status
@@ -43,11 +45,12 @@ extension GeoBackgroundService {
             }
             self.setDebugSnapshot(snapshot)
 
+            let currentDSN = self.state.currentDSN ?? "-"
             Task { @MainActor in
                 RuntimeDiagnosticsCenter.shared.updateGeo(
                     status: snapshot.status,
                     endpoint: snapshot.endpoint,
-                    dsn: self.state.currentDSN ?? "-",
+                    dsn: currentDSN,
                     lastPayload: snapshot.lastPayload,
                     lastError: snapshot.lastError,
                     reconnectCount: snapshot.reconnectCount

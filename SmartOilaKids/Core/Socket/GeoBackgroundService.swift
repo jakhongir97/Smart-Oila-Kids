@@ -22,16 +22,7 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     let pathMonitorQueue = DispatchQueue(label: "GeoBackgroundService.PathMonitor")
     let pendingPayloadQueue = GeoPendingPayloadQueue()
     let payloadEncoder = GeoPayloadEncoder()
-    lazy var timers = GeoServiceTimers(
-        locationInterval: configuration.periodicLocationInterval,
-        systemInfoInterval: configuration.systemInfoInterval,
-        onLocationTick: { [weak self] in
-            self?.sendLastKnownLocation()
-        },
-        onSystemInfoTick: { [weak self] in
-            self?.sendSystemInfo(force: true)
-        }
-    )
+    var timers: GeoServiceTimers!
 
     let webSocketClient = GeoWebSocketClient()
     var reconnectWorkItem: DispatchWorkItem?
@@ -40,6 +31,16 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     override init() {
         configuration = .default
         super.init()
+        timers = GeoServiceTimers(
+            locationInterval: configuration.periodicLocationInterval,
+            systemInfoInterval: configuration.systemInfoInterval,
+            onLocationTick: { [weak self] in
+                self?.sendLastKnownLocation()
+            },
+            onSystemInfoTick: { [weak self] in
+                self?.sendSystemInfo(force: true)
+            }
+        )
         configureDeviceObservers()
         configureLocationManager()
         configurePathMonitor()
@@ -48,13 +49,23 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     init(configuration: GeoServiceConfiguration) {
         self.configuration = configuration
         super.init()
+        timers = GeoServiceTimers(
+            locationInterval: configuration.periodicLocationInterval,
+            systemInfoInterval: configuration.systemInfoInterval,
+            onLocationTick: { [weak self] in
+                self?.sendLastKnownLocation()
+            },
+            onSystemInfoTick: { [weak self] in
+                self?.sendSystemInfo(force: true)
+            }
+        )
         configureDeviceObservers()
         configureLocationManager()
         configurePathMonitor()
     }
 
     deinit {
-        stop()
+        stop(shouldUpdateDebug: false)
         pathMonitor.cancel()
         NotificationCenter.default.removeObserver(self)
     }

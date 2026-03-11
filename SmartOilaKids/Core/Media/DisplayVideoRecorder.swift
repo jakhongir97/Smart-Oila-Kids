@@ -3,7 +3,8 @@
 import Foundation
 import UIKit
 
-final class DisplayVideoRecorder {
+// Mutable recorder state is serialized through stateQueue.
+final class DisplayVideoRecorder: @unchecked Sendable {
     enum RecorderError: LocalizedError {
         case busy
         case cancelled
@@ -192,7 +193,7 @@ final class DisplayVideoRecorder {
     }
 
     private func handleSampleBuffer(_ sampleBuffer: CMSampleBuffer, type: RPSampleBufferType) {
-        stateQueue.async {
+        stateQueue.sync {
             guard self.isCapturing else { return }
             guard type == .video else { return }
             guard let writer = self.writer, let videoInput = self.videoInput else { return }
