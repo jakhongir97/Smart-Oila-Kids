@@ -27,7 +27,6 @@
 		13B4610F2A609EDD81F1E4BC /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492B3E4DE9B3CC544DB4D520 /* SettingsService.swift */; };
 		156A236D65155CD1D4381BC4 /* AppHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2425C8628135185130E301B7 /* AppHaptics.swift */; };
 		1802E26A36C0451F1831F065 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C6C570B71E54A7F777CB04 /* AppColors.swift */; };
-		18137A4C4BB0408A9C545206 /* SmartOilaKidsScheduleMonitorExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		182DC08BA699BBA3BDADBF60 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DF6DBF6858AD49CC68DFE5A /* APIClient.swift */; };
 		1882771C7296B1B31B33E5C0 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6EA548F1CF7F9E1A410269 /* AppRuntime.swift */; };
 		195A41C9FCBD32BC9BE57BC2 /* MainViewModel+Dashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717A1B6BF6594E39FE01F6E7 /* MainViewModel+Dashboard.swift */; };
@@ -57,7 +56,6 @@
 		33B5586D579CA5DF23507F32 /* SettingsActionFlows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CBD93216102589F60B615CF /* SettingsActionFlows.swift */; };
 		34E7EE4BAA5D64256E27662B /* ScreenTimeUsageActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9E55F392A6E47D99AA4BE7 /* ScreenTimeUsageActivitySummary.swift */; };
 		350DE396F3550391AF1F3E17 /* DeviceLockScheduleSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */; };
-		355135034B1D473C93D2645F /* SmartOilaKidsUsageReportExtension.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		366594A3473CA537D099E4DE /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D889CF1BCC2C184969DDA982 /* ChatView.swift */; };
 		3685D93C0DEEF83C94B88A18 /* TemplatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4565446C94B66FB0D672C68F /* TemplatesView.swift */; };
 		37760941AA63006820D7BAE9 /* DeviceLockShieldController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AC9CC208A8592E5CAE0921D /* DeviceLockShieldController.swift */; };
@@ -310,7 +308,6 @@
 			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
 			dstSubfolderSpec = 16;
 			files = (
-				355135034B1D473C93D2645F /* SmartOilaKidsUsageReportExtension.appex in Embed ExtensionKit Extensions */,
 			);
 			name = "Embed ExtensionKit Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -321,7 +318,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				18137A4C4BB0408A9C545206 /* SmartOilaKidsScheduleMonitorExtension.appex in Embed App Extensions */,
 			);
 			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1189,8 +1185,6 @@
 			buildRules = (
 			);
 			dependencies = (
-				CAB2722D60C7457FBC28958D /* PBXTargetDependency */,
-				50708B381AC44D979E65C171 /* PBXTargetDependency */,
 			);
 			name = SmartOilaKids;
 			packageProductDependencies = (
