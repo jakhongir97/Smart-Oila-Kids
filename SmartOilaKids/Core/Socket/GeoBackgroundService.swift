@@ -3,6 +3,8 @@ import Foundation
 import Network
 
 final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerDelegate {
+    static let shared = GeoBackgroundService()
+
     @Published private(set) var debugSnapshot = GeoDebugSnapshot()
 
     var debugStatus: String { debugSnapshot.status }

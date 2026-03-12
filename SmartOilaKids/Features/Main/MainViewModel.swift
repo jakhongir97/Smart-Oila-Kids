@@ -10,9 +10,6 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var deviceStatus: MainDeviceStatus?
     @Published private(set) var pendingTasksCount: Int?
     @Published private(set) var unreadChatCount: Int?
-    @Published private(set) var unreadNotificationCount = 0
-    @Published private(set) var recentDeviceControlItems: [PushInboxItem] = []
-    @Published private(set) var recentMediaItems: [PushInboxItem] = []
 
     init(
         sosService: SOSServicing,
@@ -30,8 +27,7 @@ final class MainViewModel: ObservableObject {
             chatService: chatService,
             chatReadStateStore: chatReadStateStore,
             chatHistoryStore: chatHistoryStore,
-            taskCacheStore: taskCacheStore,
-            pushInboxStore: .shared
+            taskCacheStore: taskCacheStore
         )
     }
 
@@ -57,18 +53,6 @@ final class MainViewModel: ObservableObject {
 
     func setUnreadChatCount(_ value: Int?) {
         unreadChatCount = value
-    }
-
-    func setUnreadNotificationCount(_ value: Int) {
-        unreadNotificationCount = value
-    }
-
-    func setRecentDeviceControlItems(_ value: [PushInboxItem]) {
-        recentDeviceControlItems = value
-    }
-
-    func setRecentMediaItems(_ value: [PushInboxItem]) {
-        recentMediaItems = value
     }
 
     let dependencies: MainViewModelDependencies

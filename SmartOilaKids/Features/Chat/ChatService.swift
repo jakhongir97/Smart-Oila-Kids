@@ -29,6 +29,22 @@ final class ChatService: ChatServicing {
     }
 
     func sendMessage(sendFromID: String, text: String, attachments: [Data] = []) async throws -> WBSocketChat {
+        if attachments.isEmpty {
+            return try await client.requestDecodableWithBaseFallback(
+                baseURLs: AppConfig.apiBaseCandidates,
+                path: "messages/",
+                method: .post,
+                headers: ["Accept": "application/json"],
+                body: createFormBody(fields: [
+                    "send_from_id": sendFromID,
+                    "user_type": "child",
+                    "text": text
+                ]),
+                contentType: "application/x-www-form-urlencoded; charset=utf-8",
+                as: WBSocketChat.self
+            )
+        }
+
         let boundary = UUID().uuidString
         let body = createMultipartBody(
             boundary: boundary,
@@ -100,6 +116,17 @@ private struct MemberProfileNameResponse: Decodable {
 }
 
 private extension ChatService {
+    func createFormBody(fields: [String: String]) -> Data {
+        let allowed = CharacterSet.alphanumerics.union(.init(charactersIn: "-._* "))
+        let payload = fields.map { key, value in
+            "\(percentEncode(key, allowed: allowed))=\(percentEncode(value, allowed: allowed))"
+        }
+        .joined(separator: "&")
+        .replacingOccurrences(of: " ", with: "+")
+
+        return Data(payload.utf8)
+    }
+
     func createMultipartBody(boundary: String, fields: [String: String], attachments: [Data]) -> Data {
         var data = Data()
 
@@ -119,6 +146,10 @@ private extension ChatService {
 
         data.append("--\(boundary)--\r\n")
         return data
+    }
+
+    func percentEncode(_ value: String, allowed: CharacterSet) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }
 

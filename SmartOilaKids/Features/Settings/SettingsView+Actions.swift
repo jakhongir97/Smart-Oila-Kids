@@ -14,32 +14,6 @@ extension SettingsView {
         action()
     }
 
-    @MainActor
-    func updateSettingsProtection(_ shouldEnable: Bool) async {
-        if shouldEnable {
-            let didEnable = settingsProtection.enableProtection()
-            if didEnable {
-                AppHaptics.success()
-                banner(L10n.tr("settings.control_protection_enabled"))
-            } else {
-                AppHaptics.warning()
-                banner(L10n.tr("settings.control_protection_unavailable"))
-            }
-            return
-        }
-
-        let isUnlocked = await settingsProtection.authenticateIfNeeded()
-        guard isUnlocked else {
-            AppHaptics.warning()
-            banner(L10n.tr("settings.control_protection_required"))
-            return
-        }
-
-        settingsProtection.disableProtection()
-        AppHaptics.success()
-        banner(L10n.tr("settings.control_protection_disabled"))
-    }
-
     func save() {
         let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -162,21 +136,6 @@ extension SettingsView {
         }
     }
 
-    func beginInviteShare() {
-        GrowthMetricsStore.shared.track(.inviteShareClicked, dsn: sessionStore.dsn)
-        inviteSharePayload = actionFlows.makeInvitePayload()
-    }
-
-    func handleInviteShareCompletion(completed: Bool) {
-        guard completed else { return }
-        GrowthMetricsStore.shared.track(.inviteShareCompleted, dsn: sessionStore.dsn)
-
-        DispatchQueue.main.async {
-            AppHaptics.success()
-            banner(L10n.tr("settings.invite_share_success"))
-        }
-    }
-
     var themeBinding: Binding<AppTheme> {
         Binding(
             get: { sessionStore.appTheme },
@@ -187,8 +146,7 @@ extension SettingsView {
     var actionFlows: SettingsActionFlows {
         SettingsActionFlows(
             viewModel: viewModel,
-            currentDSN: sessionStore.dsn,
-            profileName: sessionStore.profileName
+            currentDSN: sessionStore.dsn
         )
     }
 

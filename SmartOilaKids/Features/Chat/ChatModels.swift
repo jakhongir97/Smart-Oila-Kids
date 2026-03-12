@@ -11,7 +11,7 @@ struct ChatMessagesModel: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        pagination = try container.decode(Pagination.self, forKey: .pagination)
+        pagination = (try? container.decode(Pagination.self, forKey: .pagination)) ?? .fallback
 
         if let grouped = try? container.decode([String: [Datum]].self, forKey: .data) {
             data = grouped
@@ -99,6 +99,31 @@ struct Pagination: Decodable {
         totalPage = container.decodeLossyIntIfPresent(forKey: .totalPage) ?? 0
         totalCount = container.decodeLossyIntIfPresent(forKey: .totalCount) ?? 0
     }
+
+    init(
+        current: Int,
+        previous: Int?,
+        next: Int?,
+        perPage: Int,
+        totalPage: Int,
+        totalCount: Int
+    ) {
+        self.current = current
+        self.previous = previous
+        self.next = next
+        self.perPage = perPage
+        self.totalPage = totalPage
+        self.totalCount = totalCount
+    }
+
+    static let fallback = Pagination(
+        current: 1,
+        previous: nil,
+        next: nil,
+        perPage: 0,
+        totalPage: 0,
+        totalCount: 0
+    )
 }
 
 struct WBSocketMessage: Decodable {

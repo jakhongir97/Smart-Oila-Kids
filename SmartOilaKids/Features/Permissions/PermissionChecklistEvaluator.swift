@@ -6,40 +6,30 @@ import UserNotifications
 enum PermissionChecklistEvaluator {
     static func isInteractive(_ requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> Bool {
         switch requirement {
-        case .displayOverApps:
-            return false
         case .usageStats:
             return snapshot.screenTimePermissionStatus != .unavailable
-        default:
+        case .location, .notifications, .microphone, .camera:
             return true
         }
     }
 
     static func isSatisfied(_ requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> Bool {
         switch requirement {
-        case .displayOverApps:
-            return true
         case .location:
             return isLocationSatisfied(snapshot.locationAuthorizationStatus)
-        case .batteryOptimization:
-            return !snapshot.isLowPowerModeEnabled
-        case .microphone:
-            return snapshot.microphonePermission == .granted
         case .usageStats:
             return snapshot.screenTimePermissionStatus == .granted
-        case .camera:
-            return snapshot.cameraAuthorizationStatus == .authorized
-        case .backgroundTransfer:
-            return snapshot.backgroundRefreshStatus == .available
         case .notifications:
             return isNotificationSatisfied(snapshot.notificationAuthorizationStatus)
+        case .microphone:
+            return snapshot.microphonePermission == .granted
+        case .camera:
+            return snapshot.cameraAuthorizationStatus == .authorized
         }
     }
 
     static func statusText(for requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> String {
         switch requirement {
-        case .displayOverApps:
-            return L10n.tr("permissions.status_not_required_ios")
         case .usageStats:
             switch snapshot.screenTimePermissionStatus {
             case .granted:
@@ -65,10 +55,20 @@ enum PermissionChecklistEvaluator {
             @unknown default:
                 return L10n.tr("permissions.status_open_settings")
             }
-        case .batteryOptimization:
-            return snapshot.isLowPowerModeEnabled
-                ? L10n.tr("permissions.status_low_power_disable")
-                : L10n.tr("permissions.status_granted")
+        case .notifications:
+            if isNotificationSatisfied(snapshot.notificationAuthorizationStatus) {
+                return L10n.tr("permissions.status_granted")
+            }
+            switch snapshot.notificationAuthorizationStatus {
+            case .notDetermined:
+                return L10n.tr("permissions.status_tap_to_allow")
+            case .denied:
+                return L10n.tr("permissions.status_open_settings")
+            case .authorized, .provisional, .ephemeral:
+                return L10n.tr("permissions.status_granted")
+            @unknown default:
+                return L10n.tr("permissions.status_open_settings")
+            }
         case .microphone:
             switch snapshot.microphonePermission {
             case .granted:
@@ -91,29 +91,6 @@ enum PermissionChecklistEvaluator {
             @unknown default:
                 return L10n.tr("permissions.status_open_settings")
             }
-        case .backgroundTransfer:
-            switch snapshot.backgroundRefreshStatus {
-            case .available:
-                return L10n.tr("permissions.status_granted")
-            case .denied, .restricted:
-                return L10n.tr("permissions.status_open_settings")
-            @unknown default:
-                return L10n.tr("permissions.status_open_settings")
-            }
-        case .notifications:
-            if isNotificationSatisfied(snapshot.notificationAuthorizationStatus) {
-                return L10n.tr("permissions.status_granted")
-            }
-            switch snapshot.notificationAuthorizationStatus {
-            case .notDetermined:
-                return L10n.tr("permissions.status_tap_to_allow")
-            case .denied:
-                return L10n.tr("permissions.status_open_settings")
-            case .authorized, .provisional, .ephemeral:
-                return L10n.tr("permissions.status_granted")
-            @unknown default:
-                return L10n.tr("permissions.status_open_settings")
-            }
         }
     }
 
@@ -121,8 +98,6 @@ enum PermissionChecklistEvaluator {
         guard isInteractive(requirement, in: snapshot), !isSatisfied(requirement, in: snapshot) else { return nil }
 
         switch requirement {
-        case .displayOverApps:
-            return nil
         case .usageStats:
             return L10n.tr("permissions.action_allow_screen_time")
         case .location:
@@ -138,8 +113,17 @@ enum PermissionChecklistEvaluator {
             @unknown default:
                 return L10n.tr("permissions.action_open_settings")
             }
-        case .batteryOptimization:
-            return snapshot.isLowPowerModeEnabled ? L10n.tr("permissions.action_open_settings") : nil
+        case .notifications:
+            switch snapshot.notificationAuthorizationStatus {
+            case .notDetermined:
+                return L10n.tr("permissions.action_allow_notifications")
+            case .denied:
+                return L10n.tr("permissions.action_open_settings")
+            case .authorized, .provisional, .ephemeral:
+                return nil
+            @unknown default:
+                return L10n.tr("permissions.action_open_settings")
+            }
         case .microphone:
             switch snapshot.microphonePermission {
             case .undetermined:
@@ -162,32 +146,11 @@ enum PermissionChecklistEvaluator {
             @unknown default:
                 return L10n.tr("permissions.action_open_settings")
             }
-        case .backgroundTransfer:
-            switch snapshot.backgroundRefreshStatus {
-            case .available:
-                return nil
-            case .denied, .restricted:
-                return L10n.tr("permissions.action_open_settings")
-            @unknown default:
-                return L10n.tr("permissions.action_open_settings")
-            }
-        case .notifications:
-            switch snapshot.notificationAuthorizationStatus {
-            case .notDetermined:
-                return L10n.tr("permissions.action_allow_notifications")
-            case .denied:
-                return L10n.tr("permissions.action_open_settings")
-            case .authorized, .provisional, .ephemeral:
-                return nil
-            @unknown default:
-                return L10n.tr("permissions.action_open_settings")
-            }
         }
     }
 
     static func allChecklistSatisfied(in snapshot: PermissionStatusSnapshot) -> Bool {
-        PermissionRequirement.allCases
-            .filter { $0 != .usageStats }
+        PermissionRequirement.onboardingCases
             .allSatisfy { isSatisfied($0, in: snapshot) }
     }
 

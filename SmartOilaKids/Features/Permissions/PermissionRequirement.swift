@@ -1,26 +1,68 @@
 import Foundation
 
-enum PermissionRequirement: Int, CaseIterable, Identifiable {
-    case displayOverApps
+enum PermissionRequirement: String, CaseIterable, Identifiable {
     case location
-    case batteryOptimization
-    case microphone
     case usageStats
-    case backgroundTransfer
     case notifications
+    case microphone
     case camera
 
-    var id: Int { rawValue }
+    var id: String { rawValue }
+
+    static let onboardingCases: [PermissionRequirement] = [
+        .location
+    ]
+
+    static let settingsCases: [PermissionRequirement] = [
+        .location,
+        .usageStats,
+        .notifications,
+        .microphone,
+        .camera
+    ]
 
     var titleKey: String {
-        "permissions.item_\(rawValue + 1)"
+        switch self {
+        case .location:
+            return "permissions.item_2"
+        case .usageStats:
+            return "permissions.item_5"
+        case .notifications:
+            return "permissions.item_7"
+        case .microphone:
+            return "permissions.item_4"
+        case .camera:
+            return "permissions.item_8"
+        }
     }
 
     var detailBodyKey: String {
-        "permissions.details.body_\(rawValue + 1)"
+        switch self {
+        case .location:
+            return "permissions.details.body_2"
+        case .usageStats:
+            return "permissions.details.body_5"
+        case .notifications:
+            return "permissions.details.body_7"
+        case .microphone:
+            return "permissions.details.body_4"
+        case .camera:
+            return "permissions.details.body_8"
+        }
     }
 
     var detailStepKey: String {
-        "permissions.details.step_\(rawValue + 1)"
+        switch self {
+        case .location:
+            return "permissions.details.step_2"
+        case .usageStats:
+            return "permissions.details.step_5"
+        case .notifications:
+            return "permissions.details.step_7"
+        case .microphone:
+            return "permissions.details.step_4"
+        case .camera:
+            return "permissions.details.step_8"
+        }
     }
 }

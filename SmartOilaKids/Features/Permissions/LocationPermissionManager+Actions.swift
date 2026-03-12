@@ -35,27 +35,16 @@ extension LocationPermissionManager {
 
     func performAction(for requirement: PermissionRequirement) {
         switch requirement {
-        case .displayOverApps:
-            // iOS does not expose these Android-style permissions.
-            return
-        case .usageStats:
-            requestScreenTimePermission()
         case .location:
             requestLocationPermission()
-        case .batteryOptimization:
-            if isLowPowerModeEnabled {
-                openAppSettings()
-            }
+        case .usageStats:
+            requestScreenTimePermission()
+        case .notifications:
+            requestNotificationPermission()
         case .microphone:
             requestMicrophonePermission()
         case .camera:
             requestCameraPermission()
-        case .backgroundTransfer:
-            if backgroundRefreshStatus != .available {
-                openAppSettings()
-            }
-        case .notifications:
-            requestNotificationPermission()
         }
     }
 }
@@ -63,22 +52,16 @@ extension LocationPermissionManager {
 private extension LocationPermissionManager {
     func performDisableAction(for requirement: PermissionRequirement) {
         switch requirement {
-        case .displayOverApps:
-            return
+        case .location, .microphone, .camera:
+            openAppSettings()
         case .usageStats:
             Task { @MainActor [weak self] in
                 await ScreenTimeAuthorizationManager.shared.revokeAuthorization()
                 self?.setScreenTimePermissionStatus(ScreenTimeAuthorizationManager.shared.status)
                 self?.refreshStatuses()
             }
-        case .location, .microphone, .camera, .backgroundTransfer:
-            openAppSettings()
         case .notifications:
             openNotificationSettings()
-        case .batteryOptimization:
-            // Low Power Mode is a global device state, not an app permission.
-            // Opening Settings is the closest public path available from the app.
-            openAppSettings()
         }
     }
 

@@ -2,20 +2,13 @@ import SwiftUI
 
 struct MainSurfaceView: View {
     let profileName: String
-    let notificationBadgeCount: Int
     let deviceStatus: MainDeviceStatus?
     let usageHours: [Double]
     let usagePhase: LoadPhase
-    let deviceControlItems: [PushInboxItem]
-    let mediaItems: [PushInboxItem]
     let pendingTasksCount: Int?
     let unreadChatCount: Int?
-    let onInfoTap: () -> Void
-    let onNotificationTap: () -> Void
     let onSettingsTap: () -> Void
     let onRetryUsage: () -> Void
-    let onDeviceControlTap: () -> Void
-    let onMediaTap: () -> Void
     let onTasksTap: () -> Void
     let onChatTap: () -> Void
 
@@ -40,29 +33,12 @@ struct MainSurfaceView: View {
                 VStack(spacing: 0) {
                     MainHeaderSection(
                         profileName: profileName,
-                        notificationBadgeCount: notificationBadgeCount,
-                        onInfoTap: onInfoTap,
-                        onNotificationTap: onNotificationTap,
                         onSettingsTap: onSettingsTap
                     )
 
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: sectionSpacing) {
                             MainAdInfoCard(status: deviceStatus)
-
-                            if !deviceControlItems.isEmpty {
-                                MainDeviceControlTimelineCard(
-                                    items: deviceControlItems,
-                                    onTap: onDeviceControlTap
-                                )
-                            }
-
-                            if !mediaItems.isEmpty {
-                                MainMediaTimelineCard(
-                                    items: mediaItems,
-                                    onTap: onMediaTap
-                                )
-                            }
 
                             WeeklyUsageChartCard(
                                 compact: compact,

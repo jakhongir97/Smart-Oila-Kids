@@ -12,6 +12,7 @@ extension ChatViewModel {
         setCanLoadMore(false)
         runtime.nextPage = nil
         sendStatusText = nil
+        dependencies.webSocketService.connect(dsn: dependencies.dsn)
 
         do {
             let latest = try await dependencies.historyCoordinator.fetchLatest(limit: dependencies.pageSize)
@@ -25,9 +26,6 @@ extension ChatViewModel {
             if runtime.isThreadActive {
                 markAllAsRead()
             }
-
-            dependencies.webSocketService.connect(dsn: dependencies.dsn)
-            await retryQueuedMessages()
         } catch {
             let message = NetworkError.userMessage(for: error)
             if groupedMessages.isEmpty {
@@ -37,6 +35,8 @@ extension ChatViewModel {
                 sendStatusText = L10n.tr("chat.offline_cached")
             }
         }
+
+        await retryQueuedMessages()
     }
 
     func loadOlder() async {
@@ -64,6 +64,8 @@ extension ChatViewModel {
             return
         }
 
+        dependencies.webSocketService.connect(dsn: dependencies.dsn)
+
         do {
             let latest = try await dependencies.historyCoordinator.fetchLatest(limit: dependencies.pageSize)
             _ = ChatMessageGrouping.merge(latest.groupedMessages, into: &groupedMessages)
@@ -77,8 +79,6 @@ extension ChatViewModel {
             if runtime.isThreadActive {
                 markAllAsRead()
             }
-
-            await retryQueuedMessages()
         } catch {
             let message = NetworkError.userMessage(for: error)
             if groupedMessages.isEmpty {
@@ -87,6 +87,8 @@ extension ChatViewModel {
                 sendStatusText = message
             }
         }
+
+        await retryQueuedMessages()
     }
 
     func stop() {

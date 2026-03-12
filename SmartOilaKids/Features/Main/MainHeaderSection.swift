@@ -3,9 +3,6 @@ import UIKit
 
 struct MainHeaderSection: View {
     let profileName: String
-    let notificationBadgeCount: Int
-    let onInfoTap: () -> Void
-    let onNotificationTap: () -> Void
     let onSettingsTap: () -> Void
 
     var body: some View {
@@ -45,40 +42,11 @@ struct MainHeaderSection: View {
                     .layoutPriority(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack(spacing: 2) {
-                    MainHeaderIconButton(
-                        action: onInfoTap,
-                        accessibilityLabel: L10n.tr("main.info_title")
-                    ) {
-                        iconOrFallback(asset: "IconInfo", system: "info.circle", size: 18)
-                    }
-
-                    MainHeaderIconButton(
-                        action: onNotificationTap,
-                        accessibilityLabel: L10n.tr("main.notifications")
-                    ) {
-                        ZStack(alignment: .topTrailing) {
-                            iconOrFallback(asset: "IconNotification", system: "bell", size: 18)
-
-                            if notificationBadgeCount > 0 {
-                                Text("\(min(99, notificationBadgeCount))")
-                                    .font(AppTypography.unbounded(8, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 4)
-                                    .frame(minWidth: 14, minHeight: 14)
-                                    .background(AppColors.dangerRed)
-                                    .clipShape(Capsule())
-                                    .offset(x: 5, y: -5)
-                            }
-                        }
-                    }
-
-                    MainHeaderIconButton(
-                        action: onSettingsTap,
-                        accessibilityLabel: L10n.tr("settings.title")
-                    ) {
-                        iconOrFallback(asset: "IconSettings", system: "gearshape", size: 18)
-                    }
+                MainHeaderIconButton(
+                    action: onSettingsTap,
+                    accessibilityLabel: L10n.tr("settings.title")
+                ) {
+                    iconOrFallback(asset: "IconSettings", system: "gearshape", size: 18)
                 }
                 .foregroundStyle(AppColors.black)
             }

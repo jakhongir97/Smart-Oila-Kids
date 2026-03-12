@@ -4,7 +4,7 @@ struct RootView: View {
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.appDependencies) var dependencies
     @EnvironmentObject var sessionStore: SessionStore
-    @StateObject var geoBackgroundService = GeoBackgroundService()
+    @StateObject var geoBackgroundService = GeoBackgroundService.shared
     @StateObject var lockCoordinator = DeviceLockCoordinator.shared
     @State var lastSessionDSN: String?
     @State var lastBackgroundedAt: Date?

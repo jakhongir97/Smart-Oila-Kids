@@ -9,13 +9,10 @@ struct SettingsView: View {
     @State var userName: String = ""
     @State private var showUnlinkAlert = false
     @State var deviceEditor = SettingsDeviceEditorState()
-    @State private var showDiagnostics = false
-    @State private var showPermissionsCenter = false
     @State private var showAppLockSetup = false
     @State private var showMediaHistory = false
     @State private var showAvatarPicker = false
     @State var avatarPreviewImage: UIImage?
-    @State var inviteSharePayload: SettingsInviteSharePayload?
     @StateObject var bannerCenter = SettingsBannerCenter()
     @StateObject private var permissionManager = LocationPermissionManager()
     @StateObject var settingsProtection = SettingsProtectionController.shared
@@ -58,7 +55,6 @@ struct SettingsView: View {
                                     userName: $userName,
                                     themeBinding: themeBinding,
                                     languageBinding: languageBinding,
-                                    protectionController: settingsProtection,
                                     connectedDevices: viewModel.connectedDevices,
                                     isSaving: viewModel.isSaving,
                                     nameFieldFocus: $isNameFieldFocused,
@@ -67,23 +63,6 @@ struct SettingsView: View {
                                     },
                                     onSaveName: {
                                         save()
-                                    },
-                                    onOpenDiagnostics: {
-                                        AppHaptics.tap()
-                                        Task {
-                                            await performProtectedSettingsAction {
-                                                showDiagnostics = true
-                                            }
-                                        }
-                                    },
-                                    onOpenPermissions: {
-                                        AppHaptics.tap()
-                                        Task {
-                                            await performProtectedSettingsAction {
-                                                permissionManager.refreshStatuses()
-                                                showPermissionsCenter = true
-                                            }
-                                        }
                                     },
                                     onOpenAppLock: {
                                         AppHaptics.tap()
@@ -104,25 +83,11 @@ struct SettingsView: View {
                                             }
                                         }
                                     },
-                                    onInviteParent: {
-                                        AppHaptics.tap()
-                                        Task {
-                                            await performProtectedSettingsAction {
-                                                beginInviteShare()
-                                            }
-                                        }
-                                    },
                                     onEditDevice: { device in
                                         Task {
                                             await performProtectedSettingsAction {
                                                 beginDeviceEditing(device)
                                             }
-                                        }
-                                    },
-                                    onToggleProtection: { shouldEnable in
-                                        AppHaptics.tap()
-                                        Task {
-                                            await updateSettingsProtection(shouldEnable)
                                         }
                                     },
                                     onSave: {
@@ -219,13 +184,6 @@ struct SettingsView: View {
         } message: {
             Text(L10n.tr("settings.change_username"))
         }
-        .sheet(isPresented: $showDiagnostics) {
-            DiagnosticsPanelView()
-                .environmentObject(sessionStore)
-        }
-        .sheet(isPresented: $showPermissionsCenter) {
-            SettingsPermissionsPanelView(manager: permissionManager)
-        }
         .sheet(isPresented: $showAppLockSetup) {
             SettingsAppLockPanelView(
                 permissionManager: permissionManager,
@@ -243,14 +201,23 @@ struct SettingsView: View {
                 uploadAvatar(from: image)
             }
         }
-        .sheet(item: $inviteSharePayload) { payload in
-            ActivityShareSheet(activityItems: [payload.message]) { completed in
-                handleInviteShareCompletion(completed: completed)
-            }
+        .sheet(item: settingsProtectionPromptBinding) { prompt in
+            SettingsProtectionPINSheet(prompt: prompt, controller: settingsProtection)
+                .appMediumLargeSheetPresentation()
         }
         .onChange(of: sessionStore.dsn) { newValue in
             appLockStore.activate(dsn: newValue)
         }
         .preferredColorScheme(sessionStore.appTheme.colorScheme)
+    }
+
+    private var settingsProtectionPromptBinding: Binding<SettingsProtectionPINPrompt?> {
+        Binding(
+            get: { settingsProtection.activePINPrompt },
+            set: { newValue in
+                guard newValue == nil else { return }
+                settingsProtection.cancelPINPrompt()
+            }
+        )
     }
 }

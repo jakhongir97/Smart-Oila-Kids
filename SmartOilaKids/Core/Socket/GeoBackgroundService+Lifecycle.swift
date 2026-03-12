@@ -2,6 +2,16 @@ import CoreLocation
 import Foundation
 
 extension GeoBackgroundService {
+    @discardableResult
+    func restart(using dsn: String? = nil) -> Bool {
+        let normalizedDSN = dsn?.trimmedNonEmpty ?? state.currentDSN?.trimmedNonEmpty
+        guard let normalizedDSN else { return false }
+
+        stop()
+        start(dsn: normalizedDSN)
+        return true
+    }
+
     func start(dsn: String) {
         guard let normalizedDSN = dsn.trimmedNonEmpty else {
             stop()

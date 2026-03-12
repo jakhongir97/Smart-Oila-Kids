@@ -28,9 +28,6 @@ extension MainViewModel {
         setPendingTasksCount(await pendingTasksTask.value)
 
         await refreshUnreadChat(dsn: dsn)
-        await refreshUnreadNotifications(dsn: dsn)
-        await refreshDeviceControlTimeline(dsn: dsn)
-        await refreshMediaTimeline(dsn: dsn)
     }
 }
 
@@ -40,9 +37,6 @@ private extension MainViewModel {
         setDeviceStatus(nil)
         setPendingTasksCount(nil)
         setUnreadChatCount(nil)
-        setUnreadNotificationCount(0)
-        setRecentDeviceControlItems([])
-        setRecentMediaItems([])
         setUsagePhase(.failed(L10n.tr("common.dsn_missing")))
     }
 
