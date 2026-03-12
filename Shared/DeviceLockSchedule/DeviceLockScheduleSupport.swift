@@ -1,4 +1,5 @@
 import Foundation
+import ManagedSettings
 
 enum DeviceLockManagedSettingsStoreName {
     static let runtime = "SmartOilaKidsLock"
@@ -79,6 +80,27 @@ enum DeviceAppLimitEventIdentifier {
         value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+}
+
+enum DeviceLockManagedSettingsStoreFactory {
+    static func make(named name: String) -> ManagedSettingsStore {
+        if #available(iOS 16.0, *) {
+            return ManagedSettingsStore(named: .init(name))
+        }
+        return ManagedSettingsStore()
+    }
+
+    static func clearAllSettings(_ store: ManagedSettingsStore) {
+        if #available(iOS 16.0, *) {
+            store.clearAllSettings()
+            return
+        }
+
+        store.shield.applications = nil
+        store.shield.applicationCategories = nil
+        store.shield.webDomains = nil
+        store.shield.webDomainCategories = nil
     }
 }
 

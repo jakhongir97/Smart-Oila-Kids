@@ -5,7 +5,7 @@ struct SettingsPermissionsPanelView: View {
     @ObservedObject var manager: LocationPermissionManager
 
     var body: some View {
-        NavigationStack {
+        AppNavigationContainer {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(L10n.tr("settings.permissions_subtitle"))
@@ -26,7 +26,7 @@ struct SettingsPermissionsPanelView: View {
             .navigationTitle(L10n.tr("settings.permissions"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(L10n.tr("common.close")) {
                         dismiss()
                     }
@@ -34,7 +34,7 @@ struct SettingsPermissionsPanelView: View {
                     .foregroundStyle(AppColors.primaryPurple)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         manager.refreshStatuses()
                     } label: {

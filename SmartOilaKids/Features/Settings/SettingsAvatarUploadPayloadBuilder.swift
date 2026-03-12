@@ -1,5 +1,3 @@
-import PhotosUI
-import SwiftUI
 import UIKit
 
 struct SettingsAvatarUploadPayload {
@@ -8,13 +6,11 @@ struct SettingsAvatarUploadPayload {
 }
 
 enum SettingsAvatarUploadPayloadBuilder {
-    static func make(from item: PhotosPickerItem) async -> SettingsAvatarUploadPayload? {
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data) else {
+    static func make(from image: UIImage) -> SettingsAvatarUploadPayload? {
+        guard let uploadData = image.jpegData(compressionQuality: 0.85) else {
             return nil
         }
 
-        let uploadData = image.jpegData(compressionQuality: 0.85) ?? data
         return SettingsAvatarUploadPayload(previewImage: image, uploadData: uploadData)
     }
 }

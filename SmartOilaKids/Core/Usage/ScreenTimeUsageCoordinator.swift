@@ -73,6 +73,19 @@ final class ScreenTimeUsageCoordinator: ObservableObject {
             return
         }
 
+        guard #available(iOS 16.0, *) else {
+            cancelRefresh()
+            latestSnapshot = nil
+            updateDiagnostics(
+                status: "unsupported_os",
+                dsn: currentDSN,
+                selectedApps: selectedIdentifiers.count,
+                lastSnapshot: "0 apps, 0s",
+                lastError: "Requires iOS 16 for Screen Time usage reports."
+            )
+            return
+        }
+
         let sharedStore = ScreenTimeUsageSharedStore()
         guard sharedStore.isAvailable else {
             cancelRefresh()

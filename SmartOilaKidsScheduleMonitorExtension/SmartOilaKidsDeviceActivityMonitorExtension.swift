@@ -29,7 +29,7 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         super.intervalDidEnd(for: activity)
 
         if DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: activity.rawValue) {
-            scheduleStore.clearAllSettings()
+            DeviceLockManagedSettingsStoreFactory.clearAllSettings(scheduleStore)
             if let dsn = DeviceLockScheduleActivityIdentifier.dsn(from: activity.rawValue) {
                 recordEvent(kind: .scheduleEnded, dsn: dsn)
             }
@@ -73,15 +73,19 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         )
     }
 
-    private let scheduleStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.schedule))
-    private let appLimitStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.limit))
+    private let scheduleStore = DeviceLockManagedSettingsStoreFactory.make(
+        named: DeviceLockManagedSettingsStoreName.schedule
+    )
+    private let appLimitStore = DeviceLockManagedSettingsStoreFactory.make(
+        named: DeviceLockManagedSettingsStoreName.limit
+    )
     private let sharedStore = DeviceAppLimitSharedStore()
     private let eventStore = DeviceControlEventSharedStore()
 }
 
 private extension SmartOilaKidsDeviceActivityMonitorExtension {
     func clearAppLimitState(for dsn: String) {
-        appLimitStore.clearAllSettings()
+        DeviceLockManagedSettingsStoreFactory.clearAllSettings(appLimitStore)
 
         guard var snapshot = sharedStore.loadSnapshot(dsn: dsn) else {
             return
@@ -98,7 +102,7 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
             reachedIdentifiers.contains(configuration.packageName.lowercased()) ? configuration.applicationToken : nil
         }
 
-        appLimitStore.clearAllSettings()
+        DeviceLockManagedSettingsStoreFactory.clearAllSettings(appLimitStore)
         guard !tokens.isEmpty else { return }
 
         appLimitStore.shield.applications = Set(tokens)

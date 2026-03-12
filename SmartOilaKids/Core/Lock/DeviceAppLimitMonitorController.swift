@@ -57,7 +57,9 @@ final class DeviceAppLimitMonitorController: ObservableObject {
     ) {
         let resolvedSelectionStore = selectionStore ?? .shared
         let activityCenter = DeviceActivityCenter()
-        let limitStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.limit))
+        let limitStore = DeviceLockManagedSettingsStoreFactory.make(
+            named: DeviceLockManagedSettingsStoreName.limit
+        )
 
         self.service = service
         self.selectionStore = resolvedSelectionStore
@@ -85,7 +87,7 @@ final class DeviceAppLimitMonitorController: ObservableObject {
             Self.defaultApplyLimitShield(using: snapshot, store: limitStore)
         }
         self.clearShield = clearShield ?? {
-            limitStore.clearAllSettings()
+            DeviceLockManagedSettingsStoreFactory.clearAllSettings(limitStore)
         }
         self.reportRecovery = reportRecovery ?? { snapshot in
             Self.defaultReportRecovery(using: snapshot)
@@ -869,7 +871,7 @@ private extension DeviceAppLimitMonitorController {
             reachedIdentifiers.contains(configuration.packageName) ? configuration.applicationToken : nil
         }
 
-        store.clearAllSettings()
+        DeviceLockManagedSettingsStoreFactory.clearAllSettings(store)
         guard !tokens.isEmpty else { return }
 
         store.shield.applications = Set(tokens)

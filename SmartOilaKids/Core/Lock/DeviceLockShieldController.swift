@@ -14,7 +14,9 @@ final class DeviceLockShieldController {
         applySelectiveShield: ApplySelectiveShieldAction? = nil,
         clearRestrictions: ClearRestrictionsAction? = nil
     ) {
-        let store = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.runtime))
+        let store = DeviceLockManagedSettingsStoreFactory.make(
+            named: DeviceLockManagedSettingsStoreName.runtime
+        )
 
         self.authorizationStatus = authorizationStatus ?? {
             ScreenTimeAuthorizationManager.shared.status
@@ -26,14 +28,14 @@ final class DeviceLockShieldController {
             store.shield.webDomainCategories = .all()
         }
         self.applySelectiveShieldAction = applySelectiveShield ?? { configuration in
-            store.clearAllSettings()
+            DeviceLockManagedSettingsStoreFactory.clearAllSettings(store)
             store.shield.applications = configuration.applicationTokens.isEmpty ? nil : configuration.applicationTokens
             store.shield.applicationCategories = nil
             store.shield.webDomains = nil
             store.shield.webDomainCategories = nil
         }
         self.clearRestrictionsAction = clearRestrictions ?? {
-            store.clearAllSettings()
+            DeviceLockManagedSettingsStoreFactory.clearAllSettings(store)
         }
     }
 

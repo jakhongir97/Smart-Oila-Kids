@@ -60,8 +60,7 @@ struct GeoPermissionView: View {
         }
         .sheet(item: $selectedRequirement) { requirement in
             PermissionDetailsSheet(requirement: requirement, manager: manager)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+                .appMediumLargeSheetPresentation()
         }
     }
 }

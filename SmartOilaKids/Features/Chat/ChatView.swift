@@ -57,7 +57,7 @@ struct ChatView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .navigationDestination(isPresented: $openThread) {
+        .appNavigationDestination(isPresented: $openThread) {
             ChatThreadView(viewModel: viewModel, title: selectedParent)
         }
         .task {

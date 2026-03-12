@@ -112,7 +112,7 @@ struct MainView: View {
                 await viewModel.refreshUnreadChat(dsn: sessionStore.dsn)
             }
         }) {
-            NavigationStack {
+            AppNavigationContainer {
                 ChatView(
                     viewModel: dependencies.makeChatViewModel(dsn: sessionStore.dsn ?? ""),
                     openThreadOnAppear: openChatThreadOnPresent
@@ -124,7 +124,7 @@ struct MainView: View {
                 await viewModel.refreshPendingTasks(dsn: sessionStore.dsn)
             }
         }) {
-            NavigationStack {
+            AppNavigationContainer {
                 TaskView(viewModel: dependencies.makeTaskViewModel(dsn: sessionStore.dsn ?? ""))
             }
         }
@@ -135,7 +135,7 @@ struct MainView: View {
                 await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
             }
         }) {
-            NavigationStack {
+            AppNavigationContainer {
                 NotificationsInboxView(dsn: sessionStore.dsn) { destination in
                     showNotifications = false
 
@@ -154,13 +154,13 @@ struct MainView: View {
             }
         }
         .fullScreenCover(isPresented: $showSettings) {
-            NavigationStack {
+            AppNavigationContainer {
                 SettingsView(viewModel: dependencies.makeSettingsViewModel())
             }
             .environmentObject(sessionStore)
         }
         .fullScreenCover(isPresented: $showTemplates) {
-            NavigationStack {
+            AppNavigationContainer {
                 TemplatesView()
             }
         }

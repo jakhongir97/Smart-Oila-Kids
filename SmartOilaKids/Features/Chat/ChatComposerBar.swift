@@ -1,10 +1,9 @@
-import PhotosUI
 import SwiftUI
 import UIKit
 
 struct ChatComposerBar: View {
     @Binding var text: String
-    @Binding var pickerItems: [PhotosPickerItem]
+    @Binding var showAttachmentPicker: Bool
     let selectedAttachmentsCount: Int
     let queuedMessagesCount: Int
     let sendStatusText: String?
@@ -72,7 +71,10 @@ struct ChatComposerBar: View {
                     .frame(height: 45)
 
                 HStack(spacing: 10) {
-                    PhotosPicker(selection: $pickerItems, maxSelectionCount: 5, matching: .images) {
+                    Button {
+                        AppHaptics.tap()
+                        showAttachmentPicker = true
+                    } label: {
                         Image(systemName: "paperclip")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundStyle(AppColors.textSecondary)

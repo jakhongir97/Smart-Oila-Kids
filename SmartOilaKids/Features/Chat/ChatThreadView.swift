@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -8,7 +7,7 @@ struct ChatThreadView: View {
 
     let title: String
 
-    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var showAttachmentPicker = false
     @State private var showTemplatesSheet = false
     @State private var isLoadingAttachments = false
     @FocusState private var isComposerFocused: Bool
@@ -47,7 +46,7 @@ struct ChatThreadView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     ChatComposerBar(
                         text: $viewModel.text,
-                        pickerItems: $pickerItems,
+                        showAttachmentPicker: $showAttachmentPicker,
                         selectedAttachmentsCount: viewModel.selectedAttachments.count,
                         queuedMessagesCount: viewModel.queuedMessagesCount,
                         sendStatusText: viewModel.sendStatusText,
@@ -78,9 +77,12 @@ struct ChatThreadView: View {
         .onAppear {
             viewModel.setThreadActive(true)
         }
-        .onChange(of: pickerItems) { items in
-            Task {
-                await loadSelectedAttachments(from: items)
+        .sheet(isPresented: $showAttachmentPicker) {
+            PhotoLibraryPickerSheet(selectionLimit: 5) { images in
+                showAttachmentPicker = false
+                Task {
+                    await loadSelectedAttachments(from: images)
+                }
             }
         }
         .onDisappear {
@@ -103,8 +105,7 @@ struct ChatThreadView: View {
                     await sendTemplateFromSheet(template)
                 }
             )
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+            .appMediumLargeSheetPresentation()
         }
     }
 
@@ -120,8 +121,8 @@ struct ChatThreadView: View {
         }
     }
 
-    private func loadSelectedAttachments(from items: [PhotosPickerItem]) async {
-        guard !items.isEmpty else {
+    private func loadSelectedAttachments(from images: [UIImage]) async {
+        guard !images.isEmpty else {
             isLoadingAttachments = false
             viewModel.setAttachments([])
             return
@@ -130,12 +131,9 @@ struct ChatThreadView: View {
         isLoadingAttachments = true
         var loaded: [Data] = []
 
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            if let image = UIImage(data: data), let compressed = image.jpegData(compressionQuality: 0.82) {
+        for image in images {
+            if let compressed = image.jpegData(compressionQuality: 0.82) {
                 loaded.append(compressed)
-            } else {
-                loaded.append(data)
             }
         }
 

@@ -165,7 +165,7 @@ struct SettingsMediaHistoryPanelView: View {
     @StateObject private var viewModel = SettingsMediaHistoryViewModel()
 
     var body: some View {
-        NavigationStack {
+        AppNavigationContainer {
             Group {
                 switch viewModel.phase {
                 case .idle, .loading:
@@ -181,7 +181,7 @@ struct SettingsMediaHistoryPanelView: View {
             .navigationTitle(L10n.tr("settings.media_history"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(L10n.tr("common.close")) {
                         dismiss()
                     }
@@ -189,7 +189,7 @@ struct SettingsMediaHistoryPanelView: View {
                     .foregroundStyle(AppColors.primaryPurple)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         Task {
                             await viewModel.refresh()

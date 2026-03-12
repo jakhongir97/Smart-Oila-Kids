@@ -57,9 +57,17 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
         lastErrorText = nil
 
         do {
-            // Use the individual flow so the child device can authorize locally
-            // without requiring a Family Sharing child-account setup.
-            try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
+            if #available(iOS 16.0, *) {
+                // Use the individual flow so the child device can authorize locally
+                // without requiring a Family Sharing child-account setup.
+                try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
+            } else {
+                try await withCheckedThrowingContinuation { continuation in
+                    AuthorizationCenter.shared.requestAuthorization { result in
+                        continuation.resume(with: result)
+                    }
+                }
+            }
             markedUnavailable = false
         } catch {
             markedUnavailable = Self.shouldMarkUnavailable(error)

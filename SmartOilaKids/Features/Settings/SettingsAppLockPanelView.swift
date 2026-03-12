@@ -26,7 +26,7 @@ struct SettingsAppLockPanelView: View {
         let isScreenTimeReady = controller.isScreenTimeReady
         let actionTitle = controller.actionTitle
 
-        return NavigationStack {
+        let content = AppNavigationContainer {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
                     SettingsAppLockStatusCard(
@@ -97,7 +97,7 @@ struct SettingsAppLockPanelView: View {
             .navigationTitle(L10n.tr("settings.app_lock"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(L10n.tr("common.close")) {
                         dismiss()
                     }
@@ -105,7 +105,7 @@ struct SettingsAppLockPanelView: View {
                     .foregroundStyle(AppColors.primaryPurple)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         controller.refreshProtectionState()
                     } label: {
@@ -117,9 +117,17 @@ struct SettingsAppLockPanelView: View {
             .onAppear {
                 controller.handleAppear()
             }
-            .familyActivityPicker(
+        }
+
+        if #available(iOS 16.0, *) {
+            return content.familyActivityPicker(
                 headerText: L10n.tr("settings.app_lock_picker_header"),
                 footerText: L10n.tr("settings.app_lock_picker_footer"),
+                isPresented: $controller.showPicker,
+                selection: controller.selectionBinding
+            )
+        } else {
+            return content.familyActivityPicker(
                 isPresented: $controller.showPicker,
                 selection: controller.selectionBinding
             )

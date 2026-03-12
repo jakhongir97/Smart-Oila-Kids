@@ -157,7 +157,7 @@ struct SettingsMediaRecordingPreviewSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        AppNavigationContainer {
             VStack(alignment: .leading, spacing: 16) {
                 DeviceRecordingPlayerView(player: player)
                     .frame(minHeight: 260)
@@ -200,7 +200,7 @@ struct SettingsMediaRecordingPreviewSheet: View {
             .navigationTitle(L10n.tr("settings.media_history_preview_title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(L10n.tr("common.close")) {
                         dismiss()
                     }

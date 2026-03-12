@@ -24,7 +24,9 @@ final class DeviceLockScheduleMonitorController {
         diagnosticsUpdater: DiagnosticsAction? = nil
     ) {
         let activityCenter = DeviceActivityCenter()
-        let scheduleStore = ManagedSettingsStore(named: .init(DeviceLockManagedSettingsStoreName.schedule))
+        let scheduleStore = DeviceLockManagedSettingsStoreFactory.make(
+            named: DeviceLockManagedSettingsStoreName.schedule
+        )
 
         self.authorizationStatus = authorizationStatus ?? {
             ScreenTimeAuthorizationManager.shared.refreshStatus()
@@ -37,7 +39,7 @@ final class DeviceLockScheduleMonitorController {
             activityCenter.stopMonitoring(activityNames)
         }
         self.clearMonitoringStore = clearMonitoringStore ?? {
-            scheduleStore.clearAllSettings()
+            DeviceLockManagedSettingsStoreFactory.clearAllSettings(scheduleStore)
         }
         self.diagnosticsUpdater = diagnosticsUpdater ?? { status, dsn, schedule, activityCount, lastError in
             RuntimeDiagnosticsCenter.shared.updateLockSchedule(

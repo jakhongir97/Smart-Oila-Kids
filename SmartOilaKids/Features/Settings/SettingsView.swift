@@ -1,6 +1,5 @@
-import SwiftUI
-import PhotosUI
 import UIKit
+import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -15,7 +14,6 @@ struct SettingsView: View {
     @State private var showAppLockSetup = false
     @State private var showMediaHistory = false
     @State private var showAvatarPicker = false
-    @State private var avatarPickerItem: PhotosPickerItem?
     @State var avatarPreviewImage: UIImage?
     @State var inviteSharePayload: SettingsInviteSharePayload?
     @StateObject var bannerCenter = SettingsBannerCenter()
@@ -150,7 +148,7 @@ struct SettingsView: View {
                                 )
                             }
                         }
-                        .scrollDismissesKeyboard(.interactively)
+                        .appInteractiveKeyboardDismiss()
                     }
                 }
 
@@ -238,19 +236,17 @@ struct SettingsView: View {
             SettingsMediaHistoryPanelView(manager: permissionManager)
                 .environmentObject(sessionStore)
         }
+        .sheet(isPresented: $showAvatarPicker) {
+            PhotoLibraryPickerSheet(selectionLimit: 1) { images in
+                showAvatarPicker = false
+                guard let image = images.first else { return }
+                uploadAvatar(from: image)
+            }
+        }
         .sheet(item: $inviteSharePayload) { payload in
             ActivityShareSheet(activityItems: [payload.message]) { completed in
                 handleInviteShareCompletion(completed: completed)
             }
-        }
-        .photosPicker(
-            isPresented: $showAvatarPicker,
-            selection: $avatarPickerItem,
-            matching: .images
-        )
-        .onChange(of: avatarPickerItem) { newValue in
-            guard let newValue else { return }
-            uploadAvatar(from: newValue)
         }
         .onChange(of: sessionStore.dsn) { newValue in
             appLockStore.activate(dsn: newValue)

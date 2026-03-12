@@ -7,7 +7,7 @@ struct PermissionDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        AppNavigationContainer {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(L10n.tr("permissions.details_title"))
@@ -68,7 +68,7 @@ struct PermissionDetailsSheet: View {
             }
             .background(AppColors.white)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(L10n.tr("common.close")) {
                         dismiss()
                     }

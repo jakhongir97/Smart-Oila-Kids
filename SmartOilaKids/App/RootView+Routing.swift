@@ -20,20 +20,20 @@ extension RootView {
         case .permissions:
             GeoPermissionView(manager: LocationPermissionManager())
         case .settings:
-            NavigationStack {
+            AppNavigationContainer {
                 SettingsView(viewModel: dependencies.makeSettingsViewModel())
             }
             .environmentObject(sessionStore)
         case .chat:
-            NavigationStack {
+            AppNavigationContainer {
                 ChatView(viewModel: dependencies.makeChatViewModel(dsn: sessionStore.dsn ?? ""))
             }
         case .tasks:
-            NavigationStack {
+            AppNavigationContainer {
                 TaskView(viewModel: dependencies.makeTaskViewModel(dsn: sessionStore.dsn ?? ""))
             }
         case .templates:
-            NavigationStack {
+            AppNavigationContainer {
                 TemplatesView()
             }
         }

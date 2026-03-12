@@ -13,7 +13,7 @@ struct DiagnosticsPanelView: View {
     @State private var diagnosticsSharePayload: DiagnosticsSharePayload?
 
     var body: some View {
-        NavigationStack {
+        AppNavigationContainer {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
                     SettingsDiagnosticsSectionCard(
@@ -89,7 +89,7 @@ struct DiagnosticsPanelView: View {
             .navigationTitle(L10n.tr("settings.diagnostics"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(L10n.tr("common.close")) {
                         dismiss()
                     }
@@ -97,7 +97,7 @@ struct DiagnosticsPanelView: View {
                     .foregroundStyle(AppColors.primaryPurple)
                 }
 
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Button {
                         diagnosticsSharePayload = makeDiagnosticsSharePayload()
                     } label: {

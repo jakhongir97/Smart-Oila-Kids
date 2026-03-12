@@ -11,22 +11,15 @@ struct ScreenTimeUsageReportBridgeView: View {
     @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
 
     var body: some View {
-        let descriptor = reportDescriptor
+        let reportIdentity = reportIdentity
 
         ZStack {
-            if let descriptor, AppRuntime.debugRoute == nil {
-                DeviceActivityReport(
-                    .init(ScreenTimeUsageReportContext.rawValue),
-                    filter: descriptor.filter
-                )
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            if AppRuntime.debugRoute == nil {
+                reportBridgeBody
             }
         }
         .frame(width: 1, height: 1)
-        .task(id: descriptor?.identity ?? stateIdentity) {
+        .task(id: reportIdentity ?? stateIdentity) {
             await coordinator.updateBridge(
                 dsn: dsn,
                 selectedApplications: Array(appLockStore.selection.applications)
@@ -36,12 +29,21 @@ struct ScreenTimeUsageReportBridgeView: View {
 }
 
 private extension ScreenTimeUsageReportBridgeView {
-    struct ReportDescriptor {
-        let identity: String
-        let filter: DeviceActivityFilter
+    @ViewBuilder
+    var reportBridgeBody: some View {
+        if #available(iOS 16.0, *), let filter = reportFilter {
+            DeviceActivityReport(
+                .init(ScreenTimeUsageReportContext.rawValue),
+                filter: filter
+            )
+            .frame(width: 1, height: 1)
+            .opacity(0.01)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 
-    var reportDescriptor: ReportDescriptor? {
+    var reportIdentity: String? {
         guard ScreenTimeAuthorizationManager.shared.status == .granted,
               let normalizedDSN = normalizedDSN(dsn) else {
             return nil
@@ -51,22 +53,32 @@ private extension ScreenTimeUsageReportBridgeView {
         let selectedIdentifiers = selectedApplications
             .compactMap { normalizedIdentifier($0.bundleIdentifier) }
             .sorted()
-        let selectedTokens = Set(selectedApplications.compactMap(\.token))
 
-        guard !selectedIdentifiers.isEmpty, !selectedTokens.isEmpty else {
+        guard !selectedIdentifiers.isEmpty else {
+            return nil
+        }
+
+        let dayKey = ScreenTimeUsageDayFormatter.dayKey(for: Date())
+        let identity = "\(normalizedDSN)|\(dayKey)|\(selectedIdentifiers.joined(separator: ","))"
+        return identity
+    }
+
+    @available(iOS 16.0, *)
+    var reportFilter: DeviceActivityFilter? {
+        guard ScreenTimeAuthorizationManager.shared.status == .granted else {
+            return nil
+        }
+
+        let selectedTokens = Set(Array(appLockStore.selection.applications).compactMap(\.token))
+        guard !selectedTokens.isEmpty else {
             return nil
         }
 
         let dayInterval = ScreenTimeUsageDayFormatter.dayInterval(containing: Date())
-        let dayKey = ScreenTimeUsageDayFormatter.dayKey(for: dayInterval.start)
-
-        let filter = DeviceActivityFilter(
+        return DeviceActivityFilter(
             segment: .daily(during: dayInterval),
             applications: selectedTokens
         )
-        let identity = "\(normalizedDSN)|\(dayKey)|\(selectedIdentifiers.joined(separator: ","))"
-
-        return ReportDescriptor(identity: identity, filter: filter)
     }
 
     var stateIdentity: String {

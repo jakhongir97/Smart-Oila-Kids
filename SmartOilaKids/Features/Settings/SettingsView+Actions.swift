@@ -1,5 +1,5 @@
-import PhotosUI
 import SwiftUI
+import UIKit
 
 extension SettingsView {
     @MainActor
@@ -139,9 +139,9 @@ extension SettingsView {
         }
     }
 
-    func uploadAvatar(from item: PhotosPickerItem) {
+    func uploadAvatar(from image: UIImage) {
         Task {
-            guard let payload = await SettingsAvatarUploadPayloadBuilder.make(from: item) else {
+            guard let payload = SettingsAvatarUploadPayloadBuilder.make(from: image) else {
                 AppHaptics.warning()
                 banner(L10n.tr("settings.avatar_invalid_image"))
                 return

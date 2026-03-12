@@ -54,7 +54,7 @@ struct ChatThreadMessagesListView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 14)
                 }
-                .scrollDismissesKeyboard(.interactively)
+                .appInteractiveKeyboardDismiss()
                 .onChange(of: messageCount) { _ in
                     if let id = displayMessages.last?.id {
                         withAnimation {

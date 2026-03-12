@@ -49,7 +49,7 @@ struct TemplatesView: View {
                             .padding(.top, 30)
                             .padding(.bottom, max(20, proxy.safeAreaInsets.bottom + 8))
                         }
-                        .scrollDismissesKeyboard(.interactively)
+                        .appInteractiveKeyboardDismiss()
                     }
                 }
 

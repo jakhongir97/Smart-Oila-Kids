@@ -1,5 +1,26 @@
 import SwiftUI
 
+struct AppNavigationContainer<Content: View>: View {
+    @ViewBuilder private let content: () -> Content
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        if #available(iOS 16.0, *) {
+            NavigationStack {
+                content()
+            }
+        } else {
+            NavigationView {
+                content()
+            }
+            .navigationViewStyle(.stack)
+        }
+    }
+}
+
 struct ChildTopBackButton: View {
     var foreground: Color = AppColors.black
     let action: () -> Void
@@ -49,5 +70,45 @@ struct ChildTitleBar<Leading: View, Trailing: View>: View {
         .padding(.horizontal, horizontalPadding)
         .padding(.top, topPadding)
         .padding(.bottom, bottomPadding)
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func appInteractiveKeyboardDismiss() -> some View {
+        if #available(iOS 16.0, *) {
+            scrollDismissesKeyboard(.interactively)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func appMediumLargeSheetPresentation() -> some View {
+        if #available(iOS 16.0, *) {
+            presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func appNavigationDestination<Destination: View>(
+        isPresented: Binding<Bool>,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        if #available(iOS 16.0, *) {
+            navigationDestination(isPresented: isPresented, destination: destination)
+        } else {
+            background(
+                NavigationLink(isActive: isPresented) {
+                    destination()
+                } label: {
+                    EmptyView()
+                }
+                .hidden()
+            )
+        }
     }
 }
