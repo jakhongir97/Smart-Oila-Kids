@@ -14,6 +14,7 @@ struct ChatComposerBar: View {
     let sidePadding: CGFloat
     let focus: FocusState<Bool>.Binding
     let onRetryQueued: () -> Void
+    let onOpenTemplates: () -> Void
     let onSend: () -> Void
 
     var body: some View {
@@ -93,6 +94,18 @@ struct ChatComposerBar: View {
                             .offset(x: 6, y: -6)
                         }
                     }
+
+                    Button {
+                        AppHaptics.tap()
+                        onOpenTemplates()
+                    } label: {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(AppColors.textSecondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.tr("chat.template_button"))
 
                     TextField(L10n.tr("chat.message_placeholder"), text: $text)
                         .font(AppTypography.unbounded(14, weight: .medium))

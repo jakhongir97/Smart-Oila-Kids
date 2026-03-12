@@ -9,8 +9,10 @@ struct MainView: View {
 
     @State private var showChat = false
     @State private var openChatThreadOnPresent = false
+    @State private var showNotifications = false
     @State private var showTasks = false
     @State private var showSettings = false
+    @State private var showTemplates = false
 
     init(viewModel: MainViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -19,17 +21,24 @@ struct MainView: View {
     var body: some View {
         MainSurfaceView(
             profileName: viewModel.currentDeviceName ?? sessionStore.profileName,
+            notificationBadgeCount: viewModel.unreadNotificationCount,
             deviceStatus: viewModel.deviceStatus,
             usageHours: viewModel.weeklyUsageHours,
             usagePhase: viewModel.usagePhase,
+            deviceControlItems: viewModel.recentDeviceControlItems,
+            mediaItems: viewModel.recentMediaItems,
             pendingTasksCount: viewModel.pendingTasksCount,
             unreadChatCount: viewModel.unreadChatCount,
+            onInfoTap: { showTemplates = true },
+            onNotificationTap: { showNotifications = true },
             onSettingsTap: { showSettings = true },
             onRetryUsage: {
                 Task {
                     await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
                 }
             },
+            onDeviceControlTap: { showNotifications = true },
+            onMediaTap: { showNotifications = true },
             onTasksTap: { showTasks = true },
             onChatTap: {
                 openChatThreadOnPresent = false
@@ -80,6 +89,14 @@ struct MainView: View {
                 await viewModel.refreshPendingTasks(dsn: sessionStore.dsn)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pushInboxDidChange)) { notification in
+            guard shouldHandlePush(notification: notification) else { return }
+            Task {
+                await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
+                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenChat)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             openChatThreadOnPresent = true
@@ -111,11 +128,40 @@ struct MainView: View {
                 TaskView(viewModel: dependencies.makeTaskViewModel(dsn: sessionStore.dsn ?? ""))
             }
         }
+        .fullScreenCover(isPresented: $showNotifications, onDismiss: {
+            Task {
+                await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
+                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
+            }
+        }) {
+            AppNavigationContainer {
+                NotificationsInboxView(dsn: sessionStore.dsn) { destination in
+                    showNotifications = false
+
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 220_000_000)
+                        switch destination {
+                        case .chat:
+                            openChatThreadOnPresent = true
+                            showChat = true
+                        case .tasks:
+                            showTasks = true
+                        }
+                    }
+                }
+            }
+        }
         .fullScreenCover(isPresented: $showSettings) {
             AppNavigationContainer {
                 SettingsView(viewModel: dependencies.makeSettingsViewModel())
             }
             .environmentObject(sessionStore)
+        }
+        .fullScreenCover(isPresented: $showTemplates) {
+            AppNavigationContainer {
+                TemplatesView()
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { !isDebugRouteMode && !locationPermissionManager.allChecklistSatisfied },

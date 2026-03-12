@@ -8,4 +8,5 @@ struct MainViewModelDependencies {
     let chatReadStateStore: ChatReadStateStoring
     let chatHistoryStore: ChatHistoryCaching
     let taskCacheStore: TaskCacheStoring
+    let pushInboxStore: PushInboxStore
 }

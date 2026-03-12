@@ -68,3 +68,23 @@ final class NetworkErrorRetryPolicyTests: XCTestCase {
         )
     }
 }
+
+final class RemoteAssetURLResolverTests: XCTestCase {
+    func testNormalizedURLStringResolvesRelativeUploadPathAgainstAPIHost() {
+        let resolved = RemoteAssetURLResolver.normalizedURLString("/uploads/chat/test image.jpg")
+
+        XCTAssertEqual(resolved, "https://backend.smart-oila.uz/uploads/chat/test%20image.jpg")
+    }
+
+    func testNormalizedURLStringResolvesRelativeAPIPathAgainstAPIRoot() {
+        let resolved = RemoteAssetURLResolver.normalizedURLString("media/avatars/kid 1.jpg")
+
+        XCTAssertEqual(resolved, "https://backend.smart-oila.uz/api/media/avatars/kid%201.jpg")
+    }
+
+    func testNormalizedURLStringLeavesAbsoluteURLsUsable() {
+        let resolved = RemoteAssetURLResolver.normalizedURLString("https://cdn.example.com/a b.png")
+
+        XCTAssertEqual(resolved, "https://cdn.example.com/a%20b.png")
+    }
+}

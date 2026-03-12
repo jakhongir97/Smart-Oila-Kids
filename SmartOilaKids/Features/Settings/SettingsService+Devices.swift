@@ -7,7 +7,6 @@ extension SettingsService {
     }
 
     func resolveConnectedDevice(dsn: String) async throws -> ConnectedDevice {
-        try ensureAuthorized()
         let record = try await memberDevicesService.resolveDevice(byDSN: dsn, limit: 100)
         return Self.makeConnectedDevice(from: record)
     }
@@ -36,8 +35,6 @@ extension SettingsService {
     }
 
     func uploadConnectedDeviceAvatar(deviceID: Int, imageData: Data) async throws -> ConnectedDevice {
-        try ensureAuthorized()
-
         let boundary = UUID().uuidString
         let body = createAvatarMultipartBody(boundary: boundary, imageData: imageData)
 

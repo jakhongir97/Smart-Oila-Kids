@@ -209,7 +209,9 @@ private func decodeAttachmentList<K: CodingKey>(
     key: K
 ) -> [String] {
     if let items = container.decodeLossyStringArrayIfPresent(forKey: key) {
-        return items
+        return items.compactMap { item in
+            RemoteAssetURLResolver.normalizedURLString(item) ?? item.trimmedNonEmpty
+        }
     }
 
     return []

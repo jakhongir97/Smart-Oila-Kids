@@ -163,3 +163,77 @@ extension KeyedDecodingContainer {
         return nil
     }
 }
+
+enum RemoteAssetURLResolver {
+    static func resolveURL(_ rawValue: String?) -> URL? {
+        guard let normalized = normalizedURLString(rawValue) else { return nil }
+        return URL(string: normalized)
+    }
+
+    static func normalizedURLString(_ rawValue: String?) -> String? {
+        guard let rawValue = rawValue?.trimmedNonEmpty else { return nil }
+
+        if let absoluteURL = absoluteURL(from: rawValue) {
+            return absoluteURL.absoluteString
+        }
+
+        if rawValue.hasPrefix("/"),
+           let hostBaseURL = hostBaseURL(),
+           let resolved = relativeURL(from: rawValue, baseURL: hostBaseURL) {
+            return resolved.absoluteString
+        }
+
+        if let resolved = relativeURL(from: rawValue, baseURL: AppConfig.apiBaseURL) {
+            return resolved.absoluteString
+        }
+
+        if let hostBaseURL = hostBaseURL(),
+           let resolved = relativeURL(from: rawValue, baseURL: hostBaseURL) {
+            return resolved.absoluteString
+        }
+
+        return nil
+    }
+}
+
+private extension RemoteAssetURLResolver {
+    static func absoluteURL(from rawValue: String) -> URL? {
+        if let candidate = URL(string: rawValue),
+           candidate.scheme != nil {
+            return candidate
+        }
+
+        guard let encoded = percentEncode(rawValue),
+              let candidate = URL(string: encoded),
+              candidate.scheme != nil else {
+            return nil
+        }
+
+        return candidate
+    }
+
+    static func relativeURL(from rawValue: String, baseURL: URL) -> URL? {
+        if let candidate = URL(string: rawValue, relativeTo: baseURL)?.absoluteURL,
+           candidate.scheme != nil {
+            return candidate
+        }
+
+        guard let encoded = percentEncode(rawValue) else { return nil }
+        return URL(string: encoded, relativeTo: baseURL)?.absoluteURL
+    }
+
+    static func percentEncode(_ rawValue: String) -> String? {
+        rawValue.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed)
+    }
+
+    static func hostBaseURL() -> URL? {
+        guard var components = URLComponents(url: AppConfig.apiBaseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+}

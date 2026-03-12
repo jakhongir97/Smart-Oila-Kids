@@ -8,6 +8,7 @@ struct ChatThreadView: View {
     let title: String
 
     @State private var showAttachmentPicker = false
+    @State private var showTemplatesSheet = false
     @State private var isLoadingAttachments = false
     @FocusState private var isComposerFocused: Bool
 
@@ -60,6 +61,9 @@ struct ChatThreadView: View {
                                 await viewModel.retryQueuedMessages()
                             }
                         },
+                        onOpenTemplates: {
+                            showTemplatesSheet = true
+                        },
                         onSend: {
                             sendCurrentMessage()
                         }
@@ -80,6 +84,17 @@ struct ChatThreadView: View {
                     await loadSelectedAttachments(from: images)
                 }
             }
+        }
+        .sheet(isPresented: $showTemplatesSheet) {
+            ChatTemplatesSheet(
+                onClose: {
+                    showTemplatesSheet = false
+                },
+                onSendTemplate: { template in
+                    await sendTemplateFromSheet(template)
+                }
+            )
+            .appMediumLargeSheetPresentation()
         }
         .onDisappear {
             viewModel.setThreadActive(false)
@@ -138,5 +153,16 @@ struct ChatThreadView: View {
             }
         }
     }
-
+    
+    private func sendTemplateFromSheet(_ template: String) async -> Bool {
+        let sent = await viewModel.sendTemplate(template)
+        if sent {
+            AppHaptics.success()
+            isComposerFocused = false
+            showTemplatesSheet = false
+        } else {
+            AppHaptics.warning()
+        }
+        return sent
+    }
 }

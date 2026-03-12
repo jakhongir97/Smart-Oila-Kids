@@ -84,6 +84,24 @@ final class MemberDevicesService: MemberDevicesServicing {
         throw NetworkError.unexpectedBody
     }
 
+    func primeCache(with record: MemberDeviceRecord) {
+        var records = cachedRecords(limit: 500)
+        records.removeAll { existing in
+            if existing.id == record.id {
+                return true
+            }
+
+            guard let existingDSN = existing.dsn?.trimmedNonEmpty,
+                  let recordDSN = record.dsn?.trimmedNonEmpty else {
+                return false
+            }
+
+            return existingDSN.caseInsensitiveCompare(recordDSN) == .orderedSame
+        }
+        records.insert(record, at: 0)
+        saveCachedRecords(records)
+    }
+
     private let client: APIClient
     private let secureTokens: SecureTokenStoring
     private let userDefaults: UserDefaults
@@ -118,7 +136,7 @@ final class MemberDevicesService: MemberDevicesServicing {
                 id: $0.id,
                 dsn: $0.dsn,
                 name: $0.name,
-                avatarURL: $0.avatarURL.flatMap(URL.init(string:))
+                avatarURL: RemoteAssetURLResolver.resolveURL($0.avatarURL)
             )
         }
 

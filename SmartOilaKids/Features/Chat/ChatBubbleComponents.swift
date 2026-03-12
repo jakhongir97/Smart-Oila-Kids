@@ -76,7 +76,7 @@ private struct AttachmentBubbleImage: View {
     let urlString: String
 
     var body: some View {
-        if let url = URL(string: urlString) {
+        if let url = RemoteAssetURLResolver.resolveURL(urlString) {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case let .success(image):
@@ -94,6 +94,10 @@ private struct AttachmentBubbleImage: View {
                         }
                 }
             }
+        } else {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.2))
+                .frame(width: 150, height: 120)
         }
     }
 }

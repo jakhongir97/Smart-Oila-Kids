@@ -18,6 +18,7 @@ enum SettingsDeviceDeleteOutcome: Equatable {
 struct SettingsActionFlows {
     let viewModel: SettingsViewModel
     let currentDSN: String?
+    let profileName: String
 
     func saveProfileName(_ trimmedName: String) async -> SettingsProfileSaveOutcome {
         do {
@@ -68,5 +69,9 @@ struct SettingsActionFlows {
         } catch {
             return .failure(error)
         }
+    }
+
+    func makeInvitePayload() -> SettingsInviteSharePayload {
+        SettingsInviteShareBuilder.payload(profileName: profileName, dsn: currentDSN)
     }
 }

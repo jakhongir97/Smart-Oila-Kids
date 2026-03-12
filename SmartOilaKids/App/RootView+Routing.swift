@@ -32,6 +32,10 @@ extension RootView {
             AppNavigationContainer {
                 TaskView(viewModel: dependencies.makeTaskViewModel(dsn: sessionStore.dsn ?? ""))
             }
+        case .templates:
+            AppNavigationContainer {
+                TemplatesView()
+            }
         }
     }
 }

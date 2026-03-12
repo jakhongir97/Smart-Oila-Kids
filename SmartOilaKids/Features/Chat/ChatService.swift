@@ -60,6 +60,7 @@ final class ChatService: ChatServicing {
             baseURLs: AppConfig.apiBaseCandidates,
             path: "messages/",
             method: .post,
+            headers: ["Accept": "application/json"],
             body: body,
             contentType: "multipart/form-data; boundary=\(boundary)",
             as: WBSocketChat.self

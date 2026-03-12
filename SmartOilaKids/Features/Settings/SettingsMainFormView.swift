@@ -11,14 +11,21 @@ struct SettingsMainFormView: View {
     @Binding var userName: String
     let themeBinding: Binding<AppTheme>
     let languageBinding: Binding<AppLanguage>
+    @ObservedObject var protectionController: SettingsProtectionController
     let connectedDevices: [ConnectedDevice]
     let isSaving: Bool
     let nameFieldFocus: FocusState<Bool>.Binding
     let onTapAvatar: () -> Void
     let onSaveName: () -> Void
+    let onOpenDiagnostics: () -> Void
+    let onOpenPermissions: () -> Void
     let onOpenAppLock: () -> Void
     let onOpenMediaHistory: () -> Void
+    let onInviteParent: () -> Void
     let onEditDevice: (ConnectedDevice) -> Void
+    let onToggleProtection: (Bool) -> Void
+    let onConfigureProtectionPIN: () -> Void
+    let onRemoveProtectionPIN: () -> Void
     let onSave: () -> Void
     let onLogout: () -> Void
     let onUnlink: () -> Void
@@ -47,8 +54,20 @@ struct SettingsMainFormView: View {
             SettingsQuickActionsSection(
                 compact: compact,
                 sidePadding: sidePadding,
+                onOpenDiagnostics: onOpenDiagnostics,
+                onOpenPermissions: onOpenPermissions,
                 onOpenAppLock: onOpenAppLock,
-                onOpenMediaHistory: onOpenMediaHistory
+                onOpenMediaHistory: onOpenMediaHistory,
+                onInviteParent: onInviteParent
+            )
+
+            SettingsProtectionSection(
+                compact: compact,
+                sidePadding: sidePadding,
+                controller: protectionController,
+                onToggleProtection: onToggleProtection,
+                onConfigurePIN: onConfigureProtectionPIN,
+                onRemovePIN: onRemoveProtectionPIN
             )
 
             SettingsConnectedDevicesSection(

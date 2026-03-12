@@ -52,8 +52,7 @@ struct MemberDevice: Decodable {
     }
 
     var resolvedAvatarURL: URL? {
-        guard let avatarURL = avatarURL?.trimmedNonEmpty else { return nil }
-        return URL(string: avatarURL)
+        RemoteAssetURLResolver.resolveURL(avatarURL)
     }
 
     enum CodingKeys: String, CodingKey {

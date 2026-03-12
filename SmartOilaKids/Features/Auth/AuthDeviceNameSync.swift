@@ -7,8 +7,6 @@ enum AuthDeviceNameSync {
         client: APIClient,
         onDebug: (String) -> Void
     ) async {
-        guard let scannedDeviceName else { return }
-
         let authorization = registration.authorizationHeader?.trimmedNonEmpty
         var headers: [String: String] = ["Accept": "application/json"]
         if let authorization {
@@ -16,7 +14,7 @@ enum AuthDeviceNameSync {
         }
 
         do {
-            let devices: [RenamableDevice] = try await client.requestDecodableWithBaseFallback(
+            let response: MembersDevicesResponse = try await client.requestDecodableWithBaseFallback(
                 baseURLs: AppConfig.apiBaseCandidates,
                 path: "members/me/devices",
                 method: .get,
@@ -25,13 +23,23 @@ enum AuthDeviceNameSync {
                     URLQueryItem(name: "limit", value: "100")
                 ],
                 headers: headers,
-                as: [RenamableDevice].self
+                as: MembersDevicesResponse.self
             )
 
+            let mapper = MemberDevicesMapper()
+            let devices = mapper.mapRecords(from: response)
+
             guard let target = devices.first(where: { device in
-                guard let dsn = device.resolvedDSN?.trimmedNonEmpty else { return false }
+                guard let dsn = device.dsn?.trimmedNonEmpty else { return false }
                 return dsn.caseInsensitiveCompare(registration.dsn) == .orderedSame
             }) else {
+                return
+            }
+
+            MemberDevicesService(client: client).primeCache(with: target)
+
+            guard let scannedDeviceName else {
+                onDebug("Seeded current child device cache for DSN \(registration.dsn).")
                 return
             }
 
@@ -49,32 +57,6 @@ enum AuthDeviceNameSync {
         } catch {
             onDebug("Skipping QR name sync: \(error.localizedDescription)")
         }
-    }
-}
-
-private struct RenamableDevice: Decodable {
-    let id: Int
-    let dsn: String?
-    let deviceDSN: String?
-    let childrenDeviceDSN: String?
-
-    var resolvedDSN: String? {
-        dsn ?? deviceDSN ?? childrenDeviceDSN
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case dsn
-        case deviceDSN = "device_dsn"
-        case childrenDeviceDSN = "children_device_dsn"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = container.decodeLossyIntIfPresent(forKey: .id) ?? 0
-        dsn = container.decodeLossyStringIfPresent(forKey: .dsn)
-        deviceDSN = container.decodeLossyStringIfPresent(forKey: .deviceDSN)
-        childrenDeviceDSN = container.decodeLossyStringIfPresent(forKey: .childrenDeviceDSN)
     }
 }
 
