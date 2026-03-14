@@ -20,7 +20,8 @@ struct MainView: View {
 
     var body: some View {
         MainSurfaceView(
-            profileName: viewModel.currentDeviceName ?? sessionStore.profileName,
+            profileName: resolvedProfileName,
+            profileAvatarURL: SettingsAvatarStore.shared.avatarURL(for: sessionStore.dsn),
             notificationBadgeCount: viewModel.unreadNotificationCount,
             deviceStatus: viewModel.deviceStatus,
             usageHours: viewModel.weeklyUsageHours,
@@ -180,6 +181,12 @@ struct MainView: View {
         }, message: {
             Text(viewModel.alertText ?? "")
         })
+    }
+
+    private var resolvedProfileName: String {
+        sessionStore.profileName.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
+            ?? viewModel.currentDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
+            ?? "Пользователь"
     }
 
     private var isDebugRouteMode: Bool {

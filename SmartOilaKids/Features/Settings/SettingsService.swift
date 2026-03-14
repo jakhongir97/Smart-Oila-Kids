@@ -14,6 +14,7 @@ protocol SettingsServicing {
     func updateProfileName(_ name: String) async throws -> String
     func renameConnectedDevice(deviceID: Int, name: String) async throws -> ConnectedDevice
     func uploadConnectedDeviceAvatar(deviceID: Int, imageData: Data) async throws -> ConnectedDevice
+    func uploadConnectedDeviceAvatar(dsn: String, imageData: Data) async throws -> URL?
     func deleteConnectedDevice(deviceID: Int) async throws
 }
 

@@ -1,3 +1,4 @@
+import Combine
 import CoreLocation
 import Foundation
 import Network
@@ -5,7 +6,8 @@ import Network
 final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerDelegate {
     static let shared = GeoBackgroundService()
 
-    @Published private(set) var debugSnapshot = GeoDebugSnapshot()
+    let objectWillChange = ObservableObjectPublisher()
+    private(set) var debugSnapshot = GeoDebugSnapshot()
 
     var debugStatus: String { debugSnapshot.status }
     var debugEndpoint: String { debugSnapshot.endpoint }
@@ -14,6 +16,8 @@ final class GeoBackgroundService: NSObject, ObservableObject, CLLocationManagerD
     var debugReconnectCount: Int { debugSnapshot.reconnectCount }
 
     func setDebugSnapshot(_ snapshot: GeoDebugSnapshot) {
+        guard debugSnapshot != snapshot else { return }
+        objectWillChange.send()
         debugSnapshot = snapshot
     }
 

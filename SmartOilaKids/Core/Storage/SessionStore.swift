@@ -2,9 +2,11 @@ import Foundation
 import SwiftUI
 
 final class SessionStore: ObservableObject {
+    static let profileNameDefaultsKey = "PROFILE_NAME"
+
     private enum Keys {
         static let dsn = "DSN"
-        static let profileName = "PROFILE_NAME"
+        static let profileName = SessionStore.profileNameDefaultsKey
         static let appTheme = "APP_THEME"
         static let appLanguage = "APP_LANGUAGE"
     }
@@ -33,6 +35,12 @@ final class SessionStore: ObservableObject {
         appLanguage = SessionStore.defaultLanguage(userDefaults: userDefaults)
 
         L10n.setLanguage(appLanguage.rawValue)
+
+#if DEBUG
+        SessionStore.debugThemeLog(
+            "init theme=\(appTheme.rawValue) storedRaw=\(userDefaults.string(forKey: Keys.appTheme) ?? "nil") language=\(appLanguage.rawValue)"
+        )
+#endif
     }
 
     func setDSN(_ value: String?) {
@@ -61,8 +69,20 @@ final class SessionStore: ObservableObject {
     }
 
     func setTheme(_ value: AppTheme) {
+#if DEBUG
+        let previousTheme = appTheme.rawValue
+        let previousStoredValue = userDefaults.string(forKey: Keys.appTheme) ?? "nil"
+        SessionStore.debugThemeLog(
+            "setTheme requested=\(value.rawValue) previousTheme=\(previousTheme) previousStoredRaw=\(previousStoredValue)"
+        )
+#endif
         appTheme = value
         userDefaults.set(value.rawValue, forKey: Keys.appTheme)
+#if DEBUG
+        SessionStore.debugThemeLog(
+            "setTheme applied theme=\(appTheme.rawValue) storedRaw=\(userDefaults.string(forKey: Keys.appTheme) ?? "nil")"
+        )
+#endif
     }
 
     func setLanguage(_ value: AppLanguage) {
@@ -96,4 +116,10 @@ final class SessionStore: ObservableObject {
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " ")
     }
+
+#if DEBUG
+    private static func debugThemeLog(_ message: String) {
+        print("[ThemeDebug][SessionStore] \(message)")
+    }
+#endif
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainSurfaceView: View {
     let profileName: String
+    let profileAvatarURL: URL?
     let notificationBadgeCount: Int
     let deviceStatus: MainDeviceStatus?
     let usageHours: [Double]
@@ -40,6 +41,7 @@ struct MainSurfaceView: View {
                 VStack(spacing: 0) {
                     MainHeaderSection(
                         profileName: profileName,
+                        avatarURL: profileAvatarURL,
                         notificationBadgeCount: notificationBadgeCount,
                         onInfoTap: onInfoTap,
                         onNotificationTap: onNotificationTap,

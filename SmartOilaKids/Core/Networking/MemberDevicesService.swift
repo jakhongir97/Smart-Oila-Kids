@@ -36,8 +36,20 @@ final class MemberDevicesService: MemberDevicesServicing {
     }
 
     func fetchDevices(limit: Int) async throws -> [MemberDeviceRecord] {
-        guard hasAuthorization else {
-            return cachedRecords(limit: limit)
+        let cached = cachedRecords(limit: limit)
+        let hasMemberAuthorization = secureTokens.accessToken() != nil || secureTokens.refreshToken() != nil
+
+#if DEBUG
+        MemberDevicesDebugLogger.log(
+            "fetchDevices start limit=\(limit) accessTokenPresent=\(secureTokens.accessToken() != nil) refreshTokenPresent=\(secureTokens.refreshToken() != nil) cachedCount=\(cached.count)"
+        )
+#endif
+
+        guard hasMemberAuthorization else {
+#if DEBUG
+            MemberDevicesDebugLogger.log("fetchDevices skipped remote because member auth is unavailable")
+#endif
+            return cached
         }
 
         do {
@@ -55,9 +67,16 @@ final class MemberDevicesService: MemberDevicesServicing {
 
             let records = mapper.mapRecords(from: response)
             saveCachedRecords(records)
+#if DEBUG
+            MemberDevicesDebugLogger.log("fetchDevices remoteCount=\(records.count)")
+#endif
             return records
         } catch {
-            let cached = cachedRecords(limit: limit)
+#if DEBUG
+            MemberDevicesDebugLogger.log(
+                "fetchDevices failed error=\(String(reflecting: error)) cachedFallbackCount=\(cached.count)"
+            )
+#endif
             if !cached.isEmpty {
                 return cached
             }
@@ -78,9 +97,15 @@ final class MemberDevicesService: MemberDevicesServicing {
             }
             return remoteDSN.caseInsensitiveCompare(normalizedDSN) == .orderedSame
         }) {
+#if DEBUG
+            MemberDevicesDebugLogger.log("resolveDevice matched dsn=\(normalizedDSN) id=\(matched.id)")
+#endif
             return matched
         }
 
+#if DEBUG
+        MemberDevicesDebugLogger.log("resolveDevice missing dsn=\(normalizedDSN) devicesCount=\(devices.count)")
+#endif
         throw NetworkError.unexpectedBody
     }
 
@@ -106,10 +131,6 @@ final class MemberDevicesService: MemberDevicesServicing {
     private let secureTokens: SecureTokenStoring
     private let userDefaults: UserDefaults
     private let mapper: MemberDevicesMapper
-
-    private var hasAuthorization: Bool {
-        secureTokens.accessToken() != nil
-    }
 
     private func saveCachedRecords(_ records: [MemberDeviceRecord]) {
         let payload = records.map {
@@ -153,3 +174,11 @@ final class MemberDevicesService: MemberDevicesServicing {
 
     private var cacheKey: String { "MEMBER_DEVICES_CACHE_V1" }
 }
+
+#if DEBUG
+private enum MemberDevicesDebugLogger {
+    static func log(_ message: String) {
+        print("[MemberDevicesDebug] \(message)")
+    }
+}
+#endif

@@ -85,12 +85,19 @@ extension SettingsView {
             switch await actionFlows.renameDevice(device, to: trimmed) {
             case .success(let outcome):
                 switch outcome {
-                case .renamed:
+                case .renamed(let updatedName):
+                    if isCurrentSettingsDevice(device) {
+                        userName = updatedName
+                        sessionStore.setProfileName(updatedName)
+                    }
                     GrowthMetricsStore.shared.track(.deviceRenameCompleted, dsn: sessionStore.dsn)
                     AppHaptics.success()
                     deviceEditor.close()
                     banner(L10n.tr("settings.device_renamed"))
                 case .unchanged:
+                    if isCurrentSettingsDevice(device) {
+                        sessionStore.setProfileName(trimmed)
+                    }
                     AppHaptics.success()
                     deviceEditor.close()
                     banner(L10n.tr("settings.saved"))
@@ -130,7 +137,12 @@ extension SettingsView {
             userName = sessionStore.profileName
         }
 
+        if avatarPreviewImage == nil {
+            avatarPreviewImage = SettingsAvatarStore.shared.avatarImage(for: sessionStore.dsn)
+        }
+
         await viewModel.loadIfNeeded(currentDSN: sessionStore.dsn)
+        viewModel.ensureCurrentDevicePlaceholder(dsn: sessionStore.dsn, fallbackName: sessionStore.profileName)
 
         if let remoteProfileName = viewModel.remoteProfileName,
            remoteProfileName != sessionStore.profileName {
@@ -141,20 +153,43 @@ extension SettingsView {
 
     func uploadAvatar(from image: UIImage) {
         Task {
+#if DEBUG
+            SettingsAvatarUploadActionDebugLogger.log(
+                "picker imageSize=\(Int(image.size.width))x\(Int(image.size.height)) scale=\(image.scale) currentDSN=\(sessionStore.dsn ?? "nil")"
+            )
+#endif
             guard let payload = SettingsAvatarUploadPayloadBuilder.make(from: image) else {
+#if DEBUG
+                SettingsAvatarUploadActionDebugLogger.log("payload build failed")
+#endif
                 AppHaptics.warning()
                 banner(L10n.tr("settings.avatar_invalid_image"))
                 return
             }
 
+#if DEBUG
+            SettingsAvatarUploadActionDebugLogger.log(
+                "payload ready bytes=\(payload.uploadData.count) previewSize=\(Int(payload.previewImage.size.width))x\(Int(payload.previewImage.size.height))"
+            )
+#endif
             let previousImage = avatarPreviewImage
             avatarPreviewImage = payload.previewImage
 
             switch await actionFlows.uploadCurrentDeviceAvatar(data: payload.uploadData) {
-            case .success:
+            case let .success(uploadedURL):
+#if DEBUG
+                SettingsAvatarUploadActionDebugLogger.log(
+                    "upload succeeded uploadedURL=\(uploadedURL?.absoluteString ?? "nil")"
+                )
+#endif
                 AppHaptics.success()
                 banner(L10n.tr("settings.avatar_uploaded"))
-            case .failure:
+            case let .failure(error):
+#if DEBUG
+                SettingsAvatarUploadActionDebugLogger.log(
+                    "upload failed error=\(String(reflecting: error)) message=\(NetworkError.userMessage(for: error))"
+                )
+#endif
                 avatarPreviewImage = previousImage
                 AppHaptics.warning()
                 banner(L10n.tr("settings.avatar_upload_failed"))
@@ -230,4 +265,21 @@ extension SettingsView {
             set: { sessionStore.setLanguage($0) }
         )
     }
+
+    func isCurrentSettingsDevice(_ device: ConnectedDevice) -> Bool {
+        guard let currentDSN = sessionStore.dsn?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty,
+              let deviceDSN = device.dsn?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty else {
+            return false
+        }
+
+        return currentDSN.caseInsensitiveCompare(deviceDSN) == .orderedSame
+    }
 }
+
+#if DEBUG
+private enum SettingsAvatarUploadActionDebugLogger {
+    static func log(_ message: String) {
+        print("[AvatarUploadDebug][SettingsView] \(message)")
+    }
+}
+#endif

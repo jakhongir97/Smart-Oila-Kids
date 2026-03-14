@@ -31,10 +31,7 @@ struct ChildPurpleSurface<Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(AppColors.surfacePurple)
         .clipShape(TopRoundedShape(radius: 30))
-        .background(
-            AppColors.surfacePurple
-                .ignoresSafeArea(edges: .bottom)
-        )
+        .ignoresSafeArea(edges: .bottom)
     }
 }
 

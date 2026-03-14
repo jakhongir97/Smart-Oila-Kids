@@ -14,25 +14,45 @@ extension SettingsViewModel {
             try? await ensureConnectedDevicesLoadedIfNeeded(required: false)
 
             if let target = connectedDevice(matchingDSN: normalizedCurrentDSN) {
-                let updated = try await dependencies.service.renameConnectedDevice(deviceID: target.id, name: name)
-                updateConnectedDeviceCache(with: updated)
-                setRemoteProfileName(updated.name)
-                dependencies.cacheStore.saveProfileName(updated.name)
-                return updated.name
+                do {
+                    let updated = try await dependencies.service.renameConnectedDevice(deviceID: target.id, name: name)
+                    updateConnectedDeviceCache(with: updated)
+                    setRemoteProfileName(updated.name)
+                    dependencies.cacheStore.saveProfileName(updated.name)
+                    return updated.name
+                } catch {
+                    if shouldUseLocalCurrentDeviceFallback(after: error) {
+                        return persistLocalCurrentDeviceName(name, dsn: normalizedCurrentDSN)
+                    }
+                    throw error
+                }
             }
 
-            if let resolved = try? await dependencies.service.resolveConnectedDevice(dsn: normalizedCurrentDSN) {
+            do {
+                let resolved = try await dependencies.service.resolveConnectedDevice(dsn: normalizedCurrentDSN)
                 let updated = try await dependencies.service.renameConnectedDevice(deviceID: resolved.id, name: name)
                 updateConnectedDeviceCache(with: updated)
                 setRemoteProfileName(updated.name)
                 dependencies.cacheStore.saveProfileName(updated.name)
                 return updated.name
+            } catch {
+                if shouldUseLocalCurrentDeviceFallback(after: error) {
+                    return persistLocalCurrentDeviceName(name, dsn: normalizedCurrentDSN)
+                }
+                throw error
             }
         }
 
-        let resolvedName = try await dependencies.service.updateProfileName(name)
-        setRemoteProfileName(resolvedName)
-        dependencies.cacheStore.saveProfileName(resolvedName)
-        return resolvedName
+        do {
+            let resolvedName = try await dependencies.service.updateProfileName(name)
+            setRemoteProfileName(resolvedName)
+            dependencies.cacheStore.saveProfileName(resolvedName)
+            return resolvedName
+        } catch {
+            if shouldUseLocalCurrentDeviceFallback(after: error) {
+                return persistLocalCurrentDeviceName(name, dsn: normalizedCurrentDSN)
+            }
+            throw error
+        }
     }
 }

@@ -31,6 +31,7 @@ final class MainDashboardService: MainDashboardServicing {
             calendar: calendar
         )
         self.cacheStore = MainDashboardCacheStore(userDefaults: userDefaults)
+        self.userDefaults = userDefaults
     }
 
     func fetchWeeklyUsageHours(dsn: String) async throws -> [Double] {
@@ -63,6 +64,10 @@ final class MainDashboardService: MainDashboardServicing {
         if let remoteName = try? await remoteDataSource.resolveCurrentDevice(for: normalizedDSN, onDebug: debugLog).name,
            let normalizedRemoteName = remoteName.trimmedNonEmpty {
             return normalizedRemoteName
+        }
+
+        if let storedName = storedProfileName() {
+            return storedName
         }
 
         let localDeviceName = await MainActor.run { UIDevice.current.name }
@@ -105,7 +110,7 @@ final class MainDashboardService: MainDashboardServicing {
 
         if let cached = cacheStore.status(for: normalizedDSN) {
             return MainDeviceStatus(
-                deviceName: cached.deviceName.trimmedNonEmpty ?? localSnapshot.deviceName,
+                deviceName: storedProfileName() ?? localSnapshot.deviceName,
                 battery: cached.battery ?? localSnapshot.battery,
                 connectionType: cached.connectionType?.trimmedNonEmpty,
                 soundMode: cached.soundMode?.trimmedNonEmpty ?? localSnapshot.soundMode,
@@ -119,6 +124,7 @@ final class MainDashboardService: MainDashboardServicing {
 
     private let remoteDataSource: MainDashboardRemoteDataSource
     private let cacheStore: MainDashboardCacheStore
+    private let userDefaults: UserDefaults
 
     @MainActor
     private func localFallbackStatus() -> MainDeviceStatus {
@@ -135,7 +141,9 @@ final class MainDashboardService: MainDashboardServicing {
             ? "mute"
             : "normal"
 
-        let localName = UIDevice.current.name.trimmedNonEmpty ?? "iPhone"
+        let localName = storedProfileName()
+            ?? UIDevice.current.name.trimmedNonEmpty
+            ?? "iPhone"
 
         return MainDeviceStatus(
             deviceName: localName,
@@ -151,5 +159,9 @@ final class MainDashboardService: MainDashboardServicing {
 #if DEBUG
         print("[MainDashboardService] \(message)")
 #endif
+    }
+
+    private func storedProfileName() -> String? {
+        userDefaults.string(forKey: SessionStore.profileNameDefaultsKey)?.trimmedNonEmpty
     }
 }

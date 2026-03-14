@@ -15,7 +15,7 @@ struct ChatThreadView: View {
     var body: some View {
         GeometryReader { proxy in
             let sidePadding = min(24, max(14, proxy.size.width * 0.05))
-            let bottomInset = max(8, proxy.safeAreaInsets.bottom)
+            let bottomInset = isComposerFocused ? 0 : max(8, proxy.safeAreaInsets.bottom)
 
             ZStack(alignment: .bottomTrailing) {
                 AppColors.white.ignoresSafeArea()
@@ -98,14 +98,6 @@ struct ChatThreadView: View {
         }
         .onDisappear {
             viewModel.setThreadActive(false)
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(L10n.tr("common.done")) {
-                    isComposerFocused = false
-                }
-            }
         }
     }
 

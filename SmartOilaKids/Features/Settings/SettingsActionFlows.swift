@@ -15,6 +15,7 @@ enum SettingsDeviceDeleteOutcome: Equatable {
     case deletedRemoteDevice
 }
 
+@MainActor
 struct SettingsActionFlows {
     let viewModel: SettingsViewModel
     let currentDSN: String?
@@ -37,6 +38,16 @@ struct SettingsActionFlows {
                 : .renamed(name: updatedName)
             return .success(outcome)
         } catch {
+            if let normalizedCurrentDSN = currentDSN?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty,
+               let deviceDSN = device.dsn?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty,
+               deviceDSN.caseInsensitiveCompare(normalizedCurrentDSN) == .orderedSame,
+               viewModel.shouldUseLocalCurrentDeviceFallback(after: error) {
+                let localName = viewModel.persistLocalCurrentDeviceName(trimmedName, dsn: normalizedCurrentDSN)
+                let outcome: SettingsDeviceRenameOutcome = localName == device.name
+                    ? .unchanged
+                    : .renamed(name: localName)
+                return .success(outcome)
+            }
             return .failure(error)
         }
     }

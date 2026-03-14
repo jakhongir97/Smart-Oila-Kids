@@ -83,15 +83,6 @@ struct ChatTemplatesSheet: View {
                 isEditorFocused = false
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(L10n.tr("common.done")) {
-                    saveTemplate()
-                    isEditorFocused = false
-                }
-            }
-        }
         .confirmationDialog(
             L10n.tr("templates.actions_title"),
             isPresented: $editorState.showActionsDialog,

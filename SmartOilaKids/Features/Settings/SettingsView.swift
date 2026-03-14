@@ -2,6 +2,8 @@ import UIKit
 import SwiftUI
 
 struct SettingsView: View {
+    @AppStorage("APP_THEME") private var appThemeRawValue = AppTheme.system.rawValue
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var sessionStore: SessionStore
 
@@ -167,19 +169,32 @@ struct SettingsView: View {
                 ChildWatermarkOverlay()
             }
         }
+        .id(appThemeRawValue)
         .navigationBarBackButtonHidden(true)
         .task {
             appLockStore.activate(dsn: sessionStore.dsn)
             settingsProtection.refreshAvailability()
             await loadRemoteDataIfNeeded()
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(L10n.tr("common.done")) {
-                    isNameFieldFocused = false
-                }
-            }
+        .onAppear {
+#if DEBUG
+            logThemeState(event: "onAppear")
+#endif
+        }
+        .onChange(of: appThemeRawValue) { _ in
+#if DEBUG
+            logThemeState(event: "appThemeRawValue changed")
+#endif
+        }
+        .onChange(of: sessionStore.appTheme) { _ in
+#if DEBUG
+            logThemeState(event: "sessionStore.appTheme changed")
+#endif
+        }
+        .onChange(of: colorScheme) { _ in
+#if DEBUG
+            logThemeState(event: "environment colorScheme changed")
+#endif
         }
         .overlay(alignment: .top) {
             if let bannerText = bannerCenter.text {
@@ -267,7 +282,6 @@ struct SettingsView: View {
         .onChange(of: sessionStore.dsn) { newValue in
             appLockStore.activate(dsn: newValue)
         }
-        .preferredColorScheme(sessionStore.appTheme.colorScheme)
     }
 
     private var settingsProtectionPromptBinding: Binding<SettingsProtectionPINPrompt?> {
@@ -279,4 +293,43 @@ struct SettingsView: View {
             }
         )
     }
+
+#if DEBUG
+    private func logThemeState(event: String) {
+        let resolvedTheme = AppTheme(rawValue: appThemeRawValue) ?? .system
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+        let keyWindow = windows.first(where: \.isKeyWindow) ?? windows.first
+        let windowStyle = keyWindow.map { debugStyleDescription($0.traitCollection.userInterfaceStyle) } ?? "none"
+        let overrideStyle = keyWindow.map { debugStyleDescription($0.overrideUserInterfaceStyle) } ?? "none"
+        print(
+            "[ThemeDebug][SettingsView] event=\(event) storedRaw=\(appThemeRawValue) resolvedTheme=\(resolvedTheme.rawValue) sessionTheme=\(sessionStore.appTheme.rawValue) envColorScheme=\(debugColorSchemeDescription(colorScheme)) windowStyle=\(windowStyle) windowOverride=\(overrideStyle)"
+        )
+    }
+
+    private func debugColorSchemeDescription(_ colorScheme: ColorScheme) -> String {
+        switch colorScheme {
+        case .light:
+            return "light"
+        case .dark:
+            return "dark"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    private func debugStyleDescription(_ style: UIUserInterfaceStyle) -> String {
+        switch style {
+        case .light:
+            return "light"
+        case .dark:
+            return "dark"
+        case .unspecified:
+            return "unspecified"
+        @unknown default:
+            return "unknown"
+        }
+    }
+#endif
 }

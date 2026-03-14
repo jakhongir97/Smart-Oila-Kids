@@ -278,20 +278,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		76E2F70D3D944EBB87613BDC /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = FC18D17BD5B7480387B00D20;
-			remoteInfo = SmartOilaKidsScheduleMonitorExtension;
-		};
-		78F79099D12B4777B8859201 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = D7FAB55786594D5A927B96E4;
-			remoteInfo = SmartOilaKidsUsageReportExtension;
-		};
 		F1A0B1C2D3E4F50617283941 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
@@ -1626,16 +1612,6 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		50708B381AC44D979E65C171 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = D7FAB55786594D5A927B96E4 /* SmartOilaKidsUsageReportExtension */;
-			targetProxy = 78F79099D12B4777B8859201 /* PBXContainerItemProxy */;
-		};
-		CAB2722D60C7457FBC28958D /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = FC18D17BD5B7480387B00D20 /* SmartOilaKidsScheduleMonitorExtension */;
-			targetProxy = 76E2F70D3D944EBB87613BDC /* PBXContainerItemProxy */;
-		};
 		F1A0B1C2D3E4F50617283949 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 92844C8577B27B0138F9A882 /* SmartOilaKids */;
@@ -1725,7 +1701,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
@@ -1773,7 +1749,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";

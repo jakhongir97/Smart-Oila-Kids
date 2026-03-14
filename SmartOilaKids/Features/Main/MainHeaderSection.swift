@@ -3,6 +3,7 @@ import UIKit
 
 struct MainHeaderSection: View {
     let profileName: String
+    let avatarURL: URL?
     let notificationBadgeCount: Int
     let onInfoTap: () -> Void
     let onNotificationTap: () -> Void
@@ -24,17 +25,9 @@ struct MainHeaderSection: View {
                                 .frame(width: 52, height: 52)
                         }
 
-                        if UIImage(named: "UserAvatarGlyph") != nil {
-                            Image("UserAvatarGlyph")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 28, height: 28)
-                        } else {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 24, weight: .semibold))
-                                .foregroundStyle(AppColors.white)
-                        }
+                        avatarContent
                     }
+                    .clipShape(Circle())
 
                 Text(profileName)
                     .font(AppTypography.unbounded(16, weight: .semibold))
@@ -88,6 +81,50 @@ struct MainHeaderSection: View {
         }
         .background(AppColors.white)
         .clipShape(RoundedCornerShape(corners: [.bottomLeft, .bottomRight], radius: 20))
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        if let avatarURL,
+           avatarURL.isFileURL,
+           let storedImage = UIImage(contentsOfFile: avatarURL.path) {
+            Image(uiImage: storedImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 52, height: 52)
+                .clipShape(Circle())
+        } else if let avatarURL {
+            AsyncImage(url: avatarURL) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .failure, .empty:
+                    placeholderAvatar
+                @unknown default:
+                    placeholderAvatar
+                }
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(Circle())
+        } else {
+            placeholderAvatar
+        }
+    }
+
+    @ViewBuilder
+    private var placeholderAvatar: some View {
+        if UIImage(named: "UserAvatarGlyph") != nil {
+            Image("UserAvatarGlyph")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
+        } else {
+            Image(systemName: "person.fill")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(AppColors.white)
+        }
     }
 
     @ViewBuilder

@@ -16,7 +16,12 @@ enum APIClientDebugLogger {
         }
 
         if let body = request.httpBody, !body.isEmpty {
-            if let bodyText = String(data: body, encoding: .utf8) {
+            if isMultipartRequest(request),
+               let multipartPreview = multipartPreview(for: body) {
+                print("\t--data-binary \"<\(body.count) bytes multipart body>\" \\")
+                print("Multipart preview:")
+                print(multipartPreview)
+            } else if let bodyText = String(data: body, encoding: .utf8) {
                 print("\t-d \"\(escapeForShell(bodyText))\" \\")
             } else {
                 print("\t--data-binary \"<\(body.count) bytes>\" \\")
@@ -75,5 +80,28 @@ enum APIClientDebugLogger {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    private static func isMultipartRequest(_ request: URLRequest) -> Bool {
+        request.value(forHTTPHeaderField: "Content-Type")?
+            .lowercased()
+            .contains("multipart/form-data") == true
+    }
+
+    private static func multipartPreview(for body: Data) -> String? {
+        guard let separator = "\r\n\r\n".data(using: .utf8),
+              let headerRange = body.range(of: separator) else {
+            return nil
+        }
+
+        let previewData = body[..<headerRange.upperBound]
+        guard let preview = String(data: previewData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !preview.isEmpty else {
+            return nil
+        }
+
+        let binaryBytes = max(0, body.count - previewData.count)
+        return "\(preview)\n<binary payload: \(binaryBytes) bytes>"
     }
 }

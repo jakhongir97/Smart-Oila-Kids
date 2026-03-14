@@ -53,6 +53,12 @@ struct SettingsAvatarSection: View {
             Image(uiImage: localImage)
                 .resizable()
                 .scaledToFill()
+        } else if let imageURL,
+                  imageURL.isFileURL,
+                  let storedImage = UIImage(contentsOfFile: imageURL.path) {
+            Image(uiImage: storedImage)
+                .resizable()
+                .scaledToFill()
         } else if let imageURL {
             AsyncImage(url: imageURL) { phase in
                 switch phase {
@@ -139,7 +145,15 @@ struct SettingsDeviceCard: View {
 
     @ViewBuilder
     private var avatarGlyph: some View {
-        if let avatarURL {
+        if let avatarURL,
+           avatarURL.isFileURL,
+           let storedImage = UIImage(contentsOfFile: avatarURL.path) {
+            Image(uiImage: storedImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 46, height: 46)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        } else if let avatarURL {
             AsyncImage(url: avatarURL) { phase in
                 switch phase {
                 case let .success(image):

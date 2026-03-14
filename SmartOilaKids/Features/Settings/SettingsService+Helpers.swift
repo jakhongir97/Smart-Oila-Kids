@@ -2,7 +2,7 @@ import Foundation
 
 extension SettingsService {
     func ensureAuthorized() throws {
-        guard secureTokens.accessToken() != nil else {
+        guard secureTokens.accessToken() != nil || secureTokens.refreshToken() != nil else {
             throw NetworkError.server(statusCode: 401, body: "Not authenticated")
         }
     }

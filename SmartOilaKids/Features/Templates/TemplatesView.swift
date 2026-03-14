@@ -68,11 +68,12 @@ struct TemplatesView: View {
                         }
 
                     VStack {
+                        Spacer(minLength: 0)
                         editorCard(width: editorWidth, height: editorHeight)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, sidePadding)
-                    .padding(.bottom, proxy.safeAreaInsets.bottom * 0.4)
+                    .padding(.bottom, isEditorFocused ? 12 : max(16, proxy.safeAreaInsets.bottom + 12))
                 }
             }
         }
@@ -84,15 +85,6 @@ struct TemplatesView: View {
                 }
             } else {
                 isEditorFocused = false
-            }
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(L10n.tr("common.done")) {
-                    saveTemplate()
-                    isEditorFocused = false
-                }
             }
         }
         .confirmationDialog(

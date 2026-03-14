@@ -1,6 +1,8 @@
 import SwiftUI
+import UIKit
 
 struct AppNavigationContainer<Content: View>: View {
+    @AppStorage("APP_THEME") private var appThemeRawValue = AppTheme.system.rawValue
     @ViewBuilder private let content: () -> Content
 
     init(@ViewBuilder content: @escaping () -> Content) {
@@ -8,15 +10,100 @@ struct AppNavigationContainer<Content: View>: View {
     }
 
     var body: some View {
-        if #available(iOS 16.0, *) {
-            NavigationStack {
-                content()
+        let appTheme = AppTheme(rawValue: appThemeRawValue) ?? .system
+
+        Group {
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    content()
+                }
+            } else {
+                NavigationView {
+                    content()
+                }
+                .navigationViewStyle(.stack)
             }
-        } else {
-            NavigationView {
-                content()
-            }
-            .navigationViewStyle(.stack)
+        }
+        .preferredColorScheme(appTheme.colorScheme)
+        .background {
+            AppThemeHostingBridge(appTheme: appTheme)
+                .frame(width: 0, height: 0)
+        }
+    }
+}
+
+private struct AppThemeHostingBridge: UIViewControllerRepresentable {
+    let appTheme: AppTheme
+
+    func makeUIViewController(context: Context) -> AppThemeHostingController {
+        let controller = AppThemeHostingController()
+        controller.overrideStyle = userInterfaceStyle(for: appTheme)
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AppThemeHostingController, context: Context) {
+        uiViewController.overrideStyle = userInterfaceStyle(for: appTheme)
+    }
+
+    private func userInterfaceStyle(for appTheme: AppTheme) -> UIUserInterfaceStyle {
+        switch appTheme {
+        case .system:
+            return .unspecified
+        case .light:
+            return .light
+        case .dark:
+            return .dark
+        }
+    }
+}
+
+private final class AppThemeHostingController: UIViewController {
+    var overrideStyle: UIUserInterfaceStyle = .unspecified {
+        didSet {
+            applyThemeOverrideIfNeeded()
+        }
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.isHidden = true
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        applyThemeOverrideIfNeeded()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyThemeOverrideIfNeeded()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        applyThemeOverrideIfNeeded()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyThemeOverrideIfNeeded()
+    }
+
+    private func applyThemeOverrideIfNeeded() {
+        let targets = [
+            parent,
+            parent?.navigationController,
+            view.window?.rootViewController
+        ]
+
+        for target in targets.compactMap({ $0 }) where target.overrideUserInterfaceStyle != overrideStyle {
+            target.overrideUserInterfaceStyle = overrideStyle
+        }
+
+        if let window = view.window, window.overrideUserInterfaceStyle != overrideStyle {
+            window.overrideUserInterfaceStyle = overrideStyle
         }
     }
 }
