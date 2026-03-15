@@ -251,6 +251,31 @@ extension SettingsView {
         )
     }
 
+    func unlinkCurrentDevice() {
+        guard !isUnlinkingDevice else { return }
+
+        isUnlinkingDevice = true
+
+        Task {
+            let result = await actionFlows.deleteCurrentDeviceSession()
+
+            await MainActor.run {
+                isUnlinkingDevice = false
+
+                switch result {
+                case .success:
+                    showUnlinkConfirmation = false
+                    AppHaptics.success()
+                    sessionStore.clearSession()
+                case .failure:
+                    showUnlinkConfirmation = false
+                    AppHaptics.warning()
+                    banner(L10n.tr("settings.unlink_failed"))
+                }
+            }
+        }
+    }
+
     var actionFlows: SettingsActionFlows {
         SettingsActionFlows(
             viewModel: viewModel,

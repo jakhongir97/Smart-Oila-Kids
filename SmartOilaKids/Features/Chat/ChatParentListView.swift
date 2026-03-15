@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct ParentChatRow {
     let id: String
@@ -18,24 +17,30 @@ struct ChatParentListView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 10) {
-                ForEach(rows, id: \.id) { row in
-                    Button {
-                        AppHaptics.tap()
-                        onOpen(row)
-                    } label: {
-                        chatRow(name: row.name, preview: row.preview, unreadCount: row.unreadCount)
+                if rows.isEmpty {
+                    Text(L10n.tr("chat.empty"))
+                        .font(AppTypography.unbounded(12, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else {
+                    ForEach(rows, id: \.id) { row in
+                        Button {
+                            AppHaptics.tap()
+                            onOpen(row)
+                        } label: {
+                            chatRow(name: row.name, preview: row.preview, unreadCount: row.unreadCount)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(accessibilityLabel(for: row))
+                        .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(accessibilityLabel(for: row))
-                    .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
                 }
-
-                Spacer()
             }
             .padding(.horizontal, sidePadding)
             .padding(.top, compact ? 18 : 30)
-            .padding(.bottom, 16)
+            .padding(.bottom, compact ? 24 : 32)
         }
         .refreshable {
             await onRefresh()
@@ -45,33 +50,22 @@ struct ChatParentListView: View {
     private func chatRow(name: String, preview: String, unreadCount: Int) -> some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(Color.gray.opacity(0.35))
+                .fill(AppColors.neutral600)
                 .frame(width: 50, height: 50)
-                .overlay {
-                    if UIImage(named: "UserAvatarGlyph") != nil {
-                        Image("UserAvatarGlyph")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 30, height: 30)
-                    } else {
-                        Image(systemName: "person.fill")
-                            .foregroundStyle(AppColors.textSecondary)
-                    }
-                }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(name)
                     .font(AppTypography.unbounded(16, weight: .semibold))
-                    .foregroundStyle(AppColors.black)
-                    .lineLimit(2)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
                 Text(preview)
                     .font(AppTypography.unbounded(12, weight: .regular))
-                    .foregroundStyle(AppColors.black)
+                    .foregroundStyle(.white)
                     .lineLimit(2)
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if unreadCount > 0 {
                 Text("\(min(99, unreadCount))")
@@ -86,8 +80,8 @@ struct ChatParentListView: View {
         }
         .padding(.horizontal, 15)
         .frame(minHeight: 80)
-        .background(AppColors.white)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(AppColors.neutral900)
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
     }
 
     private func accessibilityLabel(for row: ParentChatRow) -> String {

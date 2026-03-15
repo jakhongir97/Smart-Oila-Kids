@@ -12,7 +12,6 @@ struct MainView: View {
     @State private var showNotifications = false
     @State private var showTasks = false
     @State private var showSettings = false
-    @State private var showTemplates = false
 
     init(viewModel: MainViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -30,7 +29,7 @@ struct MainView: View {
             mediaItems: viewModel.recentMediaItems,
             pendingTasksCount: viewModel.pendingTasksCount,
             unreadChatCount: viewModel.unreadChatCount,
-            onInfoTap: { showTemplates = true },
+            isSendingSOS: viewModel.isSendingSOS,
             onNotificationTap: { showNotifications = true },
             onSettingsTap: { showSettings = true },
             onRetryUsage: {
@@ -44,6 +43,11 @@ struct MainView: View {
             onChatTap: {
                 openChatThreadOnPresent = false
                 showChat = true
+            },
+            onSOSTap: {
+                Task {
+                    await viewModel.sendSOS(dsn: sessionStore.dsn)
+                }
             }
         )
         .refreshable {
@@ -159,34 +163,36 @@ struct MainView: View {
             }
             .environmentObject(sessionStore)
         }
-        .fullScreenCover(isPresented: $showTemplates) {
-            AppNavigationContainer {
-                TemplatesView()
-            }
-        }
         .fullScreenCover(isPresented: Binding(
             get: { !isDebugRouteMode && !locationPermissionManager.allChecklistSatisfied },
             set: { _ in }
         )) {
             GeoPermissionView(manager: locationPermissionManager)
         }
-        .alert(L10n.tr("main.info_title"), isPresented: Binding(get: {
+        .sheet(isPresented: Binding(get: {
             viewModel.alertText != nil
         }, set: { newValue in
             if !newValue {
                 viewModel.alertText = nil
             }
-        }), actions: {
-            Button(L10n.tr("common.ok")) { viewModel.alertText = nil }
-        }, message: {
-            Text(viewModel.alertText ?? "")
-        })
+        })) {
+            AppNavigationContainer {
+                MainInfoSheet(
+                    title: L10n.tr("main.info_title"),
+                    message: viewModel.alertText ?? "",
+                    onClose: {
+                        viewModel.alertText = nil
+                    }
+                )
+            }
+            .appMediumLargeSheetPresentation()
+        }
     }
 
     private var resolvedProfileName: String {
         sessionStore.profileName.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
             ?? viewModel.currentDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
-            ?? "Пользователь"
+            ?? L10n.tr("common.user_default")
     }
 
     private var isDebugRouteMode: Bool {
@@ -213,6 +219,57 @@ struct MainView: View {
                 showChat = true
             case .tasks:
                 showTasks = true
+            }
+        }
+    }
+}
+
+private struct MainInfoSheet: View {
+    let title: String
+    let message: String
+    let onClose: () -> Void
+
+    var body: some View {
+        SettingsPanelChrome(
+            title: title,
+            onClose: onClose,
+            trailing: { Color.clear }
+        ) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(AppColors.secondaryPurple.opacity(0.24))
+                                .frame(width: 52, height: 52)
+
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+
+                        Text(message)
+                            .font(AppTypography.unbounded(12, weight: .regular))
+                            .foregroundStyle(AppColors.neutral600)
+                            .lineSpacing(4)
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .settingsPanelCard(cornerRadius: 22)
+
+                    Button(action: onClose) {
+                        Text(L10n.tr("common.ok"))
+                            .font(AppTypography.unbounded(14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 45)
+                            .background(AppColors.primaryPurple)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
         }
     }

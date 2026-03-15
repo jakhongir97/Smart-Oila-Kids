@@ -43,7 +43,14 @@ struct WeeklyUsageChartCard: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(L10n.tr("main.weekly_stats"))
+                .font(AppTypography.unbounded(16, weight: .medium))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
             GeometryReader { proxy in
                 let width = proxy.size.width
                 let height = proxy.size.height
@@ -60,7 +67,7 @@ struct WeeklyUsageChartCard: View {
 
                 ZStack(alignment: .topLeading) {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color.white, lineWidth: 5)
+                        .strokeBorder(Color.white.opacity(0.85), lineWidth: 3)
 
                     ForEach(0...lineCount, id: \.self) { index in
                         let progress = CGFloat(index) / CGFloat(lineCount)
@@ -72,12 +79,12 @@ struct WeeklyUsageChartCard: View {
                             path.addLine(to: CGPoint(x: outerPadding + yLabelWidth + plotWidth, y: y))
                         }
                         .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                        .foregroundStyle(Color.white.opacity(0.45))
+                        .foregroundStyle(Color.white.opacity(0.28))
 
                         if hourValue > 0 {
                             Text("\(hourValue)\(L10n.tr("main.hours_short"))")
                                 .font(AppTypography.unbounded(14, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.white.opacity(0.9))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                                 .frame(width: yLabelWidth - 6, alignment: .trailing)
@@ -98,24 +105,18 @@ struct WeeklyUsageChartCard: View {
 
                         Text(L10n.tr(item.dayKey))
                             .font(AppTypography.unbounded(14, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.white.opacity(0.92))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .position(x: x, y: chartTop + plotHeight + (dayLabelHeight / 2))
                     }
                 }
             }
-            .frame(height: compact ? 260 : 300)
+            .frame(height: compact ? 240 : 280)
             .frame(maxWidth: .infinity)
-
-            Text(L10n.tr("main.weekly_stats"))
-                .font(AppTypography.unbounded(16, weight: .medium))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 24)
         }
+        .padding(18)
+        .mainDashboardCard(cornerRadius: 28)
     }
 }
 

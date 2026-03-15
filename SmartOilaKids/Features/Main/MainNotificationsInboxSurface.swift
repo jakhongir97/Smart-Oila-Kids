@@ -12,16 +12,17 @@ struct NotificationsInboxSurface: View {
             let sidePadding = min(24, max(14, proxy.size.width * 0.05))
             let compact = proxy.size.height < 760
 
-            ZStack(alignment: .bottomTrailing) {
-                AppColors.white.ignoresSafeArea()
+            ZStack {
+                AppColors.surfacePurple.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(background: AppColors.white)
+                    ChildStatusBar(background: AppColors.surfacePurple)
 
                     ChildTitleBar(
                         title: L10n.tr("notifications.title"),
+                        titleColor: .white,
                         leading: {
-                            ChildTopBackButton {
+                            ChildTopBackButton(foreground: .white) {
                                 onBack()
                             }
                         },
@@ -32,7 +33,7 @@ struct NotificationsInboxSurface: View {
                             } label: {
                                 Text(L10n.tr("notifications.mark_all_read"))
                                     .font(AppTypography.unbounded(11, weight: .medium))
-                                    .foregroundStyle(AppColors.primaryPurple)
+                                    .foregroundStyle(.white)
                                     .lineLimit(1)
                             }
                             .buttonStyle(.plain)
@@ -41,7 +42,10 @@ struct NotificationsInboxSurface: View {
                         }
                     )
 
-                    ChildPurpleSurface {
+                    ZStack(alignment: .bottomTrailing) {
+                        AppColors.neutral800
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
                         Group {
                             if isLoading {
                                 ProgressView()
@@ -71,10 +75,12 @@ struct NotificationsInboxSurface: View {
                                 }
                             }
                         }
+                        ChildWatermarkOverlay(opacity: 0.45)
+                            .offset(x: 28, y: 34)
                     }
+                    .clipShape(TopRoundedShape(radius: 30))
+                    .ignoresSafeArea(edges: .bottom)
                 }
-
-                ChildWatermarkOverlay()
             }
         }
     }
@@ -99,7 +105,7 @@ struct NotificationsInboxSurface: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(displayTitle(for: item))
                     .font(AppTypography.unbounded(13, weight: isUnread ? .semibold : .medium))
-                    .foregroundStyle(AppColors.black)
+                    .foregroundStyle(.white)
                     .lineLimit(2)
 
                 Spacer(minLength: 6)
@@ -114,33 +120,34 @@ struct NotificationsInboxSurface: View {
                 if isInteractive {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(AppColors.textSecondary.opacity(0.75))
+                        .foregroundStyle(AppColors.neutral600.opacity(0.8))
                 }
 
                 Text(item.receivedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.textSecondary)
+                    .foregroundStyle(AppColors.neutral600)
                     .lineLimit(1)
             }
 
             if let body = item.body.trimmedNonEmpty {
                 Text(body)
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(AppColors.black.opacity(0.82))
+                    .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(3)
             }
 
-            if let dsn = item.dsn?.trimmedNonEmpty {
-                Text("DSN: \(dsn)")
-                    .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .lineLimit(1)
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(isUnread ? AppColors.white : AppColors.neutral100)
+        .background(isUnread ? AppColors.neutral800 : AppColors.neutral900)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    isUnread ? AppColors.primaryPurple.opacity(0.3) : AppColors.neutral700.opacity(0.7),
+                    lineWidth: 1
+                )
+        }
     }
 
     private func displayTitle(for item: PushInboxItem) -> String {

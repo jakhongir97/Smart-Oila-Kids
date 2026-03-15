@@ -31,7 +31,6 @@ final class MainDashboardService: MainDashboardServicing {
             calendar: calendar
         )
         self.cacheStore = MainDashboardCacheStore(userDefaults: userDefaults)
-        self.userDefaults = userDefaults
     }
 
     func fetchWeeklyUsageHours(dsn: String) async throws -> [Double] {
@@ -66,16 +65,12 @@ final class MainDashboardService: MainDashboardServicing {
             return normalizedRemoteName
         }
 
-        if let storedName = storedProfileName() {
-            return storedName
-        }
-
         let localDeviceName = await MainActor.run { UIDevice.current.name }
         if let localName = localDeviceName.trimmedNonEmpty {
             return localName
         }
 
-        return "iPhone"
+        return ProductFallbackText.localDeviceName()
     }
 
     func fetchDeviceStatus(dsn: String) async throws -> MainDeviceStatus {
@@ -84,23 +79,26 @@ final class MainDashboardService: MainDashboardServicing {
             throw NetworkError.unexpectedBody
         }
 
-        let localSnapshot = await MainActor.run {
-            localFallbackStatus()
-        }
-
         if let device = try? await remoteDataSource.resolveCurrentDevice(for: normalizedDSN, onDebug: debugLog) {
-            async let systemInfoTask = remoteDataSource.fetchSystemInfo(deviceID: device.id)
-            async let locationTask = remoteDataSource.fetchCurrentLocation(deviceID: device.id)
+            let systemInfo = await remoteDataSource.fetchSystemInfo(deviceID: device.id)
+            let location = await remoteDataSource.fetchCurrentLocation(deviceID: device.id)
+            let localSnapshot: MainDeviceStatus?
+            if device.name.trimmedNonEmpty == nil ||
+                systemInfo?.battery == nil ||
+                systemInfo?.soundMode?.trimmedNonEmpty == nil {
+                localSnapshot = await MainActor.run { localFallbackStatus() }
+            } else {
+                localSnapshot = nil
+            }
 
-            let systemInfo = await systemInfoTask
-            let location = await locationTask
-
-            let resolvedName = device.name.trimmedNonEmpty ?? localSnapshot.deviceName
+            let resolvedName = device.name.trimmedNonEmpty
+                ?? localSnapshot?.deviceName
+                ?? ProductFallbackText.localDeviceName()
             let status = MainDeviceStatus(
                 deviceName: resolvedName,
-                battery: systemInfo?.battery ?? localSnapshot.battery,
+                battery: systemInfo?.battery ?? localSnapshot?.battery,
                 connectionType: systemInfo?.connect?.trimmedNonEmpty,
-                soundMode: systemInfo?.soundMode?.trimmedNonEmpty ?? localSnapshot.soundMode,
+                soundMode: systemInfo?.soundMode?.trimmedNonEmpty ?? localSnapshot?.soundMode,
                 latitude: location?.latitude,
                 longitude: location?.longitude
             )
@@ -109,8 +107,9 @@ final class MainDashboardService: MainDashboardServicing {
         }
 
         if let cached = cacheStore.status(for: normalizedDSN) {
+            let localSnapshot = await MainActor.run { localFallbackStatus() }
             return MainDeviceStatus(
-                deviceName: storedProfileName() ?? localSnapshot.deviceName,
+                deviceName: cached.deviceName.trimmedNonEmpty ?? localSnapshot.deviceName,
                 battery: cached.battery ?? localSnapshot.battery,
                 connectionType: cached.connectionType?.trimmedNonEmpty,
                 soundMode: cached.soundMode?.trimmedNonEmpty ?? localSnapshot.soundMode,
@@ -119,12 +118,11 @@ final class MainDashboardService: MainDashboardServicing {
             )
         }
 
-        return localSnapshot
+        return await MainActor.run { localFallbackStatus() }
     }
 
     private let remoteDataSource: MainDashboardRemoteDataSource
     private let cacheStore: MainDashboardCacheStore
-    private let userDefaults: UserDefaults
 
     @MainActor
     private func localFallbackStatus() -> MainDeviceStatus {
@@ -141,9 +139,8 @@ final class MainDashboardService: MainDashboardServicing {
             ? "mute"
             : "normal"
 
-        let localName = storedProfileName()
-            ?? UIDevice.current.name.trimmedNonEmpty
-            ?? "iPhone"
+        let localName = UIDevice.current.name.trimmedNonEmpty
+            ?? ProductFallbackText.localDeviceName()
 
         return MainDeviceStatus(
             deviceName: localName,
@@ -159,9 +156,5 @@ final class MainDashboardService: MainDashboardServicing {
 #if DEBUG
         print("[MainDashboardService] \(message)")
 #endif
-    }
-
-    private func storedProfileName() -> String? {
-        userDefaults.string(forKey: SessionStore.profileNameDefaultsKey)?.trimmedNonEmpty
     }
 }

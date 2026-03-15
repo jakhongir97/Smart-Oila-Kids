@@ -17,7 +17,7 @@ extension AuthService {
         let normalizedScannedDeviceName = AuthInputNormalization.normalizeDeviceName(scannedDeviceName)
         let effectiveDeviceName = normalizedScannedDeviceName
             ?? AuthInputNormalization.normalizeDeviceName(deviceName)
-            ?? "iPhone"
+            ?? ProductFallbackText.localDeviceName()
 
         if let normalizedDSN {
             debugLog("Using pre-created DSN from QR payload: \(normalizedDSN)")

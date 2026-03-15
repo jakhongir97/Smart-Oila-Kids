@@ -1742,13 +1742,25 @@ final class MediaTelemetryInboxBridgeTests: XCTestCase {
 }
 
 final class PermissionRequirementTests: XCTestCase {
-    func testComputedKeysUseOrdinalSuffixes() {
-        for (index, requirement) in PermissionRequirement.allCases.enumerated() {
-            XCTAssertEqual(requirement.id, requirement.rawValue)
-            XCTAssertEqual(requirement.titleKey, "permissions.item_\(index + 1)")
-            XCTAssertEqual(requirement.detailBodyKey, "permissions.details.body_\(index + 1)")
-            XCTAssertEqual(requirement.detailStepKey, "permissions.details.step_\(index + 1)")
-        }
+    func testComputedKeysMatchCurrentPermissionCatalog() {
+        XCTAssertEqual(PermissionRequirement.onboardingCases, [.location])
+        XCTAssertEqual(
+            PermissionRequirement.settingsCases,
+            [.location, .usageStats, .notifications, .microphone, .camera]
+        )
+
+        XCTAssertEqual(PermissionRequirement.location.id, PermissionRequirement.location.rawValue)
+        XCTAssertEqual(PermissionRequirement.location.titleKey, "permissions.item_2")
+        XCTAssertEqual(PermissionRequirement.location.detailBodyKey, "permissions.details.body_2")
+        XCTAssertEqual(PermissionRequirement.location.detailStepKey, "permissions.details.step_2")
+
+        XCTAssertEqual(PermissionRequirement.usageStats.titleKey, "permissions.item_5")
+        XCTAssertEqual(PermissionRequirement.usageStats.detailBodyKey, "permissions.details.body_5")
+        XCTAssertEqual(PermissionRequirement.usageStats.detailStepKey, "permissions.details.step_5")
+
+        XCTAssertEqual(PermissionRequirement.notifications.titleKey, "permissions.item_7")
+        XCTAssertEqual(PermissionRequirement.microphone.titleKey, "permissions.item_4")
+        XCTAssertEqual(PermissionRequirement.camera.titleKey, "permissions.item_8")
     }
 }
 
@@ -1756,37 +1768,26 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
     func testIsInteractiveAndSatisfiedCoverEveryRequirement() {
         let satisfied = makePermissionSnapshot()
 
-        XCTAssertFalse(PermissionChecklistEvaluator.isInteractive(.displayOverApps, in: satisfied))
         XCTAssertFalse(PermissionChecklistEvaluator.isInteractive(.usageStats, in: makePermissionSnapshot(screenTime: .unavailable)))
         XCTAssertTrue(PermissionChecklistEvaluator.isInteractive(.usageStats, in: makePermissionSnapshot(screenTime: .denied)))
         XCTAssertTrue(PermissionChecklistEvaluator.isInteractive(.location, in: satisfied))
+        XCTAssertTrue(PermissionChecklistEvaluator.isInteractive(.notifications, in: satisfied))
+        XCTAssertTrue(PermissionChecklistEvaluator.isInteractive(.microphone, in: satisfied))
+        XCTAssertTrue(PermissionChecklistEvaluator.isInteractive(.camera, in: satisfied))
 
-        XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.displayOverApps, in: satisfied))
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.location, in: satisfied))
         XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.location, in: makePermissionSnapshot(location: .authorizedWhenInUse)))
-        XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.batteryOptimization, in: satisfied))
-        XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.batteryOptimization, in: makePermissionSnapshot(isLowPowerModeEnabled: true)))
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.microphone, in: satisfied))
         XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.microphone, in: makePermissionSnapshot(microphone: .denied)))
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.usageStats, in: satisfied))
         XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.usageStats, in: makePermissionSnapshot(screenTime: .denied)))
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.camera, in: satisfied))
         XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.camera, in: makePermissionSnapshot(camera: .denied)))
-        XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.backgroundTransfer, in: satisfied))
-        XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.backgroundTransfer, in: makePermissionSnapshot(backgroundRefresh: .denied)))
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.notifications, in: makePermissionSnapshot(notification: .provisional)))
         XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.notifications, in: makePermissionSnapshot(notification: .denied)))
     }
 
     func testStatusTextAndPrimaryActionTitleCoverPermissionStates() {
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.statusText(for: .displayOverApps, in: makePermissionSnapshot()),
-            L10n.tr("permissions.status_not_required_ios")
-        )
-        XCTAssertNil(
-            PermissionChecklistEvaluator.primaryActionTitle(for: .displayOverApps, in: makePermissionSnapshot())
-        )
-
         XCTAssertEqual(
             PermissionChecklistEvaluator.statusText(for: .usageStats, in: makePermissionSnapshot(screenTime: .granted)),
             L10n.tr("permissions.status_granted")
@@ -1837,22 +1838,6 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            PermissionChecklistEvaluator.statusText(for: .batteryOptimization, in: makePermissionSnapshot(isLowPowerModeEnabled: true)),
-            L10n.tr("permissions.status_low_power_disable")
-        )
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.primaryActionTitle(for: .batteryOptimization, in: makePermissionSnapshot(isLowPowerModeEnabled: true)),
-            L10n.tr("permissions.action_open_settings")
-        )
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.statusText(for: .batteryOptimization, in: makePermissionSnapshot(isLowPowerModeEnabled: false)),
-            L10n.tr("permissions.status_granted")
-        )
-        XCTAssertNil(
-            PermissionChecklistEvaluator.primaryActionTitle(for: .batteryOptimization, in: makePermissionSnapshot(isLowPowerModeEnabled: false))
-        )
-
-        XCTAssertEqual(
             PermissionChecklistEvaluator.statusText(for: .microphone, in: makePermissionSnapshot(microphone: .undetermined)),
             L10n.tr("permissions.status_tap_to_allow")
         )
@@ -1898,22 +1883,6 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
         )
         XCTAssertNil(
             PermissionChecklistEvaluator.primaryActionTitle(for: .camera, in: makePermissionSnapshot(camera: .authorized))
-        )
-
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.statusText(for: .backgroundTransfer, in: makePermissionSnapshot(backgroundRefresh: .denied)),
-            L10n.tr("permissions.status_open_settings")
-        )
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.primaryActionTitle(for: .backgroundTransfer, in: makePermissionSnapshot(backgroundRefresh: .denied)),
-            L10n.tr("permissions.action_open_settings")
-        )
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.statusText(for: .backgroundTransfer, in: makePermissionSnapshot(backgroundRefresh: .available)),
-            L10n.tr("permissions.status_granted")
-        )
-        XCTAssertNil(
-            PermissionChecklistEvaluator.primaryActionTitle(for: .backgroundTransfer, in: makePermissionSnapshot(backgroundRefresh: .available))
         )
 
         XCTAssertEqual(
@@ -3224,6 +3193,39 @@ final class SettingsCacheStoreTests: XCTestCase {
         userDefaults.set(Data("broken".utf8), forKey: "SETTINGS_CACHE_CONNECTED_DEVICES")
         XCTAssertTrue(store.loadConnectedDevices().isEmpty)
     }
+
+    func testConnectedDevicesResolveRelativeAvatarURLsFromLegacyCachePayload() throws {
+        let suiteName = "SettingsCacheStoreRelativeAvatarTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        struct CachedConnectedDevice: Codable {
+            let id: Int
+            let dsn: String?
+            let name: String
+            let avatarURL: String?
+        }
+
+        let payload = [
+            CachedConnectedDevice(
+                id: 7,
+                dsn: "child-7",
+                name: "Kid Seven",
+                avatarURL: "/uploads/settings/avatar 7.jpg"
+            )
+        ]
+        let data = try JSONEncoder().encode(payload)
+        userDefaults.set(data, forKey: "SETTINGS_CACHE_CONNECTED_DEVICES")
+
+        let store = SettingsCacheStore(userDefaults: userDefaults)
+        let loaded = store.loadConnectedDevices()
+
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(
+            loaded.first?.avatarURL?.absoluteString,
+            "https://backend.smart-oila.uz/uploads/settings/avatar%207.jpg"
+        )
+    }
 }
 
 final class ScreenTimeUsageSharedModelsTests: XCTestCase {
@@ -4208,8 +4210,64 @@ final class SettingsViewModelDeviceTests: XCTestCase {
         XCTAssertEqual(service.uploadCalls.map(\.0), [7])
         XCTAssertEqual(avatarURL?.absoluteString, "https://example.com/avatar-7.jpg")
         XCTAssertEqual(viewModel.connectedDevices.first?.avatarURL?.absoluteString, "https://example.com/avatar-7.jpg")
-        XCTAssertEqual(cacheStore.savedConnectedDevicesSnapshots.count, 2)
+        XCTAssertEqual(cacheStore.savedConnectedDevicesSnapshots.count, 3)
+        XCTAssertEqual(cacheStore.savedConnectedDevicesSnapshots.last?.first?.id, 7)
         XCTAssertFalse(viewModel.isUploadingAvatar)
+    }
+
+    func testUploadCurrentDeviceAvatarFallsBackToDSNUploadWhenDeviceUploadIsAuthScoped() async throws {
+        let current = ConnectedDevice(id: 8, dsn: "child-8", name: "Current Kid", avatarURL: nil)
+        let fallbackURL = try XCTUnwrap(URL(string: "https://backend.smart-oila.uz/uploads/devices/avatar-8.jpg"))
+        let service = SettingsServiceSpy(
+            uploadConnectedDeviceAvatarResult: .failure(NetworkError.server(statusCode: 403, body: "forbidden")),
+            uploadConnectedDeviceAvatarByDSNResult: .success(fallbackURL)
+        )
+        let cacheStore = SettingsCacheStoreSpy(cachedDevices: [current])
+        let viewModel = SettingsViewModel(service: service, cacheStore: cacheStore)
+        viewModel.setConnectedDevices([current])
+        viewModel.runtime.hasLoadedRemoteDeviceNames = true
+
+        let avatarURL = try await viewModel.uploadCurrentDeviceAvatar(
+            dsn: " child-8 ",
+            imageData: Data([0x05, 0x06, 0x07])
+        )
+
+        XCTAssertEqual(service.uploadCalls.map(\.0), [8])
+        XCTAssertEqual(service.uploadDSNCalls.map(\.0), ["child-8"])
+        XCTAssertEqual(avatarURL, fallbackURL)
+        XCTAssertEqual(viewModel.connectedDevices.first?.avatarURL, fallbackURL)
+        XCTAssertEqual(cacheStore.savedConnectedDevicesSnapshots.last?.first?.avatarURL, fallbackURL)
+        XCTAssertFalse(viewModel.isUploadingAvatar)
+    }
+
+    func testUploadCurrentDeviceAvatarResolvesRemoteDeviceWhenCacheOnlyHasSyntheticPlaceholder() async throws {
+        let placeholder = ConnectedDevice(id: -131, dsn: "child-18", name: "Current Device", avatarURL: nil)
+        let resolved = ConnectedDevice(id: 18, dsn: "child-18", name: "Resolved Kid", avatarURL: nil)
+        let uploaded = ConnectedDevice(
+            id: 18,
+            dsn: "child-18",
+            name: "Resolved Kid",
+            avatarURL: URL(string: "https://example.com/avatar-18.jpg")
+        )
+        let service = SettingsServiceSpy(
+            resolveConnectedDeviceResult: .success(resolved),
+            uploadConnectedDeviceAvatarResult: .success(uploaded)
+        )
+        let cacheStore = SettingsCacheStoreSpy(cachedDevices: [placeholder])
+        let viewModel = SettingsViewModel(service: service, cacheStore: cacheStore)
+        viewModel.setConnectedDevices([placeholder])
+        viewModel.runtime.hasLoadedRemoteDeviceNames = true
+
+        let avatarURL = try await viewModel.uploadCurrentDeviceAvatar(
+            dsn: " child-18 ",
+            imageData: Data([0x08, 0x09, 0x0A])
+        )
+
+        XCTAssertEqual(service.resolvedDSNs, ["child-18"])
+        XCTAssertEqual(service.uploadCalls.map(\.0), [18])
+        XCTAssertEqual(avatarURL?.absoluteString, "https://example.com/avatar-18.jpg")
+        XCTAssertEqual(viewModel.connectedDevices.first?.id, 18)
+        XCTAssertEqual(viewModel.connectedDevices.first?.avatarURL?.absoluteString, "https://example.com/avatar-18.jpg")
     }
 
     func testDeleteCurrentDeviceSessionRemovesCachedCurrentDeviceAndClearsProfile() async throws {
@@ -4229,6 +4287,25 @@ final class SettingsViewModelDeviceTests: XCTestCase {
         XCTAssertEqual(viewModel.connectedDevices.map(\.id), [10])
         XCTAssertNil(viewModel.remoteProfileName)
         XCTAssertNil(cacheStore.savedProfileNames.last!)
+    }
+
+    func testDeleteCurrentDeviceSessionResolvesRemoteDeviceWhenCacheOnlyHasSyntheticPlaceholder() async throws {
+        let placeholder = ConnectedDevice(id: -101, dsn: "child-15", name: "Current Device", avatarURL: nil)
+        let resolved = ConnectedDevice(id: 15, dsn: "child-15", name: "Current Kid", avatarURL: nil)
+        let service = SettingsServiceSpy(resolveConnectedDeviceResult: .success(resolved))
+        let cacheStore = SettingsCacheStoreSpy(cachedProfileName: "Current Kid", cachedDevices: [placeholder])
+        let viewModel = SettingsViewModel(service: service, cacheStore: cacheStore)
+        viewModel.setConnectedDevices([placeholder])
+        viewModel.setRemoteProfileName("Current Kid")
+        viewModel.runtime.currentDSN = "child-15"
+        viewModel.runtime.hasLoadedRemoteDeviceNames = true
+
+        try await viewModel.deleteCurrentDeviceSession(dsn: "child-15")
+
+        XCTAssertEqual(service.resolvedDSNs, ["child-15"])
+        XCTAssertEqual(service.deletedDeviceIDs, [15])
+        XCTAssertTrue(viewModel.connectedDevices.isEmpty)
+        XCTAssertNil(viewModel.remoteProfileName)
     }
 }
 
@@ -4274,6 +4351,28 @@ final class SettingsViewModelProfileTests: XCTestCase {
         XCTAssertEqual(service.renameCalls.first?.0, 12)
         XCTAssertEqual(viewModel.remoteProfileName, "Resolved Rename")
         XCTAssertEqual(viewModel.connectedDevices.first?.id, 12)
+        XCTAssertEqual(cacheStore.savedProfileNames.last!, "Resolved Rename")
+    }
+
+    func testSaveProfileNameIgnoresSyntheticPlaceholderAndResolvesRemoteDeviceBeforeRename() async throws {
+        let placeholder = ConnectedDevice(id: -121, dsn: "child-13", name: "Current Device", avatarURL: nil)
+        let resolved = ConnectedDevice(id: 13, dsn: "child-13", name: "Resolved", avatarURL: nil)
+        let updated = ConnectedDevice(id: 13, dsn: "child-13", name: "Resolved Rename", avatarURL: nil)
+        let service = SettingsServiceSpy(
+            resolveConnectedDeviceResult: .success(resolved),
+            renameConnectedDeviceResult: .success(updated)
+        )
+        let cacheStore = SettingsCacheStoreSpy(cachedDevices: [placeholder])
+        let viewModel = SettingsViewModel(service: service, cacheStore: cacheStore)
+        viewModel.setConnectedDevices([placeholder])
+        viewModel.runtime.hasLoadedRemoteDeviceNames = true
+
+        let name = try await viewModel.saveProfileName("Resolved Rename", currentDSN: "child-13")
+
+        XCTAssertEqual(name, "Resolved Rename")
+        XCTAssertEqual(service.resolvedDSNs, ["child-13"])
+        XCTAssertEqual(service.renameCalls.first?.0, 13)
+        XCTAssertEqual(viewModel.connectedDevices.first?.id, 13)
         XCTAssertEqual(cacheStore.savedProfileNames.last!, "Resolved Rename")
     }
 
@@ -4442,6 +4541,29 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(device.avatarURL?.absoluteString, "https://example.com/avatar-77.jpg")
     }
 
+    func testUploadConnectedDeviceAvatarByDSNParsesNestedRelativeAvatarURL() async throws {
+        let imageData = Data([0x10, 0x11, 0x12])
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/devices/child-77/upload-avatar")
+            let contentType = try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
+            XCTAssertTrue(contentType.hasPrefix("multipart/form-data; boundary="))
+            let body = try XCTUnwrap(TestHTTPURLProtocol.bodyData(for: request))
+            XCTAssertTrue(body.range(of: imageData) != nil)
+
+            let payload = #"{"device":{"avatar_url":"/uploads/devices/avatar 77.jpg"}}"#.data(using: .utf8)!
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), payload)
+        }
+
+        let service = makeSettingsServiceForTests(accessToken: "Bearer access")
+        let avatarURL = try await service.uploadConnectedDeviceAvatar(dsn: "child-77", imageData: imageData)
+
+        XCTAssertEqual(
+            avatarURL?.absoluteString,
+            "https://backend.smart-oila.uz/uploads/devices/avatar%2077.jpg"
+        )
+    }
+
     func testDeleteConnectedDeviceBuildsDeleteRequest() async throws {
         TestHTTPURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "DELETE")
@@ -4524,6 +4646,56 @@ final class PushInboxStoreMutationTests: XCTestCase {
         XCTAssertEqual(items.last?.title, "Title 6")
     }
 
+    func testAppendDeduplicatesMatchingHistoricalItemEvenWhenItIsNotLatest() async {
+        let suiteName = "PushInboxStoreNonLatestDedupTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let store = PushInboxStore(userDefaults: userDefaults)
+
+        await store.append(
+            title: "Started",
+            body: "Recording rec-1",
+            event: "media_stream_started",
+            dsn: "child-1",
+            isRead: false,
+            receivedAt: Date(timeIntervalSince1970: 100)
+        )
+        await store.append(
+            title: "Failed",
+            body: "Disconnected",
+            event: "media_stream_failed",
+            dsn: "child-1",
+            isRead: false,
+            receivedAt: Date(timeIntervalSince1970: 200)
+        )
+        await store.append(
+            title: "Completed",
+            body: "Done",
+            event: "media_recording_completed",
+            dsn: "child-1",
+            isRead: false,
+            receivedAt: Date(timeIntervalSince1970: 300)
+        )
+
+        await store.append(
+            title: "Started",
+            body: "Recording rec-1",
+            event: "media_stream_started",
+            dsn: "child-1",
+            isRead: false,
+            receivedAt: Date(timeIntervalSince1970: 100)
+        )
+
+        let items = await store.loadItems(dsn: "child-1")
+        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(items.map(\.event), [
+            "media_recording_completed",
+            "media_stream_failed",
+            "media_stream_started"
+        ])
+    }
+
     func testMarkAllReadMarksMatchingAndGlobalItemsOnly() async throws {
         let suiteName = "PushInboxStoreMarkAllReadTests.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
@@ -4601,6 +4773,7 @@ private final class SettingsServiceSpy: SettingsServicing {
     var updateProfileNameResult: Result<String, Error>
     var renameConnectedDeviceResult: Result<ConnectedDevice, Error>
     var uploadConnectedDeviceAvatarResult: Result<ConnectedDevice, Error>
+    var uploadConnectedDeviceAvatarByDSNResult: Result<URL?, Error>
     var deleteConnectedDeviceResult: Result<Void, Error>
     private(set) var fetchConnectedDevicesCalls = 0
     private(set) var fetchProfileNameCalls = 0
@@ -4608,6 +4781,7 @@ private final class SettingsServiceSpy: SettingsServicing {
     private(set) var updateProfileNames: [String] = []
     private(set) var renameCalls: [(Int, String)] = []
     private(set) var uploadCalls: [(Int, Int)] = []
+    private(set) var uploadDSNCalls: [(String, Int)] = []
     private(set) var deletedDeviceIDs: [Int] = []
 
     init(
@@ -4628,6 +4802,9 @@ private final class SettingsServiceSpy: SettingsServicing {
                 avatarURL: URL(string: "https://example.com/avatar.jpg")
             )
         ),
+        uploadConnectedDeviceAvatarByDSNResult: Result<URL?, Error> = .success(
+            URL(string: "https://example.com/avatar.jpg")
+        ),
         deleteConnectedDeviceResult: Result<Void, Error> = .success(())
     ) {
         self.fetchConnectedDevicesResults = fetchConnectedDevicesResults
@@ -4636,6 +4813,7 @@ private final class SettingsServiceSpy: SettingsServicing {
         self.updateProfileNameResult = updateProfileNameResult
         self.renameConnectedDeviceResult = renameConnectedDeviceResult
         self.uploadConnectedDeviceAvatarResult = uploadConnectedDeviceAvatarResult
+        self.uploadConnectedDeviceAvatarByDSNResult = uploadConnectedDeviceAvatarByDSNResult
         self.deleteConnectedDeviceResult = deleteConnectedDeviceResult
     }
 
@@ -4670,6 +4848,11 @@ private final class SettingsServiceSpy: SettingsServicing {
     func uploadConnectedDeviceAvatar(deviceID: Int, imageData: Data) async throws -> ConnectedDevice {
         uploadCalls.append((deviceID, imageData.count))
         return try uploadConnectedDeviceAvatarResult.get()
+    }
+
+    func uploadConnectedDeviceAvatar(dsn: String, imageData: Data) async throws -> URL? {
+        uploadDSNCalls.append((dsn, imageData.count))
+        return try uploadConnectedDeviceAvatarByDSNResult.get()
     }
 
     func deleteConnectedDevice(deviceID: Int) async throws {
@@ -4793,8 +4976,14 @@ private actor PushTokenServiceSpy: PushTokenServicing {
 }
 
 final class TestHTTPURLProtocol: URLProtocol {
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-    static private(set) var recordedRequests: [URLRequest] = []
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get { stateQueue.sync { _requestHandler } }
+        set { stateQueue.sync { _requestHandler = newValue } }
+    }
+
+    static var recordedRequests: [URLRequest] {
+        stateQueue.sync { _recordedRequests }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -4805,9 +4994,12 @@ final class TestHTTPURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        Self.recordedRequests.append(request)
+        let handler = Self.stateQueue.sync { () -> ((URLRequest) throws -> (HTTPURLResponse, Data))? in
+            Self._recordedRequests.append(request)
+            return Self._requestHandler
+        }
 
-        guard let handler = Self.requestHandler else {
+        guard let handler else {
             client?.urlProtocol(self, didFailWithError: NetworkError.invalidResponse)
             return
         }
@@ -4825,8 +5017,10 @@ final class TestHTTPURLProtocol: URLProtocol {
     override func stopLoading() {}
 
     static func reset() {
-        requestHandler = nil
-        recordedRequests = []
+        stateQueue.sync {
+            _requestHandler = nil
+            _recordedRequests = []
+        }
     }
 
     static func bodyData(for request: URLRequest) -> Data? {
@@ -4861,6 +5055,10 @@ final class TestHTTPURLProtocol: URLProtocol {
 
         return data
     }
+
+    private static let stateQueue = DispatchQueue(label: "TestHTTPURLProtocol.state")
+    private static var _requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    private static var _recordedRequests: [URLRequest] = []
 }
 
 struct SecureTokenStoreStub: SecureTokenStoring {
@@ -5704,7 +5902,7 @@ final class DeviceLockScheduleSupportTests: XCTestCase {
 
 final class AppRuntimeDefaultsTests: XCTestCase {
     func testDebugRuntimeDefaultsReflectUnsetEnvironment() {
-        XCTAssertFalse(AppRuntime.screenTimeFeaturesEnabled)
+        XCTAssertTrue(AppRuntime.screenTimeFeaturesEnabled)
         XCTAssertNil(AppRuntime.debugRoute)
         XCTAssertFalse(AppRuntime.hasDebugRoute)
         XCTAssertNil(AppRuntime.debugAuthStage)

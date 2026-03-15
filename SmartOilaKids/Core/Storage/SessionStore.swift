@@ -27,14 +27,15 @@ final class SessionStore: ObservableObject {
 
         secureTokens.migrateFromUserDefaults(userDefaults)
 
+        let resolvedLanguage = SessionStore.defaultLanguage(userDefaults: userDefaults)
+        L10n.setLanguage(resolvedLanguage.rawValue)
+
         dsn = userDefaults.string(forKey: Keys.dsn)?.trimmedNonEmpty
-        profileName = userDefaults.string(forKey: Keys.profileName) ?? "Пользователь"
+        profileName = userDefaults.string(forKey: Keys.profileName) ?? L10n.tr("common.user_default")
         apiAccessToken = secureTokens.accessToken()
         apiRefreshToken = secureTokens.refreshToken()
         appTheme = AppTheme(rawValue: userDefaults.string(forKey: Keys.appTheme) ?? "") ?? .system
-        appLanguage = SessionStore.defaultLanguage(userDefaults: userDefaults)
-
-        L10n.setLanguage(appLanguage.rawValue)
+        appLanguage = resolvedLanguage
 
 #if DEBUG
         SessionStore.debugThemeLog(

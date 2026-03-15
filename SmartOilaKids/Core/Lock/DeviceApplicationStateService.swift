@@ -68,7 +68,7 @@ struct DeviceApplicationStateFetchResult {
         let appName = record.name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty
-            ?? packageName
+            ?? ProductFallbackText.appName()
 
         return DeviceAppSelectionApplication(
             packageName: packageName,

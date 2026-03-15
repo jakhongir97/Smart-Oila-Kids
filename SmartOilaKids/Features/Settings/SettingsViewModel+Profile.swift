@@ -13,7 +13,7 @@ extension SettingsViewModel {
         if let normalizedCurrentDSN, !normalizedCurrentDSN.isEmpty {
             try? await ensureConnectedDevicesLoadedIfNeeded(required: false)
 
-            if let target = connectedDevice(matchingDSN: normalizedCurrentDSN) {
+            if let target = remoteConnectedDevice(matchingDSN: normalizedCurrentDSN) {
                 do {
                     let updated = try await dependencies.service.renameConnectedDevice(deviceID: target.id, name: name)
                     updateConnectedDeviceCache(with: updated)

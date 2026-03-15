@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct AuthStatusStageView: View {
+    private let referenceSize = CGSize(width: 412, height: 917)
+
     let title: String
     let subtitle: String
     let buttonTitle: String
@@ -10,22 +12,28 @@ struct AuthStatusStageView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let compact = proxy.size.height < 760
-            let horizontalPadding = min(24, max(16, proxy.size.width * 0.06))
-            let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
+            let scale = min(proxy.size.width / referenceSize.width, proxy.size.height / referenceSize.height)
+            let compact = scale < 0.9
+            let scaled = { (value: CGFloat) in value * scale }
+            let horizontalPadding = scaled(30)
+            let buttonHorizontalPadding = scaled(31)
+            let buttonBottomPadding = max(scaled(35), proxy.safeAreaInsets.bottom + 8)
+            let topSpacer = scaled(251)
+            let contentSpacer = scaled(265)
 
             VStack(spacing: 0) {
                 ChildStatusBar(background: AppColors.white)
 
-                Spacer(minLength: compact ? 26 : 52)
+                Spacer(minLength: topSpacer)
 
                 AuthBrandingView(compact: compact)
 
                 Text(title)
                     .font(AppTypography.unbounded(compact ? 18 : 20, weight: .semibold))
                     .foregroundStyle(AppColors.black)
-                    .padding(.top, compact ? 18 : 30)
+                    .padding(.top, scaled(30))
                     .multilineTextAlignment(.center)
+                    .frame(maxWidth: scaled(255))
                     .padding(.horizontal, horizontalPadding)
 
                 Text(subtitle)
@@ -33,10 +41,11 @@ struct AuthStatusStageView: View {
                     .foregroundStyle(AppColors.textSecondary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
+                    .frame(maxWidth: scaled(290))
                     .padding(.horizontal, horizontalPadding)
-                    .padding(.top, compact ? 8 : 10)
+                    .padding(.top, scaled(10))
 
-                Spacer(minLength: compact ? 14 : 24)
+                Spacer(minLength: contentSpacer)
 
                 ChildPrimaryButton(
                     title: buttonTitle,
@@ -44,8 +53,8 @@ struct AuthStatusStageView: View {
                     trailingArrow: trailingArrow,
                     action: action
                 )
-                .padding(.horizontal, 20)
-                .padding(.bottom, bottomInset)
+                .padding(.horizontal, buttonHorizontalPadding)
+                .padding(.bottom, buttonBottomPadding)
             }
         }
     }

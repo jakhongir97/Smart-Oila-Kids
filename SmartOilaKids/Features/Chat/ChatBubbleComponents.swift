@@ -4,24 +4,22 @@ struct ChatBubble: View {
     let message: Datum
     let preferredWidth: CGFloat?
 
+    private let incomingTextColor = Color(red: 42 / 255, green: 42 / 255, blue: 42 / 255)
+
     var isIncoming: Bool {
         message.userType == "parent"
     }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .bottom, spacing: 0) {
             if !isIncoming {
                 Spacer(minLength: 20)
             }
 
-            VStack(alignment: isIncoming ? .leading : .trailing, spacing: 4) {
+            VStack(alignment: isIncoming ? .leading : .trailing, spacing: isIncoming ? 6 : 0) {
                 bubbleContent
 
-                Text(shortTime(message.time))
-                    .font(AppTypography.unbounded(12, weight: .regular))
-                    .foregroundStyle(isIncoming ? AppColors.textSecondary : Color.white.opacity(0.5))
-                    .padding(.leading, isIncoming ? 4 : 0)
-                    .padding(.trailing, isIncoming ? 0 : 4)
+                timestamp
             }
 
             if isIncoming {
@@ -39,15 +37,25 @@ struct ChatBubble: View {
             if let text = message.text, !text.isEmpty {
                 Text(text)
                     .font(AppTypography.unbounded(12, weight: .regular))
-                    .foregroundStyle(isIncoming ? AppColors.black : AppColors.white)
+                    .foregroundStyle(isIncoming ? incomingTextColor : AppColors.white)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .frame(maxWidth: preferredWidth ?? (isIncoming ? 280 : 285), alignment: .center)
-        .background(isIncoming ? AppColors.neutral200 : AppColors.surfacePurple)
+        .background {
+            if isIncoming {
+                AppColors.neutral700
+            } else {
+                LinearGradient(
+                    colors: [AppColors.primaryPurple, AppColors.secondaryPurple],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
         .clipShape(
             AsymmetricRoundedBubble(
                 topLeft: 40,
@@ -56,6 +64,16 @@ struct ChatBubble: View {
                 bottomLeft: isIncoming ? 5 : 40
             )
         )
+    }
+
+    private var timestamp: some View {
+        Text(shortTime(message.time))
+            .font(AppTypography.unbounded(12, weight: .regular))
+            .foregroundStyle(isIncoming ? AppColors.textSecondary : Color.white.opacity(0.5))
+            .padding(.leading, isIncoming ? 4 : 0)
+            .padding(.trailing, isIncoming ? 0 : 10)
+            .padding(.top, isIncoming ? 0 : 2)
+            .offset(y: isIncoming ? 0 : -4)
     }
 
     private func shortTime(_ input: String) -> String {
@@ -87,7 +105,7 @@ private struct AttachmentBubbleImage: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 default:
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.white.opacity(0.2))
+                        .fill(Color.white.opacity(0.14))
                         .frame(width: 150, height: 120)
                         .overlay {
                             ProgressView()
@@ -96,7 +114,7 @@ private struct AttachmentBubbleImage: View {
             }
         } else {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.2))
+                .fill(Color.white.opacity(0.14))
                 .frame(width: 150, height: 120)
         }
     }

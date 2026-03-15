@@ -21,22 +21,30 @@ struct ChatView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let sidePadding = min(24, max(14, proxy.size.width * 0.05))
+            let sidePadding = min(30, max(20, proxy.size.width * 0.07))
             let compact = proxy.size.height < 760
 
-            ZStack(alignment: .bottomTrailing) {
-                AppColors.white.ignoresSafeArea()
+            ZStack {
+                AppColors.surfacePurple.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(background: AppColors.white)
+                    ChildStatusBar(background: AppColors.surfacePurple)
 
                     ChildTitleBar(
                         title: L10n.tr("chat.parents_title"),
-                        leading: { ChildTopBackButton { dismiss() } },
+                        titleColor: .white,
+                        bottomPadding: compact ? 18 : 24,
+                        leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
                         trailing: { Color.clear }
                     )
 
-                    ChildPurpleSurface {
+                    Color.clear
+                        .frame(height: compact ? 12 : 16)
+
+                    ZStack(alignment: .bottomTrailing) {
+                        AppColors.neutral800
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
                         ChatParentListView(
                             rows: parentRows,
                             sidePadding: sidePadding,
@@ -49,11 +57,14 @@ struct ChatView: View {
                                 await viewModel.refreshLatest()
                             }
                         )
-                        .padding(.bottom, max(0, proxy.safeAreaInsets.bottom - 10))
-                    }
-                }
+                        .padding(.bottom, max(16, proxy.safeAreaInsets.bottom + 4))
 
-                ChildWatermarkOverlay()
+                        ChildWatermarkOverlay(opacity: 0.5)
+                            .offset(x: 28, y: 34)
+                    }
+                    .clipShape(TopRoundedShape(radius: 30))
+                    .ignoresSafeArea(edges: .bottom)
+                }
             }
         }
         .navigationBarBackButtonHidden(true)

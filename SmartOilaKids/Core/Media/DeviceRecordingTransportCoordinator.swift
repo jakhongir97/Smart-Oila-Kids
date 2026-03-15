@@ -167,7 +167,7 @@ actor DeviceRecordingTransportCoordinator {
                 dsn: normalizedDSN,
                 mediaType: telemetryType(for: type),
                 recordingID: recordingID,
-                reason: error.localizedDescription,
+                reason: NetworkError.userMessage(for: error),
                 cooldown: 10
             )
             updateDiagnostics(

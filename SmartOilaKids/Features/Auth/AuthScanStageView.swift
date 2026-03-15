@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct AuthScanStageView: View {
+    private let referenceSize = CGSize(width: 412, height: 917)
+
     let title: String
     let missionText: String
     let hintText: String
@@ -11,9 +13,14 @@ struct AuthScanStageView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let compact = proxy.size.height < 760
-            let horizontalPadding = min(24, max(16, proxy.size.width * 0.06))
-            let bottomInset = max(16, proxy.safeAreaInsets.bottom + 8)
+            let scale = min(proxy.size.width / referenceSize.width, proxy.size.height / referenceSize.height)
+            let compact = scale < 0.9
+            let scaled = { (value: CGFloat) in value * scale }
+            let horizontalPadding = scaled(30)
+            let buttonHorizontalPadding = scaled(31)
+            let buttonBottomPadding = max(scaled(35), proxy.safeAreaInsets.bottom + 8)
+            let topSpacer = scaled(222)
+            let contentSpacer = inviteAttribution == nil ? scaled(200) : scaled(36)
 
             VStack(spacing: 0) {
                 ChildStatusBar(background: AppColors.white)
@@ -22,18 +29,19 @@ struct AuthScanStageView: View {
                     Spacer()
                     AuthLanguageBadge()
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, compact ? 6 : 11)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.top, scaled(11))
 
-                Spacer(minLength: compact ? 18 : 32)
+                Spacer(minLength: topSpacer)
 
                 AuthBrandingView(compact: compact)
 
                 Text(title)
                     .font(AppTypography.unbounded(compact ? 18 : 20, weight: .semibold))
                     .foregroundStyle(AppColors.black)
-                    .padding(.top, compact ? 18 : 30)
+                    .padding(.top, scaled(30))
                     .multilineTextAlignment(.center)
+                    .frame(maxWidth: scaled(255))
                     .padding(.horizontal, horizontalPadding)
 
                 Text(missionText)
@@ -41,22 +49,24 @@ struct AuthScanStageView: View {
                     .foregroundStyle(AppColors.black)
                     .multilineTextAlignment(.center)
                     .lineSpacing(2)
+                    .frame(maxWidth: scaled(335))
                     .padding(.horizontal, horizontalPadding)
-                    .padding(.top, compact ? 8 : 10)
+                    .padding(.top, scaled(10))
 
                 if let inviteAttribution {
                     AuthInviteContextCard(context: inviteAttribution)
                         .padding(.horizontal, horizontalPadding)
-                        .padding(.top, compact ? 10 : 12)
+                        .padding(.top, scaled(12))
                 }
 
-                Spacer(minLength: compact ? 14 : 24)
+                Spacer(minLength: contentSpacer)
 
-                VStack(spacing: 12) {
+                VStack(spacing: scaled(15)) {
                     Text(hintText)
                         .font(AppTypography.unbounded(14, weight: .regular))
                         .foregroundStyle(AppColors.black)
                         .multilineTextAlignment(.center)
+                        .frame(maxWidth: scaled(216))
 
                     ChildPrimaryButton(
                         title: buttonTitle,
@@ -65,9 +75,9 @@ struct AuthScanStageView: View {
                         disabled: isLoading,
                         action: onOpenScanner
                     )
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, buttonHorizontalPadding)
                 }
-                .padding(.bottom, bottomInset)
+                .padding(.bottom, buttonBottomPadding)
             }
         }
     }

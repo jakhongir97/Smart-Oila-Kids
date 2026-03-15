@@ -15,23 +15,26 @@ struct TaskView: View {
             let bottomInset: CGFloat = 16
 
             ZStack(alignment: .bottomTrailing) {
-                AppColors.white.ignoresSafeArea()
+                AppColors.primaryPurple.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(background: AppColors.white)
+                    ChildStatusBar(background: AppColors.primaryPurple)
 
                     ChildTitleBar(
                         title: L10n.tr("tasks.title"),
-                        leading: { ChildTopBackButton { dismiss() } },
+                        titleColor: .white,
+                        leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
                         trailing: { Color.clear }
                     )
 
-                    ChildPurpleSurface {
+                    VStack(spacing: 0) {
                         taskSurface(compact: compact, sidePadding: sidePadding, bottomInset: bottomInset)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .background(AppColors.neutral800)
+                    .clipShape(TopRoundedShape(radius: 30))
+                    .ignoresSafeArea(edges: .bottom)
                 }
-
-                ChildWatermarkOverlay()
             }
         }
         .navigationBarBackButtonHidden(true)

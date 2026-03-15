@@ -13,31 +13,26 @@ struct MainAdInfoCard: View {
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 30, style: .continuous)
-            .fill(AppColors.neutral200)
-            .frame(maxWidth: .infinity)
-            .aspectRatio(1.7, contentMode: .fit)
-            .frame(maxHeight: 240)
-            .overlay(alignment: .leading) {
-                if hasStatusData {
-                    liveStatusContent
-                        .padding(.horizontal, 22)
-                } else {
-                    Text(L10n.tr("main.ad_info"))
-                        .font(AppTypography.unbounded(15.6, weight: .medium))
-                        .foregroundStyle(AppColors.black)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                        .frame(maxWidth: .infinity)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            if hasStatusData {
+                liveStatusContent
+                    .padding(.horizontal, 22)
+            } else {
+                emptyStateContent
+                    .padding(.horizontal, 22)
             }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1.7, contentMode: .fit)
+        .frame(maxHeight: 240)
+        .mainDashboardCard(cornerRadius: 30)
     }
 
     private var liveStatusContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.tr("main.device_live_status"))
                 .font(AppTypography.unbounded(13, weight: .semibold))
-                .foregroundStyle(AppColors.black)
+                .foregroundStyle(.white)
                 .lineLimit(1)
 
             if let deviceName = status?.deviceName.trimmedNonEmpty {
@@ -81,16 +76,33 @@ struct MainAdInfoCard: View {
         .padding(.vertical, 14)
     }
 
+    private var emptyStateContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.tr("main.device_live_status"))
+                .font(AppTypography.unbounded(13, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            Text(L10n.tr("main.device_status_waiting"))
+                .font(AppTypography.unbounded(11, weight: .medium))
+                .foregroundStyle(AppColors.neutral600)
+                .multilineTextAlignment(.leading)
+                .lineLimit(3)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.vertical, 14)
+    }
+
     private func statusRow(iconSystemName: String, text: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: iconSystemName)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AppColors.black.opacity(0.78))
+                .foregroundStyle(AppColors.neutral600)
                 .frame(width: 16, alignment: .leading)
 
             Text(text)
                 .font(AppTypography.unbounded(11, weight: .medium))
-                .foregroundStyle(AppColors.black.opacity(0.86))
+                .foregroundStyle(.white)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
         }

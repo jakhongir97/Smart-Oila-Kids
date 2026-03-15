@@ -8,27 +8,28 @@ struct ChatThreadView: View {
     let title: String
 
     @State private var showAttachmentPicker = false
-    @State private var showTemplatesSheet = false
     @State private var isLoadingAttachments = false
     @FocusState private var isComposerFocused: Bool
 
     var body: some View {
         GeometryReader { proxy in
-            let sidePadding = min(24, max(14, proxy.size.width * 0.05))
+            let sidePadding = min(30, max(20, proxy.size.width * 0.07))
+            let compact = proxy.size.height < 760
             let bottomInset = isComposerFocused ? 0 : max(8, proxy.safeAreaInsets.bottom)
 
             ZStack(alignment: .bottomTrailing) {
-                AppColors.white.ignoresSafeArea()
+                AppColors.neutral800.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(background: AppColors.white)
+                    ChildStatusBar(background: AppColors.neutral800)
 
-                    ChildTitleBar(
+                    ChatThreadHeader(
                         title: title,
-                        bottomPadding: 10,
-                        leading: { ChildTopBackButton { dismiss() } },
-                        trailing: { Color.clear }
-                    )
+                        sidePadding: sidePadding,
+                        compact: compact
+                    ) {
+                        dismiss()
+                    }
 
                     ChatThreadMessagesListView(
                         canLoadMore: viewModel.canLoadMore,
@@ -36,6 +37,7 @@ struct ChatThreadView: View {
                         messageCount: flatMessages.count,
                         displayMessages: displayMessages,
                         sidePadding: sidePadding,
+                        compact: compact,
                         onLoadOlder: {
                             Task {
                                 await viewModel.loadOlder()
@@ -55,14 +57,12 @@ struct ChatThreadView: View {
                         isSending: viewModel.isSending,
                         bottomInset: bottomInset,
                         sidePadding: sidePadding,
+                        compact: compact,
                         focus: $isComposerFocused,
                         onRetryQueued: {
                             Task {
                                 await viewModel.retryQueuedMessages()
                             }
-                        },
-                        onOpenTemplates: {
-                            showTemplatesSheet = true
                         },
                         onSend: {
                             sendCurrentMessage()
@@ -70,8 +70,10 @@ struct ChatThreadView: View {
                     )
                 }
 
-                ChildWatermarkOverlay()
+                ChildWatermarkOverlay(size: compact ? 176 : 200, opacity: 0.5)
+                    .offset(x: 36, y: compact ? 56 : 70)
             }
+            .clipped()
         }
         .navigationBarBackButtonHidden(true)
         .onAppear {
@@ -84,17 +86,6 @@ struct ChatThreadView: View {
                     await loadSelectedAttachments(from: images)
                 }
             }
-        }
-        .sheet(isPresented: $showTemplatesSheet) {
-            ChatTemplatesSheet(
-                onClose: {
-                    showTemplatesSheet = false
-                },
-                onSendTemplate: { template in
-                    await sendTemplateFromSheet(template)
-                }
-            )
-            .appMediumLargeSheetPresentation()
         }
         .onDisappear {
             viewModel.setThreadActive(false)
@@ -145,16 +136,33 @@ struct ChatThreadView: View {
             }
         }
     }
-    
-    private func sendTemplateFromSheet(_ template: String) async -> Bool {
-        let sent = await viewModel.sendTemplate(template)
-        if sent {
-            AppHaptics.success()
-            isComposerFocused = false
-            showTemplatesSheet = false
-        } else {
-            AppHaptics.warning()
+}
+
+private struct ChatThreadHeader: View {
+    let title: String
+    let sidePadding: CGFloat
+    let compact: Bool
+    let onBack: () -> Void
+
+    var body: some View {
+        HStack {
+            ChildTopBackButton(foreground: .white, action: onBack)
+
+            Spacer(minLength: 12)
+
+            Text(title)
+                .font(AppTypography.unbounded(20, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Spacer(minLength: 12)
+
+            Color.clear
+                .frame(width: 30, height: 30)
         }
-        return sent
+        .padding(.horizontal, sidePadding)
+        .padding(.top, compact ? 12 : 16)
+        .padding(.bottom, compact ? 16 : 22)
     }
 }

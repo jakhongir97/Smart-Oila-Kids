@@ -1,6 +1,110 @@
 import SwiftUI
 import UIKit
 
+struct SettingsPanelChrome<Trailing: View, Content: View>: View {
+    let title: String
+    let onClose: () -> Void
+    @ViewBuilder let trailing: () -> Trailing
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        GeometryReader { proxy in
+            let compact = proxy.size.height < 760
+
+            ZStack {
+                AppColors.primaryPurple.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    ChildStatusBar(background: AppColors.primaryPurple)
+
+                    ChildTitleBar(
+                        title: title,
+                        titleColor: .white,
+                        bottomPadding: compact ? 18 : 24,
+                        leading: { ChildTopBackButton(foreground: .white) { onClose() } },
+                        trailing: trailing
+                    )
+
+                    Color.clear
+                        .frame(height: compact ? 12 : 16)
+
+                    ZStack(alignment: .bottomTrailing) {
+                        AppColors.neutral800
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        content()
+                            .padding(.bottom, max(16, proxy.safeAreaInsets.bottom + 4))
+
+                        ChildWatermarkOverlay(opacity: 0.5)
+                            .offset(x: 28, y: 34)
+                    }
+                    .clipShape(TopRoundedShape(radius: 30))
+                    .ignoresSafeArea(edges: .bottom)
+                }
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+    }
+}
+
+struct SettingsPanelIconButton: View {
+    let systemName: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            AppHaptics.tap()
+            action()
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct SettingsPanelCardModifier: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(AppColors.neutral900)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
+            }
+    }
+}
+
+private struct SettingsPanelFieldModifier: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(AppColors.neutral900)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
+            }
+    }
+}
+
+extension View {
+    func settingsPanelCard(cornerRadius: CGFloat = 20) -> some View {
+        modifier(SettingsPanelCardModifier(cornerRadius: cornerRadius))
+    }
+
+    func settingsPanelField(cornerRadius: CGFloat = 18) -> some View {
+        modifier(SettingsPanelFieldModifier(cornerRadius: cornerRadius))
+    }
+}
+
 struct SettingsAvatarSection: View {
     let imageURL: URL?
     let localImage: UIImage?
@@ -14,12 +118,16 @@ struct SettingsAvatarSection: View {
         } label: {
             ZStack(alignment: .bottomTrailing) {
                 Circle()
-                    .fill(AppColors.white)
+                    .fill(AppColors.neutral900)
                     .frame(width: 100, height: 100)
                     .overlay {
                         avatarContent
                     }
                     .clipShape(Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
+                    }
 
                 Circle()
                     .fill(AppColors.secondaryPurple)
@@ -101,7 +209,7 @@ struct SettingsDeviceCard: View {
     var body: some View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .stroke(AppColors.primaryPurple, lineWidth: 2)
+                .fill(AppColors.neutral900)
                 .frame(width: 50, height: 50)
                 .overlay {
                     avatarGlyph
@@ -109,7 +217,7 @@ struct SettingsDeviceCard: View {
 
             Text(name)
                 .font(AppTypography.unbounded(16, weight: .medium))
-                .foregroundStyle(AppColors.black)
+                .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(0.75)
 
@@ -119,15 +227,22 @@ struct SettingsDeviceCard: View {
                 AppHaptics.tap()
                 onEdit()
             } label: {
-                if UIImage(named: "IconPencil") != nil {
-                    Image("IconPencil")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 25, height: 25)
-                } else {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(AppColors.black)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(AppColors.neutral900)
+                        .frame(width: 40, height: 40)
+
+                    if UIImage(named: "IconPencil") != nil {
+                        Image("IconPencil")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
+                            .foregroundStyle(.white)
+                    } else {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -135,11 +250,11 @@ struct SettingsDeviceCard: View {
         }
         .padding(.horizontal, 15)
         .frame(height: 70)
-        .background(AppColors.white)
+        .background(AppColors.neutral900)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(AppColors.primaryPurple, lineWidth: 3)
+                .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
         }
     }
 

@@ -30,15 +30,6 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshLockState)) { notification in
             handleLockRefreshNotification(notification)
         }
-        .overlay(alignment: .bottomLeading) {
-#if DEBUG
-            if shouldShowGeoDebugOverlay {
-                GeoDebugOverlay(service: geoBackgroundService)
-                    .padding(.bottom, 12)
-                    .padding(.leading, 8)
-            }
-#endif
-        }
         .overlay {
             if shouldShowDeviceLockOverlay {
                 DeviceLockOverlay(
@@ -58,12 +49,6 @@ struct RootView: View {
 }
 
 private extension RootView {
-    var shouldShowGeoDebugOverlay: Bool {
-        sessionStore.dsn != nil &&
-            AppRuntime.debugRoute == nil &&
-            AppRuntime.showGeoDebugOverlay
-    }
-
     var shouldShowDeviceLockOverlay: Bool {
         lockCoordinator.state.isLocked && AppRuntime.debugRoute == nil
     }

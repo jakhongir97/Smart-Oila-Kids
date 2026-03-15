@@ -637,11 +637,12 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 dsn: dsn,
                 defaultMediaType: .audioStream
             )
+            let userMessage = NetworkError.userMessage(for: error)
             recordMediaTelemetry(
                 .streamFailed,
                 dsn: dsn,
                 mediaType: .audioStream,
-                reason: error.localizedDescription,
+                reason: userMessage,
                 cooldown: 10
             )
             updateAudioStreamDiagnostics(
@@ -793,11 +794,12 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 dsn: dsn,
                 defaultMediaType: telemetryType(for: streamType)
             )
+            let userMessage = NetworkError.userMessage(for: error)
             recordMediaTelemetry(
                 .streamFailed,
                 dsn: dsn,
                 mediaType: telemetryType(for: streamType),
-                reason: error.localizedDescription,
+                reason: userMessage,
                 cooldown: 10
             )
             updateVideoStreamDiagnostics(
@@ -1083,12 +1085,13 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 defaultMediaType: mediaType,
                 recordingID: recordingID
             )
+            let userMessage = NetworkError.userMessage(for: error)
             recordMediaTelemetry(
                 .recordingFailed,
                 dsn: dsn,
                 mediaType: mediaType,
                 recordingID: recordingID,
-                reason: error.localizedDescription,
+                reason: userMessage,
                 cooldown: 10
             )
             updateRecordingDiagnostics(
@@ -1099,7 +1102,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 phase: "failed",
                 lastError: error.localizedDescription
             )
-            await cancelTransportAction(recordingID, dsn, type, error.localizedDescription)
+            await cancelTransportAction(recordingID, dsn, type, userMessage)
         }
 
         clearActiveRecordingStateIfNeeded(recordingID: recordingID, type: type)

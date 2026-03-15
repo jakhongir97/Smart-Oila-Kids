@@ -13,6 +13,13 @@ extension SettingsViewModel {
         }
     }
 
+    func remoteConnectedDevice(matchingDSN dsn: String) -> ConnectedDevice? {
+        guard let device = connectedDevice(matchingDSN: dsn), device.id > 0 else {
+            return nil
+        }
+        return device
+    }
+
     func isCurrentDevice(_ device: ConnectedDevice) -> Bool {
         guard let currentDSN = normalizedDSN(runtime.currentDSN),
               let deviceDSN = normalizedDSN(device.dsn) else {
@@ -66,7 +73,7 @@ extension SettingsViewModel {
             ?? remoteProfileName?.trimmedNonEmpty
             ?? dependencies.cacheStore.loadProfileName()
             ?? connectedDevice(matchingDSN: normalized)?.name
-            ?? "Current Device"
+            ?? currentDeviceFallbackName()
 
         let current = connectedDevice(matchingDSN: normalized)
         let updated = ConnectedDevice(
@@ -83,7 +90,8 @@ extension SettingsViewModel {
 
     @discardableResult
     func persistLocalCurrentDeviceName(_ name: String, dsn: String?) -> String {
-        let resolvedName = name.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty ?? "Current Device"
+        let resolvedName = name.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
+            ?? currentDeviceFallbackName()
         setRemoteProfileName(resolvedName)
         dependencies.cacheStore.saveProfileName(resolvedName)
 
@@ -109,7 +117,7 @@ extension SettingsViewModel {
             ?? preferredName?.trimmedNonEmpty
             ?? remoteProfileName?.trimmedNonEmpty
             ?? dependencies.cacheStore.loadProfileName()
-            ?? "Current Device"
+            ?? currentDeviceFallbackName()
 
         updateConnectedDeviceCache(
             with: ConnectedDevice(
@@ -138,6 +146,10 @@ extension SettingsViewModel {
             (partialResult &* 31) &+ Int(scalar.value)
         }
         return -max(1, checksum)
+    }
+
+    func currentDeviceFallbackName() -> String {
+        L10n.tr("settings.current_device")
     }
 }
 

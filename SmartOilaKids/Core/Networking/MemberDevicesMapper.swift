@@ -12,8 +12,7 @@ struct MemberDevicesMapper {
             guard visited.insert(id).inserted else { return nil }
             let resolvedDSN = item.resolvedDSN?.trimmedNonEmpty
             let name = item.resolvedName?.trimmedNonEmpty
-                ?? resolvedDSN
-                ?? "Device \(id)"
+                ?? ProductFallbackText.connectedDeviceName()
             return MemberDeviceRecord(
                 id: id,
                 dsn: resolvedDSN,

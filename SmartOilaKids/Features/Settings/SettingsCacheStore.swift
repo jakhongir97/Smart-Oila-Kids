@@ -37,7 +37,7 @@ final class SettingsCacheStore: SettingsCacheStoring {
                 id: $0.id,
                 dsn: $0.dsn,
                 name: $0.name,
-                avatarURL: $0.avatarURL.flatMap(URL.init(string:))
+                avatarURL: RemoteAssetURLResolver.resolveURL($0.avatarURL)
             )
         }
     }

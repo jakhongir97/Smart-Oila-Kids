@@ -62,7 +62,7 @@
 		<string>remote-notification</string>
 	</array>
 	<key>SMARTOILA_SCREEN_TIME_FEATURES_ENABLED</key>
-	<false/>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiresFullScreen</key>

@@ -103,9 +103,9 @@ final class DeviceAppLockSelectionStore: ObservableObject {
                     return nil
                 }
 
-                let appName = application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? application.bundleIdentifier
-                    ?? packageName
+                let appName = resolvedApplicationName(
+                    localizedDisplayName: application.localizedDisplayName
+                )
 
                 return DeviceAppSelectionApplication(
                     packageName: packageName,
@@ -177,9 +177,9 @@ final class DeviceAppLockSelectionStore: ObservableObject {
     func selectionSummary() -> DeviceAppLockSelectionSummary {
         let sortedNames = selection.applications
             .map { application in
-                application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? application.bundleIdentifier
-                    ?? "Unknown App"
+                resolvedApplicationName(
+                    localizedDisplayName: application.localizedDisplayName
+                )
             }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
 
@@ -189,9 +189,9 @@ final class DeviceAppLockSelectionStore: ObservableObject {
                 return nil
             }
 
-            return application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                ?? application.bundleIdentifier
-                ?? bundleIdentifier
+            return resolvedApplicationName(
+                localizedDisplayName: application.localizedDisplayName
+            )
         }
         .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
 
@@ -212,9 +212,9 @@ final class DeviceAppLockSelectionStore: ObservableObject {
                     return nil
                 }
 
-                let appName = application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? application.bundleIdentifier
-                    ?? bundleIdentifier
+                let appName = resolvedApplicationName(
+                    localizedDisplayName: application.localizedDisplayName
+                )
 
                 return DeviceAppLockSyncEntry(
                     packageName: bundleIdentifier,
@@ -247,6 +247,12 @@ final class DeviceAppLockSelectionStore: ObservableObject {
             Task { @MainActor [weak self] in
                 self?.handleUsageSnapshotDidChange(notification)
             }
+        }
+    }
+
+    deinit {
+        if let snapshotObserver {
+            NotificationCenter.default.removeObserver(snapshotObserver)
         }
     }
 
@@ -348,6 +354,13 @@ private extension DeviceAppLockSelectionStore {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .nilIfEmpty
+    }
+
+    func resolvedApplicationName(localizedDisplayName: String?) -> String {
+        localizedDisplayName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+            ?? ProductFallbackText.appName()
     }
 }
 

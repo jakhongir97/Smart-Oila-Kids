@@ -28,6 +28,10 @@ enum AppColors {
     static let neutral200 = dynamic(rgb(226, 226, 226), rgb(47, 47, 53))
     static let neutral300 = dynamic(rgb(217, 217, 217), rgb(59, 59, 67))
     static let neutral500 = dynamic(rgb(0, 0, 0, 0.3), rgb(255, 255, 255, 0.28))
+    static let neutral600 = dynamic(rgb(199, 199, 199), rgb(199, 199, 199))
+    static let neutral700 = dynamic(rgb(134, 134, 134), rgb(134, 134, 134))
+    static let neutral800 = dynamic(rgb(79, 79, 79), rgb(79, 79, 79))
+    static let neutral900 = dynamic(rgb(66, 66, 66), rgb(66, 66, 66))
 
     static let textPrimary = dynamic(rgb(18, 18, 18), rgb(242, 242, 247))
     static let textSecondary = dynamic(rgb(0, 0, 0, 0.3), rgb(255, 255, 255, 0.55))

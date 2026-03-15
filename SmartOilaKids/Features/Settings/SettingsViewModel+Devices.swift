@@ -65,7 +65,7 @@ extension SettingsViewModel {
         )
 
         let target: ConnectedDevice?
-        if let cached = connectedDevice(matchingDSN: normalized) {
+        if let cached = remoteConnectedDevice(matchingDSN: normalized) {
             target = cached
 #if DEBUG
             SettingsAvatarUploadViewModelDebugLogger.log(
@@ -181,7 +181,7 @@ extension SettingsViewModel {
         try await ensureConnectedDevicesLoadedIfNeeded(required: true)
 
         let target: ConnectedDevice
-        if let cached = connectedDevice(matchingDSN: normalized) {
+        if let cached = remoteConnectedDevice(matchingDSN: normalized) {
             target = cached
         } else if let resolved = try? await dependencies.service.resolveConnectedDevice(dsn: normalized) {
             target = resolved
@@ -223,7 +223,7 @@ private extension SettingsViewModel {
         let resolvedName = resolvedTarget?.name ??
             remoteProfileName ??
             dependencies.cacheStore.loadProfileName() ??
-            "Current Device"
+            currentDeviceFallbackName()
 
         return ConnectedDevice(
             id: resolvedTarget?.id ?? syntheticConnectedDeviceID(forDSN: dsn),

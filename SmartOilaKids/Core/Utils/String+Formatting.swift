@@ -183,7 +183,7 @@ enum RemoteAssetURLResolver {
             return resolved.absoluteString
         }
 
-        if let resolved = relativeURL(from: rawValue, baseURL: AppConfig.apiBaseURL) {
+        if let resolved = relativeURL(from: rawValue, baseURL: apiDirectoryBaseURL()) {
             return resolved.absoluteString
         }
 
@@ -197,6 +197,18 @@ enum RemoteAssetURLResolver {
 }
 
 private extension RemoteAssetURLResolver {
+    static func apiDirectoryBaseURL() -> URL {
+        guard var components = URLComponents(url: AppConfig.apiBaseURL, resolvingAgainstBaseURL: false) else {
+            return AppConfig.apiBaseURL
+        }
+
+        if !components.path.hasSuffix("/") {
+            components.path += "/"
+        }
+
+        return components.url ?? AppConfig.apiBaseURL
+    }
+
     static func absoluteURL(from rawValue: String) -> URL? {
         if let candidate = URL(string: rawValue),
            candidate.scheme != nil {

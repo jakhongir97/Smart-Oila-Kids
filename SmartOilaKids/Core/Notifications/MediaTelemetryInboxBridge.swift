@@ -97,11 +97,38 @@ private extension MediaTelemetryInboxBridge {
             return reason
         }
 
-        if let recordingID = event.recordingID?.trimmedNonEmpty {
-            return L10n.tr("notifications.media.recording_id_body", recordingID)
+        if let eventBody = localizedEventBody(for: event.event) {
+            return eventBody
         }
 
         return L10n.tr("notifications.media.default_body")
+    }
+
+    func localizedEventBody(for event: MediaTelemetryEvent) -> String? {
+        switch event {
+        case .recordingStarted:
+            return L10n.tr("notifications.media.recording_started_body")
+        case .recordingCompleted:
+            return L10n.tr("notifications.media.recording_completed_body")
+        case .recordingUploadQueued:
+            return L10n.tr("notifications.media.recording_upload_queued_body")
+        case .recordingDiscarded:
+            return L10n.tr("notifications.media.recording_discarded_body")
+        case .recordingFailed:
+            return L10n.tr("notifications.media.recording_failed_body")
+        case .recordingCancelled:
+            return L10n.tr("notifications.media.recording_cancelled_body")
+        case .streamStarted:
+            return L10n.tr("notifications.media.stream_started_body")
+        case .streamStopped:
+            return L10n.tr("notifications.media.stream_stopped_body")
+        case .streamFailed:
+            return L10n.tr("notifications.media.stream_failed_body")
+        case .streamDeliveryFailed:
+            return L10n.tr("notifications.media.stream_delivery_failed_body")
+        case .permissionRevoked, .foregroundInterrupted:
+            return nil
+        }
     }
 
     func localizedMediaType(for type: MediaTelemetryType) -> String {

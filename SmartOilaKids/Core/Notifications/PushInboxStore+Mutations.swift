@@ -24,13 +24,12 @@ extension PushInboxStore {
             dsn: normalizedDSN
         )
 
-        if let latest = items.first,
-           latest.fingerprint == fingerprint,
-           now.timeIntervalSince(latest.receivedAt) < duplicateWindow {
-            if latest.isRead == false, isRead == true {
-                var updated = latest
-                updated.isRead = true
-                items[0] = updated
+        if let duplicateIndex = items.firstIndex(where: { existing in
+            existing.fingerprint == fingerprint &&
+            abs(now.timeIntervalSince(existing.receivedAt)) < duplicateWindow
+        }) {
+            if items[duplicateIndex].isRead == false, isRead == true {
+                items[duplicateIndex].isRead = true
                 persist(items)
                 postDidChange(dsn: normalizedDSN, unreadCount: resolvedBadgeCount(in: items))
             }

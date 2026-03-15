@@ -24,6 +24,7 @@ struct QRScannerSheet: View {
                     }
                 )
                 .ignoresSafeArea()
+                .allowsHitTesting(errorMessage == nil)
 
                 Color.black.opacity(0.35)
                     .ignoresSafeArea()
@@ -66,19 +67,71 @@ struct QRScannerSheet: View {
 
                     Spacer(minLength: bottomInset)
                 }
+
+                if let errorMessage = errorMessage?.trimmedNonEmpty {
+                    Color.black.opacity(0.45)
+                        .ignoresSafeArea()
+
+                    QRScannerErrorCard(
+                        message: errorMessage,
+                        onConfirm: {
+                            self.errorMessage = nil
+                            onClose()
+                        }
+                    )
+                    .padding(.horizontal, 24)
+                }
             }
         }
-        .alert(L10n.tr("scanner.unavailable_title"), isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button(L10n.tr("common.ok")) {
-                errorMessage = nil
-                onClose()
+    }
+}
+
+private struct QRScannerErrorCard: View {
+    let message: String
+    let onConfirm: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(AppColors.dangerRed.opacity(0.16))
+                    .frame(width: 58, height: 58)
+
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(AppColors.dangerRed)
             }
-        } message: {
-            Text(errorMessage ?? "")
+
+            VStack(spacing: 10) {
+                Text(L10n.tr("scanner.unavailable_title"))
+                    .font(AppTypography.unbounded(18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+
+                Text(message)
+                    .font(AppTypography.unbounded(12, weight: .regular))
+                    .foregroundStyle(AppColors.neutral600)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
+
+            ChildPrimaryButton(
+                title: L10n.tr("common.ok"),
+                background: AppColors.accentGreen,
+                trailingArrow: false,
+                action: onConfirm
+            )
         }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 24)
+        .frame(maxWidth: 340)
+        .background(AppColors.neutral900.opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.24), radius: 24, y: 12)
     }
 }
 
@@ -187,8 +240,25 @@ private final class QRScannerViewController: UIViewController, AVCaptureMetadata
 
             session.startRunning()
         } catch {
-            onError?("\(L10n.tr("scanner.camera_runtime_error")): \(error.localizedDescription)")
+            onError?(runtimeErrorMessage(for: error))
         }
+    }
+
+    private func runtimeErrorMessage(for error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == AVFoundationErrorDomain,
+           let avError = AVError.Code(rawValue: nsError.code) {
+            switch avError {
+            case .applicationIsNotAuthorizedToUseDevice:
+                return L10n.tr("scanner.camera_settings")
+            case .deviceIsNotAvailableInBackground, .mediaServicesWereReset:
+                return L10n.tr("scanner.camera_unavailable")
+            default:
+                break
+            }
+        }
+
+        return L10n.tr("scanner.camera_runtime_error")
     }
 
     func metadataOutput(

@@ -532,6 +532,18 @@ final class AuthServiceRegistrationTests: XCTestCase {
                 let payload = Data("Registration success: child-legacy".utf8)
                 return (makeHTTPResponse(for: request.url!, statusCode: 200), payload)
 
+            case "/api/members/me/devices":
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), scannedToken)
+
+                let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                XCTAssertEqual(queryItems.first(where: { $0.name == "offset" })?.value, "0")
+                XCTAssertEqual(queryItems.first(where: { $0.name == "limit" })?.value, "100")
+
+                let payload = #"[{"id":88,"dsn":"child-legacy"}]"#.data(using: .utf8)!
+                return (makeHTTPResponse(for: request.url!, statusCode: 200), payload)
+
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
                 throw NetworkError.invalidURL
@@ -554,7 +566,8 @@ final class AuthServiceRegistrationTests: XCTestCase {
         XCTAssertEqual(result.refreshToken, "refresh-legacy")
         XCTAssertEqual(TestHTTPURLProtocol.recordedRequests.map { $0.url?.path }, [
             "/api/auth_v2/child/claim_qr",
-            "/upload-v2/device"
+            "/upload-v2/device",
+            "/api/members/me/devices"
         ])
     }
 

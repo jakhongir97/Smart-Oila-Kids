@@ -55,7 +55,7 @@ extension SettingsService {
             as: MemberDevice.self
         )
 
-        let resolvedName = response.resolvedName?.trimmedNonEmpty ?? "Device \(deviceID)"
+        let resolvedName = response.resolvedName?.trimmedNonEmpty ?? ProductFallbackText.connectedDeviceName()
 #if DEBUG
         SettingsAvatarUploadServiceDebugLogger.log(
             "response deviceID=\(deviceID) name=\(resolvedName) avatarURL=\(response.resolvedAvatarURL?.absoluteString ?? "nil")"

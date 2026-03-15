@@ -17,9 +17,7 @@ extension TaskView {
                 return lhs.isFinished == false && rhs.isFinished == true
             }
             .map(\.name)
-        if names.isEmpty {
-            return [L10n.tr("tasks.placeholder_line_1"), L10n.tr("tasks.placeholder_line_2")]
-        }
+        if names.isEmpty { return [] }
 
         if names.count == 1 {
             return [names[0], ""]

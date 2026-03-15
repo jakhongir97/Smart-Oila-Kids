@@ -571,7 +571,10 @@ private extension DeviceLockCoordinator {
 
             if event.lockStatus {
                 resolved[normalizedIdentifier] = resolved[normalizedIdentifier]
-                    ?? DeviceAppSelectionApplication(packageName: normalizedIdentifier, appName: normalizedIdentifier)
+                    ?? DeviceAppSelectionApplication(
+                        packageName: normalizedIdentifier,
+                        appName: ProductFallbackText.appName()
+                    )
             } else {
                 resolved.removeValue(forKey: normalizedIdentifier)
             }

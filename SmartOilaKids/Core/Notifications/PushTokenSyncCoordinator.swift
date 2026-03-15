@@ -222,7 +222,7 @@ actor PushTokenSyncCoordinator {
 
         await updateDiagnostics(
             status: status,
-            endpoint: hasDSN ? pushTokenEndpoint(for: dsn!) : "-",
+            endpoint: dsn.map { pushTokenEndpoint(for: $0) } ?? "-",
             dsn: dsn ?? "-",
             localToken: summarizeToken(token),
             remoteToken: "-",

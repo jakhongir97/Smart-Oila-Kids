@@ -800,9 +800,10 @@ private extension DeviceAppLimitMonitorController {
 
             return DeviceAppLimitConfiguration(
                 packageName: packageName,
-                appName: application.localizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ?? application.bundleIdentifier
-                    ?? packageName,
+                appName: application.localizedDisplayName?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .nilIfEmpty
+                    ?? ProductFallbackText.appName(),
                 applicationToken: applicationToken,
                 dailyLimitMinutes: max(1, min(limit.dailyLimitMinutes, 1440))
             )

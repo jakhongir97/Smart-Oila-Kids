@@ -4,8 +4,15 @@ enum AppRuntime {
     private static let environment = ProcessInfo.processInfo.environment
 
     static var screenTimeFeaturesEnabled: Bool {
+        if let configured = configuredBool("SMARTOILA_SCREEN_TIME_FEATURES_ENABLED") {
+            return configured
+        }
         if let configured = Bundle.main.object(forInfoDictionaryKey: "SMARTOILA_SCREEN_TIME_FEATURES_ENABLED") as? NSNumber {
             return configured.boolValue
+        }
+        if let configured = Bundle.main.object(forInfoDictionaryKey: "SMARTOILA_SCREEN_TIME_FEATURES_ENABLED") as? String,
+           let resolved = parseBool(configured) {
+            return resolved
         }
         return false
     }
@@ -57,16 +64,6 @@ enum AppRuntime {
 #endif
     }
 
-    static var showGeoDebugOverlay: Bool {
-#if DEBUG
-        guard let value = trimmed("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY")?.lowercased() else {
-            return false
-        }
-        return value == "1" || value == "true" || value == "yes"
-#else
-        return false
-#endif
-    }
 }
 
 enum DebugRoute: String {
@@ -76,7 +73,6 @@ enum DebugRoute: String {
     case settings
     case chat
     case tasks
-    case templates
 }
 
 enum DebugAuthStage: String {
@@ -93,6 +89,22 @@ enum DebugPermissionsStage: String {
 }
 
 private extension AppRuntime {
+    static func configuredBool(_ key: String) -> Bool? {
+        guard let value = trimmed(key) else { return nil }
+        return parseBool(value)
+    }
+
+    static func parseBool(_ value: String) -> Bool? {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        default:
+            return nil
+        }
+    }
+
     static func trimmed(_ key: String) -> String? {
         let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value, !value.isEmpty else { return nil }
