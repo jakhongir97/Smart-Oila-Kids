@@ -3,10 +3,10 @@ import SwiftUI
 extension RootView {
     @ViewBuilder
     var regularRoot: some View {
-        if sessionStore.dsn == nil {
+        if sessionStore.apiAccessToken?.trimmedNonEmpty == nil {
             AuthView(viewModel: dependencies.makeAuthViewModel())
         } else {
-            MainView(viewModel: dependencies.makeMainViewModel())
+            ParentHomeView(viewModel: dependencies.makeParentHomeViewModel())
         }
     }
 

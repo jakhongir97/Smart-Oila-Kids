@@ -90,7 +90,7 @@ extension SettingsView {
                         userName = updatedName
                         sessionStore.setProfileName(updatedName)
                     }
-                    GrowthMetricsStore.shared.track(.deviceRenameCompleted, dsn: sessionStore.dsn)
+                    GrowthMetricsStore.shared.track(.deviceRenameCompleted, dsn: currentRemoteDSN)
                     AppHaptics.success()
                     deviceEditor.close()
                     banner(L10n.tr("settings.device_renamed"))
@@ -115,7 +115,7 @@ extension SettingsView {
         Task {
             switch await actionFlows.deleteDevice(device) {
             case .success(let outcome):
-                GrowthMetricsStore.shared.track(.deviceDeleteCompleted, dsn: sessionStore.dsn)
+                GrowthMetricsStore.shared.track(.deviceDeleteCompleted, dsn: currentRemoteDSN)
                 AppHaptics.success()
                 deviceEditor.close()
 
@@ -138,11 +138,11 @@ extension SettingsView {
         }
 
         if avatarPreviewImage == nil {
-            avatarPreviewImage = SettingsAvatarStore.shared.avatarImage(for: sessionStore.dsn)
+            avatarPreviewImage = SettingsAvatarStore.shared.avatarImage(for: currentRemoteDSN)
         }
 
-        await viewModel.loadIfNeeded(currentDSN: sessionStore.dsn)
-        viewModel.ensureCurrentDevicePlaceholder(dsn: sessionStore.dsn, fallbackName: sessionStore.profileName)
+        await viewModel.loadIfNeeded(currentDSN: currentRemoteDSN)
+        viewModel.ensureCurrentDevicePlaceholder(dsn: currentRemoteDSN, fallbackName: sessionStore.profileName)
 
         if let remoteProfileName = viewModel.remoteProfileName,
            remoteProfileName != sessionStore.profileName {
@@ -155,7 +155,7 @@ extension SettingsView {
         Task {
 #if DEBUG
             SettingsAvatarUploadActionDebugLogger.log(
-                "picker imageSize=\(Int(image.size.width))x\(Int(image.size.height)) scale=\(image.scale) currentDSN=\(sessionStore.dsn ?? "nil")"
+                "picker imageSize=\(Int(image.size.width))x\(Int(image.size.height)) scale=\(image.scale) currentDSN=\(currentRemoteDSN ?? "nil")"
             )
 #endif
             guard let payload = SettingsAvatarUploadPayloadBuilder.make(from: image) else {
@@ -230,13 +230,13 @@ extension SettingsView {
     }
 
     func beginInviteShare() {
-        GrowthMetricsStore.shared.track(.inviteShareClicked, dsn: sessionStore.dsn)
+        GrowthMetricsStore.shared.track(.inviteShareClicked, dsn: currentRemoteDSN)
         inviteSharePayload = actionFlows.makeInvitePayload()
     }
 
     func handleInviteShareCompletion(completed: Bool) {
         guard completed else { return }
-        GrowthMetricsStore.shared.track(.inviteShareCompleted, dsn: sessionStore.dsn)
+        GrowthMetricsStore.shared.track(.inviteShareCompleted, dsn: currentRemoteDSN)
 
         DispatchQueue.main.async {
             AppHaptics.success()
@@ -279,7 +279,7 @@ extension SettingsView {
     var actionFlows: SettingsActionFlows {
         SettingsActionFlows(
             viewModel: viewModel,
-            currentDSN: sessionStore.dsn,
+            currentDSN: currentRemoteDSN,
             profileName: sessionStore.profileName
         )
     }
@@ -292,7 +292,7 @@ extension SettingsView {
     }
 
     func isCurrentSettingsDevice(_ device: ConnectedDevice) -> Bool {
-        guard let currentDSN = sessionStore.dsn?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty,
+        guard let currentDSN = currentRemoteDSN?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty,
               let deviceDSN = device.dsn?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty else {
             return false
         }

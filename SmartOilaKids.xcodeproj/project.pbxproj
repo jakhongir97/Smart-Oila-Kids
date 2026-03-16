@@ -165,6 +165,8 @@
 		A9545578A313D0B44FA87613 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1842BC9A7B725383EAF19B63 /* AppPreferences.swift */; };
 		A959624F88BAB31BA1CB3143 /* MainDashboardPayloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DC10C48D583773250791E6E /* MainDashboardPayloadModels.swift */; };
 		A981309D438B4CAA82487FF5 /* PushInboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9330607ECABFAFCD014BA56 /* PushInboxStore.swift */; };
+		A1E53D1B2C4F1001A0B0C0D1 /* ParentHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E53D1B2C4F1001A0B0C0E1 /* ParentHomeView.swift */; };
+		A1E53D1B2C4F1001A0B0C0D2 /* ParentHomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E53D1B2C4F1001A0B0C0E2 /* ParentHomeViewModel.swift */; };
 		AA95BAE093CDEDE1DFC86580 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0896EA30F859C46916368E4C /* MainView.swift */; };
 		AB12EDC2467F4FE3AEBB40B0 /* ScreenTimeUsageSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */; };
 		AB4B4C32719A8D784F730D7D /* DeviceRecordingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F26C5C6B3DA01F74B933DD /* DeviceRecordingModels.swift */; };
@@ -481,6 +483,8 @@
 		A72514A5E6AF470DEDED4B68 /* ChatMessageGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageGrouping.swift; sourceTree = "<group>"; };
 		A8CB88E59DE6518D215B75D0 /* RootView+PushHandling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RootView+PushHandling.swift"; sourceTree = "<group>"; };
 		A9330607ECABFAFCD014BA56 /* PushInboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushInboxStore.swift; sourceTree = "<group>"; };
+		A1E53D1B2C4F1001A0B0C0E1 /* ParentHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentHomeView.swift; sourceTree = "<group>"; };
+		A1E53D1B2C4F1001A0B0C0E2 /* ParentHomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentHomeViewModel.swift; sourceTree = "<group>"; };
 		AA8AAD14D93BEA1AEC4822E4 /* ScreenTimeUsageCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageCoordinator.swift; sourceTree = "<group>"; };
 		AAD37744A5F83DB9BDE34D7D /* GeoBackgroundService+Debug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeoBackgroundService+Debug.swift"; sourceTree = "<group>"; };
 		AB1969F4FA44EB2A77CA5084 /* DSNScopedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DSNScopedStorage.swift; sourceTree = "<group>"; };
@@ -750,6 +754,8 @@
 				3A43DE0E98794DCA579C9165 /* MainNotificationsInboxSurface.swift */,
 				35C14E0E29CA4E3BDA34D432 /* MainNotificationsInboxView.swift */,
 				6CC7C3DA4A1BA2AC5EE3379B /* MainPrimaryActions.swift */,
+				A1E53D1B2C4F1001A0B0C0E1 /* ParentHomeView.swift */,
+				A1E53D1B2C4F1001A0B0C0E2 /* ParentHomeViewModel.swift */,
 				D6EDCB8DF3CCE55626D84D65 /* MainSOSFloatingButton.swift */,
 				BE59A51C549A69DCE10EC73D /* MainSurfaceView.swift */,
 				0896EA30F859C46916368E4C /* MainView.swift */,
@@ -1472,6 +1478,8 @@
 				6FA076E9996B2797EF943B0A /* MainNotificationsInboxSurface.swift in Sources */,
 				486041E4E237913705E7FF3F /* MainNotificationsInboxView.swift in Sources */,
 				3BBE69C55B1E82BBC7FEEE74 /* MainPrimaryActions.swift in Sources */,
+				A1E53D1B2C4F1001A0B0C0D1 /* ParentHomeView.swift in Sources */,
+				A1E53D1B2C4F1001A0B0C0D2 /* ParentHomeViewModel.swift in Sources */,
 				2123EAC51A8B4FE974F7485D /* MainSOSFloatingButton.swift in Sources */,
 				D5384AB5E64F484683E64EB8 /* MainSurfaceView.swift in Sources */,
 				AA95BAE093CDEDE1DFC86580 /* MainView.swift in Sources */,

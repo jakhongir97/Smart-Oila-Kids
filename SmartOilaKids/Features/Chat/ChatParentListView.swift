@@ -39,8 +39,8 @@ struct ChatParentListView: View {
                 }
             }
             .padding(.horizontal, sidePadding)
-            .padding(.top, compact ? 18 : 30)
-            .padding(.bottom, compact ? 24 : 32)
+            .padding(.top, compact ? 24 : 30)
+            .padding(.bottom, compact ? 24 : 30)
         }
         .refreshable {
             await onRefresh()
@@ -50,10 +50,10 @@ struct ChatParentListView: View {
     private func chatRow(name: String, preview: String, unreadCount: Int) -> some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(AppColors.neutral600)
+                .fill(AppColors.neutral700)
                 .frame(width: 50, height: 50)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(name)
                     .font(AppTypography.unbounded(16, weight: .semibold))
                     .foregroundStyle(.white)
@@ -63,7 +63,11 @@ struct ChatParentListView: View {
                     .font(AppTypography.unbounded(12, weight: .regular))
                     .foregroundStyle(.white)
                     .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer(minLength: 8)
 
@@ -79,7 +83,7 @@ struct ChatParentListView: View {
             }
         }
         .padding(.horizontal, 15)
-        .frame(minHeight: 80)
+        .frame(maxWidth: .infinity, minHeight: 80, maxHeight: 80, alignment: .leading)
         .background(AppColors.neutral900)
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
     }

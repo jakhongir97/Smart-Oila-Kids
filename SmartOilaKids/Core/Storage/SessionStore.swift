@@ -6,12 +6,14 @@ final class SessionStore: ObservableObject {
 
     private enum Keys {
         static let dsn = "DSN"
+        static let selectedRemoteDSN = "SELECTED_REMOTE_DSN"
         static let profileName = SessionStore.profileNameDefaultsKey
         static let appTheme = "APP_THEME"
         static let appLanguage = "APP_LANGUAGE"
     }
 
     @Published private(set) var dsn: String?
+    @Published private(set) var selectedRemoteDSN: String?
     @Published var profileName: String
     @Published private(set) var apiAccessToken: String?
     @Published private(set) var apiRefreshToken: String?
@@ -31,6 +33,7 @@ final class SessionStore: ObservableObject {
         L10n.setLanguage(resolvedLanguage.rawValue)
 
         dsn = userDefaults.string(forKey: Keys.dsn)?.trimmedNonEmpty
+        selectedRemoteDSN = userDefaults.string(forKey: Keys.selectedRemoteDSN)?.trimmedNonEmpty
         profileName = userDefaults.string(forKey: Keys.profileName) ?? L10n.tr("common.user_default")
         apiAccessToken = secureTokens.accessToken()
         apiRefreshToken = secureTokens.refreshToken()
@@ -51,6 +54,16 @@ final class SessionStore: ObservableObject {
             userDefaults.set(normalized, forKey: Keys.dsn)
         } else {
             userDefaults.removeObject(forKey: Keys.dsn)
+        }
+    }
+
+    func setSelectedRemoteDSN(_ value: String?) {
+        let normalized = value?.trimmedNonEmpty
+        selectedRemoteDSN = normalized
+        if let normalized {
+            userDefaults.set(normalized, forKey: Keys.selectedRemoteDSN)
+        } else {
+            userDefaults.removeObject(forKey: Keys.selectedRemoteDSN)
         }
     }
 
@@ -94,6 +107,7 @@ final class SessionStore: ObservableObject {
 
     func clearSession() {
         setDSN(nil)
+        setSelectedRemoteDSN(nil)
         setAPIAccessToken(nil)
         setAPIRefreshToken(nil)
     }
@@ -108,6 +122,10 @@ final class SessionStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private let secureTokens: SecureTokenStoring
+
+    var activeRemoteDSN: String? {
+        selectedRemoteDSN?.trimmedNonEmpty ?? dsn?.trimmedNonEmpty
+    }
 
     private func normalizeAccessToken(_ token: String?) -> String? {
         guard let token = token?.trimmedNonEmpty else { return nil }

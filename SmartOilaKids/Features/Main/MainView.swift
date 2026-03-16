@@ -12,15 +12,27 @@ struct MainView: View {
     @State private var showNotifications = false
     @State private var showTasks = false
     @State private var showSettings = false
+    private let dsnOverride: String?
+    private let onClose: (() -> Void)?
+    private let allowsSettings: Bool
 
-    init(viewModel: MainViewModel) {
+    init(
+        viewModel: MainViewModel,
+        dsnOverride: String? = nil,
+        onClose: (() -> Void)? = nil,
+        allowsSettings: Bool = true
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.dsnOverride = dsnOverride?.trimmedNonEmpty
+        self.onClose = onClose
+        self.allowsSettings = allowsSettings
     }
 
     var body: some View {
         MainSurfaceView(
+            onBackTap: onClose,
             profileName: resolvedProfileName,
-            profileAvatarURL: SettingsAvatarStore.shared.avatarURL(for: sessionStore.dsn),
+            profileAvatarURL: SettingsAvatarStore.shared.avatarURL(for: activeDSN),
             notificationBadgeCount: viewModel.unreadNotificationCount,
             deviceStatus: viewModel.deviceStatus,
             usageHours: viewModel.weeklyUsageHours,
@@ -31,10 +43,10 @@ struct MainView: View {
             unreadChatCount: viewModel.unreadChatCount,
             isSendingSOS: viewModel.isSendingSOS,
             onNotificationTap: { showNotifications = true },
-            onSettingsTap: { showSettings = true },
+            onSettingsTap: allowsSettings ? { showSettings = true } : nil,
             onRetryUsage: {
                 Task {
-                    await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+                    await viewModel.loadWeeklyUsage(dsn: activeDSN)
                 }
             },
             onDeviceControlTap: { showNotifications = true },
@@ -46,15 +58,15 @@ struct MainView: View {
             },
             onSOSTap: {
                 Task {
-                    await viewModel.sendSOS(dsn: sessionStore.dsn)
+                    await viewModel.sendSOS(dsn: activeDSN)
                 }
             }
         )
         .refreshable {
-            await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+            await viewModel.loadWeeklyUsage(dsn: activeDSN)
         }
-        .task(id: sessionStore.dsn) {
-            await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+        .task(id: activeDSN) {
+            await viewModel.loadWeeklyUsage(dsn: activeDSN)
             await consumePendingPushDestinationIfNeeded()
         }
         .onChange(of: locationPermissionManager.allChecklistSatisfied) { isSatisfied in
@@ -66,11 +78,12 @@ struct MainView: View {
         .onChange(of: scenePhase) { newValue in
             guard newValue == .active else { return }
             Task {
-                await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+                await viewModel.loadWeeklyUsage(dsn: activeDSN)
                 await consumePendingPushDestinationIfNeeded()
             }
         }
         .onChange(of: viewModel.currentDeviceName) { newValue in
+            guard dsnOverride == nil else { return }
             guard let newValue = newValue?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !newValue.isEmpty,
                   sessionStore.profileName != newValue else { return }
@@ -79,27 +92,27 @@ struct MainView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshDashboard)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
+                await viewModel.loadWeeklyUsage(dsn: activeDSN)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshChat)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.refreshUnreadChat(dsn: sessionStore.dsn)
+                await viewModel.refreshUnreadChat(dsn: activeDSN)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.refreshPendingTasks(dsn: sessionStore.dsn)
+                await viewModel.refreshPendingTasks(dsn: activeDSN)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushInboxDidChange)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
-                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
-                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshUnreadNotifications(dsn: activeDSN)
+                await viewModel.refreshDeviceControlTimeline(dsn: activeDSN)
+                await viewModel.refreshMediaTimeline(dsn: activeDSN)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenChat)) { notification in
@@ -114,34 +127,34 @@ struct MainView: View {
         .fullScreenCover(isPresented: $showChat, onDismiss: {
             openChatThreadOnPresent = false
             Task {
-                await viewModel.refreshUnreadChat(dsn: sessionStore.dsn)
+                await viewModel.refreshUnreadChat(dsn: activeDSN)
             }
         }) {
             AppNavigationContainer {
                 ChatView(
-                    viewModel: dependencies.makeChatViewModel(dsn: sessionStore.dsn ?? ""),
+                    viewModel: dependencies.makeChatViewModel(dsn: activeDSN ?? ""),
                     openThreadOnAppear: openChatThreadOnPresent
                 )
             }
         }
         .fullScreenCover(isPresented: $showTasks, onDismiss: {
             Task {
-                await viewModel.refreshPendingTasks(dsn: sessionStore.dsn)
+                await viewModel.refreshPendingTasks(dsn: activeDSN)
             }
         }) {
             AppNavigationContainer {
-                TaskView(viewModel: dependencies.makeTaskViewModel(dsn: sessionStore.dsn ?? ""))
+                TaskView(viewModel: dependencies.makeTaskViewModel(dsn: activeDSN ?? ""))
             }
         }
         .fullScreenCover(isPresented: $showNotifications, onDismiss: {
             Task {
-                await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
-                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
-                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshUnreadNotifications(dsn: activeDSN)
+                await viewModel.refreshDeviceControlTimeline(dsn: activeDSN)
+                await viewModel.refreshMediaTimeline(dsn: activeDSN)
             }
         }) {
             AppNavigationContainer {
-                NotificationsInboxView(dsn: sessionStore.dsn) { destination in
+                NotificationsInboxView(dsn: activeDSN) { destination in
                     showNotifications = false
 
                     Task { @MainActor in
@@ -190,7 +203,12 @@ struct MainView: View {
     }
 
     private var resolvedProfileName: String {
-        sessionStore.profileName.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
+        if dsnOverride != nil {
+            return viewModel.currentDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
+                ?? L10n.tr("common.user_default")
+        }
+
+        return sessionStore.profileName.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
             ?? viewModel.currentDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
             ?? L10n.tr("common.user_default")
     }
@@ -199,8 +217,14 @@ struct MainView: View {
         AppRuntime.hasDebugRoute
     }
 
+    private var activeDSN: String? {
+        dsnOverride?.trimmedNonEmpty
+            ?? sessionStore.selectedRemoteDSN?.trimmedNonEmpty
+            ?? sessionStore.dsn?.trimmedNonEmpty
+    }
+
     private func shouldHandlePush(notification: Notification) -> Bool {
-        guard let currentDSN = sessionStore.dsn?.trimmedNonEmpty else { return false }
+        guard let currentDSN = activeDSN else { return false }
         guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
             return true
         }
@@ -209,7 +233,7 @@ struct MainView: View {
 
     private func consumePendingPushDestinationIfNeeded() async {
         guard locationPermissionManager.allChecklistSatisfied else { return }
-        guard let currentDSN = sessionStore.dsn?.trimmedNonEmpty else { return }
+        guard let currentDSN = activeDSN else { return }
         guard let destination = await PushDeepLinkStore.shared.consume(matching: currentDSN) else { return }
 
         await MainActor.run {

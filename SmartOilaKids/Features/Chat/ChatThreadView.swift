@@ -13,9 +13,9 @@ struct ChatThreadView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let sidePadding = min(30, max(20, proxy.size.width * 0.07))
+            let sidePadding: CGFloat = 30
             let compact = proxy.size.height < 760
-            let bottomInset = isComposerFocused ? 0 : max(8, proxy.safeAreaInsets.bottom)
+            let bottomInset: CGFloat = isComposerFocused ? 0 : 20
 
             ZStack(alignment: .bottomTrailing) {
                 AppColors.neutral800.ignoresSafeArea()
@@ -25,7 +25,7 @@ struct ChatThreadView: View {
 
                     ChatThreadHeader(
                         title: title,
-                        sidePadding: sidePadding,
+                        sidePadding: sidePadding + 1,
                         compact: compact
                     ) {
                         dismiss()
@@ -70,8 +70,7 @@ struct ChatThreadView: View {
                     )
                 }
 
-                ChildWatermarkOverlay(size: compact ? 176 : 200, opacity: 0.5)
-                    .offset(x: 36, y: compact ? 56 : 70)
+                ChildWatermarkOverlay(size: 200, opacity: 0.5)
             }
             .clipped()
         }
@@ -146,7 +145,7 @@ private struct ChatThreadHeader: View {
 
     var body: some View {
         HStack {
-            ChildTopBackButton(foreground: .white, action: onBack)
+            ChatThreadBackButton(action: onBack)
 
             Spacer(minLength: 12)
 
@@ -164,5 +163,35 @@ private struct ChatThreadHeader: View {
         .padding(.horizontal, sidePadding)
         .padding(.top, compact ? 12 : 16)
         .padding(.bottom, compact ? 16 : 22)
+    }
+}
+
+private struct ChatThreadBackButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            AppHaptics.tap()
+            action()
+        } label: {
+            ZStack {
+                if UIImage(named: "IconBack") != nil {
+                    Image("IconBack")
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: 15, height: 8)
+                        .scaleEffect(y: -1)
+                        .rotationEffect(.degrees(90))
+                } else {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.white)
+            .frame(width: 30, height: 30, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.tr("common.back"))
     }
 }

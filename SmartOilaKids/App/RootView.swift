@@ -40,7 +40,7 @@ struct RootView: View {
             }
         }
         .background(alignment: .topLeading) {
-            if AppRuntime.debugRoute == nil,
+            if shouldRunLocalChildServices,
                AppRuntime.screenTimeFeaturesEnabled {
                 ScreenTimeUsageReportBridgeView(dsn: sessionStore.dsn)
             }
@@ -50,6 +50,6 @@ struct RootView: View {
 
 private extension RootView {
     var shouldShowDeviceLockOverlay: Bool {
-        lockCoordinator.state.isLocked && AppRuntime.debugRoute == nil
+        shouldRunLocalChildServices && lockCoordinator.state.isLocked
     }
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MainSurfaceView: View {
+    let onBackTap: (() -> Void)?
     let profileName: String
     let profileAvatarURL: URL?
     let notificationBadgeCount: Int
@@ -13,7 +14,7 @@ struct MainSurfaceView: View {
     let unreadChatCount: Int?
     let isSendingSOS: Bool
     let onNotificationTap: () -> Void
-    let onSettingsTap: () -> Void
+    let onSettingsTap: (() -> Void)?
     let onRetryUsage: () -> Void
     let onDeviceControlTap: () -> Void
     let onMediaTap: () -> Void
@@ -33,6 +34,7 @@ struct MainSurfaceView: View {
 
                 VStack(spacing: 0) {
                     MainHeaderSection(
+                        onBackTap: onBackTap,
                         profileName: profileName,
                         avatarURL: profileAvatarURL,
                         notificationBadgeCount: notificationBadgeCount,

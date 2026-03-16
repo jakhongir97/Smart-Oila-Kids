@@ -11,8 +11,11 @@ struct TaskView: View {
     var body: some View {
         GeometryReader { proxy in
             let compact = proxy.size.height < 760
-            let sidePadding = min(24, max(14, proxy.size.width * 0.05))
-            let bottomInset: CGFloat = 16
+            let referenceWidth: CGFloat = 412
+            let sidePadding = max(22, min(31, proxy.size.width * (31 / referenceWidth)))
+            let titleBarTopPadding: CGFloat = compact ? 14 : 16
+            let titleBarBottomPadding: CGFloat = compact ? 34 : 40
+            let bottomInset: CGFloat = 28
 
             ZStack(alignment: .bottomTrailing) {
                 AppColors.primaryPurple.ignoresSafeArea()
@@ -23,6 +26,9 @@ struct TaskView: View {
                     ChildTitleBar(
                         title: L10n.tr("tasks.title"),
                         titleColor: .white,
+                        horizontalPadding: sidePadding,
+                        topPadding: titleBarTopPadding,
+                        bottomPadding: titleBarBottomPadding,
                         leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
                         trailing: { Color.clear }
                     )

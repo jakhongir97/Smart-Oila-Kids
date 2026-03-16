@@ -61,7 +61,7 @@ struct SettingsView: View {
                                 compact: compact,
                                 sidePadding: sidePadding,
                                 bottomInset: max(24, proxy.safeAreaInsets.bottom + 12),
-                                avatarURL: viewModel.currentAvatarURL(for: sessionStore.dsn),
+                                avatarURL: viewModel.currentAvatarURL(for: currentRemoteDSN),
                                 avatarPreviewImage: avatarPreviewImage,
                                 isUploadingAvatar: viewModel.isUploadingAvatar,
                                 userName: $userName,
@@ -91,7 +91,7 @@ struct SettingsView: View {
                                     Task {
                                         await performProtectedSettingsAction {
                                             permissionManager.refreshStatuses()
-                                            appLockStore.activate(dsn: sessionStore.dsn)
+                                            appLockStore.activate(dsn: currentRemoteDSN)
                                             showAppLockSetup = true
                                         }
                                     }
@@ -174,7 +174,7 @@ struct SettingsView: View {
         .id(appThemeRawValue)
         .navigationBarBackButtonHidden(true)
         .task {
-            appLockStore.activate(dsn: sessionStore.dsn)
+            appLockStore.activate(dsn: currentRemoteDSN)
             settingsProtection.refreshAvailability()
             await loadRemoteDataIfNeeded()
         }
@@ -269,9 +269,16 @@ struct SettingsView: View {
             SettingsProtectionPINSheet(prompt: prompt, controller: settingsProtection)
                 .appMediumLargeSheetPresentation()
         }
-        .onChange(of: sessionStore.dsn) { newValue in
-            appLockStore.activate(dsn: newValue)
+        .onChange(of: sessionStore.dsn) { _ in
+            appLockStore.activate(dsn: currentRemoteDSN)
         }
+        .onChange(of: sessionStore.selectedRemoteDSN) { _ in
+            appLockStore.activate(dsn: currentRemoteDSN)
+        }
+    }
+
+    var currentRemoteDSN: String? {
+        sessionStore.activeRemoteDSN
     }
 
     private var settingsProtectionPromptBinding: Binding<SettingsProtectionPINPrompt?> {

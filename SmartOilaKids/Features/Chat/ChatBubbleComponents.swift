@@ -16,11 +16,7 @@ struct ChatBubble: View {
                 Spacer(minLength: 20)
             }
 
-            VStack(alignment: isIncoming ? .leading : .trailing, spacing: isIncoming ? 6 : 0) {
-                bubbleContent
-
-                timestamp
-            }
+            bubbleContent
 
             if isIncoming {
                 Spacer(minLength: 20)
@@ -39,41 +35,105 @@ struct ChatBubble: View {
                     .font(AppTypography.unbounded(12, weight: .regular))
                     .foregroundStyle(isIncoming ? incomingTextColor : AppColors.white)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(1)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .frame(maxWidth: preferredWidth ?? (isIncoming ? 280 : 285), alignment: .center)
+        .padding(.top, usesExpandedIncomingShape ? 16 : 12)
+        .padding(.bottom, isIncoming ? (usesExpandedIncomingShape ? 16 : 12) : 24)
+        .frame(width: resolvedBubbleWidth, alignment: .center)
+        .frame(
+            minWidth: nil,
+            idealWidth: nil,
+            maxWidth: nil,
+            minHeight: minimumBubbleHeight,
+            idealHeight: nil,
+            maxHeight: nil,
+            alignment: .center
+        )
         .background {
             if isIncoming {
                 AppColors.neutral700
             } else {
-                LinearGradient(
-                    colors: [AppColors.primaryPurple, AppColors.secondaryPurple],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                AppColors.primaryPurple
             }
         }
         .clipShape(
             AsymmetricRoundedBubble(
-                topLeft: 40,
+                topLeft: incomingTopLeftRadius,
                 topRight: 40,
                 bottomRight: isIncoming ? 40 : 5,
-                bottomLeft: isIncoming ? 5 : 40
+                bottomLeft: incomingBottomLeftRadius
             )
         )
+        .overlay(alignment: .bottomTrailing) {
+            if !isIncoming {
+                timestamp
+                    .foregroundStyle(Color.white.opacity(0.5))
+                    .padding(.trailing, 5)
+                    .padding(.bottom, 5)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if isIncoming {
+                timestamp
+                    .foregroundStyle(AppColors.textSecondary)
+                    .padding(.leading, 5)
+                    .padding(.bottom, 5)
+            }
+        }
     }
 
     private var timestamp: some View {
         Text(shortTime(message.time))
             .font(AppTypography.unbounded(12, weight: .regular))
-            .foregroundStyle(isIncoming ? AppColors.textSecondary : Color.white.opacity(0.5))
-            .padding(.leading, isIncoming ? 4 : 0)
-            .padding(.trailing, isIncoming ? 0 : 10)
-            .padding(.top, isIncoming ? 0 : 2)
-            .offset(y: isIncoming ? 0 : -4)
+    }
+
+    private var minimumBubbleHeight: CGFloat? {
+        guard message.attachments.isEmpty else { return nil }
+        return usesExpandedIncomingShape ? 115 : 80
+    }
+
+    private var usesExpandedIncomingShape: Bool {
+        guard isIncoming else { return false }
+
+        let normalizedText = normalizedMessageText
+        return message.attachments.isEmpty && normalizedText.count > 26
+    }
+
+    private var incomingTopLeftRadius: CGFloat {
+        guard isIncoming else { return 40 }
+        return usesExpandedIncomingShape ? 10 : 40
+    }
+
+    private var incomingBottomLeftRadius: CGFloat {
+        guard isIncoming else { return 40 }
+        return usesExpandedIncomingShape ? 10 : 5
+    }
+
+    private var resolvedBubbleWidth: CGFloat {
+        if isIncoming {
+            return min(preferredWidth ?? 280, 280)
+        }
+
+        guard message.attachments.isEmpty else {
+            return preferredWidth ?? 285
+        }
+
+        let normalizedText = normalizedMessageText
+
+        if normalizedText.count <= 24 {
+            return 210
+        }
+
+        return preferredWidth ?? 285
+    }
+
+    private var normalizedMessageText: String {
+        (message.text ?? "")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func shortTime(_ input: String) -> String {

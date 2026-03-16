@@ -38,6 +38,8 @@ extension TaskView {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .padding(.horizontal, sidePadding)
             } else {
+                let hasCompletedAwards = viewModel.awards.contains(where: \.isCompleted)
+
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView(showsIndicators: false) {
                         LazyVStack(spacing: 15) {
@@ -64,29 +66,25 @@ extension TaskView {
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(isUpdating || !isActionable)
-                                .opacity((isUpdating || !isActionable) ? 0.96 : 1)
+                                .opacity(award.isCompleted ? 1 : ((isUpdating || !isActionable) ? 0.96 : 1))
                             }
 
-                            if viewModel.awards.contains(where: \.isCompleted) {
-                                Text(L10n.tr("tasks.completed_cleanup_note"))
-                                    .font(AppTypography.unbounded(12, weight: .medium))
-                                    .foregroundStyle(Color(red: 42 / 255, green: 42 / 255, blue: 42 / 255).opacity(0.6))
-                                    .multilineTextAlignment(.center)
-                                    .padding(.top, 4)
-                                    .padding(.bottom, 110)
+                            if hasCompletedAwards {
+                                taskCompletedCleanupNote
+                                    .padding(.top, 8)
+                                    .padding(.bottom, 44)
                             }
                         }
                         .padding(.horizontal, sidePadding)
-                        .padding(.top, compact ? 14 : 20)
+                        .padding(.top, compact ? 16 : 20)
                         .padding(.bottom, bottomInset)
                     }
                     .refreshable {
                         await viewModel.load()
                     }
 
-                    if viewModel.awards.contains(where: \.isCompleted) {
+                    if hasCompletedAwards {
                         ChildWatermarkOverlay(size: 200, opacity: 0.5)
-                            .offset(x: 56, y: 56)
                     }
                 }
             }
@@ -122,6 +120,14 @@ extension TaskView {
             .clipShape(Capsule())
     }
 
+    private var taskCompletedCleanupNote: some View {
+        Text(L10n.tr("tasks.completed_cleanup_note"))
+            .font(AppTypography.unbounded(12, weight: .medium))
+            .foregroundStyle(Color(red: 42 / 255, green: 42 / 255, blue: 42 / 255).opacity(0.6))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 288)
+    }
+
     private func taskRow(
         award: AwardsResponse,
         compact: Bool,
@@ -130,60 +136,60 @@ extension TaskView {
     ) -> some View {
         let previewLines = taskPreviewLines(for: award.tasks)
         let actionBackground = award.isCompleted ? AppColors.neutral700 : AppColors.accentGreen
-        let actionForeground = award.isCompleted ? AppColors.black.opacity(0.3) : Color.white
+        let actionForeground = award.isCompleted ? Color.black.opacity(0.3) : Color.white
 
-        return HStack(alignment: .top, spacing: 14) {
-            taskAwardArtwork(urlString: award.imageURL)
+        return VStack(spacing: compact ? 14 : 15) {
+            HStack(alignment: .top, spacing: 15) {
+                taskAwardArtwork(urlString: award.imageURL)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 8) {
                         Text(award.name)
                             .font(AppTypography.unbounded(16, weight: .semibold))
                             .foregroundStyle(.white)
-                            .lineLimit(2)
-
-                        Text(L10n.tr("tasks.task_title"))
-                            .font(AppTypography.unbounded(14, weight: .medium))
-                            .foregroundStyle(.white)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+
+                        Spacer(minLength: 8)
+
+                        if !award.isCompleted {
+                            taskEditGlyph
+                                .padding(.top, 2)
+                        }
                     }
 
-                    Spacer(minLength: 6)
+                    Text(L10n.tr("tasks.task_title"))
+                        .font(AppTypography.unbounded(14, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.top, 8)
 
-                    if !award.isCompleted {
-                        taskEditGlyph
-                            .padding(.top, 2)
-                    }
+                    taskPreviewText(previewLines)
+                        .padding(.top, 11)
                 }
-
-                ForEach(Array(previewLines.enumerated()), id: \.offset) { item in
-                    Text(item.element)
-                        .font(AppTypography.unbounded(12, weight: .regular))
-                        .foregroundStyle(AppColors.neutral700)
-                        .lineLimit(2)
-                }
-
-                ZStack {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(actionBackground)
-                        .frame(height: 45)
-
-                    if isUpdating {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        Text(buttonTitle(completed: award.isCompleted, isUpdating: isUpdating))
-                            .font(AppTypography.unbounded(16, weight: .semibold))
-                            .foregroundStyle(actionForeground)
-                    }
-                }
-                .padding(.top, compact ? 4 : 6)
-                .opacity(isActionable || award.isCompleted ? 1 : 0.85)
+                .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(actionBackground)
+                    .frame(height: 45)
+
+                if isUpdating {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Text(buttonTitle(completed: award.isCompleted, isUpdating: isUpdating))
+                        .font(AppTypography.unbounded(16, weight: .semibold))
+                        .foregroundStyle(actionForeground)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .opacity(isActionable || award.isCompleted ? 1 : 0.88)
         }
-        .padding(.horizontal, 15)
-        .padding(.vertical, compact ? 15 : 16)
+        .padding(15)
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
         .background(AppColors.neutral900)
         .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
@@ -216,7 +222,14 @@ extension TaskView {
 
     @ViewBuilder
     private var taskAwardGlyph: some View {
-        if UIImage(named: "IconTrophy") != nil {
+        if UIImage(named: "ParentTaskTrophy") != nil {
+            Image("ParentTaskTrophy")
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: 40, height: 40)
+                .foregroundStyle(AppColors.neutral700)
+        } else if UIImage(named: "IconTrophy") != nil {
             Image("IconTrophy")
                 .resizable()
                 .renderingMode(.template)
@@ -232,7 +245,14 @@ extension TaskView {
 
     @ViewBuilder
     private var taskEditGlyph: some View {
-        if UIImage(named: "IconPencil") != nil {
+        if UIImage(named: "ParentTaskPencil") != nil {
+            Image("ParentTaskPencil")
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: 25, height: 25)
+                .foregroundStyle(.white)
+        } else if UIImage(named: "IconPencil") != nil {
             Image("IconPencil")
                 .resizable()
                 .renderingMode(.template)
@@ -244,5 +264,28 @@ extension TaskView {
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.white)
         }
+    }
+
+    @ViewBuilder
+    private func taskPreviewText(_ previewLines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let firstLine = previewLines.first {
+                Text(firstLine)
+                    .font(AppTypography.unbounded(12, weight: .regular))
+                    .foregroundStyle(AppColors.neutral700)
+                    .lineLimit(1)
+                    .frame(width: 225, alignment: .leading)
+            }
+
+            if previewLines.count > 1 {
+                Text(previewLines[1])
+                    .font(AppTypography.unbounded(12, weight: .regular))
+                    .foregroundStyle(AppColors.neutral700)
+                    .lineLimit(1)
+                    .frame(width: 245, alignment: .leading)
+                    .offset(x: -90)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

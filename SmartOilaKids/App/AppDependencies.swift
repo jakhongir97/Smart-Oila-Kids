@@ -16,11 +16,29 @@ struct AppDependencies {
     func makeMainViewModel() -> MainViewModel {
         let tasksService = TaskService(client: apiClient)
         let chatService = ChatService(client: apiClient)
+        let memberDevicesService = MemberDevicesService(client: apiClient)
         return MainViewModel(
             sosService: SOSService(client: apiClient),
-            dashboardService: MainDashboardService(client: apiClient),
+            dashboardService: MainDashboardService(client: apiClient, memberDevicesService: memberDevicesService),
             taskSummaryService: tasksService,
             chatService: chatService
+        )
+    }
+
+    @MainActor
+    func makeParentHomeViewModel() -> ParentHomeViewModel {
+        let memberDevicesService = MemberDevicesService(client: apiClient)
+        let settingsService = SettingsService(
+            client: apiClient,
+            memberDevicesService: memberDevicesService
+        )
+        return ParentHomeViewModel(
+            profileService: settingsService,
+            memberDevicesService: memberDevicesService,
+            remoteDataSource: MainDashboardRemoteDataSource(
+                client: apiClient,
+                memberDevicesService: memberDevicesService
+            )
         )
     }
 

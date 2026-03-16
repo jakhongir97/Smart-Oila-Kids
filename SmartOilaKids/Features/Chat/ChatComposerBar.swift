@@ -18,9 +18,15 @@ struct ChatComposerBar: View {
     let onSend: () -> Void
 
     private let composerForeground = Color(red: 66 / 255, green: 66 / 255, blue: 66 / 255)
+    private var showsStatusRows: Bool {
+        queuedMessagesCount > 0
+            || (sendStatusText?.isEmpty == false)
+            || isLoadingAttachments
+            || selectedAttachmentsCount > 0
+    }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             if queuedMessagesCount > 0 {
                 HStack(spacing: 10) {
                     Text(L10n.tr("chat.retry_pending", queuedMessagesCount))
@@ -116,6 +122,11 @@ struct ChatComposerBar: View {
                         if isSending {
                             ProgressView()
                                 .tint(AppColors.primaryPurple)
+                        } else if UIImage(named: "ParentChatSend") != nil {
+                            Image("ParentChatSend")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 20, height: 20)
                         } else if UIImage(named: "IconSend") != nil {
                             Image("IconSend")
                                 .resizable()
@@ -136,8 +147,8 @@ struct ChatComposerBar: View {
             }
         }
         .padding(.horizontal, sidePadding)
-        .padding(.top, compact ? 6 : 8)
-        .padding(.bottom, bottomInset + (compact ? 8 : 10))
+        .padding(.top, showsStatusRows ? (compact ? 4 : 6) : 0)
+        .padding(.bottom, bottomInset)
         .background(AppColors.neutral800)
     }
 }

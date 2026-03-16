@@ -123,7 +123,9 @@ struct ChildTopBackButton: View {
                         .resizable()
                         .renderingMode(.template)
                         .scaledToFit()
-                        .frame(width: 15, height: 15)
+                        .frame(width: 15, height: 8)
+                        .scaleEffect(y: -1)
+                        .rotationEffect(.degrees(90))
                 } else {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 17, weight: .bold))

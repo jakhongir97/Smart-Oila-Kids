@@ -2,17 +2,27 @@ import SwiftUI
 import UIKit
 
 struct MainHeaderSection: View {
+    let onBackTap: (() -> Void)?
     let profileName: String
     let avatarURL: URL?
     let notificationBadgeCount: Int
     let onNotificationTap: () -> Void
-    let onSettingsTap: () -> Void
+    let onSettingsTap: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
             ChildStatusBar(background: AppColors.surfacePurple)
 
             HStack(spacing: 12) {
+                if let onBackTap {
+                    MainHeaderIconButton(
+                        action: onBackTap,
+                        accessibilityLabel: L10n.tr("common.back")
+                    ) {
+                        iconOrFallback(asset: "IconBack", system: "chevron.left", size: 16)
+                    }
+                }
+
                 Circle()
                     .fill(AppColors.neutral900)
                     .frame(width: 52, height: 52)
@@ -62,11 +72,13 @@ struct MainHeaderSection: View {
                         }
                     }
 
-                    MainHeaderIconButton(
-                        action: onSettingsTap,
-                        accessibilityLabel: L10n.tr("settings.title")
-                    ) {
-                        iconOrFallback(asset: "IconSettings", system: "gearshape", size: 18)
+                    if let onSettingsTap {
+                        MainHeaderIconButton(
+                            action: onSettingsTap,
+                            accessibilityLabel: L10n.tr("settings.title")
+                        ) {
+                            iconOrFallback(asset: "IconSettings", system: "gearshape", size: 18)
+                        }
                     }
                 }
                 .foregroundStyle(.white)
@@ -125,11 +137,21 @@ struct MainHeaderSection: View {
     @ViewBuilder
     private func iconOrFallback(asset: String, system: String, size: CGFloat) -> some View {
         if UIImage(named: asset) != nil {
-            Image(asset)
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
-                .frame(width: size, height: size)
+            if asset == "IconBack" {
+                Image(asset)
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 15, height: 8)
+                    .scaleEffect(y: -1)
+                    .rotationEffect(.degrees(90))
+            } else {
+                Image(asset)
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: size, height: size)
+            }
         } else {
             Image(systemName: system)
                 .font(.system(size: size, weight: .regular))

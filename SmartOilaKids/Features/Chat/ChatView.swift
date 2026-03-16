@@ -21,7 +21,7 @@ struct ChatView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let sidePadding = min(30, max(20, proxy.size.width * 0.07))
+            let sidePadding: CGFloat = 30
             let compact = proxy.size.height < 760
 
             ZStack {
@@ -33,13 +33,12 @@ struct ChatView: View {
                     ChildTitleBar(
                         title: L10n.tr("chat.parents_title"),
                         titleColor: .white,
-                        bottomPadding: compact ? 18 : 24,
+                        horizontalPadding: 31,
+                        topPadding: compact ? 14 : 16,
+                        bottomPadding: compact ? 34 : 40,
                         leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
                         trailing: { Color.clear }
                     )
-
-                    Color.clear
-                        .frame(height: compact ? 12 : 16)
 
                     ZStack(alignment: .bottomTrailing) {
                         AppColors.neutral800
@@ -59,8 +58,7 @@ struct ChatView: View {
                         )
                         .padding(.bottom, max(16, proxy.safeAreaInsets.bottom + 4))
 
-                        ChildWatermarkOverlay(opacity: 0.5)
-                            .offset(x: 28, y: 34)
+                        ChildWatermarkOverlay(size: 200, opacity: 0.5)
                     }
                     .clipShape(TopRoundedShape(radius: 30))
                     .ignoresSafeArea(edges: .bottom)

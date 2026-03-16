@@ -197,11 +197,16 @@ struct SettingsMediaHistoryPanelView: View {
             }
             .task {
                 manager.refreshStatuses()
-                await viewModel.load(dsn: sessionStore.dsn)
+                await viewModel.load(dsn: sessionStore.activeRemoteDSN)
             }
-            .onChange(of: sessionStore.dsn) { newValue in
+            .onChange(of: sessionStore.dsn) { _ in
                 Task {
-                    await viewModel.load(dsn: newValue)
+                    await viewModel.load(dsn: sessionStore.activeRemoteDSN)
+                }
+            }
+            .onChange(of: sessionStore.selectedRemoteDSN) { _ in
+                Task {
+                    await viewModel.load(dsn: sessionStore.activeRemoteDSN)
                 }
             }
         }

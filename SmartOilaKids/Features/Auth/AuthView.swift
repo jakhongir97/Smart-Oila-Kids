@@ -11,6 +11,7 @@ struct AuthView: View {
 
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var viewModel: AuthViewModel
+    private let onCompleted: (() -> Void)?
 
     @State private var stage: Stage = .splash
     @State private var pendingRegistration: AuthRegistrationResult?
@@ -19,8 +20,9 @@ struct AuthView: View {
     @State private var inviteAttribution: InviteAttributionContext?
     @State private var showQRScanner = false
 
-    init(viewModel: AuthViewModel) {
+    init(viewModel: AuthViewModel, onCompleted: (() -> Void)? = nil) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.onCompleted = onCompleted
 #if DEBUG
         if let initial = Self.debugInitialStage {
             _stage = State(initialValue: initial)
@@ -94,11 +96,13 @@ struct AuthView: View {
                         guard let pendingRegistration else { return }
                         AppHaptics.success()
                         sessionStore.setDSN(pendingRegistration.dsn)
+                        sessionStore.setSelectedRemoteDSN(pendingRegistration.dsn)
                         sessionStore.setAPIAccessToken(pendingRegistration.authorizationHeader)
                         sessionStore.setAPIRefreshToken(pendingRegistration.refreshToken)
                         if let profileName = pendingProfileName?.trimmedNonEmpty {
                             sessionStore.setProfileName(profileName)
                         }
+                        onCompleted?()
                     }
                 )
             }
