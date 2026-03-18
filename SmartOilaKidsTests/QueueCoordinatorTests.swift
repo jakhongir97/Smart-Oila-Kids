@@ -1633,7 +1633,7 @@ final class MemberDevicesMappingTests: XCTestCase {
 
         XCTAssertEqual(records.map(\.id), [1, 2, 3])
         XCTAssertEqual(records.map(\.dsn), ["child-1", "child-2", nil])
-        XCTAssertEqual(records.map(\.name), ["Kid One", "Kid Two", "Device 3"])
+        XCTAssertEqual(records.map(\.name), ["Kid One", "Kid Two", ProductFallbackText.connectedDeviceName()])
         XCTAssertNil(records[0].avatarURL)
         XCTAssertEqual(records[1].avatarURL?.absoluteString, "https://example.com/two.png")
         XCTAssertEqual(records[2].avatarURL?.absoluteString, "https://example.com/three.png")
@@ -2351,8 +2351,7 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
             )
         )
         let expectedPaths = Set([
-            "/api/members/device/42/applications",
-            "/api/members/device/42/applications/locked"
+            "/api/members/device/v2/42/applications"
         ])
 
         TestHTTPURLProtocol.requestHandler = { request in
@@ -2361,7 +2360,7 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access")
 
             switch request.url?.path {
-            case "/api/members/device/42/applications":
+            case "/api/members/device/v2/42/applications":
                 let payload = #"""
                 [
                   {
@@ -2371,29 +2370,13 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
                   },
                   {
                     "package_name": " COM.example.mail ",
-                    "name": "   ",
+                    "name": " Mail App ",
                     "is_locked": true
                   },
                   {
                     "package_name": "com.example.free",
                     "name": "Free App",
                     "is_locked": false
-                  }
-                ]
-                """#.data(using: .utf8)!
-                return (makeHTTPResponse(for: request.url!, statusCode: 200), payload)
-            case "/api/members/device/42/applications/locked":
-                let payload = #"""
-                [
-                  {
-                    "package_name": " com.example.mail ",
-                    "name": " Mail App ",
-                    "is_locked": true
-                  },
-                  {
-                    "package_name": "com.example.camera",
-                    "name": "Camera",
-                    "is_locked": true
                   }
                 ]
                 """#.data(using: .utf8)!
@@ -2418,19 +2401,17 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
         ])
         XCTAssertEqual(Set(TestHTTPURLProtocol.recordedRequests.compactMap(\.url?.path)), expectedPaths)
         XCTAssertEqual(result.deviceID, 42)
-        XCTAssertEqual(result.applicationsEndpoint, "members/device/42/applications")
-        XCTAssertEqual(result.lockedEndpoint, "members/device/42/applications/locked")
+        XCTAssertEqual(result.applicationsEndpoint, "members/device/v2/42/applications")
+        XCTAssertEqual(result.lockedEndpoint, "-")
         XCTAssertEqual(result.authoritativeLockedApplications, [
-            DeviceAppSelectionApplication(packageName: "com.example.camera", appName: "Camera"),
             DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App"),
             DeviceAppSelectionApplication(packageName: "com.example.mail", appName: "Mail App")
         ])
         XCTAssertEqual(result.authoritativeLockedIdentifiers, [
-            "com.example.camera",
             "com.example.chat",
             "com.example.mail"
         ])
-        XCTAssertEqual(result.payloadSummary, "3 apps, 3 locked")
+        XCTAssertEqual(result.payloadSummary, "3 apps, 2 locked")
     }
 
     func testFetchStateDefaultsNullPayloadsToEmptyCollections() async throws {
@@ -2441,10 +2422,7 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
         )
 
         TestHTTPURLProtocol.requestHandler = { request in
-            XCTAssertTrue([
-                "/api/members/device/7/applications",
-                "/api/members/device/7/applications/locked"
-            ].contains(request.url?.path))
+            XCTAssertEqual(request.url?.path, "/api/members/device/v2/7/applications")
             return (makeHTTPResponse(for: request.url!, statusCode: 200), Data("null".utf8))
         }
 
@@ -2543,7 +2521,11 @@ final class DeviceAppLimitServiceTests: XCTestCase {
 
         TestHTTPURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/members/device/13/applications/limits")
+            XCTAssertEqual(request.url?.path, "/api/members/device/v2/13/applications")
+            XCTAssertEqual(
+                Set(request.url?.query?.split(separator: "&").map(String.init) ?? []),
+                Set(["is_limit_enabled=true"])
+            )
             XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access")
 
@@ -2575,7 +2557,7 @@ final class DeviceAppLimitServiceTests: XCTestCase {
             MemberDeviceResolutionCall(dsn: "child-13", limit: 100)
         ])
         XCTAssertEqual(result.deviceID, 13)
-        XCTAssertEqual(result.endpoint, "members/device/13/applications/limits")
+        XCTAssertEqual(result.endpoint, "members/device/v2/13/applications?is_limit_enabled=true")
         XCTAssertEqual(result.limits, [
             DeviceAppLimitResponse(
                 packageName: "com.example.chat",
@@ -2683,6 +2665,160 @@ final class DeviceAppLockSyncCoordinatorTests: XCTestCase {
     }
 }
 
+final class DeviceApplicationUsageReportCoordinatorTests: XCTestCase {
+    func testUpdateSnapshotUploadsOnlyDeltaUsageForTheCurrentDay() async {
+        let service = DeviceApplicationUsageReportServiceSpy(
+            results: [
+                .success(.init(lockedPackages: [], stats: [])),
+                .success(.init(lockedPackages: [], stats: []))
+            ]
+        )
+        let suiteName = "DeviceApplicationUsageReportCoordinatorTests.delta.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let coordinator = DeviceApplicationUsageReportCoordinator(
+            service: service,
+            userDefaults: userDefaults,
+            responseHandler: { _, _ in },
+            diagnosticsUpdater: { _, _, _, _, _, _, _, _ in },
+            retryScheduler: { _, _ in Task {} }
+        )
+
+        await coordinator.updateDSN("child-usage")
+        await coordinator.updateSnapshot(
+            makeUsageSnapshot(
+                dsn: "child-usage",
+                dayKey: "2026-03-19",
+                entries: [
+                    .init(packageName: "com.example.chat", appName: "Chat", usedTime: 120),
+                    .init(packageName: "com.example.maps", appName: "Maps", usedTime: 60)
+                ]
+            )
+        )
+        await coordinator.updateSnapshot(
+            makeUsageSnapshot(
+                dsn: "child-usage",
+                dayKey: "2026-03-19",
+                entries: [
+                    .init(packageName: "com.example.chat", appName: "Chat", usedTime: 180),
+                    .init(packageName: "com.example.maps", appName: "Maps", usedTime: 60)
+                ]
+            )
+        )
+
+        let recordedCalls = await service.recordedCalls()
+        let pendingBatchCount = await coordinator.pendingBatchCount()
+
+        XCTAssertEqual(recordedCalls, [
+            DeviceApplicationUsageReportCall(
+                dsn: "child-usage",
+                items: [
+                    DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 120),
+                    DeviceApplicationUsageReportItemRequest(packageName: "com.example.maps", usedSeconds: 60)
+                ]
+            ),
+            DeviceApplicationUsageReportCall(
+                dsn: "child-usage",
+                items: [
+                    DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 60)
+                ]
+            )
+        ])
+        XCTAssertEqual(pendingBatchCount, 0)
+    }
+
+    func testFailedUploadPersistsQueueUntilANewCoordinatorRetriesIt() async {
+        let suiteName = "DeviceApplicationUsageReportCoordinatorTests.retry.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let failingService = DeviceApplicationUsageReportServiceSpy(
+            results: [.failure(DeviceApplicationUsageReportTestError.offline)]
+        )
+        let firstCoordinator = DeviceApplicationUsageReportCoordinator(
+            service: failingService,
+            userDefaults: userDefaults,
+            responseHandler: { _, _ in },
+            diagnosticsUpdater: { _, _, _, _, _, _, _, _ in },
+            retryScheduler: { _, _ in Task {} }
+        )
+
+        await firstCoordinator.updateDSN("child-usage")
+        await firstCoordinator.updateSnapshot(
+            makeUsageSnapshot(
+                dsn: "child-usage",
+                dayKey: "2026-03-19",
+                entries: [
+                    .init(packageName: "com.example.chat", appName: "Chat", usedTime: 240)
+                ]
+            )
+        )
+
+        let firstPendingBatchCount = await firstCoordinator.pendingBatchCount()
+        let failingCalls = await failingService.recordedCalls()
+
+        XCTAssertEqual(firstPendingBatchCount, 1)
+        XCTAssertEqual(failingCalls, [
+            DeviceApplicationUsageReportCall(
+                dsn: "child-usage",
+                items: [DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 240)]
+            )
+        ])
+
+        let succeedingService = DeviceApplicationUsageReportServiceSpy(
+            results: [.success(.init(
+                lockedPackages: ["com.example.chat"],
+                stats: [
+                    DeviceApplicationUsageReportStat(
+                        packageName: "com.example.chat",
+                        usageDate: "2026-03-19",
+                        usedSeconds: 240,
+                        dailyLimitSeconds: 300,
+                        remainingSeconds: 60,
+                        isLimitReached: false
+                    )
+                ]
+            ))]
+        )
+        let secondCoordinator = DeviceApplicationUsageReportCoordinator(
+            service: succeedingService,
+            userDefaults: userDefaults,
+            responseHandler: { _, _ in },
+            diagnosticsUpdater: { _, _, _, _, _, _, _, _ in },
+            retryScheduler: { _, _ in Task {} }
+        )
+
+        await secondCoordinator.updateDSN("child-usage")
+
+        let succeedingCalls = await succeedingService.recordedCalls()
+        let secondPendingBatchCount = await secondCoordinator.pendingBatchCount()
+
+        XCTAssertEqual(succeedingCalls, [
+            DeviceApplicationUsageReportCall(
+                dsn: "child-usage",
+                items: [DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 240)]
+            )
+        ])
+        XCTAssertEqual(secondPendingBatchCount, 0)
+    }
+
+    private func makeUsageSnapshot(
+        dsn: String,
+        dayKey: String,
+        entries: [ScreenTimeUsageSnapshotEntry]
+    ) -> ScreenTimeUsageSnapshot {
+        ScreenTimeUsageSnapshot(
+            dsn: dsn,
+            dayKey: dayKey,
+            generatedAt: Date(timeIntervalSince1970: 1_742_339_200),
+            entries: entries
+        )
+    }
+}
+
 final class SessionStoreTests: XCTestCase {
     override func tearDown() {
         L10n.setLanguage(AppLanguage.defaultForDevice.rawValue)
@@ -2726,7 +2862,7 @@ final class SessionStoreTests: XCTestCase {
         )
 
         XCTAssertNil(store.dsn)
-        XCTAssertEqual(store.profileName, "Пользователь")
+        XCTAssertEqual(store.profileName, L10n.tr("common.user_default"))
         XCTAssertEqual(store.appTheme, .system)
         XCTAssertEqual(store.appLanguage, AppLanguage.defaultForDevice)
     }
@@ -2903,6 +3039,10 @@ private enum DeviceAppLockSyncTestError: Error {
     case offline
 }
 
+private enum DeviceApplicationUsageReportTestError: Error {
+    case offline
+}
+
 private actor DeviceAppLockSyncServiceSpy: DeviceAppLockSyncServicing {
     private var calls: [DeviceAppLockSyncCall] = []
     private var results: [Result<Void, Error>]
@@ -2922,6 +3062,41 @@ private actor DeviceAppLockSyncServiceSpy: DeviceAppLockSyncServicing {
     }
 
     func recordedCalls() -> [DeviceAppLockSyncCall] {
+        calls
+    }
+}
+
+private struct DeviceApplicationUsageReportCall: Equatable {
+    let dsn: String
+    let items: [DeviceApplicationUsageReportItemRequest]
+}
+
+private actor DeviceApplicationUsageReportServiceSpy: DeviceApplicationUsageReportServicing {
+    private var calls: [DeviceApplicationUsageReportCall] = []
+    private var results: [Result<DeviceApplicationUsageReportResponse, Error>]
+
+    init(
+        results: [Result<DeviceApplicationUsageReportResponse, Error>] = [
+            .success(DeviceApplicationUsageReportResponse(lockedPackages: [], stats: []))
+        ]
+    ) {
+        self.results = results
+    }
+
+    func reportUsage(
+        dsn: String,
+        items: [DeviceApplicationUsageReportItemRequest]
+    ) async throws -> DeviceApplicationUsageReportResponse {
+        calls.append(DeviceApplicationUsageReportCall(dsn: dsn, items: items))
+
+        if results.count > 1 {
+            return try results.removeFirst().get()
+        }
+
+        return try results.first?.get() ?? DeviceApplicationUsageReportResponse(lockedPackages: [], stats: [])
+    }
+
+    func recordedCalls() -> [DeviceApplicationUsageReportCall] {
         calls
     }
 }

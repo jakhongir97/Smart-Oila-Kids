@@ -27,6 +27,7 @@ extension RootView {
         clearPersistedBackgroundTimestamp()
         lastBackgroundedAt = nil
         Task {
+            await DeviceApplicationUsageReportCoordinator.shared.updateDSN(sessionStore.dsn)
             await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
             await PushInboxStore.shared.reconcileAppBadge()
         }
@@ -42,6 +43,7 @@ extension RootView {
         syncMediaService(with: localServiceDSN)
 
         Task {
+            await DeviceApplicationUsageReportCoordinator.shared.updateDSN(normalizedNewDSN)
             await PushTokenSyncCoordinator.shared.updateDSN(normalizedNewDSN)
 
             if let previousDSN,
@@ -68,6 +70,11 @@ extension RootView {
             lastBackgroundedAt = now
             persistBackgroundTimestamp(now)
             DeviceRecordingCoordinator.shared.setApplicationActive(false)
+            if shouldRunLocalChildServices {
+                Task {
+                    await DeviceApplicationUsageReportCoordinator.shared.retryNow()
+                }
+            }
             RuntimeDiagnosticsCenter.shared.updateLifecycle(
                 scenePhase: phase,
                 applicationState: applicationState,
@@ -112,6 +119,7 @@ extension RootView {
             Task {
                 await lockCoordinator.refreshNow()
                 await DeviceAppLockSyncCoordinator.shared.retryNow()
+                await DeviceApplicationUsageReportCoordinator.shared.retryNow()
                 await ScreenTimeUsageCoordinator.shared.retryNow()
             }
         }

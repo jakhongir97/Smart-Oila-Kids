@@ -17,6 +17,7 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
     @Published private(set) var appLimits = AppLimitsDiagnosticsSnapshot()
     @Published private(set) var lockSchedule = LockScheduleMonitorDiagnosticsSnapshot()
     @Published private(set) var screenTimeUsage = ScreenTimeUsageDiagnosticsSnapshot()
+    @Published private(set) var sos = SOSDiagnosticsSnapshot()
 
     private init() {}
 
@@ -440,6 +441,43 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         appLimits.updatedAt = Date()
     }
 
+    func updateAppLimitsUsage(
+        status: String? = nil,
+        dsn: String? = nil,
+        endpoint: String? = nil,
+        queuedBatchCount: Int? = nil,
+        lastPayload: String? = nil,
+        lastResponse: String? = nil,
+        lastUploadAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        if let status {
+            appLimits.usageUploadStatus = status
+        }
+        if let dsn {
+            appLimits.usageDSN = dsn
+        }
+        if let endpoint {
+            appLimits.usageEndpoint = endpoint
+        }
+        if let queuedBatchCount {
+            appLimits.usageQueuedBatchCount = queuedBatchCount
+        }
+        if let lastPayload {
+            appLimits.usageLastPayload = lastPayload
+        }
+        if let lastResponse {
+            appLimits.usageLastResponse = lastResponse
+        }
+        if let lastUploadAt {
+            appLimits.usageLastUploadAt = lastUploadAt
+        }
+        if let lastError {
+            appLimits.usageLastError = lastError
+        }
+        appLimits.updatedAt = Date()
+    }
+
     func updateLockSchedule(
         status: String? = nil,
         dsn: String? = nil,
@@ -500,6 +538,35 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
             screenTimeUsage.lastCollectedAt = lastCollectedAt
         }
         screenTimeUsage.updatedAt = Date()
+    }
+
+    func updateSOS(
+        status: String? = nil,
+        dsn: String? = nil,
+        endpoint: String? = nil,
+        lastResult: String? = nil,
+        lastError: String? = nil,
+        lastTriggeredAt: Date? = nil
+    ) {
+        if let status {
+            sos.status = status
+        }
+        if let dsn {
+            sos.dsn = dsn
+        }
+        if let endpoint {
+            sos.endpoint = endpoint
+        }
+        if let lastResult {
+            sos.lastResult = lastResult
+        }
+        if let lastError {
+            sos.lastError = lastError
+        }
+        if let lastTriggeredAt {
+            sos.lastTriggeredAt = lastTriggeredAt
+        }
+        sos.updatedAt = Date()
     }
 }
 
@@ -622,6 +689,14 @@ struct AppLimitsDiagnosticsSnapshot {
     var reachedCount: Int = 0
     var lastPayload: String = "-"
     var lastError: String = "-"
+    var usageUploadStatus: String = "idle"
+    var usageDSN: String = "-"
+    var usageEndpoint: String = "-"
+    var usageQueuedBatchCount: Int = 0
+    var usageLastPayload: String = "-"
+    var usageLastResponse: String = "-"
+    var usageLastUploadAt: Date? = nil
+    var usageLastError: String = "-"
     var updatedAt: Date? = nil
 }
 
@@ -643,6 +718,16 @@ struct ScreenTimeUsageDiagnosticsSnapshot {
     var lastSnapshot: String = "-"
     var lastError: String = "-"
     var lastCollectedAt: Date? = nil
+    var updatedAt: Date? = nil
+}
+
+struct SOSDiagnosticsSnapshot {
+    var status: String = "idle"
+    var dsn: String = "-"
+    var endpoint: String = "-"
+    var lastResult: String = "-"
+    var lastError: String = "-"
+    var lastTriggeredAt: Date? = nil
     var updatedAt: Date? = nil
 }
 

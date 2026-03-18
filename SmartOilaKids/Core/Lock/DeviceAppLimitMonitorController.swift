@@ -302,6 +302,107 @@ final class DeviceAppLimitMonitorController: ObservableObject {
         pendingForegroundRecoveryCheck = true
     }
 
+    func applyUsageReportResponse(_ response: DeviceApplicationUsageReportResponse, dsn: String) {
+        guard isCurrent(dsn: dsn) else { return }
+
+        let normalizedLockedPackages = Set(response.lockedPackages.compactMap(normalizedIdentifier(_:)))
+        let reportedLimits = response.stats.compactMap { stat -> DeviceAppLimitResponse? in
+            guard let packageName = normalizedIdentifier(stat.packageName) else {
+                return nil
+            }
+
+            let normalizedUsedSeconds = max(0, stat.usedSeconds)
+            let normalizedDailyLimitSeconds = max(0, stat.dailyLimitSeconds ?? 0)
+            let normalizedRemainingSeconds = max(
+                0,
+                stat.remainingSeconds ?? max(0, normalizedDailyLimitSeconds - normalizedUsedSeconds)
+            )
+
+            return DeviceAppLimitResponse(
+                packageName: packageName,
+                dailyLimitMinutes: normalizedDailyLimitSeconds > 0
+                    ? max(1, Int(ceil(Double(normalizedDailyLimitSeconds) / 60.0)))
+                    : 0,
+                isLimitEnabled: normalizedDailyLimitSeconds > 0,
+                usedTodaySeconds: normalizedUsedSeconds,
+                remainingTodaySeconds: normalizedRemainingSeconds,
+                isLimitReached: stat.isLimitReached || normalizedLockedPackages.contains(packageName)
+            )
+        }
+
+        let reportedLimitByPackage = Dictionary(
+            uniqueKeysWithValues: reportedLimits.compactMap { limit -> (String, DeviceAppLimitResponse)? in
+                guard let packageName = normalizedIdentifier(limit.packageName) else {
+                    return nil
+                }
+                return (packageName, limit)
+            }
+        )
+
+        var mergedLimits = latestFetchResult?.limits ?? []
+        var mergedIdentifiers = Set<String>()
+
+        if !mergedLimits.isEmpty {
+            mergedLimits = mergedLimits.map { limit in
+                guard let packageName = normalizedIdentifier(limit.packageName),
+                      let reported = reportedLimitByPackage[packageName] else {
+                    return limit
+                }
+
+                mergedIdentifiers.insert(packageName)
+                return reported
+            }
+        }
+
+        for reportedLimit in reportedLimits {
+            guard let packageName = normalizedIdentifier(reportedLimit.packageName),
+                  !mergedIdentifiers.contains(packageName) else {
+                continue
+            }
+            mergedLimits.append(reportedLimit)
+        }
+
+        let mergedResult = DeviceAppLimitFetchResult(
+            deviceID: latestFetchResult?.deviceID ?? 0,
+            endpoint: latestFetchResult?.endpoint ?? "devices/\(dsn)/applications/usage",
+            limits: mergedLimits.sorted { lhs, rhs in
+                lhs.packageName.localizedCaseInsensitiveCompare(rhs.packageName) == .orderedAscending
+            }
+        )
+
+        latestFetchResult = mergedResult
+
+        do {
+            try applyConfiguration(mergedResult, dsn: dsn)
+        } catch {
+            publishState(
+                status: "failed",
+                dsn: dsn,
+                endpoint: mergedResult.endpoint,
+                remoteLimits: mergedResult.limits.filter { $0.isLimitEnabled && $0.dailyLimitMinutes > 0 },
+                items: sharedStore.loadSnapshot(dsn: dsn).map {
+                    makePresentationItems(
+                        configurations: $0.configurations,
+                        responses: mergedResult.limits,
+                        reachedIdentifiers: Set($0.reachedPackageNames),
+                        dsn: dsn
+                    )
+                } ?? [],
+                lastError: error.localizedDescription
+            )
+            updateDiagnostics(
+                status: "failed",
+                dsn: dsn,
+                endpoint: mergedResult.endpoint,
+                remoteCount: mergedResult.limits.count,
+                matchedCount: matchedCount(from: mergedResult.limits),
+                reachedCount: sharedStore.loadSnapshot(dsn: dsn)?.reachedPackageNames.count ?? 0,
+                lastPayload: payloadSummary(from: mergedResult),
+                lastError: error.localizedDescription
+            )
+        }
+    }
+
     private let service: DeviceAppLimitServicing
     private let selectionStore: DeviceAppLockSelectionStore
     private let sharedStore: DeviceAppLimitSharedStore

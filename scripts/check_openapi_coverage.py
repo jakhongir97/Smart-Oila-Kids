@@ -26,8 +26,16 @@ REST_PATH_VARIABLE_RE = re.compile(
     r'path:\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*method:\s*\.(get|post|put|patch|delete))?',
     flags=re.MULTILINE | re.DOTALL,
 )
+REST_DOTTED_PATH_VARIABLE_RE = re.compile(
+    r'path:\s*([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*method:\s*\.(get|post|put|patch|delete))?',
+    flags=re.MULTILINE | re.DOTALL,
+)
 STRING_ASSIGNMENT_RE = re.compile(
     r'(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]+)"'
+)
+APP_CONFIG_STRING_RE = re.compile(
+    r"static let ([A-Za-z_][A-Za-z0-9_]*)\s*=\s*configuredString\([^)]*fallback:\s*\"([^\"]+)\"",
+    flags=re.MULTILINE | re.DOTALL,
 )
 REST_URL_RE = re.compile(r'https?://[^/"\']+/api/[^"\'\s]+')
 WS_URL_RE = re.compile(r'wss?://[^/"\']+/ws/[^"\'\s]+')
@@ -35,6 +43,9 @@ WS_INTERPOLATED_PATH_RE = re.compile(r'/ws/[^"\'\s]+')
 WS_TEMPLATE_PATH_RE = re.compile(r'path:\s*"(/ws/[^"]+)"')
 WS_APP_CONFIG_SUFFIX_RE = re.compile(
     r'AppConfig\.websocketTokenPath\)(/[^"\n]+)"'
+)
+WS_CHILD_SUFFIX_LITERAL_RE = re.compile(
+    r'"(/(?:v2/)?children/device/\\\([^)]+\)/[^"\n]+)"'
 )
 
 
@@ -93,8 +104,22 @@ def collect_swift_files(root: Path) -> Iterable[Path]:
     return root.rglob("*.swift")
 
 
+def collect_app_config_strings(source_dir: Path) -> Dict[str, str]:
+    config_file = source_dir / "Core/Config/AppConfig.swift"
+    if not config_file.exists():
+        return {}
+
+    text = config_file.read_text(encoding="utf-8", errors="ignore")
+    return {
+        f"AppConfig.{name}": value
+        for name, value in APP_CONFIG_STRING_RE.findall(text)
+        if "/" in value
+    }
+
+
 def collect_rest_ops_from_path_method(source_dir: Path) -> Set[Tuple[str, str]]:
     ops: Set[Tuple[str, str]] = set()
+    app_config_strings = collect_app_config_strings(source_dir)
     for file in collect_swift_files(source_dir):
         text = file.read_text(encoding="utf-8", errors="ignore")
         assigned_paths = {
@@ -102,6 +127,7 @@ def collect_rest_ops_from_path_method(source_dir: Path) -> Set[Tuple[str, str]]:
             for name, value in STRING_ASSIGNMENT_RE.findall(text)
             if "/" in value
         }
+        assigned_paths.update(app_config_strings)
         for path, method in REST_CALL_RE.findall(text):
             ops.add((method.upper(), as_api_path(path)))
         for path, method in REQUEST_CALL_RE.findall(text):
@@ -112,6 +138,12 @@ def collect_rest_ops_from_path_method(source_dir: Path) -> Set[Tuple[str, str]]:
         for method, path in REST_TEMPLATE_RE.findall(text):
             ops.add((method.upper(), as_api_path(path)))
         for variable_name, method in REST_PATH_VARIABLE_RE.findall(text):
+            path = assigned_paths.get(variable_name)
+            if path is None:
+                continue
+            resolved_method = (method or "get").upper()
+            ops.add((resolved_method, as_api_path(path)))
+        for variable_name, method in REST_DOTTED_PATH_VARIABLE_RE.findall(text):
             path = assigned_paths.get(variable_name)
             if path is None:
                 continue
@@ -152,6 +184,10 @@ def collect_ws_paths_from_urls(source_dir: Path) -> Set[str]:
             if normalized.startswith("/ws/"):
                 paths.add(normalized)
         for suffix in WS_APP_CONFIG_SUFFIX_RE.findall(text):
+            normalized = normalize_path("/ws/{dynamic}" + suffix)
+            if normalized.startswith("/ws/"):
+                paths.add(normalized)
+        for suffix in WS_CHILD_SUFFIX_LITERAL_RE.findall(text):
             normalized = normalize_path("/ws/{dynamic}" + suffix)
             if normalized.startswith("/ws/"):
                 paths.add(normalized)

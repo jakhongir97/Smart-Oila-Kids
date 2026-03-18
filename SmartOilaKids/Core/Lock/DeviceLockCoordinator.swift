@@ -48,18 +48,23 @@ final class DeviceLockCoordinator: ObservableObject {
         webSocketService: DeviceLockWebSocketService = DeviceLockWebSocketService(),
         appLockStore: DeviceAppLockSelectionStore? = nil,
         appLockWebSocketService: DeviceApplicationLockWebSocketService = DeviceApplicationLockWebSocketService(),
+        applicationsSyncWebSocketService: DeviceApplicationsSyncWebSocketService = DeviceApplicationsSyncWebSocketService(),
         scheduleMonitorController: DeviceLockScheduleMonitorController? = nil,
         appLimitMonitorController: DeviceAppLimitMonitorController? = nil,
         connectGlobalLockWebSocket: ConnectAction? = nil,
         disconnectGlobalLockWebSocket: VoidAction? = nil,
         connectAppLockWebSocket: ConnectAction? = nil,
         disconnectAppLockWebSocket: VoidAction? = nil,
+        connectApplicationsSyncWebSocket: ConnectAction? = nil,
+        disconnectApplicationsSyncWebSocket: VoidAction? = nil,
         applyScheduleMonitoring: ScheduleApplyAction? = nil,
         stopScheduleMonitoring: VoidAction? = nil,
         activateAppLimitMonitoring: OptionalDSNAction? = nil,
         stopAppLimitMonitoring: VoidAction? = nil,
         refreshAppLimitMonitoring: AsyncVoidAction? = nil,
         armAppLimitRecoveryCheck: VoidAction? = nil,
+        syncSelectedApplicationsNow: AsyncVoidAction? = nil,
+        syncApplicationUsageNow: AsyncVoidAction? = nil,
         applyShield: ShieldApplyAction? = nil,
         clearShield: VoidAction? = nil,
         shouldStartPolling: Bool = true
@@ -84,6 +89,12 @@ final class DeviceLockCoordinator: ObservableObject {
         self.disconnectAppLockWebSocket = disconnectAppLockWebSocket ?? { [appLockWebSocketService] in
             appLockWebSocketService.disconnect()
         }
+        self.connectApplicationsSyncWebSocket = connectApplicationsSyncWebSocket ?? { [applicationsSyncWebSocketService] in
+            applicationsSyncWebSocketService.connect(dsn: $0)
+        }
+        self.disconnectApplicationsSyncWebSocket = disconnectApplicationsSyncWebSocket ?? { [applicationsSyncWebSocketService] in
+            applicationsSyncWebSocketService.disconnect()
+        }
         self.applyScheduleMonitoring = applyScheduleMonitoring ?? { [resolvedScheduleMonitorController] schedule, dsn in
             resolvedScheduleMonitorController.applySchedule(schedule, dsn: dsn)
         }
@@ -101,6 +112,12 @@ final class DeviceLockCoordinator: ObservableObject {
         }
         self.armAppLimitRecoveryCheck = armAppLimitRecoveryCheck ?? { [resolvedAppLimitMonitorController] in
             resolvedAppLimitMonitorController.armForegroundRecoveryCheck()
+        }
+        self.syncSelectedApplicationsNow = syncSelectedApplicationsNow ?? {
+            await DeviceAppLockSyncCoordinator.shared.retryNow()
+        }
+        self.syncApplicationUsageNow = syncApplicationUsageNow ?? {
+            await DeviceApplicationUsageReportCoordinator.shared.retryNow()
         }
         self.applyShield = applyShield ?? { [resolvedShieldController] isLocked, configuration in
             resolvedShieldController.applyLockState(isLocked, appLockConfiguration: configuration)
@@ -123,6 +140,11 @@ final class DeviceLockCoordinator: ObservableObject {
                     event,
                     isReconnectDelivery: isReconnectDelivery
                 )
+            }
+        }
+        applicationsSyncWebSocketService.onSyncRequested = { [weak self] isReconnectDelivery in
+            Task { @MainActor in
+                await self?.handleApplicationsSyncRequested(isReconnectDelivery: isReconnectDelivery)
             }
         }
         configurationObserver = NotificationCenter.default.addObserver(
@@ -177,6 +199,13 @@ final class DeviceLockCoordinator: ObservableObject {
         lastErrorText = nil
         connectGlobalLockWebSocket(normalized)
         connectAppLockWebSocket(normalized)
+        connectApplicationsSyncWebSocket(normalized)
+        updateAppLockSyncDiagnostics(
+            status: "listening",
+            endpoint: applicationsSyncEndpoint(for: normalized),
+            dsn: normalized,
+            lastSyncAt: nil
+        )
 
         guard shouldStartPolling else { return }
 
@@ -191,6 +220,13 @@ final class DeviceLockCoordinator: ObservableObject {
         currentDSN = nil
         pendingForegroundRecoveryCheck = false
         disconnectAppLockWebSocket()
+        disconnectApplicationsSyncWebSocket()
+        updateAppLockSyncDiagnostics(
+            status: "idle",
+            endpoint: "-",
+            dsn: "-",
+            lastSyncAt: nil
+        )
         stopScheduleMonitoring()
         stopAppLimitMonitoring()
         appLockStore.activate(dsn: nil)
@@ -450,12 +486,16 @@ final class DeviceLockCoordinator: ObservableObject {
     private let disconnectGlobalLockWebSocket: VoidAction
     private let connectAppLockWebSocket: ConnectAction
     private let disconnectAppLockWebSocket: VoidAction
+    private let connectApplicationsSyncWebSocket: ConnectAction
+    private let disconnectApplicationsSyncWebSocket: VoidAction
     private let applyScheduleMonitoring: ScheduleApplyAction
     private let stopScheduleMonitoring: VoidAction
     private let activateAppLimitMonitoring: OptionalDSNAction
     private let stopAppLimitMonitoring: VoidAction
     private let refreshAppLimitMonitoring: AsyncVoidAction
     private let armAppLimitRecoveryCheck: VoidAction
+    private let syncSelectedApplicationsNow: AsyncVoidAction
+    private let syncApplicationUsageNow: AsyncVoidAction
     private let applyShield: ShieldApplyAction
     private let clearShield: VoidAction
     private let shouldStartPolling: Bool
@@ -474,6 +514,25 @@ final class DeviceLockCoordinator: ObservableObject {
     deinit {
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
+        }
+    }
+    
+    private func handleApplicationsSyncRequested(
+        isReconnectDelivery: Bool
+    ) async {
+        guard let dsn = currentDSN else { return }
+        updateAppLockSyncDiagnostics(
+            status: "sync_received",
+            endpoint: applicationsSyncEndpoint(for: dsn),
+            dsn: dsn,
+            lastSyncAt: Date()
+        )
+        await syncSelectedApplicationsNow()
+        await syncApplicationUsageNow()
+        let didRefresh = await refreshApplicationStateIfNeeded(for: dsn, force: true)
+        await refreshAppLimitMonitoring()
+        if isReconnectDelivery && didRefresh {
+            reportLockRecoveryIfNeeded(dsn: dsn)
         }
     }
 }
@@ -522,6 +581,26 @@ private extension DeviceLockCoordinator {
             remoteUnenforceableCount: remoteUnenforceableCount,
             lastError: lastError
         )
+    }
+
+    func updateAppLockSyncDiagnostics(
+        status: String? = nil,
+        endpoint: String? = nil,
+        dsn: String? = nil,
+        lastSyncAt: Date? = nil
+    ) {
+        RuntimeDiagnosticsCenter.shared.updateAppLockSync(
+            status: status,
+            endpoint: endpoint,
+            dsn: dsn,
+            lastPayload: nil,
+            lastError: nil,
+            lastSyncAt: lastSyncAt
+        )
+    }
+
+    func applicationsSyncEndpoint(for dsn: String) -> String {
+        "/children/device/\(dsn)/applications/sync"
     }
 
     func recalculateAppLockMismatchState() {
@@ -573,7 +652,7 @@ private extension DeviceLockCoordinator {
                 resolved[normalizedIdentifier] = resolved[normalizedIdentifier]
                     ?? DeviceAppSelectionApplication(
                         packageName: normalizedIdentifier,
-                        appName: ProductFallbackText.appName()
+                        appName: normalizedIdentifier
                     )
             } else {
                 resolved.removeValue(forKey: normalizedIdentifier)

@@ -117,3 +117,57 @@ enum SettingsDiagnosticsValueMapper {
         return entries.joined(separator: " | ")
     }
 }
+
+struct DiagnosticsExportArtifact {
+    let fileURL: URL
+    let text: String
+
+    static func makeFilename(dsn: String?, now: Date = Date()) -> String {
+        let safeDSN = sanitizedDSN(dsn)
+        return "smart_oila_kids_diagnostics_\(safeDSN)_\(timestamp(now)).txt"
+    }
+
+    static func create(
+        text: String,
+        dsn: String?,
+        now: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> DiagnosticsExportArtifact {
+        let filename = makeFilename(dsn: dsn, now: now)
+        let fileURL = fileManager.temporaryDirectory.appendingPathComponent(filename, isDirectory: false)
+
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try? fileManager.removeItem(at: fileURL)
+        }
+
+        try text.write(to: fileURL, atomically: true, encoding: .utf8)
+        return DiagnosticsExportArtifact(fileURL: fileURL, text: text)
+    }
+
+    private static func sanitizedDSN(_ dsn: String?) -> String {
+        let trimmed = dsn?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "no-dsn" }
+
+        let lowercased = trimmed.lowercased()
+        let replaced = lowercased.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: "-",
+            options: .regularExpression
+        )
+        let collapsed = replaced.replacingOccurrences(
+            of: "-+",
+            with: "-",
+            options: .regularExpression
+        )
+        let sanitized = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return sanitized.isEmpty ? "no-dsn" : sanitized
+    }
+
+    private static func timestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss'Z'"
+        return formatter.string(from: date)
+    }
+}

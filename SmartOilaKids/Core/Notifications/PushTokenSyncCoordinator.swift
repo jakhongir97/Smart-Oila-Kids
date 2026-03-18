@@ -31,14 +31,25 @@ final class PushTokenService: PushTokenServicing {
     }
 
     func fetchRemoteToken(dsn: String) async throws -> String? {
-        let response: FirebaseTokenResponse = try await client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "devices/dsn/\(dsn)/firebase_notification_token",
-            method: .get,
-            headers: ["Accept": "application/json"],
-            as: FirebaseTokenResponse.self
-        )
-        return response.token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let response: FirebaseTokenResponse = try await client.requestDecodableWithBaseFallback(
+                baseURLs: AppConfig.apiBaseCandidates,
+                path: "devices/dsn/\(dsn)/firebase_notification_token",
+                method: .get,
+                headers: ["Accept": "application/json"],
+                as: FirebaseTokenResponse.self
+            )
+            return response.token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
+            let fallbackResponse: FirebaseTokenResponse = try await client.requestDecodableWithBaseFallback(
+                baseURLs: AppConfig.apiBaseCandidates,
+                path: "members/me/firebase_notification_token",
+                method: .get,
+                headers: ["Accept": "application/json"],
+                as: FirebaseTokenResponse.self
+            )
+            return fallbackResponse.token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 
     private let client: APIClient

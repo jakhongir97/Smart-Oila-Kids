@@ -12,15 +12,28 @@ struct APIRequestFactory {
         body: Data? = nil,
         contentType: String? = nil
     ) throws -> URLRequest {
+        let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pathComponents = normalizedPath.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        let requestPath = String(pathComponents.first ?? "")
+
         guard var components = URLComponents(
-            url: baseURL.appendingPathComponent(path),
+            url: baseURL.appendingPathComponent(requestPath),
             resolvingAgainstBaseURL: false
         ) else {
             throw NetworkError.invalidURL
         }
 
-        if !queryItems.isEmpty {
-            components.queryItems = queryItems
+        var resolvedQueryItems: [URLQueryItem] = []
+        if pathComponents.count == 2 {
+            let embeddedQuery = String(pathComponents[1])
+            if let embeddedComponents = URLComponents(string: "https://smartoila.invalid/?\(embeddedQuery)") {
+                resolvedQueryItems.append(contentsOf: embeddedComponents.queryItems ?? [])
+            }
+        }
+
+        resolvedQueryItems.append(contentsOf: queryItems)
+        if !resolvedQueryItems.isEmpty {
+            components.queryItems = resolvedQueryItems
         }
 
         guard let url = components.url else {

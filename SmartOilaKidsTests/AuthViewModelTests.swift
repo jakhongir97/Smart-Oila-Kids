@@ -469,7 +469,7 @@ final class AuthServiceRegistrationTests: XCTestCase {
             let body = try XCTUnwrap(TestHTTPURLProtocol.bodyData(for: request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["token"] as? String, "qr-token-800")
-            XCTAssertEqual(json["device_name"] as? String, "iPhone")
+            XCTAssertEqual(json["device_name"] as? String, ProductFallbackText.localDeviceName())
             XCTAssertEqual(json["app_version"] as? String, "2.0.0")
 
             let payload = #"""
@@ -568,6 +568,49 @@ final class AuthServiceRegistrationTests: XCTestCase {
             "/api/auth_v2/child/claim_qr",
             "/upload-v2/device",
             "/api/members/me/devices"
+        ])
+    }
+
+    func testRegisterDeviceDoesNotUseLegacyFallbackWhenDisabled() async {
+        let key = "SMARTOILA_ENABLE_LEGACY_DEVICE_CLAIM_FALLBACK"
+        let previousValue = getenv(key).map { String(cString: $0) }
+        defer {
+            if let previousValue {
+                setenv(key, previousValue, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+
+        setenv(key, "0", 1)
+
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/auth_v2/child/claim_qr")
+            return (makeHTTPResponse(for: request.url!, statusCode: 404), Data("not-found".utf8))
+        }
+
+        let service = AuthService(client: makeTestAPIClient(accessToken: nil))
+
+        do {
+            _ = try await service.registerDevice(
+                qrToken: " qr-token-disabled ",
+                qrRefreshToken: nil,
+                parentPhone: "+998901234567",
+                qrDSN: nil,
+                scannedDeviceName: nil,
+                deviceName: "Kid Phone",
+                appVersion: "3.1.0"
+            )
+            XCTFail("Expected fallback-disabled error")
+        } catch let NetworkError.server(statusCode, body) {
+            XCTAssertEqual(statusCode, 404)
+            XCTAssertEqual(body, "not-found")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(TestHTTPURLProtocol.recordedRequests.map { $0.url?.path }, [
+            "/api/auth_v2/child/claim_qr"
         ])
     }
 

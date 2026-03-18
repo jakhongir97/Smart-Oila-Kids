@@ -23,6 +23,7 @@ struct DeviceApplicationStateFetchResult {
 
     var authoritativeLockedApplications: [DeviceAppSelectionApplication] {
         var resolved: [String: DeviceAppSelectionApplication] = [:]
+        let genericFallbackName = ProductFallbackText.appName()
 
         for application in applications where application.isLocked {
             guard let normalized = Self.makeApplicationIdentity(from: application) else { continue }
@@ -33,7 +34,8 @@ struct DeviceApplicationStateFetchResult {
             guard let normalized = Self.makeApplicationIdentity(from: application) else { continue }
 
             if let existing = resolved[normalized.packageName],
-               existing.appName != existing.packageName {
+               existing.appName != existing.packageName,
+               existing.appName != genericFallbackName {
                 continue
             }
 
@@ -92,8 +94,8 @@ final class DeviceApplicationStateService: DeviceApplicationStateServicing {
 
     func fetchState(dsn: String) async throws -> DeviceApplicationStateFetchResult {
         let device = try await memberDevicesService.resolveDevice(byDSN: dsn, limit: 100)
-        let applicationsEndpoint = "members/device/\(device.id)/applications"
-        let lockedEndpoint = "members/device/\(device.id)/applications/locked"
+        let applicationsEndpoint = "members/device/v2/\(device.id)/applications"
+        let lockedEndpoint = "-"
 
         async let applicationsTask: [DeviceApplicationRecord]? = client.requestDecodableWithBaseFallback(
             baseURLs: AppConfig.apiBaseCandidates,
@@ -102,16 +104,9 @@ final class DeviceApplicationStateService: DeviceApplicationStateServicing {
             headers: ["Accept": "application/json"],
             as: Optional<[DeviceApplicationRecord]>.self
         )
-        async let lockedApplicationsTask: [DeviceApplicationRecord]? = client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: lockedEndpoint,
-            method: .get,
-            headers: ["Accept": "application/json"],
-            as: Optional<[DeviceApplicationRecord]>.self
-        )
 
         let applications = try await applicationsTask ?? []
-        let lockedApplications = try await lockedApplicationsTask ?? []
+        let lockedApplications: [DeviceApplicationRecord] = []
 
         return DeviceApplicationStateFetchResult(
             deviceID: device.id,

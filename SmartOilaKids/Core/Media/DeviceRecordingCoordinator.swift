@@ -637,12 +637,12 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 dsn: dsn,
                 defaultMediaType: .audioStream
             )
-            let userMessage = NetworkError.userMessage(for: error)
+            let technicalReason = error.localizedDescription
             recordMediaTelemetry(
                 .streamFailed,
                 dsn: dsn,
                 mediaType: .audioStream,
-                reason: userMessage,
+                reason: technicalReason,
                 cooldown: 10
             )
             updateAudioStreamDiagnostics(
@@ -794,12 +794,12 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 dsn: dsn,
                 defaultMediaType: telemetryType(for: streamType)
             )
-            let userMessage = NetworkError.userMessage(for: error)
+            let technicalReason = error.localizedDescription
             recordMediaTelemetry(
                 .streamFailed,
                 dsn: dsn,
                 mediaType: telemetryType(for: streamType),
-                reason: userMessage,
+                reason: technicalReason,
                 cooldown: 10
             )
             updateVideoStreamDiagnostics(
@@ -1085,13 +1085,13 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 defaultMediaType: mediaType,
                 recordingID: recordingID
             )
-            let userMessage = NetworkError.userMessage(for: error)
+            let technicalReason = error.localizedDescription
             recordMediaTelemetry(
                 .recordingFailed,
                 dsn: dsn,
                 mediaType: mediaType,
                 recordingID: recordingID,
-                reason: userMessage,
+                reason: technicalReason,
                 cooldown: 10
             )
             updateRecordingDiagnostics(
@@ -1102,7 +1102,7 @@ final class DeviceRecordingCoordinator: ObservableObject {
                 phase: "failed",
                 lastError: error.localizedDescription
             )
-            await cancelTransportAction(recordingID, dsn, type, userMessage)
+            await cancelTransportAction(recordingID, dsn, type, technicalReason)
         }
 
         clearActiveRecordingStateIfNeeded(recordingID: recordingID, type: type)
@@ -1450,7 +1450,14 @@ final class DeviceRecordingCoordinator: ObservableObject {
     }
 
     private func streamAudioEndpoint(for dsn: String) -> String {
-        "/children/device/\(dsn)/stream/audio"
+        switch AppConfig.mediaStreamWebSocketMode {
+        case .legacyOnly:
+            return "/children/device/\(dsn)/stream/audio"
+        case .v2Preferred:
+            return "/v2/children/device/\(dsn)/stream/audio | /children/device/\(dsn)/stream/audio"
+        case .v2Only:
+            return "/v2/children/device/\(dsn)/stream/audio"
+        }
     }
 
     private func streamVideoEndpoint(
@@ -1458,7 +1465,28 @@ final class DeviceRecordingCoordinator: ObservableObject {
         streamType: DeviceMediaStreamType? = nil
     ) -> String {
         let resolvedStreamType = streamType ?? currentVideoStreamEndpointType ?? .camera
-        return "/children/device/\(dsn)/stream/\(resolvedStreamType.rawValue)"
+        let legacyRoute: String
+        let v2Route: String
+
+        switch resolvedStreamType {
+        case .audio:
+            return streamAudioEndpoint(for: dsn)
+        case .camera:
+            legacyRoute = "/children/device/\(dsn)/stream/camera"
+            v2Route = "/v2/children/device/\(dsn)/stream/camera"
+        case .frontCamera:
+            legacyRoute = "/children/device/\(dsn)/stream/front_camera"
+            v2Route = "/v2/children/device/\(dsn)/stream/front_camera"
+        }
+
+        switch AppConfig.mediaStreamWebSocketMode {
+        case .legacyOnly:
+            return legacyRoute
+        case .v2Preferred:
+            return "\(v2Route) | \(legacyRoute)"
+        case .v2Only:
+            return v2Route
+        }
     }
 
     private func pruneCompletedRecordingIDs(referenceDate: Date) {

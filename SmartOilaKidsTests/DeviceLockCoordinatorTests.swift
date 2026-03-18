@@ -36,6 +36,8 @@ final class DeviceLockCoordinatorTests: XCTestCase {
         var globalDisconnects = 0
         var appConnects: [String] = []
         var appDisconnects = 0
+        var appSyncConnects: [String] = []
+        var appSyncDisconnects = 0
         var scheduleStops = 0
         var appLimitActivations: [String?] = []
         var appLimitStops = 0
@@ -48,6 +50,8 @@ final class DeviceLockCoordinatorTests: XCTestCase {
             disconnectGlobalLockWebSocket: { globalDisconnects += 1 },
             connectAppLockWebSocket: { appConnects.append($0) },
             disconnectAppLockWebSocket: { appDisconnects += 1 },
+            connectApplicationsSyncWebSocket: { appSyncConnects.append($0) },
+            disconnectApplicationsSyncWebSocket: { appSyncDisconnects += 1 },
             stopScheduleMonitoring: { scheduleStops += 1 },
             activateAppLimitMonitoring: { appLimitActivations.append($0) },
             stopAppLimitMonitoring: { appLimitStops += 1 },
@@ -60,6 +64,7 @@ final class DeviceLockCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.state, .unlocked)
         XCTAssertEqual(globalConnects, ["child-1"])
         XCTAssertEqual(appConnects, ["child-1"])
+        XCTAssertEqual(appSyncConnects, ["child-1"])
         XCTAssertEqual(scheduleStops, 1)
         XCTAssertEqual(appLimitActivations, ["child-1"])
         XCTAssertEqual(appLimitRecoveryArms, 1)
@@ -71,6 +76,7 @@ final class DeviceLockCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.lastErrorText)
         XCTAssertEqual(globalDisconnects, 1)
         XCTAssertEqual(appDisconnects, 1)
+        XCTAssertEqual(appSyncDisconnects, 1)
         XCTAssertEqual(scheduleStops, 2)
         XCTAssertEqual(appLimitStops, 1)
     }
@@ -203,20 +209,60 @@ final class DeviceLockCoordinatorTests: XCTestCase {
         XCTAssertTrue(store.activeLockedApplicationIdentifiers.isEmpty)
     }
 
+    func testApplicationsSyncEventRetriesChildSyncSurfacesUsageRetryAndRefreshesState() async {
+        let service = DeviceLockServiceSpy()
+        let applicationStateService = DeviceApplicationStateServiceSpy()
+        let applicationsSyncWebSocketService = DeviceApplicationsSyncWebSocketService()
+        var selectedSyncRetryCount = 0
+        var usageRetryCount = 0
+        var appLimitRefreshCount = 0
+
+        let coordinator = makeCoordinator(
+            service: service,
+            applicationStateService: applicationStateService,
+            applicationsSyncWebSocketService: applicationsSyncWebSocketService,
+            refreshAppLimitMonitoring: {
+                appLimitRefreshCount += 1
+            },
+            syncSelectedApplicationsNow: {
+                selectedSyncRetryCount += 1
+            },
+            syncApplicationUsageNow: {
+                usageRetryCount += 1
+            }
+        )
+
+        coordinator.start(dsn: "child-sync")
+        applicationsSyncWebSocketService.onSyncRequested?(false)
+
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(selectedSyncRetryCount, 1)
+        XCTAssertEqual(usageRetryCount, 1)
+        XCTAssertEqual(applicationStateService.requests, ["child-sync"])
+        XCTAssertEqual(appLimitRefreshCount, 1)
+    }
+
     private func makeCoordinator(
         service: DeviceLockServicing? = nil,
         applicationStateService: DeviceApplicationStateServicing? = nil,
         appLockWebSocketService: DeviceApplicationLockWebSocketService = DeviceApplicationLockWebSocketService(),
+        applicationsSyncWebSocketService: DeviceApplicationsSyncWebSocketService = DeviceApplicationsSyncWebSocketService(),
         connectGlobalLockWebSocket: DeviceLockCoordinator.ConnectAction? = nil,
         disconnectGlobalLockWebSocket: DeviceLockCoordinator.VoidAction? = nil,
         connectAppLockWebSocket: DeviceLockCoordinator.ConnectAction? = nil,
         disconnectAppLockWebSocket: DeviceLockCoordinator.VoidAction? = nil,
+        connectApplicationsSyncWebSocket: DeviceLockCoordinator.ConnectAction? = nil,
+        disconnectApplicationsSyncWebSocket: DeviceLockCoordinator.VoidAction? = nil,
         applyScheduleMonitoring: DeviceLockCoordinator.ScheduleApplyAction? = nil,
         stopScheduleMonitoring: DeviceLockCoordinator.VoidAction? = nil,
         activateAppLimitMonitoring: DeviceLockCoordinator.OptionalDSNAction? = nil,
         stopAppLimitMonitoring: DeviceLockCoordinator.VoidAction? = nil,
         refreshAppLimitMonitoring: DeviceLockCoordinator.AsyncVoidAction? = nil,
-        armAppLimitRecoveryCheck: DeviceLockCoordinator.VoidAction? = nil
+        armAppLimitRecoveryCheck: DeviceLockCoordinator.VoidAction? = nil,
+        syncSelectedApplicationsNow: DeviceLockCoordinator.AsyncVoidAction? = nil,
+        syncApplicationUsageNow: DeviceLockCoordinator.AsyncVoidAction? = nil
     ) -> DeviceLockCoordinator {
         let resolvedService = service ?? DeviceLockServiceSpy()
         let resolvedApplicationStateService = applicationStateService ?? DeviceApplicationStateServiceSpy()
@@ -227,16 +273,21 @@ final class DeviceLockCoordinatorTests: XCTestCase {
             webSocketService: DeviceLockWebSocketService(),
             appLockStore: store,
             appLockWebSocketService: appLockWebSocketService,
+            applicationsSyncWebSocketService: applicationsSyncWebSocketService,
             connectGlobalLockWebSocket: connectGlobalLockWebSocket ?? { _ in },
             disconnectGlobalLockWebSocket: disconnectGlobalLockWebSocket ?? {},
             connectAppLockWebSocket: connectAppLockWebSocket ?? { _ in },
             disconnectAppLockWebSocket: disconnectAppLockWebSocket ?? {},
+            connectApplicationsSyncWebSocket: connectApplicationsSyncWebSocket ?? { _ in },
+            disconnectApplicationsSyncWebSocket: disconnectApplicationsSyncWebSocket ?? {},
             applyScheduleMonitoring: applyScheduleMonitoring ?? { _, _ in },
             stopScheduleMonitoring: stopScheduleMonitoring ?? {},
             activateAppLimitMonitoring: activateAppLimitMonitoring ?? { _ in },
             stopAppLimitMonitoring: stopAppLimitMonitoring ?? {},
             refreshAppLimitMonitoring: refreshAppLimitMonitoring ?? {},
             armAppLimitRecoveryCheck: armAppLimitRecoveryCheck ?? {},
+            syncSelectedApplicationsNow: syncSelectedApplicationsNow ?? {},
+            syncApplicationUsageNow: syncApplicationUsageNow ?? {},
             applyShield: { _, _ in },
             clearShield: {},
             shouldStartPolling: false
@@ -337,8 +388,8 @@ private final class DeviceApplicationStateServiceSpy: DeviceApplicationStateServ
         }
         return DeviceApplicationStateFetchResult(
             deviceID: 1,
-            applicationsEndpoint: "members/device/1/applications",
-            lockedEndpoint: "members/device/1/applications/locked",
+            applicationsEndpoint: "members/device/v2/1/applications",
+            lockedEndpoint: "-",
             applications: [],
             lockedApplications: []
         )

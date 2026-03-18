@@ -29,39 +29,50 @@ struct MainView: View {
     }
 
     var body: some View {
-        MainSurfaceView(
-            onBackTap: onClose,
-            profileName: resolvedProfileName,
-            profileAvatarURL: SettingsAvatarStore.shared.avatarURL(for: activeDSN),
-            notificationBadgeCount: viewModel.unreadNotificationCount,
-            deviceStatus: viewModel.deviceStatus,
-            usageHours: viewModel.weeklyUsageHours,
-            usagePhase: viewModel.usagePhase,
-            deviceControlItems: viewModel.recentDeviceControlItems,
-            mediaItems: viewModel.recentMediaItems,
-            pendingTasksCount: viewModel.pendingTasksCount,
-            unreadChatCount: viewModel.unreadChatCount,
-            isSendingSOS: viewModel.isSendingSOS,
-            onNotificationTap: { showNotifications = true },
-            onSettingsTap: allowsSettings ? { showSettings = true } : nil,
-            onRetryUsage: {
-                Task {
-                    await viewModel.loadWeeklyUsage(dsn: activeDSN)
+        ZStack(alignment: .top) {
+            MainSurfaceView(
+                onBackTap: onClose,
+                profileName: resolvedProfileName,
+                profileAvatarURL: SettingsAvatarStore.shared.avatarURL(for: activeDSN),
+                notificationBadgeCount: viewModel.unreadNotificationCount,
+                deviceStatus: viewModel.deviceStatus,
+                usageHours: viewModel.weeklyUsageHours,
+                usagePhase: viewModel.usagePhase,
+                deviceControlItems: viewModel.recentDeviceControlItems,
+                mediaItems: viewModel.recentMediaItems,
+                pendingTasksCount: viewModel.pendingTasksCount,
+                unreadChatCount: viewModel.unreadChatCount,
+                isSendingSOS: viewModel.isSendingSOS,
+                onNotificationTap: { showNotifications = true },
+                onSettingsTap: allowsSettings ? { showSettings = true } : nil,
+                onRetryUsage: {
+                    Task {
+                        await viewModel.loadWeeklyUsage(dsn: activeDSN)
+                    }
+                },
+                onDeviceControlTap: { showNotifications = true },
+                onMediaTap: { showNotifications = true },
+                onTasksTap: { showTasks = true },
+                onChatTap: {
+                    openChatThreadOnPresent = false
+                    showChat = true
+                },
+                onSOSTap: {
+                    Task {
+                        await viewModel.sendSOS(dsn: activeDSN)
+                    }
                 }
-            },
-            onDeviceControlTap: { showNotifications = true },
-            onMediaTap: { showNotifications = true },
-            onTasksTap: { showTasks = true },
-            onChatTap: {
-                openChatThreadOnPresent = false
-                showChat = true
-            },
-            onSOSTap: {
-                Task {
-                    await viewModel.sendSOS(dsn: activeDSN)
-                }
+            )
+
+            if let banner = viewModel.sosBanner {
+                MainStatusBanner(state: banner)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)
+                    .allowsHitTesting(false)
             }
-        )
+        }
         .refreshable {
             await viewModel.loadWeeklyUsage(dsn: activeDSN)
         }
@@ -295,6 +306,49 @@ private struct MainInfoSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
+        }
+    }
+}
+
+private struct MainStatusBanner: View {
+    let state: MainStatusBannerState
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: iconName)
+                .font(.system(size: 16, weight: .semibold))
+
+            Text(state.text)
+                .font(AppTypography.unbounded(11, weight: .medium))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(backgroundColor)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: Color.black.opacity(0.2), radius: 12, y: 4)
+    }
+
+    private var iconName: String {
+        switch state.tone {
+        case .success:
+            return "checkmark.circle.fill"
+        case .error:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch state.tone {
+        case .success:
+            return AppColors.accentGreen
+        case .error:
+            return AppColors.dangerRed
         }
     }
 }

@@ -17,9 +17,9 @@ actor DeviceAudioStreamWebSocketService {
 
         isDisconnectRequested = false
         connectedDSN = normalizedDSN
-        currentBaseIndex = 0
+        currentCandidateIndex = 0
         reconnectAttemptCount = 0
-        connectUsingCurrentBase()
+        connectUsingCurrentCandidate()
     }
 
     func disconnect() {
@@ -44,43 +44,39 @@ actor DeviceAudioStreamWebSocketService {
                 self.task = nil
             }
             if !isDisconnectRequested {
-                connectNextBase()
+                connectNextCandidate()
             }
             return false
         }
     }
 
-    private func connectUsingCurrentBase() {
+    private func connectUsingCurrentCandidate() {
         guard let dsn = connectedDSN else { return }
+        let candidates = endpointCandidates(for: dsn)
 
-        guard currentBaseIndex < AppConfig.websocketBaseCandidates.count else {
+        guard currentCandidateIndex < candidates.count else {
             scheduleReconnect()
             return
         }
 
-        let base = AppConfig.websocketBaseCandidates[currentBaseIndex]
-        let urlString = "\(base)\(AppConfig.websocketTokenPath)/children/device/\(dsn)/stream/audio"
-        guard let url = URL(string: urlString) else {
-            connectNextBase()
-            return
-        }
-
+        let url = candidates[currentCandidateIndex]
         let task = URLSession.shared.webSocketTask(with: url)
         self.task = task
         task.resume()
-        receiveLoop(baseIndex: currentBaseIndex, task: task)
+        receiveLoop(candidateIndex: currentCandidateIndex, task: task)
     }
 
-    private func connectNextBase() {
+    private func connectNextCandidate() {
         guard !isDisconnectRequested else { return }
 
-        currentBaseIndex += 1
-        if currentBaseIndex < AppConfig.websocketBaseCandidates.count {
-            connectUsingCurrentBase()
+        currentCandidateIndex += 1
+        if let connectedDSN,
+           currentCandidateIndex < endpointCandidates(for: connectedDSN).count {
+            connectUsingCurrentCandidate()
             return
         }
 
-        currentBaseIndex = 0
+        currentCandidateIndex = 0
         scheduleReconnect()
     }
 
@@ -94,21 +90,21 @@ actor DeviceAudioStreamWebSocketService {
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            await self?.connectUsingCurrentBase()
+            await self?.connectUsingCurrentCandidate()
         }
     }
 
-    private func receiveLoop(baseIndex: Int, task: URLSessionWebSocketTask) {
+    private func receiveLoop(candidateIndex: Int, task: URLSessionWebSocketTask) {
         task.receive { [weak self] result in
             Task { [weak self] in
-                await self?.handleReceiveResult(result, baseIndex: baseIndex, task: task)
+                await self?.handleReceiveResult(result, candidateIndex: candidateIndex, task: task)
             }
         }
     }
 
     private func handleReceiveResult(
         _ result: Result<URLSessionWebSocketTask.Message, Error>,
-        baseIndex: Int,
+        candidateIndex: Int,
         task: URLSessionWebSocketTask
     ) {
         guard self.task === task else { return }
@@ -116,11 +112,36 @@ actor DeviceAudioStreamWebSocketService {
         switch result {
         case .success:
             reconnectAttemptCount = 0
-            receiveLoop(baseIndex: baseIndex, task: task)
+            receiveLoop(candidateIndex: candidateIndex, task: task)
         case .failure:
             self.task = nil
-            if !isDisconnectRequested, baseIndex == currentBaseIndex {
-                connectNextBase()
+            if !isDisconnectRequested, candidateIndex == currentCandidateIndex {
+                connectNextCandidate()
+            }
+        }
+    }
+
+    private func endpointCandidates(for dsn: String) -> [URL] {
+        let routeSuffixes: [String]
+        switch AppConfig.mediaStreamWebSocketMode {
+        case .legacyOnly:
+            routeSuffixes = [
+                "/children/device/\(dsn)/stream/audio"
+            ]
+        case .v2Preferred:
+            routeSuffixes = [
+                "/v2/children/device/\(dsn)/stream/audio",
+                "/children/device/\(dsn)/stream/audio"
+            ]
+        case .v2Only:
+            routeSuffixes = [
+                "/v2/children/device/\(dsn)/stream/audio"
+            ]
+        }
+
+        return routeSuffixes.flatMap { suffix in
+            AppConfig.websocketBaseCandidates.compactMap { base in
+                URL(string: "\(base)\(AppConfig.websocketTokenPath)\(suffix)")
             }
         }
     }
@@ -132,7 +153,7 @@ actor DeviceAudioStreamWebSocketService {
     }
 
     private var connectedDSN: String?
-    private var currentBaseIndex = 0
+    private var currentCandidateIndex = 0
     private var isDisconnectRequested = false
     private var task: URLSessionWebSocketTask?
     private var reconnectTask: Task<Void, Never>?

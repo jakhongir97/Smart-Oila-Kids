@@ -54,7 +54,11 @@ extension AuthService {
                     headers: [:],
                     onDebug: debugLog
                 )
-            } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
+            } catch let NetworkError.server(statusCode, body) where statusCode == 404 {
+                guard AppConfig.legacyDeviceClaimFallbackEnabled else {
+                    debugLog("`\(AppConfig.qrClaimPath)` returned 404 and legacy claim fallback is disabled.")
+                    throw NetworkError.server(statusCode: statusCode, body: body)
+                }
                 debugLog("`\(AppConfig.qrClaimPath)` returned 404. Falling back to legacy claim endpoint.")
                 let legacyResult = try await registerDeviceByLegacyEndpoint(
                     token: normalizedToken,

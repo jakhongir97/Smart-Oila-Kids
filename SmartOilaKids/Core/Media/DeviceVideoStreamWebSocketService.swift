@@ -20,9 +20,9 @@ actor DeviceVideoStreamWebSocketService {
         isDisconnectRequested = false
         connectedDSN = normalizedDSN
         connectedStreamType = streamType
-        currentBaseIndex = 0
+        currentCandidateIndex = 0
         reconnectAttemptCount = 0
-        connectUsingCurrentBase()
+        connectUsingCurrentCandidate()
     }
 
     func disconnect() {
@@ -48,43 +48,40 @@ actor DeviceVideoStreamWebSocketService {
                 self.task = nil
             }
             if !isDisconnectRequested {
-                connectNextBase()
+                connectNextCandidate()
             }
             return false
         }
     }
 
-    private func connectUsingCurrentBase() {
+    private func connectUsingCurrentCandidate() {
         guard let dsn = connectedDSN, let streamType = connectedStreamType else { return }
+        let candidates = endpointCandidates(for: dsn, streamType: streamType)
 
-        guard currentBaseIndex < AppConfig.websocketBaseCandidates.count else {
+        guard currentCandidateIndex < candidates.count else {
             scheduleReconnect()
             return
         }
 
-        let base = AppConfig.websocketBaseCandidates[currentBaseIndex]
-        let urlString = "\(base)\(AppConfig.websocketTokenPath)/children/device/\(dsn)/stream/\(streamType.rawValue)"
-        guard let url = URL(string: urlString) else {
-            connectNextBase()
-            return
-        }
-
+        let url = candidates[currentCandidateIndex]
         let task = URLSession.shared.webSocketTask(with: url)
         self.task = task
         task.resume()
-        receiveLoop(baseIndex: currentBaseIndex, task: task)
+        receiveLoop(candidateIndex: currentCandidateIndex, task: task)
     }
 
-    private func connectNextBase() {
+    private func connectNextCandidate() {
         guard !isDisconnectRequested else { return }
 
-        currentBaseIndex += 1
-        if currentBaseIndex < AppConfig.websocketBaseCandidates.count {
-            connectUsingCurrentBase()
+        currentCandidateIndex += 1
+        if let connectedDSN,
+           let connectedStreamType,
+           currentCandidateIndex < endpointCandidates(for: connectedDSN, streamType: connectedStreamType).count {
+            connectUsingCurrentCandidate()
             return
         }
 
-        currentBaseIndex = 0
+        currentCandidateIndex = 0
         scheduleReconnect()
     }
 
@@ -98,21 +95,21 @@ actor DeviceVideoStreamWebSocketService {
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            await self?.connectUsingCurrentBase()
+            await self?.connectUsingCurrentCandidate()
         }
     }
 
-    private func receiveLoop(baseIndex: Int, task: URLSessionWebSocketTask) {
+    private func receiveLoop(candidateIndex: Int, task: URLSessionWebSocketTask) {
         task.receive { [weak self] result in
             Task { [weak self] in
-                await self?.handleReceiveResult(result, baseIndex: baseIndex, task: task)
+                await self?.handleReceiveResult(result, candidateIndex: candidateIndex, task: task)
             }
         }
     }
 
     private func handleReceiveResult(
         _ result: Result<URLSessionWebSocketTask.Message, Error>,
-        baseIndex: Int,
+        candidateIndex: Int,
         task: URLSessionWebSocketTask
     ) {
         guard self.task === task else { return }
@@ -120,11 +117,47 @@ actor DeviceVideoStreamWebSocketService {
         switch result {
         case .success:
             reconnectAttemptCount = 0
-            receiveLoop(baseIndex: baseIndex, task: task)
+            receiveLoop(candidateIndex: candidateIndex, task: task)
         case .failure:
             self.task = nil
-            if !isDisconnectRequested, baseIndex == currentBaseIndex {
-                connectNextBase()
+            if !isDisconnectRequested, candidateIndex == currentCandidateIndex {
+                connectNextCandidate()
+            }
+        }
+    }
+
+    private func endpointCandidates(
+        for dsn: String,
+        streamType: DeviceMediaStreamType
+    ) -> [URL] {
+        let legacyRoute: String
+        let v2Route: String
+
+        switch streamType {
+        case .audio:
+            legacyRoute = "/children/device/\(dsn)/stream/audio"
+            v2Route = "/v2/children/device/\(dsn)/stream/audio"
+        case .camera:
+            legacyRoute = "/children/device/\(dsn)/stream/camera"
+            v2Route = "/v2/children/device/\(dsn)/stream/camera"
+        case .frontCamera:
+            legacyRoute = "/children/device/\(dsn)/stream/front_camera"
+            v2Route = "/v2/children/device/\(dsn)/stream/front_camera"
+        }
+
+        let routeSuffixes: [String]
+        switch AppConfig.mediaStreamWebSocketMode {
+        case .legacyOnly:
+            routeSuffixes = [legacyRoute]
+        case .v2Preferred:
+            routeSuffixes = [v2Route, legacyRoute]
+        case .v2Only:
+            routeSuffixes = [v2Route]
+        }
+
+        return routeSuffixes.flatMap { suffix in
+            AppConfig.websocketBaseCandidates.compactMap { base in
+                URL(string: "\(base)\(AppConfig.websocketTokenPath)\(suffix)")
             }
         }
     }
@@ -137,7 +170,7 @@ actor DeviceVideoStreamWebSocketService {
 
     private var connectedDSN: String?
     private var connectedStreamType: DeviceMediaStreamType?
-    private var currentBaseIndex = 0
+    private var currentCandidateIndex = 0
     private var isDisconnectRequested = false
     private var task: URLSessionWebSocketTask?
     private var reconnectTask: Task<Void, Never>?

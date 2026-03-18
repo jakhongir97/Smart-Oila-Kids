@@ -17,6 +17,10 @@ enum AppRuntime {
         return false
     }
 
+    static var showGeoDebugOverlay: Bool {
+        configuredBool("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY") ?? false
+    }
+
     static var debugRoute: DebugRoute? {
 #if DEBUG
         guard let value = trimmed("SMARTOILA_DEBUG_ROUTE") else { return nil }

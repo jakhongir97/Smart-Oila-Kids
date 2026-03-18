@@ -16,6 +16,7 @@ final class ScreenTimeUsageCoordinator: ObservableObject {
     func updateBridge(dsn: String?, selectedApplications: [ManagedSettings.Application]) async {
         currentDayKey = ScreenTimeUsageDayFormatter.dayKey(for: Date())
         currentDSN = normalizedDSN(dsn)
+        await DeviceApplicationUsageReportCoordinator.shared.updateDSN(currentDSN)
 
         let selectedIdentifiers = selectedApplications
             .compactMap { normalizedIdentifier($0.bundleIdentifier) }
@@ -164,12 +165,18 @@ private extension ScreenTimeUsageCoordinator {
     func scheduleRefresh(expectedSignature: String?) {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
-            let delays: [UInt64] = [1, 5, 15].map { seconds in
+            let initialDelays: [UInt64] = [1, 5, 15].map { seconds in
                 UInt64(seconds) * 1_000_000_000
             }
 
-            for delay in delays {
+            for delay in initialDelays {
                 try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else { return }
+                await self?.handleScheduledRefresh(expectedSignature: expectedSignature)
+            }
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(60 * 1_000_000_000))
                 guard !Task.isCancelled else { return }
                 await self?.handleScheduledRefresh(expectedSignature: expectedSignature)
             }
@@ -209,6 +216,9 @@ private extension ScreenTimeUsageCoordinator {
                 object: nil,
                 userInfo: [ScreenTimeUsageSnapshotUserInfoKey.dsn: dsn]
             )
+            Task {
+                await DeviceApplicationUsageReportCoordinator.shared.updateSnapshot(snapshot)
+            }
         }
 
         updateDiagnostics(

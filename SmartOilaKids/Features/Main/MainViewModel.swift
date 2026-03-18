@@ -4,6 +4,7 @@ import Foundation
 final class MainViewModel: ObservableObject {
     @Published var isSendingSOS = false
     @Published var alertText: String?
+    @Published var sosBanner: MainStatusBannerState?
     @Published private(set) var weeklyUsageHours: [Double] = Array(repeating: 0, count: 7)
     @Published private(set) var usagePhase: LoadPhase = .idle
     @Published private(set) var currentDeviceName: String?
@@ -72,4 +73,15 @@ final class MainViewModel: ObservableObject {
     }
 
     let dependencies: MainViewModelDependencies
+    var sosBannerTask: Task<Void, Never>?
+}
+
+struct MainStatusBannerState: Equatable {
+    enum Tone: Equatable {
+        case success
+        case error
+    }
+
+    let text: String
+    let tone: Tone
 }

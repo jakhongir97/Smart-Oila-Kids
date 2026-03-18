@@ -67,7 +67,7 @@ final class DeviceAppLimitMonitorControllerTests: XCTestCase {
         let service = DeviceAppLimitServiceSpy(
             results: [.success(DeviceAppLimitFetchResult(
                 deviceID: 7,
-                endpoint: "members/device/7/applications/limits",
+                endpoint: "members/device/v2/7/applications?is_limit_enabled=true",
                 limits: [
                     makeLimit(packageName: "com.example.disabled", minutes: 15, enabled: false, reached: false),
                     makeLimit(packageName: "com.example.zero", minutes: 0, enabled: true, reached: false)
@@ -83,7 +83,7 @@ final class DeviceAppLimitMonitorControllerTests: XCTestCase {
         XCTAssertEqual(service.requests, ["child-no-limits"])
         XCTAssertEqual(controller.presentationState.status, "no_limits")
         XCTAssertEqual(controller.presentationState.dsn, "child-no-limits")
-        XCTAssertEqual(controller.presentationState.endpoint, "members/device/7/applications/limits")
+        XCTAssertEqual(controller.presentationState.endpoint, "members/device/v2/7/applications?is_limit_enabled=true")
         XCTAssertEqual(controller.presentationState.remoteLimitCount, 0)
         XCTAssertEqual(controller.presentationState.matchedLimitCount, 0)
         XCTAssertEqual(controller.presentationState.reachedLimitCount, 0)
@@ -94,7 +94,7 @@ final class DeviceAppLimitMonitorControllerTests: XCTestCase {
         let service = DeviceAppLimitServiceSpy(
             results: [.success(DeviceAppLimitFetchResult(
                 deviceID: 8,
-                endpoint: "members/device/8/applications/limits",
+                endpoint: "members/device/v2/8/applications?is_limit_enabled=true",
                 limits: [makeLimit(packageName: "com.example.app", minutes: 15, enabled: true, reached: false)]
             ))]
         )
@@ -124,7 +124,7 @@ final class DeviceAppLimitMonitorControllerTests: XCTestCase {
         )
         let result = DeviceAppLimitFetchResult(
             deviceID: 9,
-            endpoint: "members/device/9/applications/limits",
+            endpoint: "members/device/v2/9/applications?is_limit_enabled=true",
             limits: [makeLimit(packageName: "com.example.app", minutes: 15, enabled: true, reached: true)]
         )
         let service = DeviceAppLimitServiceSpy(results: [.success(result), .success(result)])

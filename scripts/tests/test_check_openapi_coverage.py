@@ -62,6 +62,43 @@ class RestCoverageTests(unittest.TestCase):
             self.assertIn(("GET", "/api/members/device/{}/applications/locked"), actual)
             self.assertIn(("DELETE", "/api/members/device/{}/full_lock_schedule"), actual)
 
+    def test_collect_rest_ops_resolves_app_config_fallback_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            config = root / "Core/Config/AppConfig.swift"
+            service = root / "Features/Auth/AuthService.swift"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            service.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text(
+                """
+                enum AppConfig {
+                    static let qrClaimPath = configuredString(
+                        envKey: "SMARTOILA_QR_CLAIM_PATH",
+                        fallback: "auth_v2/child/claim_qr"
+                    )
+                }
+                """,
+                encoding="utf-8",
+            )
+            service.write_text(
+                """
+                final class AuthService {
+                    func register(client: APIClient) async throws {
+                        _ = try await client.requestDataWithBaseFallback(
+                            baseURLs: [],
+                            path: AppConfig.qrClaimPath,
+                            method: .post
+                        )
+                    }
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            actual = MODULE.collect_rest_ops_from_path_method(root)
+
+            self.assertIn(("POST", "/api/auth_v2/child/claim_qr"), actual)
+
 
 class WebSocketCoverageTests(unittest.TestCase):
     def test_collect_ws_paths_from_dynamic_app_config_urls(self) -> None:
@@ -84,6 +121,31 @@ class WebSocketCoverageTests(unittest.TestCase):
 
             self.assertIn("/ws/{}/children/device/{}/chat", actual)
             self.assertIn("/ws/{}/children/device/{}/stream/audio", actual)
+
+    def test_collect_ws_paths_from_child_suffix_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "Socket.swift").write_text(
+                """
+                final class Socket {
+                    func connect(dsn: String) {
+                        let routeSuffixes = [
+                            "/v2/children/device/\\(dsn)/stream/audio",
+                            "/children/device/\\(dsn)/stream/audio",
+                            "/v2/children/device/\\(dsn)/stream/front_camera"
+                        ]
+                        _ = routeSuffixes
+                    }
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            actual = MODULE.collect_ws_paths_from_urls(root)
+
+            self.assertIn("/ws/{}/v2/children/device/{}/stream/audio", actual)
+            self.assertIn("/ws/{}/children/device/{}/stream/audio", actual)
+            self.assertIn("/ws/{}/v2/children/device/{}/stream/front_camera", actual)
 
     def test_collect_current_child_ws_paths_reads_split_geo_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

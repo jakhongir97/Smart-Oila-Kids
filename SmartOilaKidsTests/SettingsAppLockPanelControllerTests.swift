@@ -492,7 +492,8 @@ final class MainViewModelSOSTests: XCTestCase {
 
         await viewModel.sendSOS(dsn: nil)
 
-        XCTAssertEqual(viewModel.alertText, L10n.tr("main.device_not_bound"))
+        XCTAssertEqual(viewModel.sosBanner?.text, L10n.tr("main.device_not_bound"))
+        XCTAssertEqual(viewModel.sosBanner?.tone, .error)
         XCTAssertFalse(viewModel.isSendingSOS)
         let recordedCalls = await sosService.recordedCalls()
         XCTAssertTrue(recordedCalls.isEmpty)
@@ -504,7 +505,8 @@ final class MainViewModelSOSTests: XCTestCase {
 
         await viewModel.sendSOS(dsn: "child-sos-1")
 
-        XCTAssertEqual(viewModel.alertText, L10n.tr("main.sos_sent"))
+        XCTAssertEqual(viewModel.sosBanner?.text, L10n.tr("main.sos_sent"))
+        XCTAssertEqual(viewModel.sosBanner?.tone, .success)
         XCTAssertFalse(viewModel.isSendingSOS)
         let recordedCalls = await sosService.recordedCalls()
         XCTAssertEqual(recordedCalls, ["child-sos-1"])
@@ -517,7 +519,8 @@ final class MainViewModelSOSTests: XCTestCase {
 
         await viewModel.sendSOS(dsn: "child-sos-2")
 
-        XCTAssertEqual(viewModel.alertText, NetworkError.userMessage(for: error))
+        XCTAssertEqual(viewModel.sosBanner?.text, NetworkError.userMessage(for: error))
+        XCTAssertEqual(viewModel.sosBanner?.tone, .error)
         XCTAssertFalse(viewModel.isSendingSOS)
         let recordedCalls = await sosService.recordedCalls()
         XCTAssertEqual(recordedCalls, ["child-sos-2"])
@@ -541,7 +544,8 @@ final class MainViewModelSOSTests: XCTestCase {
         await sosService.resumeSuspendedCallIfNeeded()
         _ = await first.result
 
-        XCTAssertEqual(viewModel.alertText, L10n.tr("main.sos_sent"))
+        XCTAssertEqual(viewModel.sosBanner?.text, L10n.tr("main.sos_sent"))
+        XCTAssertEqual(viewModel.sosBanner?.tone, .success)
         XCTAssertFalse(viewModel.isSendingSOS)
     }
 
@@ -1674,9 +1678,9 @@ final class MediaTelemetryInboxBridgeTests: XCTestCase {
             MediaTelemetryEvent.streamFailed.rawValue,
             MediaTelemetryEvent.streamStarted.rawValue
         ])
-        XCTAssertEqual(items[0].body, L10n.tr("notifications.media.default_body"))
+        XCTAssertEqual(items[0].body, L10n.tr("notifications.media.recording_completed_body"))
         XCTAssertEqual(items[1].body, "disconnected")
-        XCTAssertEqual(items[2].body, L10n.tr("notifications.media.recording_id_body", "rec-1"))
+        XCTAssertEqual(items[2].body, L10n.tr("notifications.media.stream_started_body"))
         XCTAssertEqual(Set(bridgeDefaults.stringArray(forKey: "SMARTOILA_MEDIA_INBOX_SYNCED_IDS") ?? []), [
             "media-1",
             "media-2",
@@ -2923,6 +2927,42 @@ final class PushTokenServiceTests: XCTestCase {
 
         XCTAssertEqual(token, "0123456789abcdef")
         XCTAssertEqual(TestHTTPURLProtocol.recordedRequests.count, 1)
+    }
+
+    func testFetchRemoteTokenFallsBackToMemberRouteWhenDeviceReadbackIsMissing() async throws {
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+
+            switch request.url?.path {
+            case "/api/devices/dsn/child-1/firebase_notification_token":
+                return (
+                    makeHTTPResponse(for: request.url!, statusCode: 404),
+                    Data(#"{"detail":"missing"}"#.utf8)
+                )
+            case "/api/members/me/firebase_notification_token":
+                return (
+                    makeHTTPResponse(for: request.url!, statusCode: 200),
+                    Data(#"{"token":"member-fallback-token"}"#.utf8)
+                )
+            default:
+                XCTFail("Unexpected path: \(request.url?.path ?? "nil")")
+                return (makeHTTPResponse(for: request.url!, statusCode: 404), Data())
+            }
+        }
+
+        let service = PushTokenService(client: makeTestAPIClient(accessToken: "Bearer access"))
+        let token = try await service.fetchRemoteToken(dsn: "child-1")
+
+        XCTAssertEqual(token, "member-fallback-token")
+        XCTAssertEqual(
+            TestHTTPURLProtocol.recordedRequests.compactMap(\.url?.path),
+            [
+                "/api/devices/dsn/child-1/firebase_notification_token",
+                "/api/members/me/firebase_notification_token"
+            ]
+        )
     }
 }
 

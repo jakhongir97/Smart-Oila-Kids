@@ -39,7 +39,7 @@ final class DeviceAppLimitService: DeviceAppLimitServicing {
 
     func fetchLimits(dsn: String) async throws -> DeviceAppLimitFetchResult {
         let device = try await memberDevicesService.resolveDevice(byDSN: dsn, limit: 100)
-        let endpoint = "members/device/\(device.id)/applications/limits"
+        let endpoint = "members/device/v2/\(device.id)/applications?is_limit_enabled=true"
         let limits: [DeviceAppLimitResponse] = try await client.requestDecodableWithBaseFallback(
             baseURLs: AppConfig.apiBaseCandidates,
             path: endpoint,

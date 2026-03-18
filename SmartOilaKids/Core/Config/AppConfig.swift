@@ -22,8 +22,40 @@ enum AppConfig {
 
     static let websocketTokenPath = configuredWebSocketTokenPath()
     static let websocketBaseCandidates = configuredWebSocketBases()
+    static var legacyDeviceClaimFallbackEnabled: Bool {
+        configuredBool(
+            envKey: "SMARTOILA_ENABLE_LEGACY_DEVICE_CLAIM_FALLBACK",
+            defaultValue: true
+        )
+    }
+    static var mediaStreamWebSocketMode: MediaStreamWebSocketMode {
+        MediaStreamWebSocketMode(
+            environmentValue: ProcessInfo.processInfo.environment["SMARTOILA_MEDIA_STREAM_SOCKET_MODE"]
+        )
+    }
 
     static let inviteLinkSource = "kids_invite"
+}
+
+enum MediaStreamWebSocketMode: Equatable {
+    case legacyOnly
+    case v2Preferred
+    case v2Only
+
+    init(environmentValue: String?) {
+        let normalized = environmentValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch normalized {
+        case "v2", "v2-only", "v2_only", "v2only":
+            self = .v2Only
+        case "v2-preferred", "v2_preferred", "prefer-v2", "prefer_v2", "dual":
+            self = .v2Preferred
+        default:
+            self = .legacyOnly
+        }
+    }
 }
 
 private extension AppConfig {
@@ -41,6 +73,21 @@ private extension AppConfig {
             return raw
         }
         return fallback
+    }
+
+    static func configuredBool(envKey: String, defaultValue: Bool) -> Bool {
+        let raw = ProcessInfo.processInfo.environment[envKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch raw {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        default:
+            return defaultValue
+        }
     }
 
     static func configuredWebSocketBases() -> [String] {
