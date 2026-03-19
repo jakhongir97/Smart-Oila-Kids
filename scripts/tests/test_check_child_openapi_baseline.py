@@ -12,8 +12,9 @@ SPEC.loader.exec_module(MODULE)
 
 class ChildCoverageGateTests(unittest.TestCase):
     def test_default_baseline_matches_current_repo_snapshot(self) -> None:
+        self.assertEqual(MODULE.DEFAULT_CONTRACT_SPEC_RELATIVE, Path("OpenAPI/child_openapi_contract.json"))
         self.assertEqual(MODULE.DEFAULT_MIN_REST, 28)
-        self.assertEqual(MODULE.DEFAULT_MIN_WS, 9)
+        self.assertEqual(MODULE.DEFAULT_MIN_WS, 13)
 
     def test_count_rest_hits_matches_with_path_variables(self) -> None:
         spec_ops = [

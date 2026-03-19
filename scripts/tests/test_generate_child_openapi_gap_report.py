@@ -33,15 +33,17 @@ class GenerateChildOpenAPIGapReportTests(unittest.TestCase):
         )
         content = render_markdown(
             report_date="2026-03-05",
+            contract_path="OpenAPI/child_openapi_contract.json",
             summary=summary,
             rest_gap_ops=[("GET", "/api/devices/{}")],
             ws_gap_paths=["/ws/{}/parent/device/{}/chat"],
         )
 
-        self.assertIn("# Smart Oila Kids - Child OpenAPI Gap Report", content)
+        self.assertIn("# Smart Oila Kids - Child OpenAPI Contract Report", content)
         self.assertIn("## Coverage Snapshot", content)
-        self.assertIn("## REST Gap Domains (Prioritize by Volume)", content)
-        self.assertIn("## WebSocket Gaps Already Proven in Parent", content)
+        self.assertIn("## REST Contract Gaps (Prioritize by Volume)", content)
+        self.assertIn("## WebSocket Contract Gaps Already Proven in Parent", content)
+        self.assertIn("- Child contract: `OpenAPI/child_openapi_contract.json`", content)
 
 
 if __name__ == "__main__":

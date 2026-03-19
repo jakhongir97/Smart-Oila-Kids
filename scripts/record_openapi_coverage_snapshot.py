@@ -60,6 +60,12 @@ def main() -> int:
     parser.add_argument("--rest-spec", type=Path, default=Path("OpenAPI/rest_openapi.json"))
     parser.add_argument("--ws-spec", type=Path, default=Path("OpenAPI/ws_openapi.json"))
     parser.add_argument(
+        "--contract-spec",
+        type=Path,
+        default=Path("OpenAPI/child_openapi_contract.json"),
+        help="Child-owned contract JSON (default: OpenAPI/child_openapi_contract.json)",
+    )
+    parser.add_argument(
         "--repo-root",
         type=Path,
         default=Path(__file__).resolve().parents[1],
@@ -99,11 +105,19 @@ def main() -> int:
 
     rest_spec_path = args.rest_spec if args.rest_spec.is_absolute() else (repo_root / args.rest_spec)
     ws_spec_path = args.ws_spec if args.ws_spec.is_absolute() else (repo_root / args.ws_spec)
+    contract_spec_path = (
+        args.contract_spec
+        if args.contract_spec.is_absolute()
+        else (repo_root / args.contract_spec)
+    )
     history_path = args.history_file if args.history_file.is_absolute() else (repo_root / args.history_file)
     history_path.parent.mkdir(parents=True, exist_ok=True)
 
     spec_rest = coverage.load_rest_operations(rest_spec_path)
     spec_ws = coverage.load_ws_paths(ws_spec_path)
+    contract_rest, contract_ws = coverage.load_child_contract(contract_spec_path)
+    spec_rest = coverage.filter_rest_operations(spec_rest, contract_rest)
+    spec_ws = coverage.filter_ws_paths(spec_ws, contract_ws)
 
     child_rest_ops = coverage.collect_rest_ops_from_path_method(child_source)
     parent_rest_ops = coverage.collect_rest_ops_from_path_method(parent_source)
@@ -158,6 +172,7 @@ def main() -> int:
         writer.writerow(row)
 
     print(f"Appended snapshot: {history_path}")
+    print(f"Contract: {contract_spec_path}")
     print(
         f"REST child={row['rest_child_hits']}/{row['rest_spec']} "
         f"({row['rest_child_pct']}%), parent={row['rest_parent_hits']}/{row['rest_spec']} "

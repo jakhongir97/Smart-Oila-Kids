@@ -19,8 +19,16 @@ coverage = load_coverage_module()
 
 
 RestOperation = Tuple[str, str]
-DEFAULT_MIN_REST = 28
-DEFAULT_MIN_WS = 9
+DEFAULT_CONTRACT_SPEC_RELATIVE = Path("OpenAPI/child_openapi_contract.json")
+DEFAULT_CONTRACT_SPEC = Path(__file__).resolve().parents[1] / DEFAULT_CONTRACT_SPEC_RELATIVE
+
+
+def load_default_contract_counts() -> Tuple[int, int]:
+    rest_ops, ws_paths = coverage.load_child_contract(DEFAULT_CONTRACT_SPEC)
+    return len(rest_ops), len(ws_paths)
+
+
+DEFAULT_MIN_REST, DEFAULT_MIN_WS = load_default_contract_counts()
 
 
 def count_rest_hits(
@@ -59,6 +67,15 @@ def main() -> None:
     parser.add_argument("--rest-spec", type=Path, required=True, help="Path to REST OpenAPI JSON")
     parser.add_argument("--ws-spec", type=Path, required=True, help="Path to WebSocket OpenAPI JSON")
     parser.add_argument(
+        "--contract-spec",
+        type=Path,
+        default=DEFAULT_CONTRACT_SPEC_RELATIVE,
+        help=(
+            "Path to child-owned contract JSON "
+            f"(default: {DEFAULT_CONTRACT_SPEC_RELATIVE})"
+        ),
+    )
+    parser.add_argument(
         "--repo-root",
         type=Path,
         default=Path(__file__).resolve().parents[1],
@@ -73,40 +90,73 @@ def main() -> None:
     parser.add_argument(
         "--min-rest",
         type=int,
-        default=DEFAULT_MIN_REST,
-        help=f"Minimum child REST coverage hit count required to pass (default: {DEFAULT_MIN_REST})",
+        default=None,
+        help=(
+            "Minimum child REST coverage hit count required to pass "
+            f"(default: full child contract, currently {DEFAULT_MIN_REST})"
+        ),
     )
     parser.add_argument(
         "--min-ws",
         type=int,
-        default=DEFAULT_MIN_WS,
-        help=f"Minimum child WebSocket coverage hit count required to pass (default: {DEFAULT_MIN_WS})",
+        default=None,
+        help=(
+            "Minimum child WebSocket coverage hit count required to pass "
+            f"(default: full child contract, currently {DEFAULT_MIN_WS})"
+        ),
     )
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
     child_source = args.child_source.resolve() if args.child_source else (repo_root / "SmartOilaKids")
+    contract_spec = (
+        args.contract_spec.resolve()
+        if args.contract_spec.is_absolute()
+        else (repo_root / args.contract_spec).resolve()
+    )
 
     spec_rest = coverage.load_rest_operations(args.rest_spec)
     spec_ws = coverage.load_ws_paths(args.ws_spec)
+    contract_rest, contract_ws = coverage.load_child_contract(contract_spec)
+    missing_contract_rest = coverage.find_missing_contract_rest_operations(spec_rest, contract_rest)
+    missing_contract_ws = coverage.find_missing_contract_ws_paths(spec_ws, contract_ws)
+    if missing_contract_rest or missing_contract_ws:
+        print("Child OpenAPI baseline gate")
+        print(f"- Contract: {contract_spec}")
+        print("Result: FAIL")
+        if missing_contract_rest:
+            print("- Missing REST contract operations in OpenAPI spec:")
+            for method, path in missing_contract_rest:
+                print(f"  - {method} {path}")
+        if missing_contract_ws:
+            print("- Missing WebSocket contract routes in OpenAPI spec:")
+            for path in missing_contract_ws:
+                print(f"  - {path}")
+        raise SystemExit(1)
+
+    spec_rest = coverage.filter_rest_operations(spec_rest, contract_rest)
+    spec_ws = coverage.filter_ws_paths(spec_ws, contract_ws)
 
     child_rest_ops = coverage.collect_rest_ops_from_path_method(child_source)
     child_ws_paths = coverage.collect_ws_paths_from_urls(child_source) | coverage.collect_current_child_ws_paths(child_source)
 
     rest_hits = count_rest_hits(spec_rest, child_rest_ops)
     ws_hits = count_ws_hits(spec_ws, child_ws_paths)
+    min_rest = args.min_rest if args.min_rest is not None else len(spec_rest)
+    min_ws = args.min_ws if args.min_ws is not None else len(spec_ws)
 
     print("Child OpenAPI baseline gate")
     print(f"- Child source: {child_source}")
+    print(f"- Contract: {contract_spec}")
     print(f"- REST: {rest_hits}/{len(spec_rest)} ({percentage(rest_hits, len(spec_rest)):.1f}%)")
     print(f"- WebSocket: {ws_hits}/{len(spec_ws)} ({percentage(ws_hits, len(spec_ws)):.1f}%)")
-    print(f"- Required minimums: REST >= {args.min_rest}, WebSocket >= {args.min_ws}")
+    print(f"- Required minimums: REST >= {min_rest}, WebSocket >= {min_ws}")
 
     failed = []
-    if rest_hits < args.min_rest:
-        failed.append(f"REST coverage regression: {rest_hits} < {args.min_rest}")
-    if ws_hits < args.min_ws:
-        failed.append(f"WebSocket coverage regression: {ws_hits} < {args.min_ws}")
+    if rest_hits < min_rest:
+        failed.append(f"REST coverage regression: {rest_hits} < {min_rest}")
+    if ws_hits < min_ws:
+        failed.append(f"WebSocket coverage regression: {ws_hits} < {min_ws}")
 
     if failed:
         print("\nResult: FAIL")

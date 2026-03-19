@@ -22,6 +22,36 @@ class NormalizePathTests(unittest.TestCase):
 
 
 class RestCoverageTests(unittest.TestCase):
+    def test_load_child_contract_normalizes_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            contract = root / "child_contract.json"
+            contract.write_text(
+                """
+                {
+                  "rest": [
+                    {"method": "get", "path": "/api/messages/{id}"},
+                    {"method": "POST", "path": "/api/messages/"}
+                  ],
+                  "websocket": [
+                    "/ws/{secret}/children/device/{dsn}/chat/"
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            rest_ops, ws_paths = MODULE.load_child_contract(contract)
+
+            self.assertEqual(
+                rest_ops,
+                [
+                    ("GET", "/api/messages/{}"),
+                    ("POST", "/api/messages"),
+                ],
+            )
+            self.assertEqual(ws_paths, ["/ws/{}/children/device/{}/chat"])
+
     def test_collect_rest_ops_resolves_local_path_variables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -99,8 +129,50 @@ class RestCoverageTests(unittest.TestCase):
 
             self.assertIn(("POST", "/api/auth_v2/child/claim_qr"), actual)
 
+    def test_filter_rest_operations_keeps_only_contract_subset(self) -> None:
+        spec_ops = [
+            ("GET", "/api/messages/{}"),
+            ("POST", "/api/messages"),
+            ("GET", "/api/devices/{}/logs"),
+        ]
+        contract_ops = [
+            ("GET", "/api/messages/{}"),
+            ("POST", "/api/messages"),
+        ]
+
+        actual = MODULE.filter_rest_operations(spec_ops, contract_ops)
+
+        self.assertEqual(
+            actual,
+            [
+                ("GET", "/api/messages/{}"),
+                ("POST", "/api/messages"),
+            ],
+        )
+
 
 class WebSocketCoverageTests(unittest.TestCase):
+    def test_filter_ws_paths_keeps_only_contract_subset(self) -> None:
+        spec_paths = [
+            "/ws/{}/children/device/{}/chat",
+            "/ws/{}/children/device/{}/geo",
+            "/ws/{}/parent/device/{}/chat",
+        ]
+        contract_paths = [
+            "/ws/{}/children/device/{}/chat",
+            "/ws/{}/children/device/{}/geo",
+        ]
+
+        actual = MODULE.filter_ws_paths(spec_paths, contract_paths)
+
+        self.assertEqual(
+            actual,
+            [
+                "/ws/{}/children/device/{}/chat",
+                "/ws/{}/children/device/{}/geo",
+            ],
+        )
+
     def test_collect_ws_paths_from_dynamic_app_config_urls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

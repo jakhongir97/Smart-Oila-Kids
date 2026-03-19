@@ -78,6 +78,7 @@ def format_ops(ops: Sequence[RestOperation], limit: int | None = None) -> List[s
 
 def render_markdown(
     report_date: str,
+    contract_path: str,
     summary: CoverageSummary,
     rest_gap_ops: Sequence[RestOperation],
     ws_gap_paths: Sequence[str],
@@ -86,13 +87,13 @@ def render_markdown(
     top_domains = sorted(rest_domains.items(), key=lambda item: (-item[1], item[0]))
 
     lines: List[str] = []
-    lines.append("# Smart Oila Kids - Child OpenAPI Gap Report")
+    lines.append("# Smart Oila Kids - Child OpenAPI Contract Report")
     lines.append("")
     lines.append(f"Date: {report_date}")
     lines.append("")
     lines.append("## Coverage Snapshot")
     lines.append("")
-    lines.append("| Surface | Spec | Child Covered | Parent Covered | Child Gap With Parent Coverage |")
+    lines.append("| Surface | Contract | Child Covered | Parent Covered | Child Gap With Parent Coverage |")
     lines.append("| --- | --- | --- | --- | --- |")
     lines.append(
         f"| REST operations | {summary.rest_spec_count} | {summary.rest_child_count} | {summary.rest_parent_count} | {summary.rest_gap_with_parent_count} |"
@@ -102,16 +103,16 @@ def render_markdown(
     )
     lines.append("")
 
-    lines.append("## REST Gap Domains (Prioritize by Volume)")
+    lines.append("## REST Contract Gaps (Prioritize by Volume)")
     lines.append("")
     if top_domains:
         for domain, count in top_domains:
             lines.append(f"- `{domain}`: {count} operations")
     else:
-        lines.append("- No REST gaps where parent has coverage.")
+        lines.append("- No REST contract gaps where parent has coverage.")
     lines.append("")
 
-    lines.append("## Top REST Gaps Already Proven in Parent")
+    lines.append("## Top REST Contract Gaps Already Proven in Parent")
     lines.append("")
     if rest_gap_ops:
         lines.extend(format_ops(rest_gap_ops, limit=30))
@@ -119,7 +120,7 @@ def render_markdown(
         lines.append("- None")
     lines.append("")
 
-    lines.append("## WebSocket Gaps Already Proven in Parent")
+    lines.append("## WebSocket Contract Gaps Already Proven in Parent")
     lines.append("")
     if ws_gap_paths:
         for path in ws_gap_paths:
@@ -131,22 +132,23 @@ def render_markdown(
     lines.append("## Dependencies")
     lines.append("")
     lines.append("- OpenAPI specs: `OpenAPI/rest_openapi.json`, `OpenAPI/ws_openapi.json`")
+    lines.append(f"- Child contract: `{contract_path}`")
     lines.append("- Parent source: `/Users/jakhongirnematov/Desktop/Smart Oila Parent/Source`")
     lines.append("- Child source: `/Users/jakhongirnematov/Desktop/Smart Oila Kids/SmartOilaKids`")
     lines.append("")
 
     lines.append("## Risks")
     lines.append("")
+    lines.append("- The contract must be updated when the child app adopts new backend routes, or the 100% gate will become misleading.")
     lines.append("- Parent parity does not guarantee child UX/API contract compatibility without end-to-end testing.")
-    lines.append("- A large gap concentrated in `devices`/`members` may block rapid feature expansion if left untracked.")
-    lines.append("- WebSocket routes involve auth/connection lifecycle complexity and should be staged with soak tests.")
+    lines.append("- WebSocket routes still require soak testing even when contract coverage is complete.")
     lines.append("")
 
     lines.append("## Next Actions")
     lines.append("")
-    lines.append("1. Convert top domain gaps into explicit child backlog tickets with owners.")
-    lines.append("2. Raise child baseline thresholds only after each tested migration batch.")
-    lines.append("3. Re-run this report after each API-surface PR and attach it to release notes.")
+    lines.append("1. Update the child contract manifest whenever a new child-owned route is introduced.")
+    lines.append("2. Keep the child baseline gate at 100% of that contract.")
+    lines.append("3. Re-run this report after each child API-surface PR and attach it to release notes.")
 
     return "\n".join(lines) + "\n"
 
@@ -157,6 +159,12 @@ def main() -> int:
     )
     parser.add_argument("--rest-spec", type=Path, default=Path("OpenAPI/rest_openapi.json"))
     parser.add_argument("--ws-spec", type=Path, default=Path("OpenAPI/ws_openapi.json"))
+    parser.add_argument(
+        "--contract-spec",
+        type=Path,
+        default=Path("OpenAPI/child_openapi_contract.json"),
+        help="Child-owned contract JSON (default: OpenAPI/child_openapi_contract.json)",
+    )
     parser.add_argument(
         "--repo-root",
         type=Path,
@@ -197,9 +205,29 @@ def main() -> int:
 
     rest_spec_path = args.rest_spec if args.rest_spec.is_absolute() else (repo_root / args.rest_spec)
     ws_spec_path = args.ws_spec if args.ws_spec.is_absolute() else (repo_root / args.ws_spec)
+    contract_spec_path = (
+        args.contract_spec
+        if args.contract_spec.is_absolute()
+        else (repo_root / args.contract_spec)
+    )
 
     spec_rest = coverage.load_rest_operations(rest_spec_path)
     spec_ws = coverage.load_ws_paths(ws_spec_path)
+    contract_rest, contract_ws = coverage.load_child_contract(contract_spec_path)
+    missing_contract_rest = coverage.find_missing_contract_rest_operations(spec_rest, contract_rest)
+    missing_contract_ws = coverage.find_missing_contract_ws_paths(spec_ws, contract_ws)
+    if missing_contract_rest or missing_contract_ws:
+        missing_lines: list[str] = []
+        if missing_contract_rest:
+            missing_lines.extend(f"REST {method} {path}" for method, path in missing_contract_rest)
+        if missing_contract_ws:
+            missing_lines.extend(f"WS {path}" for path in missing_contract_ws)
+        raise SystemExit(
+            "Contract entries not found in OpenAPI specs:\n- " + "\n- ".join(missing_lines)
+        )
+
+    spec_rest = coverage.filter_rest_operations(spec_rest, contract_rest)
+    spec_ws = coverage.filter_ws_paths(spec_ws, contract_ws)
 
     child_rest_ops = coverage.collect_rest_ops_from_path_method(child_source)
     parent_rest_ops = coverage.collect_rest_ops_from_path_method(parent_source)
@@ -229,7 +257,13 @@ def main() -> int:
     today = date.today().isoformat()
     output_path = args.output or (repo_root / f"output/doc/child_openapi_gap_report_{today}.md")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    markdown = render_markdown(today, summary, rest_gap_ops, ws_gap_paths)
+    markdown = render_markdown(
+        today,
+        str(contract_spec_path.relative_to(repo_root)),
+        summary,
+        rest_gap_ops,
+        ws_gap_paths,
+    )
     output_path.write_text(markdown, encoding="utf-8")
 
     print(f"Generated: {output_path}")

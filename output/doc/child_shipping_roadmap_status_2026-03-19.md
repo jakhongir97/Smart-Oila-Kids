@@ -103,9 +103,9 @@ The original roadmap file is partly stale:
 
 ## Verification Snapshot
 
-- Child OpenAPI baseline: PASS
-  - REST `28/85`
-  - WebSocket `13/23`
+- Child OpenAPI contract baseline: PASS
+  - REST `28/28`
+  - WebSocket `13/13`
 - Script tests: PASS
 - App target build: PASS
-- Full XCTest target: still blocked by unrelated missing symbols in `SettingsAppLockPanelControllerTests.swift`
+- Full XCTest target: PASS

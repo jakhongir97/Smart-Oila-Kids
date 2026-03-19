@@ -3,7 +3,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 
 REST_CALL_RE = re.compile(
@@ -230,6 +230,60 @@ def load_ws_paths(spec_path: Path) -> List[str]:
     return sorted({normalize_path(p) for p in paths.keys()})
 
 
+def load_child_contract(contract_path: Path) -> Tuple[List[Tuple[str, str]], List[str]]:
+    data = json.loads(contract_path.read_text(encoding="utf-8"))
+
+    rest_ops: Set[Tuple[str, str]] = set()
+    for item in data.get("rest", []):
+        if not isinstance(item, dict):
+            raise ValueError(f"Invalid REST contract item: {item!r}")
+
+        method = str(item.get("method", "")).upper()
+        path = normalize_path(str(item.get("path", "")))
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            raise ValueError(f"Invalid REST contract method: {method!r}")
+        rest_ops.add((method, path))
+
+    ws_paths = {
+        normalize_path(str(path))
+        for path in data.get("websocket", [])
+    }
+
+    return sorted(rest_ops), sorted(ws_paths)
+
+
+def filter_rest_operations(
+    spec_ops: Iterable[Tuple[str, str]],
+    contract_ops: Iterable[Tuple[str, str]],
+) -> List[Tuple[str, str]]:
+    contract_set = set(contract_ops)
+    return sorted(op for op in spec_ops if op in contract_set)
+
+
+def filter_ws_paths(
+    spec_paths: Iterable[str],
+    contract_paths: Iterable[str],
+) -> List[str]:
+    contract_set = set(contract_paths)
+    return sorted(path for path in spec_paths if path in contract_set)
+
+
+def find_missing_contract_rest_operations(
+    spec_ops: Iterable[Tuple[str, str]],
+    contract_ops: Iterable[Tuple[str, str]],
+) -> List[Tuple[str, str]]:
+    spec_set = set(spec_ops)
+    return sorted(set(contract_ops) - spec_set)
+
+
+def find_missing_contract_ws_paths(
+    spec_paths: Iterable[str],
+    contract_paths: Iterable[str],
+) -> List[str]:
+    spec_set = set(spec_paths)
+    return sorted(set(contract_paths) - spec_set)
+
+
 def path_pattern_matches(pattern_path: str, concrete_path: str) -> bool:
     if pattern_path == concrete_path:
         return True
@@ -337,6 +391,12 @@ def main() -> None:
         default=None,
         help="Optional path to child app source directory (default: <repo>/SmartOilaKids)",
     )
+    parser.add_argument(
+        "--contract-spec",
+        type=Path,
+        default=None,
+        help="Optional child-owned contract JSON to filter the OpenAPI surface before reporting",
+    )
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
@@ -347,6 +407,32 @@ def main() -> None:
     spec_rest = load_rest_operations(args.rest_spec)
     spec_ws = load_ws_paths(args.ws_spec)
 
+    contract_path: Optional[Path] = None
+    if args.contract_spec is not None:
+        contract_path = (
+            args.contract_spec.resolve()
+            if args.contract_spec.is_absolute()
+            else (repo_root / args.contract_spec).resolve()
+        )
+        contract_rest, contract_ws = load_child_contract(contract_path)
+        missing_contract_rest = find_missing_contract_rest_operations(spec_rest, contract_rest)
+        missing_contract_ws = find_missing_contract_ws_paths(spec_ws, contract_ws)
+        if missing_contract_rest or missing_contract_ws:
+            print(f"Using child contract: {contract_path}")
+            print("Contract validation failed.")
+            if missing_contract_rest:
+                print("Missing REST contract operations in OpenAPI spec:")
+                for method, path in missing_contract_rest:
+                    print(f"- {method} {path}")
+            if missing_contract_ws:
+                print("Missing WebSocket contract routes in OpenAPI spec:")
+                for path in missing_contract_ws:
+                    print(f"- {path}")
+            raise SystemExit(1)
+
+        spec_rest = filter_rest_operations(spec_rest, contract_rest)
+        spec_ws = filter_ws_paths(spec_ws, contract_ws)
+
     child_rest_ops = collect_rest_ops_from_path_method(child_source)
     parent_rest_ops = collect_rest_ops_from_path_method(parent_source)
     parent_rest_path_hints = collect_rest_paths_from_urls(parent_source)
@@ -356,6 +442,8 @@ def main() -> None:
 
     print(f"Using child source: {child_source}")
     print(f"Using parent source: {parent_source}")
+    if contract_path is not None:
+        print(f"Using child contract: {contract_path}")
     print()
 
     print_rest_report(spec_rest, child_rest_ops, parent_rest_ops, parent_rest_path_hints)
