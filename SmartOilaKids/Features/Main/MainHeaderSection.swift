@@ -2,29 +2,20 @@ import SwiftUI
 import UIKit
 
 struct MainHeaderSection: View {
-    let onBackTap: (() -> Void)?
     let profileName: String
     let avatarURL: URL?
     let notificationBadgeCount: Int
+    let onInfoTap: () -> Void
     let onNotificationTap: () -> Void
-    let onSettingsTap: (() -> Void)?
+    let onSettingsTap: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            ChildStatusBar(background: AppColors.surfacePurple)
+            ChildStatusBar(background: AppColors.white)
 
-            HStack(spacing: 12) {
-                if let onBackTap {
-                    MainHeaderIconButton(
-                        action: onBackTap,
-                        accessibilityLabel: L10n.tr("common.back")
-                    ) {
-                        iconOrFallback(asset: "IconBack", system: "chevron.left", size: 16)
-                    }
-                }
-
+            HStack(spacing: 10) {
                 Circle()
-                    .fill(AppColors.neutral900)
+                    .fill(AppColors.surfacePurple)
                     .frame(width: 52, height: 52)
                     .overlay {
                         if UIImage(named: "ProfileCircleBg") != nil {
@@ -37,14 +28,10 @@ struct MainHeaderSection: View {
                         avatarContent
                     }
                     .clipShape(Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
-                    }
 
                 Text(profileName)
                     .font(AppTypography.unbounded(16, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.black)
                     .lineLimit(2)
                     .minimumScaleFactor(0.75)
                     .truncationMode(.tail)
@@ -52,6 +39,13 @@ struct MainHeaderSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 2) {
+                    MainHeaderIconButton(
+                        action: onInfoTap,
+                        accessibilityLabel: L10n.tr("main.info_title")
+                    ) {
+                        iconOrFallback(asset: "IconInfo", system: "info.circle", size: 18)
+                    }
+
                     MainHeaderIconButton(
                         action: onNotificationTap,
                         accessibilityLabel: L10n.tr("main.notifications")
@@ -72,22 +66,21 @@ struct MainHeaderSection: View {
                         }
                     }
 
-                    if let onSettingsTap {
-                        MainHeaderIconButton(
-                            action: onSettingsTap,
-                            accessibilityLabel: L10n.tr("settings.title")
-                        ) {
-                            iconOrFallback(asset: "IconSettings", system: "gearshape", size: 18)
-                        }
+                    MainHeaderIconButton(
+                        action: onSettingsTap,
+                        accessibilityLabel: L10n.tr("settings.title")
+                    ) {
+                        iconOrFallback(asset: "IconSettings", system: "gearshape", size: 18)
                     }
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.black)
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
-            .padding(.bottom, 18)
+            .padding(.bottom, 16)
         }
-        .background(AppColors.surfacePurple)
+        .background(AppColors.white)
+        .clipShape(RoundedCornerShape(corners: [.bottomLeft, .bottomRight], radius: 20))
     }
 
     @ViewBuilder
@@ -137,21 +130,11 @@ struct MainHeaderSection: View {
     @ViewBuilder
     private func iconOrFallback(asset: String, system: String, size: CGFloat) -> some View {
         if UIImage(named: asset) != nil {
-            if asset == "IconBack" {
-                Image(asset)
-                    .resizable()
-                    .renderingMode(.template)
-                    .scaledToFit()
-                    .frame(width: 15, height: 8)
-                    .scaleEffect(y: -1)
-                    .rotationEffect(.degrees(90))
-            } else {
-                Image(asset)
-                    .resizable()
-                    .renderingMode(.template)
-                    .scaledToFit()
-                    .frame(width: size, height: size)
-            }
+            Image(asset)
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: size, height: size)
         } else {
             Image(systemName: system)
                 .font(.system(size: size, weight: .regular))
@@ -170,14 +153,8 @@ private struct MainHeaderIconButton<Content: View>: View {
             action()
         } label: {
             content()
-                .frame(width: 40, height: 40)
-                .background(AppColors.neutral900.opacity(0.32))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(AppColors.neutral700.opacity(0.4), lineWidth: 1)
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)

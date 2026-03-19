@@ -117,22 +117,10 @@ struct ChildTopBackButton: View {
             AppHaptics.tap()
             action()
         } label: {
-            Group {
-                if UIImage(named: "IconBack") != nil {
-                    Image("IconBack")
-                        .resizable()
-                        .renderingMode(.template)
-                        .scaledToFit()
-                        .frame(width: 15, height: 8)
-                        .scaleEffect(y: -1)
-                        .rotationEffect(.degrees(90))
-                } else {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .bold))
-                }
-            }
-            .foregroundStyle(foreground)
-            .frame(width: 30, height: 30, alignment: .leading)
+            Image(systemName: "chevron.left")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(foreground)
+                .frame(width: 30, height: 30, alignment: .leading)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.tr("common.back"))

@@ -18,6 +18,23 @@ struct AuthRegistrationResult {
     let refreshToken: String?
 }
 
+struct AuthPhoneConfirmationContext: Equatable {
+    let dsn: String
+    let parentPhone: String
+}
+
+enum AuthPhoneSubmitResult: Equatable {
+    case confirmationRequired(AuthPhoneConfirmationContext)
+    case completed(AuthRegistrationResult)
+}
+
+extension AuthRegistrationResult: Equatable {}
+
+struct AuthSessionTokens: Equatable {
+    let authorizationHeader: String
+    let refreshToken: String?
+}
+
 struct AuthScanPayload {
     let token: String?
     let refreshToken: String?

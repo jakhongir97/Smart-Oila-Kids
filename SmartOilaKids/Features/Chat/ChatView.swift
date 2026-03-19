@@ -21,29 +21,22 @@ struct ChatView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let sidePadding: CGFloat = 30
+            let sidePadding = min(24, max(14, proxy.size.width * 0.05))
             let compact = proxy.size.height < 760
 
-            ZStack {
-                AppColors.surfacePurple.ignoresSafeArea()
+            ZStack(alignment: .bottomTrailing) {
+                AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(background: AppColors.surfacePurple)
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: L10n.tr("chat.parents_title"),
-                        titleColor: .white,
-                        horizontalPadding: 31,
-                        topPadding: compact ? 14 : 16,
-                        bottomPadding: compact ? 34 : 40,
-                        leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
+                        leading: { ChildTopBackButton { dismiss() } },
                         trailing: { Color.clear }
                     )
 
-                    ZStack(alignment: .bottomTrailing) {
-                        AppColors.neutral800
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+                    ChildPurpleSurface {
                         ChatParentListView(
                             rows: parentRows,
                             sidePadding: sidePadding,
@@ -56,13 +49,11 @@ struct ChatView: View {
                                 await viewModel.refreshLatest()
                             }
                         )
-                        .padding(.bottom, max(16, proxy.safeAreaInsets.bottom + 4))
-
-                        ChildWatermarkOverlay(size: 200, opacity: 0.5)
+                        .padding(.bottom, max(0, proxy.safeAreaInsets.bottom - 10))
                     }
-                    .clipShape(TopRoundedShape(radius: 30))
-                    .ignoresSafeArea(edges: .bottom)
                 }
+
+                ChildWatermarkOverlay()
             }
         }
         .navigationBarBackButtonHidden(true)

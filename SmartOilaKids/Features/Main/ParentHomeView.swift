@@ -92,12 +92,10 @@ struct ParentHomeView: View {
             selectedChild = nil
         }) {
             if let selectedChild {
-                MainView(
-                    viewModel: dependencies.makeMainViewModel(),
-                    dsnOverride: selectedChild.dsn,
-                    onClose: { showDashboard = false },
-                    allowsSettings: false
-                )
+                MainView(viewModel: dependencies.makeMainViewModel())
+                    .onAppear {
+                        sessionStore.setSelectedRemoteDSN(selectedChild.dsn)
+                    }
                 .environmentObject(sessionStore)
             }
         }
@@ -115,14 +113,13 @@ struct ParentHomeView: View {
         .fullScreenCover(isPresented: $showAddChild, onDismiss: {
             Task { await viewModel.load() }
         }) {
-            AuthView(
-                viewModel: dependencies.makeAuthViewModel(),
-                onCompleted: {
-                    showAddChild = false
-                    Task { await viewModel.load() }
-                }
-            )
+            AuthView(viewModel: dependencies.makeAuthViewModel())
             .environmentObject(sessionStore)
+        }
+        .onChange(of: sessionStore.dsn) { newValue in
+            guard showAddChild, newValue?.trimmedNonEmpty != nil else { return }
+            showAddChild = false
+            Task { await viewModel.load() }
         }
         .sheet(isPresented: $showGuide) {
             AppNavigationContainer {
@@ -752,23 +749,31 @@ private struct ParentHomeGuideSheet: View {
     let onClose: () -> Void
 
     var body: some View {
-        SettingsPanelChrome(
-            title: L10n.tr("parent_home.guide_sheet_title"),
-            onClose: onClose,
-            trailing: { Color.clear }
-        ) {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    ParentHomeGuideCard(action: {})
-                        .allowsHitTesting(false)
+        ZStack {
+            AppColors.white.ignoresSafeArea()
 
-                    Text(L10n.tr("parent_home.guide_sheet_body"))
-                        .font(AppTypography.unbounded(12, weight: .medium))
-                        .foregroundStyle(AppColors.neutral600)
-                        .lineSpacing(3)
+            VStack(spacing: 0) {
+                ChildTitleBar(
+                    title: L10n.tr("parent_home.guide_sheet_title"),
+                    leading: { ChildTopBackButton(action: onClose) },
+                    trailing: { Color.clear }
+                )
+
+                ChildPurpleSurface {
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 18) {
+                            ParentHomeGuideCard(action: {})
+                                .allowsHitTesting(false)
+
+                            Text(L10n.tr("parent_home.guide_sheet_body"))
+                                .font(AppTypography.unbounded(12, weight: .medium))
+                                .foregroundStyle(AppColors.neutral600)
+                                .lineSpacing(3)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
             }
         }
     }

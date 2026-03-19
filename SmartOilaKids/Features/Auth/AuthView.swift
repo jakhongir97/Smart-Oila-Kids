@@ -5,24 +5,23 @@ struct AuthView: View {
     private enum Stage {
         case splash
         case entry
-        case failure
+        case confirmation
         case success
     }
 
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var viewModel: AuthViewModel
-    private let onCompleted: (() -> Void)?
 
     @State private var stage: Stage = .splash
     @State private var pendingRegistration: AuthRegistrationResult?
+    @State private var pendingConfirmation: AuthPhoneConfirmationContext?
     @State private var pendingProfileName: String?
     @State private var parentPhone = ""
+    @State private var confirmationCode = ""
     @State private var inviteAttribution: InviteAttributionContext?
-    @State private var showQRScanner = false
 
-    init(viewModel: AuthViewModel, onCompleted: (() -> Void)? = nil) {
+    init(viewModel: AuthViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
-        self.onCompleted = onCompleted
 #if DEBUG
         if let initial = Self.debugInitialStage {
             _stage = State(initialValue: initial)
@@ -39,52 +38,41 @@ struct AuthView: View {
             case .splash:
                 AuthSplashStageView(title: L10n.tr("auth.welcome"))
             case .entry:
-                if inviteAttribution != nil {
-                    AuthPhoneStageView(
-                        title: L10n.tr("auth.welcome"),
-                        subtitle: L10n.tr("auth.company_mission"),
-                        phoneNumber: parentPhone,
-                        buttonTitle: viewModel.isLoading ? L10n.tr("auth.connecting") : L10n.tr("auth.phone_button"),
-                        inviteAttribution: inviteAttribution,
-                        isLoading: viewModel.isLoading,
-                        errorText: viewModel.errorText,
-                        onPhoneChange: { value in
-                            let formatted = AuthInputNormalization.formatAndroidParentPhoneInput(value)
-                            parentPhone = formatted
-                            if viewModel.errorText != nil {
-                                viewModel.errorText = nil
-                            }
-                        }
-                    ) {
-                        submitParentPhone()
-                    }
-                } else {
-                    AuthScanStageView(
-                        title: L10n.tr("auth.welcome"),
-                        missionText: L10n.tr("auth.company_mission"),
-                        hintText: L10n.tr("auth.scan_qr_hint"),
-                        buttonTitle: viewModel.isLoading ? L10n.tr("auth.connecting") : L10n.tr("auth.scan_qr_button"),
-                        inviteAttribution: nil,
-                        isLoading: viewModel.isLoading,
-                        onOpenScanner: {
+                AuthPhoneStageView(
+                    title: L10n.tr("auth.welcome"),
+                    subtitle: L10n.tr("auth.phone_hint"),
+                    phoneNumber: parentPhone,
+                    buttonTitle: viewModel.isLoading ? L10n.tr("auth.connecting") : L10n.tr("auth.phone_button"),
+                    inviteAttribution: inviteAttribution,
+                    isLoading: viewModel.isLoading,
+                    errorText: viewModel.errorText,
+                    onPhoneChange: { value in
+                        let formatted = AuthInputNormalization.formatAndroidParentPhoneInput(value)
+                        parentPhone = formatted
+                        if viewModel.errorText != nil {
                             viewModel.errorText = nil
-                            showQRScanner = true
                         }
-                    )
-                }
-            case .failure:
-                AuthStatusStageView(
-                    title: L10n.tr("auth.error_title"),
-                    subtitle: viewModel.errorText?.trimmedNonEmpty ?? L10n.tr("auth.error_bind_failed"),
-                    buttonTitle: L10n.tr("common.retry"),
-                    buttonColor: AppColors.dangerRed,
-                    trailingArrow: false,
-                    action: {
-                        AppHaptics.tap()
-                        viewModel.errorText = nil
-                        stage = .entry
                     }
-                )
+                ) {
+                    submitParentPhone()
+                }
+            case .confirmation:
+                AuthCodeStageView(
+                    title: L10n.tr("auth.welcome"),
+                    subtitle: L10n.tr("auth.code_hint"),
+                    code: confirmationCode,
+                    buttonTitle: viewModel.isLoading ? L10n.tr("auth.connecting") : L10n.tr("common.next"),
+                    isLoading: viewModel.isLoading,
+                    errorText: viewModel.errorText,
+                    onCodeChange: { value in
+                        confirmationCode = AuthInputNormalization.formatVerificationCodeInput(value)
+                        if viewModel.errorText != nil {
+                            viewModel.errorText = nil
+                        }
+                    }
+                ) {
+                    submitConfirmationCode()
+                }
             case .success:
                 AuthStatusStageView(
                     title: L10n.tr("auth.success_title"),
@@ -96,13 +84,11 @@ struct AuthView: View {
                         guard let pendingRegistration else { return }
                         AppHaptics.success()
                         sessionStore.setDSN(pendingRegistration.dsn)
-                        sessionStore.setSelectedRemoteDSN(pendingRegistration.dsn)
                         sessionStore.setAPIAccessToken(pendingRegistration.authorizationHeader)
                         sessionStore.setAPIRefreshToken(pendingRegistration.refreshToken)
                         if let profileName = pendingProfileName?.trimmedNonEmpty {
                             sessionStore.setProfileName(profileName)
                         }
-                        onCompleted?()
                     }
                 )
             }
@@ -114,17 +100,6 @@ struct AuthView: View {
                 stage = .entry
             }
         }
-        .fullScreenCover(isPresented: $showQRScanner) {
-            QRScannerSheet(
-                onCodeDetected: { rawCode in
-                    showQRScanner = false
-                    submitScannedCode(rawCode)
-                },
-                onClose: {
-                    showQRScanner = false
-                }
-            )
-        }
         .onReceive(NotificationCenter.default.publisher(for: .inviteAttributionDidChange)) { _ in
             refreshInviteAttribution()
         }
@@ -133,41 +108,38 @@ struct AuthView: View {
     private func submitParentPhone() {
         pendingProfileName = UIDevice.current.name.trimmedNonEmpty
         Task {
-            if let result = await viewModel.submit(parentPhone: parentPhone) {
-                pendingRegistration = result
+            guard let result = await viewModel.submit(parentPhone: parentPhone) else {
+                AppHaptics.warning()
+                return
+            }
+
+            switch result {
+            case .completed(let registration):
+                pendingRegistration = registration
                 AppHaptics.success()
                 stage = .success
-            } else {
-                AppHaptics.warning()
-                if AuthInputNormalization.normalizeAndroidParentPhone(parentPhone) != nil {
-                    stage = .failure
-                }
+            case .confirmationRequired(let confirmation):
+                pendingConfirmation = confirmation
+                confirmationCode = ""
+                AppHaptics.success()
+                stage = .confirmation
             }
         }
     }
 
-    private func submitScannedCode(_ rawCode: String) {
-        let parseResult = AuthQRCodePayloadParser().parse(from: rawCode)
-        let payload = parseResult.payload
-        pendingProfileName = payload.deviceName?.trimmedNonEmpty ?? UIDevice.current.name.trimmedNonEmpty
-
-        guard payload.hasAuthData else {
-            viewModel.errorText = L10n.tr(
-                parseResult.isContractV1 ? "auth.qr_invalid_contract" : "auth.qr_missing_auth_data"
-            )
-            AppHaptics.warning()
-            stage = .failure
-            return
-        }
+    private func submitConfirmationCode() {
+        guard let pendingConfirmation else { return }
 
         Task {
-            if let result = await viewModel.submit(scannedPayload: payload) {
+            if let result = await viewModel.confirm(
+                confirmation: pendingConfirmation,
+                code: confirmationCode
+            ) {
                 pendingRegistration = result
                 AppHaptics.success()
                 stage = .success
             } else {
                 AppHaptics.warning()
-                stage = .failure
             }
         }
     }
@@ -198,7 +170,7 @@ private extension AuthView {
         case .scan:
             return .entry
         case .failed:
-            return .failure
+            return .entry
         case .success:
             return .success
         case nil:

@@ -77,6 +77,7 @@ enum DebugRoute: String {
     case settings
     case chat
     case tasks
+    case templates
 }
 
 enum DebugAuthStage: String {

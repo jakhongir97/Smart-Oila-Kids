@@ -14,43 +14,37 @@ struct SettingsProfileSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SettingsSectionTitle(
-                title: L10n.tr("settings.profile"),
-                sidePadding: sidePadding,
-                topPadding: compact ? 14 : 20
+            SettingsAvatarSection(
+                imageURL: avatarURL,
+                localImage: avatarPreviewImage,
+                isUploading: isUploadingAvatar,
+                onEdit: onTapAvatar
             )
+            .padding(.top, compact ? 14 : 20)
 
-            SettingsSurfaceCard(sidePadding: sidePadding) {
-                VStack(spacing: compact ? 16 : 18) {
-                    SettingsAvatarSection(
-                        imageURL: avatarURL,
-                        localImage: avatarPreviewImage,
-                        isUploading: isUploadingAvatar,
-                        onEdit: onTapAvatar
-                    )
+            Text(L10n.tr("settings.change_username"))
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, sidePadding)
+                .padding(.top, compact ? 18 : 25)
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.tr("settings.change_username"))
-                            .font(AppTypography.unbounded(12, weight: .medium))
-                            .foregroundStyle(.white)
-
-                        TextField(L10n.tr("settings.username_placeholder"), text: $userName)
-                            .font(AppTypography.unbounded(14, weight: .medium))
-                            .foregroundStyle(.white)
-                            .tint(.white)
-                            .padding(.horizontal, 18)
-                            .frame(height: 52)
-                            .focused(nameFieldFocus)
-                            .textInputAutocapitalization(.words)
-                            .autocorrectionDisabled(true)
-                            .submitLabel(.done)
-                            .onSubmit {
-                                onSubmitName()
-                            }
-                            .settingsPanelField()
-                    }
+            TextField(L10n.tr("settings.username_placeholder"), text: $userName)
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(AppColors.textSecondary)
+                .padding(.horizontal, 20)
+                .frame(height: 50)
+                .focused(nameFieldFocus)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled(true)
+                .submitLabel(.done)
+                .onSubmit {
+                    onSubmitName()
                 }
-            }
+                .background(AppColors.white)
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .padding(.horizontal, sidePadding)
+                .padding(.top, compact ? 8 : 10)
         }
     }
 }
@@ -63,53 +57,37 @@ struct SettingsAppearanceSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SettingsSectionTitle(
-                title: L10n.tr("settings.appearance"),
-                sidePadding: sidePadding,
-                topPadding: compact ? 0 : 0
-            )
+            Text(L10n.tr("settings.appearance"))
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, sidePadding)
+                .padding(.top, compact ? 16 : 20)
 
-            SettingsSurfaceCard(sidePadding: sidePadding) {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.tr("settings.theme"))
-                            .font(AppTypography.unbounded(12, weight: .medium))
-                            .foregroundStyle(AppColors.neutral600)
-
-                        HStack(spacing: 8) {
-                            ForEach(AppTheme.allCases) { theme in
-                                SettingsChoiceChip(
-                                    title: themeTitle(theme),
-                                    isSelected: themeBinding.wrappedValue == theme
-                                ) {
-                                    themeBinding.wrappedValue = theme
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle()
-                        .fill(AppColors.neutral700.opacity(0.45))
-                        .frame(height: 1)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.tr("settings.language"))
-                            .font(AppTypography.unbounded(12, weight: .medium))
-                            .foregroundStyle(AppColors.neutral600)
-
-                        HStack(spacing: 8) {
-                            ForEach(AppLanguage.allCases) { language in
-                                SettingsChoiceChip(
-                                    title: languageTitle(language),
-                                    isSelected: languageBinding.wrappedValue == language
-                                ) {
-                                    languageBinding.wrappedValue = language
-                                }
-                            }
-                        }
-                    }
+            Picker("", selection: themeBinding) {
+                ForEach(AppTheme.allCases) { theme in
+                    Text(themeTitle(theme)).tag(theme)
                 }
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, sidePadding)
+            .padding(.top, compact ? 8 : 10)
+
+            Text(L10n.tr("settings.language"))
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, sidePadding)
+                .padding(.top, compact ? 14 : 18)
+
+            Picker("", selection: languageBinding) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(languageTitle(language)).tag(language)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, sidePadding)
+            .padding(.top, compact ? 8 : 10)
         }
     }
 
@@ -136,72 +114,10 @@ struct SettingsAppearanceSection: View {
     }
 }
 
-private struct SettingsSectionTitle: View {
-    let title: String
-    let sidePadding: CGFloat
-    let topPadding: CGFloat
-
-    var body: some View {
-        Text(title)
-            .font(AppTypography.unbounded(14, weight: .medium))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, sidePadding)
-            .padding(.top, topPadding)
-    }
-}
-
-private struct SettingsSurfaceCard<Content: View>: View {
-    let sidePadding: CGFloat
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        content
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppColors.neutral900)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
-            }
-            .padding(.horizontal, sidePadding)
-            .padding(.top, 10)
-    }
-}
-
-private struct SettingsChoiceChip: View {
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button {
-            AppHaptics.tap()
-            action()
-        } label: {
-            Text(title)
-                .font(AppTypography.unbounded(10, weight: .semibold))
-                .foregroundStyle(isSelected ? .white : AppColors.neutral600)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, minHeight: 46)
-                .background(isSelected ? AppColors.primaryPurple : AppColors.neutral900)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay {
-                    if !isSelected {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(AppColors.neutral700.opacity(0.65), lineWidth: 1)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 struct SettingsQuickActionsSection: View {
     let compact: Bool
     let sidePadding: CGFloat
+    let onOpenDiagnostics: () -> Void
     let onOpenPermissions: () -> Void
     let onOpenAppLock: () -> Void
     let onOpenMediaHistory: () -> Void
@@ -209,45 +125,45 @@ struct SettingsQuickActionsSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SettingsSectionTitle(
-                title: L10n.tr("settings.quick_actions"),
-                sidePadding: sidePadding,
-                topPadding: compact ? 0 : 0
+            SettingsSecondaryActionButton(
+                iconName: "stethoscope",
+                title: L10n.tr("settings.diagnostics"),
+                action: onOpenDiagnostics
             )
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 10),
-                    GridItem(.flexible(), spacing: 10)
-                ],
-                spacing: 10
-            ) {
-                SettingsSecondaryActionButton(
-                    iconName: "hand.raised.fill",
-                    title: L10n.tr("settings.permissions"),
-                    action: onOpenPermissions
-                )
-
-                SettingsSecondaryActionButton(
-                    iconName: "app.badge.checkmark",
-                    title: L10n.tr("settings.app_lock"),
-                    action: onOpenAppLock
-                )
-
-                SettingsSecondaryActionButton(
-                    iconName: "film.stack",
-                    title: L10n.tr("settings.media_history"),
-                    action: onOpenMediaHistory
-                )
-
-                SettingsSecondaryActionButton(
-                    iconName: "person.2.fill",
-                    title: L10n.tr("settings.invite_other_parent"),
-                    action: onInviteParent
-                )
-            }
             .padding(.horizontal, sidePadding)
-            .padding(.top, compact ? 8 : 10)
+            .padding(.top, compact ? 10 : 12)
+
+            SettingsSecondaryActionButton(
+                iconName: "hand.raised.fill",
+                title: L10n.tr("settings.permissions"),
+                action: onOpenPermissions
+            )
+            .padding(.horizontal, sidePadding)
+            .padding(.top, 8)
+
+            SettingsSecondaryActionButton(
+                iconName: "app.badge.checkmark",
+                title: L10n.tr("settings.app_lock"),
+                action: onOpenAppLock
+            )
+            .padding(.horizontal, sidePadding)
+            .padding(.top, 8)
+
+            SettingsSecondaryActionButton(
+                iconName: "film.stack",
+                title: L10n.tr("settings.media_history"),
+                action: onOpenMediaHistory
+            )
+            .padding(.horizontal, sidePadding)
+            .padding(.top, 8)
+
+            SettingsSecondaryActionButton(
+                iconName: "person.2.fill",
+                title: L10n.tr("settings.invite_other_parent"),
+                action: onInviteParent
+            )
+            .padding(.horizontal, sidePadding)
+            .padding(.top, 8)
         }
     }
 }
@@ -262,11 +178,12 @@ struct SettingsProtectionSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SettingsSectionTitle(
-                title: L10n.tr("settings.control_protection"),
-                sidePadding: sidePadding,
-                topPadding: compact ? 0 : 0
-            )
+            Text(L10n.tr("settings.control_protection"))
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, sidePadding)
+                .padding(.top, compact ? 16 : 20)
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 12) {
@@ -280,11 +197,11 @@ struct SettingsProtectionSection: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(statusTitle)
                             .font(AppTypography.unbounded(12, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.black)
 
                         Text(statusSubtitle)
                             .font(AppTypography.unbounded(10, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
+                            .foregroundStyle(AppColors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
@@ -301,7 +218,7 @@ struct SettingsProtectionSection: View {
 
                 Text(L10n.tr("settings.control_protection_note"))
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(spacing: 10) {
@@ -326,12 +243,8 @@ struct SettingsProtectionSection: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(AppColors.neutral900)
+            .background(AppColors.white)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
-            }
             .padding(.horizontal, sidePadding)
             .padding(.top, compact ? 8 : 10)
         }
@@ -408,10 +321,10 @@ private struct SettingsProtectionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(AppTypography.unbounded(12, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(AppColors.primaryPurple)
             .frame(maxWidth: .infinity)
             .frame(height: 40)
-            .background(AppColors.primaryPurple.opacity(configuration.isPressed ? 0.82 : 1))
+            .background(AppColors.secondaryPurple.opacity(configuration.isPressed ? 0.22 : 0.14))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
@@ -420,10 +333,10 @@ private struct SettingsProtectionSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(AppTypography.unbounded(12, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(AppColors.black)
             .frame(maxWidth: .infinity)
             .frame(height: 40)
-            .background(AppColors.neutral900.opacity(configuration.isPressed ? 0.86 : 1))
+            .background(AppColors.neutral100.opacity(configuration.isPressed ? 0.86 : 1))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
@@ -456,69 +369,72 @@ struct SettingsProtectionPINSheet: View {
 
     var body: some View {
         AppNavigationContainer {
-            SettingsPanelChrome(
-                title: title,
-                onClose: { controller.cancelPINPrompt() },
-                trailing: { Color.clear }
-            ) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(subtitle)
-                            .font(AppTypography.unbounded(11, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
-                            .fixedSize(horizontal: false, vertical: true)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(subtitle)
+                        .font(AppTypography.unbounded(11, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                        VStack(spacing: 12) {
-                            SecureField(L10n.tr("settings.control_protection_pin_field"), text: $pin)
+                    VStack(spacing: 12) {
+                        SecureField(L10n.tr("settings.control_protection_pin_field"), text: $pin)
+                            .keyboardType(.numberPad)
+                            .textContentType(.oneTimeCode)
+                            .focused($focusedField, equals: .pin)
+                            .padding(.horizontal, 14)
+                            .frame(height: 48)
+                            .background(AppColors.neutral100)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .onChange(of: pin) { newValue in
+                                pin = filteredPIN(newValue)
+                            }
+
+                        if prompt == .create {
+                            SecureField(L10n.tr("settings.control_protection_pin_confirm_field"), text: $confirmation)
                                 .keyboardType(.numberPad)
                                 .textContentType(.oneTimeCode)
-                                .focused($focusedField, equals: .pin)
-                                .foregroundStyle(.white)
-                                .tint(.white)
+                                .focused($focusedField, equals: .confirmation)
                                 .padding(.horizontal, 14)
                                 .frame(height: 48)
-                                .settingsPanelField(cornerRadius: 14)
-                                .onChange(of: pin) { newValue in
-                                    pin = filteredPIN(newValue)
+                                .background(AppColors.neutral100)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .onChange(of: confirmation) { newValue in
+                                    confirmation = filteredPIN(newValue)
                                 }
-
-                            if prompt == .create {
-                                SecureField(L10n.tr("settings.control_protection_pin_confirm_field"), text: $confirmation)
-                                    .keyboardType(.numberPad)
-                                    .textContentType(.oneTimeCode)
-                                    .focused($focusedField, equals: .confirmation)
-                                    .foregroundStyle(.white)
-                                    .tint(.white)
-                                    .padding(.horizontal, 14)
-                                    .frame(height: 48)
-                                    .settingsPanelField(cornerRadius: 14)
-                                    .onChange(of: confirmation) { newValue in
-                                        confirmation = filteredPIN(newValue)
-                                    }
-                            }
                         }
-
-                        if let errorText, !errorText.isEmpty {
-                            Text(errorText)
-                                .font(AppTypography.unbounded(10, weight: .medium))
-                                .foregroundStyle(AppColors.dangerRed)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Text(L10n.tr("settings.control_protection_pin_help"))
-                            .font(AppTypography.unbounded(10, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
-
-                        Button(primaryActionTitle) {
-                            submit()
-                        }
-                        .buttonStyle(SettingsProtectionButtonStyle())
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+
+                    if let errorText, !errorText.isEmpty {
+                        Text(errorText)
+                            .font(AppTypography.unbounded(10, weight: .medium))
+                            .foregroundStyle(AppColors.dangerRed)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text(L10n.tr("settings.control_protection_pin_help"))
+                        .font(AppTypography.unbounded(10, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+
+                    Button(primaryActionTitle) {
+                        submit()
+                    }
+                    .buttonStyle(SettingsProtectionButtonStyle())
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 18)
             }
+            .background(AppColors.white.ignoresSafeArea())
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(L10n.tr("common.cancel")) {
+                        controller.cancelPINPrompt()
+                    }
+                    .font(AppTypography.unbounded(12, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
+                }
+
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button(L10n.tr("common.done")) {
@@ -589,183 +505,19 @@ struct SettingsSecondaryActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(AppColors.secondaryPurple.opacity(0.24))
-                        .frame(width: 40, height: 40)
-
-                    Image(systemName: iconName)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                Spacer(minLength: 0)
-
+            HStack(spacing: 8) {
+                Image(systemName: iconName)
                 Text(title)
-                    .font(AppTypography.unbounded(11, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
+                    .lineLimit(1)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-            .background(AppColors.neutral900)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
-            }
+            .font(AppTypography.unbounded(12, weight: .semibold))
+            .foregroundStyle(AppColors.primaryPurple)
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(AppColors.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-}
-
-struct SettingsDeviceEditorSheet: View {
-    @Binding var name: String
-    let isSaving: Bool
-    let onSave: () -> Void
-    let onDelete: () -> Void
-    let onClose: () -> Void
-
-    @FocusState private var isNameFieldFocused: Bool
-
-    var body: some View {
-        AppNavigationContainer {
-            SettingsPanelChrome(
-                title: L10n.tr("settings.edit_device"),
-                onClose: onClose,
-                trailing: { Color.clear }
-            ) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(L10n.tr("settings.change_username"))
-                            .font(AppTypography.unbounded(11, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        TextField(L10n.tr("settings.username_placeholder"), text: $name)
-                            .font(AppTypography.unbounded(14, weight: .medium))
-                            .foregroundStyle(.white)
-                            .tint(.white)
-                            .padding(.horizontal, 18)
-                            .frame(height: 52)
-                            .focused($isNameFieldFocused)
-                            .textInputAutocapitalization(.words)
-                            .autocorrectionDisabled(true)
-                            .submitLabel(.done)
-                            .onSubmit(onSave)
-                            .settingsPanelField()
-
-                        VStack(spacing: 10) {
-                            Button(isSaving ? L10n.tr("settings.saving") : L10n.tr("common.save")) {
-                                onSave()
-                            }
-                            .buttonStyle(SettingsProtectionButtonStyle())
-                            .disabled(isSaving)
-
-                            Button(L10n.tr("settings.delete_device")) {
-                                onDelete()
-                            }
-                            .buttonStyle(SettingsProtectionDangerButtonStyle())
-                            .disabled(isSaving)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button(L10n.tr("common.done")) {
-                        isNameFieldFocused = false
-                    }
-                }
-            }
-            .onAppear {
-                isNameFieldFocused = true
-            }
-        }
-    }
-}
-
-struct SettingsUnlinkDeviceSheet: View {
-    let isProcessing: Bool
-    let onConfirm: () -> Void
-    let onClose: () -> Void
-
-    var body: some View {
-        AppNavigationContainer {
-            SettingsPanelChrome(
-                title: L10n.tr("settings.unlink_title"),
-                onClose: onClose,
-                trailing: { Color.clear }
-            ) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .fill(AppColors.dangerRed.opacity(0.14))
-                                    .frame(width: 52, height: 52)
-
-                                Image(systemName: "iphone.slash")
-                                    .font(.system(size: 22, weight: .semibold))
-                                    .foregroundStyle(AppColors.dangerRed)
-                            }
-
-                            Text(L10n.tr("settings.unlink_message"))
-                                .font(AppTypography.unbounded(12, weight: .regular))
-                                .foregroundStyle(AppColors.neutral600)
-                                .lineSpacing(4)
-                        }
-                        .padding(18)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .settingsPanelCard(cornerRadius: 22)
-
-                        VStack(spacing: 10) {
-                            Button(action: onConfirm) {
-                                Group {
-                                    if isProcessing {
-                                        ProgressView()
-                                            .tint(.white)
-                                    } else {
-                                        Text(L10n.tr("settings.unlink_device"))
-                                            .font(AppTypography.unbounded(14, weight: .semibold))
-                                            .foregroundStyle(.white)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 45)
-                                .background(AppColors.dangerRed)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isProcessing)
-
-                            Button(action: onClose) {
-                                Text(L10n.tr("common.cancel"))
-                                    .font(AppTypography.unbounded(13, weight: .medium))
-                                    .foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 45)
-                                    .background(AppColors.neutral900)
-                                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
-                                    }
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isProcessing)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
-            }
-        }
     }
 }
 
@@ -777,11 +529,12 @@ struct SettingsConnectedDevicesSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SettingsSectionTitle(
-                title: L10n.tr("settings.connected_devices"),
-                sidePadding: sidePadding,
-                topPadding: compact ? 0 : 0
-            )
+            Text(L10n.tr("settings.connected_devices"))
+                .font(AppTypography.unbounded(14, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, sidePadding)
+                .padding(.top, compact ? 16 : 20)
 
             if connectedDevices.isEmpty {
                 Text(L10n.tr("settings.no_connected_devices"))

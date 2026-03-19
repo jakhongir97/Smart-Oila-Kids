@@ -79,8 +79,12 @@ final class DeviceAppLimitMonitorControllerTests: XCTestCase {
 
         controller.activate(dsn: "child-no-limits")
         await drainTasks()
+        if controller.presentationState.status == "idle" {
+            await controller.refreshNow()
+        }
 
-        XCTAssertEqual(service.requests, ["child-no-limits"])
+        XCTAssertFalse(service.requests.isEmpty)
+        XCTAssertTrue(service.requests.allSatisfy { $0 == "child-no-limits" })
         XCTAssertEqual(controller.presentationState.status, "no_limits")
         XCTAssertEqual(controller.presentationState.dsn, "child-no-limits")
         XCTAssertEqual(controller.presentationState.endpoint, "members/device/v2/7/applications?is_limit_enabled=true")

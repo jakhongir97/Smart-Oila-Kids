@@ -8,12 +8,13 @@ struct ChatParentRowsBuilder {
     ) -> [ParentChatRow] {
         let parentMessages = flatMessages.filter { $0.userType.lowercased() == "parent" }
         guard let latestMessage = flatMessages.last else {
-            let resolvedName = parentDisplayName?.trimmedNonEmpty ?? L10n.tr("chat.parent")
+            let preview = L10n.tr("chat.default_preview")
+            let fallbackName = parentDisplayName?.trimmedNonEmpty ?? L10n.tr("chat.parent")
             return [
                 ParentChatRow(
                     id: "placeholder-parent",
-                    name: resolvedName,
-                    preview: L10n.tr("chat.default_preview"),
+                    name: fallbackName,
+                    preview: preview,
                     unreadCount: unreadParentCount
                 )
             ]

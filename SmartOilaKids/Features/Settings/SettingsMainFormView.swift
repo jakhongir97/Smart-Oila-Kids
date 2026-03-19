@@ -17,6 +17,7 @@ struct SettingsMainFormView: View {
     let nameFieldFocus: FocusState<Bool>.Binding
     let onTapAvatar: () -> Void
     let onSaveName: () -> Void
+    let onOpenDiagnostics: () -> Void
     let onOpenPermissions: () -> Void
     let onOpenAppLock: () -> Void
     let onOpenMediaHistory: () -> Void
@@ -30,7 +31,7 @@ struct SettingsMainFormView: View {
     let onUnlink: () -> Void
 
     var body: some View {
-        VStack(spacing: compact ? 18 : 22) {
+        VStack(spacing: 0) {
             SettingsProfileSection(
                 compact: compact,
                 sidePadding: sidePadding,
@@ -53,6 +54,7 @@ struct SettingsMainFormView: View {
             SettingsQuickActionsSection(
                 compact: compact,
                 sidePadding: sidePadding,
+                onOpenDiagnostics: onOpenDiagnostics,
                 onOpenPermissions: onOpenPermissions,
                 onOpenAppLock: onOpenAppLock,
                 onOpenMediaHistory: onOpenMediaHistory,

@@ -47,7 +47,14 @@ struct AuthLanguageBadge: View {
             }
         } label: {
             HStack(spacing: 4) {
-                LanguageFlagIcon(language: sessionStore.appLanguage)
+                if UIImage(named: "FlagRU") != nil {
+                    Image("FlagRU")
+                        .resizable()
+                        .frame(width: 18, height: 18)
+                } else {
+                    Text("🌐")
+                        .font(.system(size: 13))
+                }
 
                 Text(languageTitle(sessionStore.appLanguage))
                     .font(AppTypography.unbounded(12, weight: .regular))
@@ -82,37 +89,6 @@ struct AuthLanguageBadge: View {
     }
 }
 
-struct LanguageFlagIcon: View {
-    let language: AppLanguage
-
-    var body: some View {
-        switch language {
-        case .ru:
-            if UIImage(named: "FlagRU") != nil {
-                Image("FlagRU")
-                    .resizable()
-                    .frame(width: 18, height: 18)
-            } else {
-                Text("🇷🇺")
-                    .font(.system(size: 13))
-            }
-        case .en:
-            Text("🇺🇸")
-                .font(.system(size: 13))
-        case .uz:
-            Text("🇺🇿")
-                .font(.system(size: 13))
-        }
-    }
-}
-
-struct UzbekistanFlagIcon: View {
-    var body: some View {
-        Text("🇺🇿")
-            .font(.system(size: 13))
-    }
-}
-
 struct AuthInviteContextCard: View {
     let context: InviteAttributionContext
 
@@ -142,50 +118,5 @@ struct AuthInviteContextCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(AppColors.accentGreen.opacity(0.55), lineWidth: 1)
         }
-    }
-}
-
-struct AuthSponsorBadge: View {
-    var body: some View {
-        VStack(spacing: 1) {
-            Text("MY")
-                .font(AppTypography.unbounded(17, weight: .medium))
-                .foregroundStyle(Color(red: 0.81, green: 0.66, blue: 0.33))
-
-            Text("INSURANCE")
-                .font(AppTypography.unbounded(9, weight: .medium))
-                .foregroundStyle(Color(red: 0.46, green: 0.35, blue: 0.18))
-
-            Text("SUG'URTA TASHKILOTI")
-                .font(AppTypography.roboto(5, weight: .regular))
-                .foregroundStyle(Color(red: 0.46, green: 0.35, blue: 0.18))
-        }
-        .frame(width: 100, height: 41)
-        .overlay {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .stroke(Color(red: 0.81, green: 0.66, blue: 0.33), lineWidth: 1)
-        }
-    }
-}
-
-struct AuthPolicyDisclaimer: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            Text(L10n.tr("auth.policy_prefix"))
-                .font(AppTypography.unbounded(14, weight: .regular))
-                .foregroundStyle(AppColors.black)
-
-            Text(L10n.tr("auth.policy_link"))
-                .font(AppTypography.unbounded(14, weight: .regular))
-                .foregroundStyle(AppColors.accentGreen)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(AppColors.accentGreen)
-                        .frame(height: 1)
-                        .offset(y: 2)
-                }
-        }
-        .multilineTextAlignment(.center)
-        .fixedSize(horizontal: false, vertical: true)
     }
 }

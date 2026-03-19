@@ -90,7 +90,7 @@ extension SettingsView {
                         userName = updatedName
                         sessionStore.setProfileName(updatedName)
                     }
-                    GrowthMetricsStore.shared.track(.deviceRenameCompleted, dsn: currentRemoteDSN)
+                    GrowthMetricsStore.shared.track(.deviceRenameCompleted, dsn: sessionStore.dsn)
                     AppHaptics.success()
                     deviceEditor.close()
                     banner(L10n.tr("settings.device_renamed"))
@@ -115,7 +115,7 @@ extension SettingsView {
         Task {
             switch await actionFlows.deleteDevice(device) {
             case .success(let outcome):
-                GrowthMetricsStore.shared.track(.deviceDeleteCompleted, dsn: currentRemoteDSN)
+                GrowthMetricsStore.shared.track(.deviceDeleteCompleted, dsn: sessionStore.dsn)
                 AppHaptics.success()
                 deviceEditor.close()
 
@@ -138,11 +138,11 @@ extension SettingsView {
         }
 
         if avatarPreviewImage == nil {
-            avatarPreviewImage = SettingsAvatarStore.shared.avatarImage(for: currentRemoteDSN)
+            avatarPreviewImage = SettingsAvatarStore.shared.avatarImage(for: sessionStore.dsn)
         }
 
-        await viewModel.loadIfNeeded(currentDSN: currentRemoteDSN)
-        viewModel.ensureCurrentDevicePlaceholder(dsn: currentRemoteDSN, fallbackName: sessionStore.profileName)
+        await viewModel.loadIfNeeded(currentDSN: sessionStore.dsn)
+        viewModel.ensureCurrentDevicePlaceholder(dsn: sessionStore.dsn, fallbackName: sessionStore.profileName)
 
         if let remoteProfileName = viewModel.remoteProfileName,
            remoteProfileName != sessionStore.profileName {
@@ -155,7 +155,7 @@ extension SettingsView {
         Task {
 #if DEBUG
             SettingsAvatarUploadActionDebugLogger.log(
-                "picker imageSize=\(Int(image.size.width))x\(Int(image.size.height)) scale=\(image.scale) currentDSN=\(currentRemoteDSN ?? "nil")"
+                "picker imageSize=\(Int(image.size.width))x\(Int(image.size.height)) scale=\(image.scale) currentDSN=\(sessionStore.dsn ?? "nil")"
             )
 #endif
             guard let payload = SettingsAvatarUploadPayloadBuilder.make(from: image) else {
@@ -230,13 +230,13 @@ extension SettingsView {
     }
 
     func beginInviteShare() {
-        GrowthMetricsStore.shared.track(.inviteShareClicked, dsn: currentRemoteDSN)
+        GrowthMetricsStore.shared.track(.inviteShareClicked, dsn: sessionStore.dsn)
         inviteSharePayload = actionFlows.makeInvitePayload()
     }
 
     func handleInviteShareCompletion(completed: Bool) {
         guard completed else { return }
-        GrowthMetricsStore.shared.track(.inviteShareCompleted, dsn: currentRemoteDSN)
+        GrowthMetricsStore.shared.track(.inviteShareCompleted, dsn: sessionStore.dsn)
 
         DispatchQueue.main.async {
             AppHaptics.success()
@@ -251,35 +251,10 @@ extension SettingsView {
         )
     }
 
-    func unlinkCurrentDevice() {
-        guard !isUnlinkingDevice else { return }
-
-        isUnlinkingDevice = true
-
-        Task {
-            let result = await actionFlows.deleteCurrentDeviceSession()
-
-            await MainActor.run {
-                isUnlinkingDevice = false
-
-                switch result {
-                case .success:
-                    showUnlinkConfirmation = false
-                    AppHaptics.success()
-                    sessionStore.clearSession()
-                case .failure:
-                    showUnlinkConfirmation = false
-                    AppHaptics.warning()
-                    banner(L10n.tr("settings.unlink_failed"))
-                }
-            }
-        }
-    }
-
     var actionFlows: SettingsActionFlows {
         SettingsActionFlows(
             viewModel: viewModel,
-            currentDSN: currentRemoteDSN,
+            currentDSN: sessionStore.dsn,
             profileName: sessionStore.profileName
         )
     }
@@ -292,7 +267,7 @@ extension SettingsView {
     }
 
     func isCurrentSettingsDevice(_ device: ConnectedDevice) -> Bool {
-        guard let currentDSN = currentRemoteDSN?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty,
+        guard let currentDSN = sessionStore.dsn?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty,
               let deviceDSN = device.dsn?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty else {
             return false
         }

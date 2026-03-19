@@ -110,6 +110,20 @@ enum AuthInputNormalization {
         return "+\(uzbekCountryCode) " + parts.joined(separator: " ")
     }
 
+    static func normalizeVerificationCode(_ value: String?) -> Int? {
+        guard let value else { return nil }
+        let digits = value.filter(\.isNumber)
+        guard (4...6).contains(digits.count),
+              let code = Int(digits) else {
+            return nil
+        }
+        return code
+    }
+
+    static func formatVerificationCodeInput(_ value: String) -> String {
+        String(value.filter(\.isNumber).prefix(6))
+    }
+
     static func normalizeDSN(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

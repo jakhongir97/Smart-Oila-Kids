@@ -19,6 +19,19 @@ extension ChatViewModel {
         return result == .sent || result == .queued
     }
 
+    func sendTemplate(_ template: String) async -> Bool {
+        let normalizedTemplate = template.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedTemplate.trimmedNonEmpty != nil else { return false }
+
+        let result = await sendMessage(
+            payloadText: normalizedTemplate,
+            payloadAttachments: [],
+            clearComposerOnSuccess: true,
+            queueOnFailure: true
+        )
+        return result == .sent || result == .queued
+    }
+
     func retryQueuedMessages() async {
         guard dependencies.outboxCoordinator.queuedMessagesCount > 0 else { return }
         let status = await dependencies.outboxCoordinator.retryQueuedMessages { [self] queued in

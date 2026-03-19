@@ -12,72 +12,45 @@ struct MainView: View {
     @State private var showNotifications = false
     @State private var showTasks = false
     @State private var showSettings = false
-    private let dsnOverride: String?
-    private let onClose: (() -> Void)?
-    private let allowsSettings: Bool
+    @State private var showTemplates = false
 
-    init(
-        viewModel: MainViewModel,
-        dsnOverride: String? = nil,
-        onClose: (() -> Void)? = nil,
-        allowsSettings: Bool = true
-    ) {
+    init(viewModel: MainViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
-        self.dsnOverride = dsnOverride?.trimmedNonEmpty
-        self.onClose = onClose
-        self.allowsSettings = allowsSettings
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            MainSurfaceView(
-                onBackTap: onClose,
-                profileName: resolvedProfileName,
-                profileAvatarURL: SettingsAvatarStore.shared.avatarURL(for: activeDSN),
-                notificationBadgeCount: viewModel.unreadNotificationCount,
-                deviceStatus: viewModel.deviceStatus,
-                usageHours: viewModel.weeklyUsageHours,
-                usagePhase: viewModel.usagePhase,
-                deviceControlItems: viewModel.recentDeviceControlItems,
-                mediaItems: viewModel.recentMediaItems,
-                pendingTasksCount: viewModel.pendingTasksCount,
-                unreadChatCount: viewModel.unreadChatCount,
-                isSendingSOS: viewModel.isSendingSOS,
-                onNotificationTap: { showNotifications = true },
-                onSettingsTap: allowsSettings ? { showSettings = true } : nil,
-                onRetryUsage: {
-                    Task {
-                        await viewModel.loadWeeklyUsage(dsn: activeDSN)
-                    }
-                },
-                onDeviceControlTap: { showNotifications = true },
-                onMediaTap: { showNotifications = true },
-                onTasksTap: { showTasks = true },
-                onChatTap: {
-                    openChatThreadOnPresent = false
-                    showChat = true
-                },
-                onSOSTap: {
-                    Task {
-                        await viewModel.sendSOS(dsn: activeDSN)
-                    }
+        MainSurfaceView(
+            profileName: resolvedProfileName,
+            profileAvatarURL: SettingsAvatarStore.shared.avatarURL(for: sessionStore.dsn),
+            notificationBadgeCount: viewModel.unreadNotificationCount,
+            deviceStatus: viewModel.deviceStatus,
+            usageHours: viewModel.weeklyUsageHours,
+            usagePhase: viewModel.usagePhase,
+            deviceControlItems: viewModel.recentDeviceControlItems,
+            mediaItems: viewModel.recentMediaItems,
+            pendingTasksCount: viewModel.pendingTasksCount,
+            unreadChatCount: viewModel.unreadChatCount,
+            onInfoTap: { showTemplates = true },
+            onNotificationTap: { showNotifications = true },
+            onSettingsTap: { showSettings = true },
+            onRetryUsage: {
+                Task {
+                    await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
                 }
-            )
-
-            if let banner = viewModel.sosBanner {
-                MainStatusBanner(state: banner)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(1)
-                    .allowsHitTesting(false)
+            },
+            onDeviceControlTap: { showNotifications = true },
+            onMediaTap: { showNotifications = true },
+            onTasksTap: { showTasks = true },
+            onChatTap: {
+                openChatThreadOnPresent = false
+                showChat = true
             }
-        }
+        )
         .refreshable {
-            await viewModel.loadWeeklyUsage(dsn: activeDSN)
+            await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
         }
-        .task(id: activeDSN) {
-            await viewModel.loadWeeklyUsage(dsn: activeDSN)
+        .task(id: sessionStore.dsn) {
+            await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
             await consumePendingPushDestinationIfNeeded()
         }
         .onChange(of: locationPermissionManager.allChecklistSatisfied) { isSatisfied in
@@ -89,12 +62,11 @@ struct MainView: View {
         .onChange(of: scenePhase) { newValue in
             guard newValue == .active else { return }
             Task {
-                await viewModel.loadWeeklyUsage(dsn: activeDSN)
+                await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
                 await consumePendingPushDestinationIfNeeded()
             }
         }
         .onChange(of: viewModel.currentDeviceName) { newValue in
-            guard dsnOverride == nil else { return }
             guard let newValue = newValue?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !newValue.isEmpty,
                   sessionStore.profileName != newValue else { return }
@@ -103,27 +75,27 @@ struct MainView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshDashboard)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.loadWeeklyUsage(dsn: activeDSN)
+                await viewModel.loadWeeklyUsage(dsn: sessionStore.dsn)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshChat)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.refreshUnreadChat(dsn: activeDSN)
+                await viewModel.refreshUnreadChat(dsn: sessionStore.dsn)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.refreshPendingTasks(dsn: activeDSN)
+                await viewModel.refreshPendingTasks(dsn: sessionStore.dsn)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushInboxDidChange)) { notification in
             guard shouldHandlePush(notification: notification) else { return }
             Task {
-                await viewModel.refreshUnreadNotifications(dsn: activeDSN)
-                await viewModel.refreshDeviceControlTimeline(dsn: activeDSN)
-                await viewModel.refreshMediaTimeline(dsn: activeDSN)
+                await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
+                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenChat)) { notification in
@@ -138,34 +110,34 @@ struct MainView: View {
         .fullScreenCover(isPresented: $showChat, onDismiss: {
             openChatThreadOnPresent = false
             Task {
-                await viewModel.refreshUnreadChat(dsn: activeDSN)
+                await viewModel.refreshUnreadChat(dsn: sessionStore.dsn)
             }
         }) {
             AppNavigationContainer {
                 ChatView(
-                    viewModel: dependencies.makeChatViewModel(dsn: activeDSN ?? ""),
+                    viewModel: dependencies.makeChatViewModel(dsn: sessionStore.dsn ?? ""),
                     openThreadOnAppear: openChatThreadOnPresent
                 )
             }
         }
         .fullScreenCover(isPresented: $showTasks, onDismiss: {
             Task {
-                await viewModel.refreshPendingTasks(dsn: activeDSN)
+                await viewModel.refreshPendingTasks(dsn: sessionStore.dsn)
             }
         }) {
             AppNavigationContainer {
-                TaskView(viewModel: dependencies.makeTaskViewModel(dsn: activeDSN ?? ""))
+                TaskView(viewModel: dependencies.makeTaskViewModel(dsn: sessionStore.dsn ?? ""))
             }
         }
         .fullScreenCover(isPresented: $showNotifications, onDismiss: {
             Task {
-                await viewModel.refreshUnreadNotifications(dsn: activeDSN)
-                await viewModel.refreshDeviceControlTimeline(dsn: activeDSN)
-                await viewModel.refreshMediaTimeline(dsn: activeDSN)
+                await viewModel.refreshUnreadNotifications(dsn: sessionStore.dsn)
+                await viewModel.refreshDeviceControlTimeline(dsn: sessionStore.dsn)
+                await viewModel.refreshMediaTimeline(dsn: sessionStore.dsn)
             }
         }) {
             AppNavigationContainer {
-                NotificationsInboxView(dsn: activeDSN) { destination in
+                NotificationsInboxView(dsn: sessionStore.dsn) { destination in
                     showNotifications = false
 
                     Task { @MainActor in
@@ -187,55 +159,42 @@ struct MainView: View {
             }
             .environmentObject(sessionStore)
         }
+        .fullScreenCover(isPresented: $showTemplates) {
+            AppNavigationContainer {
+                TemplatesView()
+            }
+        }
         .fullScreenCover(isPresented: Binding(
             get: { !isDebugRouteMode && !locationPermissionManager.allChecklistSatisfied },
             set: { _ in }
         )) {
             GeoPermissionView(manager: locationPermissionManager)
         }
-        .sheet(isPresented: Binding(get: {
+        .alert(L10n.tr("main.info_title"), isPresented: Binding(get: {
             viewModel.alertText != nil
         }, set: { newValue in
             if !newValue {
                 viewModel.alertText = nil
             }
-        })) {
-            AppNavigationContainer {
-                MainInfoSheet(
-                    title: L10n.tr("main.info_title"),
-                    message: viewModel.alertText ?? "",
-                    onClose: {
-                        viewModel.alertText = nil
-                    }
-                )
-            }
-            .appMediumLargeSheetPresentation()
-        }
+        }), actions: {
+            Button(L10n.tr("common.ok")) { viewModel.alertText = nil }
+        }, message: {
+            Text(viewModel.alertText ?? "")
+        })
     }
 
     private var resolvedProfileName: String {
-        if dsnOverride != nil {
-            return viewModel.currentDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
-                ?? L10n.tr("common.user_default")
-        }
-
-        return sessionStore.profileName.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
+        sessionStore.profileName.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
             ?? viewModel.currentDeviceName?.trimmingCharacters(in: .whitespacesAndNewlines).trimmedNonEmpty
-            ?? L10n.tr("common.user_default")
+            ?? "Пользователь"
     }
 
     private var isDebugRouteMode: Bool {
         AppRuntime.hasDebugRoute
     }
 
-    private var activeDSN: String? {
-        dsnOverride?.trimmedNonEmpty
-            ?? sessionStore.selectedRemoteDSN?.trimmedNonEmpty
-            ?? sessionStore.dsn?.trimmedNonEmpty
-    }
-
     private func shouldHandlePush(notification: Notification) -> Bool {
-        guard let currentDSN = activeDSN else { return false }
+        guard let currentDSN = sessionStore.dsn?.trimmedNonEmpty else { return false }
         guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
             return true
         }
@@ -244,7 +203,7 @@ struct MainView: View {
 
     private func consumePendingPushDestinationIfNeeded() async {
         guard locationPermissionManager.allChecklistSatisfied else { return }
-        guard let currentDSN = activeDSN else { return }
+        guard let currentDSN = sessionStore.dsn?.trimmedNonEmpty else { return }
         guard let destination = await PushDeepLinkStore.shared.consume(matching: currentDSN) else { return }
 
         await MainActor.run {
@@ -255,100 +214,6 @@ struct MainView: View {
             case .tasks:
                 showTasks = true
             }
-        }
-    }
-}
-
-private struct MainInfoSheet: View {
-    let title: String
-    let message: String
-    let onClose: () -> Void
-
-    var body: some View {
-        SettingsPanelChrome(
-            title: title,
-            onClose: onClose,
-            trailing: { Color.clear }
-        ) {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(AppColors.secondaryPurple.opacity(0.24))
-                                .frame(width: 52, height: 52)
-
-                            Image(systemName: "info.circle.fill")
-                                .font(.system(size: 22, weight: .semibold))
-                                .foregroundStyle(.white)
-                        }
-
-                        Text(message)
-                            .font(AppTypography.unbounded(12, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
-                            .lineSpacing(4)
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .settingsPanelCard(cornerRadius: 22)
-
-                    Button(action: onClose) {
-                        Text(L10n.tr("common.ok"))
-                            .font(AppTypography.unbounded(14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 45)
-                            .background(AppColors.primaryPurple)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            }
-        }
-    }
-}
-
-private struct MainStatusBanner: View {
-    let state: MainStatusBannerState
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: iconName)
-                .font(.system(size: 16, weight: .semibold))
-
-            Text(state.text)
-                .font(AppTypography.unbounded(11, weight: .medium))
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Color.black.opacity(0.2), radius: 12, y: 4)
-    }
-
-    private var iconName: String {
-        switch state.tone {
-        case .success:
-            return "checkmark.circle.fill"
-        case .error:
-            return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var backgroundColor: Color {
-        switch state.tone {
-        case .success:
-            return AppColors.accentGreen
-        case .error:
-            return AppColors.dangerRed
         }
     }
 }

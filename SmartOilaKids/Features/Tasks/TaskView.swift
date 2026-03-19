@@ -11,36 +11,27 @@ struct TaskView: View {
     var body: some View {
         GeometryReader { proxy in
             let compact = proxy.size.height < 760
-            let referenceWidth: CGFloat = 412
-            let sidePadding = max(22, min(31, proxy.size.width * (31 / referenceWidth)))
-            let titleBarTopPadding: CGFloat = compact ? 14 : 16
-            let titleBarBottomPadding: CGFloat = compact ? 34 : 40
-            let bottomInset: CGFloat = 28
+            let sidePadding = min(24, max(14, proxy.size.width * 0.05))
+            let bottomInset: CGFloat = 16
 
             ZStack(alignment: .bottomTrailing) {
-                AppColors.primaryPurple.ignoresSafeArea()
+                AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(background: AppColors.primaryPurple)
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: L10n.tr("tasks.title"),
-                        titleColor: .white,
-                        horizontalPadding: sidePadding,
-                        topPadding: titleBarTopPadding,
-                        bottomPadding: titleBarBottomPadding,
-                        leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
+                        leading: { ChildTopBackButton { dismiss() } },
                         trailing: { Color.clear }
                     )
 
-                    VStack(spacing: 0) {
+                    ChildPurpleSurface {
                         taskSurface(compact: compact, sidePadding: sidePadding, bottomInset: bottomInset)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .background(AppColors.neutral800)
-                    .clipShape(TopRoundedShape(radius: 30))
-                    .ignoresSafeArea(edges: .bottom)
                 }
+
+                ChildWatermarkOverlay()
             }
         }
         .navigationBarBackButtonHidden(true)

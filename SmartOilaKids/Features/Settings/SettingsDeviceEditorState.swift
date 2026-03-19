@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 struct SettingsDeviceEditorState {
@@ -93,8 +94,8 @@ enum SMSTemplatesStore {
 }
 
 @MainActor
-final class SMSTemplatesRepository {
-    private(set) var templates: [String]
+final class SMSTemplatesRepository: ObservableObject {
+    @Published private(set) var templates: [String]
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -156,12 +157,13 @@ final class SMSTemplatesRepository {
 }
 
 @MainActor
-final class SMSTemplateEditorState {
-    var showEditor = false
-    var showActionsDialog = false
-    var selectedTemplateIndex: Int?
-    var editingIndex: Int?
-    var draftText = ""
+final class SMSTemplateEditorState: ObservableObject {
+    @Published var showEditor = false
+    @Published var showActionsDialog = false
+    @Published var showDeleteAlert = false
+    @Published var selectedTemplateIndex: Int?
+    @Published var editingIndex: Int?
+    @Published var draftText = ""
 
     var isDraftEmpty: Bool {
         SMSTemplatesStore.normalizedTemplate(draftText) == nil
@@ -170,6 +172,7 @@ final class SMSTemplateEditorState {
     func beginCreate() {
         showEditor = true
         showActionsDialog = false
+        showDeleteAlert = false
         selectedTemplateIndex = nil
         editingIndex = nil
         draftText = ""
@@ -179,11 +182,13 @@ final class SMSTemplateEditorState {
         guard index >= 0 else {
             selectedTemplateIndex = nil
             showActionsDialog = false
+            showDeleteAlert = false
             return
         }
 
         selectedTemplateIndex = index
         showActionsDialog = true
+        showDeleteAlert = false
     }
 
     func beginEditingSelectedTemplate(from templates: [String]) {
@@ -198,6 +203,7 @@ final class SMSTemplateEditorState {
         draftText = templates[selectedTemplateIndex]
         showEditor = true
         showActionsDialog = false
+        showDeleteAlert = false
     }
 
     @discardableResult
@@ -226,6 +232,7 @@ final class SMSTemplateEditorState {
         editingIndex = nil
         draftText = ""
         showActionsDialog = false
+        showDeleteAlert = false
         showEditor = false
         return true
     }
@@ -233,6 +240,7 @@ final class SMSTemplateEditorState {
     func resetEditor() {
         showEditor = false
         showActionsDialog = false
+        showDeleteAlert = false
         selectedTemplateIndex = nil
         editingIndex = nil
         draftText = ""

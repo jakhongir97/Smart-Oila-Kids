@@ -12,26 +12,18 @@ struct ChatComposerBar: View {
     let isSending: Bool
     let bottomInset: CGFloat
     let sidePadding: CGFloat
-    let compact: Bool
     let focus: FocusState<Bool>.Binding
     let onRetryQueued: () -> Void
+    let onOpenTemplates: () -> Void
     let onSend: () -> Void
 
-    private let composerForeground = Color(red: 66 / 255, green: 66 / 255, blue: 66 / 255)
-    private var showsStatusRows: Bool {
-        queuedMessagesCount > 0
-            || (sendStatusText?.isEmpty == false)
-            || isLoadingAttachments
-            || selectedAttachmentsCount > 0
-    }
-
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             if queuedMessagesCount > 0 {
                 HStack(spacing: 10) {
                     Text(L10n.tr("chat.retry_pending", queuedMessagesCount))
                         .font(AppTypography.unbounded(11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(2)
 
                     Spacer(minLength: 8)
@@ -56,36 +48,36 @@ struct ChatComposerBar: View {
             if let sendStatusText, !sendStatusText.isEmpty {
                 Text(sendStatusText)
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 2)
             } else if isLoadingAttachments {
                 Text(L10n.tr("chat.attachments_loading"))
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 2)
             } else if selectedAttachmentsCount > 0 {
                 Text(L10n.tr("chat.attachments_count", selectedAttachmentsCount))
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(AppColors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 2)
             }
 
             ZStack {
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .fill(AppColors.neutral700)
+                    .fill(AppColors.neutral200)
                     .frame(height: 45)
 
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Button {
                         AppHaptics.tap()
                         showAttachmentPicker = true
                     } label: {
                         Image(systemName: "paperclip")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(composerForeground.opacity(0.82))
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(AppColors.textSecondary)
                             .frame(width: 22, height: 22)
                     }
                     .buttonStyle(.plain)
@@ -103,10 +95,21 @@ struct ChatComposerBar: View {
                         }
                     }
 
+                    Button {
+                        AppHaptics.tap()
+                        onOpenTemplates()
+                    } label: {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(AppColors.textSecondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.tr("chat.template_button"))
+
                     TextField(L10n.tr("chat.message_placeholder"), text: $text)
                         .font(AppTypography.unbounded(14, weight: .medium))
-                        .foregroundStyle(composerForeground)
-                        .tint(composerForeground)
+                        .foregroundStyle(AppColors.textSecondary)
                         .focused(focus)
                         .textInputAutocapitalization(.sentences)
                         .submitLabel(.send)
@@ -122,11 +125,6 @@ struct ChatComposerBar: View {
                         if isSending {
                             ProgressView()
                                 .tint(AppColors.primaryPurple)
-                        } else if UIImage(named: "ParentChatSend") != nil {
-                            Image("ParentChatSend")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 20, height: 20)
                         } else if UIImage(named: "IconSend") != nil {
                             Image("IconSend")
                                 .resizable()
@@ -135,7 +133,7 @@ struct ChatComposerBar: View {
                         } else {
                             Image(systemName: "paperplane.fill")
                                 .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(composerForeground)
+                                .foregroundStyle(AppColors.textSecondary)
                         }
                     }
                     .buttonStyle(.plain)
@@ -147,8 +145,8 @@ struct ChatComposerBar: View {
             }
         }
         .padding(.horizontal, sidePadding)
-        .padding(.top, showsStatusRows ? (compact ? 4 : 6) : 0)
-        .padding(.bottom, bottomInset)
-        .background(AppColors.neutral800)
+        .padding(.top, 8)
+        .padding(.bottom, bottomInset + 8)
+        .background(AppColors.white)
     }
 }

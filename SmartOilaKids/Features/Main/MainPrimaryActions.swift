@@ -12,12 +12,7 @@ struct MainPrimaryActions: View {
                 AppHaptics.tap()
                 onTasksTap()
             } label: {
-                MainActionButton(
-                    title: L10n.tr("main.tasks"),
-                    systemName: "checklist.checked",
-                    badgeCount: pendingTasksCount,
-                    accent: AppColors.primaryPurple
-                )
+                MainActionButton(title: L10n.tr("main.tasks"), badgeCount: pendingTasksCount)
             }
             .buttonStyle(.plain)
 
@@ -25,12 +20,7 @@ struct MainPrimaryActions: View {
                 AppHaptics.tap()
                 onChatTap()
             } label: {
-                MainActionButton(
-                    title: L10n.tr("main.message"),
-                    systemName: "bubble.left.and.bubble.right.fill",
-                    badgeCount: unreadChatCount,
-                    accent: AppColors.secondaryPurple
-                )
+                MainActionButton(title: L10n.tr("main.message"), badgeCount: unreadChatCount)
             }
             .buttonStyle(.plain)
         }
@@ -39,55 +29,35 @@ struct MainPrimaryActions: View {
 
 private struct MainActionButton: View {
     let title: String
-    let systemName: String
     let badgeCount: Int?
-    let accent: Color
 
-    init(title: String, systemName: String, badgeCount: Int? = nil, accent: Color) {
+    init(title: String, badgeCount: Int? = nil) {
         self.title = title
-        self.systemName = systemName
         self.badgeCount = badgeCount
-        self.accent = accent
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(AppColors.neutral900)
-                    .frame(width: 42, height: 42)
-
-                Image(systemName: systemName)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-
+        ZStack(alignment: .topTrailing) {
             Text(title)
-                .font(AppTypography.unbounded(14, weight: .semibold))
+                .font(AppTypography.unbounded(16, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-
-            Spacer(minLength: 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 45)
+                .background(AppColors.primaryPurple)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
             if let badgeCount, badgeCount > 0 {
                 Text("\(min(99, badgeCount))")
                     .font(AppTypography.unbounded(9, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .frame(minWidth: 20, minHeight: 20)
+                    .padding(.horizontal, 6)
+                    .frame(minWidth: 18, minHeight: 18)
                     .background(AppColors.dangerRed)
                     .clipShape(Capsule())
+                    .offset(x: -6, y: -8)
             }
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity)
-        .frame(height: 76)
-        .background(accent)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
         }
     }
 }

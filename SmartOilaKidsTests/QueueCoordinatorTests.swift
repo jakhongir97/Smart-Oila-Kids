@@ -2470,11 +2470,11 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(result.remoteLockedApplications, [
+            DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App"),
             DeviceAppSelectionApplication(
                 packageName: "com.example.fallback",
                 appName: ProductFallbackText.appName()
-            ),
-            DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App")
+            )
         ])
         XCTAssertEqual(result.payloadSummary, "4 apps, 2 locked")
     }

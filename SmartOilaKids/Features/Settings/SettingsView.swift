@@ -9,9 +9,9 @@ struct SettingsView: View {
 
     @StateObject var viewModel: SettingsViewModel
     @State var userName: String = ""
-    @State var showUnlinkConfirmation = false
-    @State var isUnlinkingDevice = false
+    @State private var showUnlinkAlert = false
     @State var deviceEditor = SettingsDeviceEditorState()
+    @State private var showDiagnostics = false
     @State private var showPermissionsCenter = false
     @State private var showAppLockSetup = false
     @State private var showMediaHistory = false
@@ -35,146 +35,144 @@ struct SettingsView: View {
             let sidePadding = min(30, max(16, proxy.size.width * 0.06))
             let compact = proxy.size.height < 760
 
-            ZStack {
-                AppColors.primaryPurple.ignoresSafeArea()
+            ZStack(alignment: .bottomTrailing) {
+                AppColors.white.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ChildStatusBar(background: AppColors.primaryPurple)
+                    ChildStatusBar(background: AppColors.white)
 
                     ChildTitleBar(
                         title: L10n.tr("settings.title"),
-                        titleColor: .white,
-                        bottomPadding: compact ? 18 : 24,
-                        leading: { ChildTopBackButton(foreground: .white) { dismiss() } },
+                        leading: { ChildTopBackButton { dismiss() } },
                         trailing: { Color.clear }
                     )
 
-                    Color.clear
-                        .frame(height: compact ? 12 : 16)
-
-                    ZStack(alignment: .bottomTrailing) {
-                        AppColors.neutral800
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+                    ChildPurpleSurface {
                         ScrollView(showsIndicators: false) {
-                            SettingsMainFormView(
-                                compact: compact,
-                                sidePadding: sidePadding,
-                                bottomInset: max(24, proxy.safeAreaInsets.bottom + 12),
-                                avatarURL: viewModel.currentAvatarURL(for: currentRemoteDSN),
-                                avatarPreviewImage: avatarPreviewImage,
-                                isUploadingAvatar: viewModel.isUploadingAvatar,
-                                userName: $userName,
-                                themeBinding: themeBinding,
-                                languageBinding: languageBinding,
-                                protectionController: settingsProtection,
-                                connectedDevices: viewModel.connectedDevices,
-                                isSaving: viewModel.isSaving,
-                                nameFieldFocus: $isNameFieldFocused,
-                                onTapAvatar: {
-                                    showAvatarPicker = true
-                                },
-                                onSaveName: {
-                                    save()
-                                },
-                                onOpenPermissions: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await performProtectedSettingsAction {
-                                            permissionManager.refreshStatuses()
-                                            showPermissionsCenter = true
+                            VStack(spacing: 0) {
+                                SettingsMainFormView(
+                                    compact: compact,
+                                    sidePadding: sidePadding,
+                                    bottomInset: max(24, proxy.safeAreaInsets.bottom + 12),
+                                    avatarURL: viewModel.currentAvatarURL(for: sessionStore.dsn),
+                                    avatarPreviewImage: avatarPreviewImage,
+                                    isUploadingAvatar: viewModel.isUploadingAvatar,
+                                    userName: $userName,
+                                    themeBinding: themeBinding,
+                                    languageBinding: languageBinding,
+                                    protectionController: settingsProtection,
+                                    connectedDevices: viewModel.connectedDevices,
+                                    isSaving: viewModel.isSaving,
+                                    nameFieldFocus: $isNameFieldFocused,
+                                    onTapAvatar: {
+                                        showAvatarPicker = true
+                                    },
+                                    onSaveName: {
+                                        save()
+                                    },
+                                    onOpenDiagnostics: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                showDiagnostics = true
+                                            }
+                                        }
+                                    },
+                                    onOpenPermissions: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                permissionManager.refreshStatuses()
+                                                showPermissionsCenter = true
+                                            }
+                                        }
+                                    },
+                                    onOpenAppLock: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                permissionManager.refreshStatuses()
+                                                appLockStore.activate(dsn: sessionStore.dsn)
+                                                showAppLockSetup = true
+                                            }
+                                        }
+                                    },
+                                    onOpenMediaHistory: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                permissionManager.refreshStatuses()
+                                                showMediaHistory = true
+                                            }
+                                        }
+                                    },
+                                    onInviteParent: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                beginInviteShare()
+                                            }
+                                        }
+                                    },
+                                    onEditDevice: { device in
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                beginDeviceEditing(device)
+                                            }
+                                        }
+                                    },
+                                    onToggleProtection: { shouldEnable in
+                                        AppHaptics.tap()
+                                        Task {
+                                            await updateSettingsProtection(shouldEnable)
+                                        }
+                                    },
+                                    onConfigureProtectionPIN: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await configureProtectionPIN()
+                                        }
+                                    },
+                                    onRemoveProtectionPIN: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await removeProtectionPIN()
+                                        }
+                                    },
+                                    onSave: {
+                                        AppHaptics.tap()
+                                        save()
+                                    },
+                                    onLogout: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                sessionStore.clearSession()
+                                            }
+                                        }
+                                    },
+                                    onUnlink: {
+                                        AppHaptics.tap()
+                                        Task {
+                                            await performProtectedSettingsAction {
+                                                showUnlinkAlert = true
+                                            }
                                         }
                                     }
-                                },
-                                onOpenAppLock: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await performProtectedSettingsAction {
-                                            permissionManager.refreshStatuses()
-                                            appLockStore.activate(dsn: currentRemoteDSN)
-                                            showAppLockSetup = true
-                                        }
-                                    }
-                                },
-                                onOpenMediaHistory: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await performProtectedSettingsAction {
-                                            permissionManager.refreshStatuses()
-                                            showMediaHistory = true
-                                        }
-                                    }
-                                },
-                                onInviteParent: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await performProtectedSettingsAction {
-                                            beginInviteShare()
-                                        }
-                                    }
-                                },
-                                onEditDevice: { device in
-                                    Task {
-                                        await performProtectedSettingsAction {
-                                            beginDeviceEditing(device)
-                                        }
-                                    }
-                                },
-                                onToggleProtection: { shouldEnable in
-                                    AppHaptics.tap()
-                                    Task {
-                                        await updateSettingsProtection(shouldEnable)
-                                    }
-                                },
-                                onConfigureProtectionPIN: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await configureProtectionPIN()
-                                    }
-                                },
-                                onRemoveProtectionPIN: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await removeProtectionPIN()
-                                    }
-                                },
-                                onSave: {
-                                    AppHaptics.tap()
-                                    save()
-                                },
-                                onLogout: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await performProtectedSettingsAction {
-                                            sessionStore.clearSession()
-                                        }
-                                    }
-                                },
-                                onUnlink: {
-                                    AppHaptics.tap()
-                                    Task {
-                                        await performProtectedSettingsAction {
-                                            showUnlinkConfirmation = true
-                                        }
-                                    }
-                                }
-                            )
-                            .padding(.top, 12)
+                                )
+                            }
                         }
                         .appInteractiveKeyboardDismiss()
-
-                        ChildWatermarkOverlay(opacity: 0.5)
-                            .offset(x: 28, y: 34)
                     }
-                    .clipShape(TopRoundedShape(radius: 30))
-                    .ignoresSafeArea(edges: .bottom)
                 }
+
+                ChildWatermarkOverlay()
             }
         }
         .id(appThemeRawValue)
         .navigationBarBackButtonHidden(true)
         .task {
-            appLockStore.activate(dsn: currentRemoteDSN)
+            appLockStore.activate(dsn: sessionStore.dsn)
             settingsProtection.refreshAvailability()
             await loadRemoteDataIfNeeded()
         }
@@ -210,35 +208,47 @@ struct SettingsView: View {
                     .padding(.top, 10)
             }
         }
-        .sheet(isPresented: $showUnlinkConfirmation) {
-            SettingsUnlinkDeviceSheet(
-                isProcessing: isUnlinkingDevice,
-                onConfirm: {
-                    unlinkCurrentDevice()
-                },
-                onClose: {
-                    guard !isUnlinkingDevice else { return }
-                    showUnlinkConfirmation = false
+        .alert(L10n.tr("settings.unlink_title"), isPresented: $showUnlinkAlert) {
+            Button(L10n.tr("settings.unlink_device"), role: .destructive) {
+                Task {
+                    switch await actionFlows.deleteCurrentDeviceSession() {
+                    case .success:
+                        AppHaptics.success()
+                        sessionStore.clearSession()
+                    case .failure:
+                        AppHaptics.warning()
+                        banner(L10n.tr("settings.unlink_failed"))
+                    }
                 }
-            )
-            .interactiveDismissDisabled(isUnlinkingDevice)
-            .appMediumLargeSheetPresentation()
+            }
+            Button(L10n.tr("common.cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.tr("settings.unlink_message"))
         }
-        .sheet(isPresented: $deviceEditor.isPresented, onDismiss: { deviceEditor.close() }) {
-            SettingsDeviceEditorSheet(
-                name: $deviceEditor.name,
-                isSaving: viewModel.isUpdatingDevice,
-                onSave: {
-                    saveEditedDevice()
-                },
-                onDelete: {
-                    deleteEditedDevice()
-                },
-                onClose: {
-                    deviceEditor.close()
-                }
-            )
-            .appMediumLargeSheetPresentation()
+        .alert(L10n.tr("settings.edit_device"), isPresented: $deviceEditor.isPresented) {
+            TextField(L10n.tr("settings.username_placeholder"), text: $deviceEditor.name)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled(true)
+
+            Button(L10n.tr("settings.delete_device"), role: .destructive) {
+                deleteEditedDevice()
+            }
+            .disabled(viewModel.isUpdatingDevice)
+
+            Button(L10n.tr("common.cancel"), role: .cancel) {
+                deviceEditor.clearSelection()
+            }
+
+            Button(viewModel.isUpdatingDevice ? L10n.tr("settings.saving") : L10n.tr("common.save")) {
+                saveEditedDevice()
+            }
+            .disabled(viewModel.isUpdatingDevice)
+        } message: {
+            Text(L10n.tr("settings.change_username"))
+        }
+        .sheet(isPresented: $showDiagnostics) {
+            DiagnosticsPanelView()
+                .environmentObject(sessionStore)
         }
         .sheet(isPresented: $showPermissionsCenter) {
             SettingsPermissionsPanelView(manager: permissionManager)
@@ -269,16 +279,9 @@ struct SettingsView: View {
             SettingsProtectionPINSheet(prompt: prompt, controller: settingsProtection)
                 .appMediumLargeSheetPresentation()
         }
-        .onChange(of: sessionStore.dsn) { _ in
-            appLockStore.activate(dsn: currentRemoteDSN)
+        .onChange(of: sessionStore.dsn) { newValue in
+            appLockStore.activate(dsn: newValue)
         }
-        .onChange(of: sessionStore.selectedRemoteDSN) { _ in
-            appLockStore.activate(dsn: currentRemoteDSN)
-        }
-    }
-
-    var currentRemoteDSN: String? {
-        sessionStore.activeRemoteDSN
     }
 
     private var settingsProtectionPromptBinding: Binding<SettingsProtectionPINPrompt?> {

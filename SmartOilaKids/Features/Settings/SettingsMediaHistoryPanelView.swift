@@ -95,9 +95,7 @@ private final class SettingsMediaHistoryViewModel: ObservableObject {
         } catch {
             recordings = []
             lastErrorMessage = NetworkError.userMessage(for: error)
-            phase = (!activity.isEmpty || pendingCount > 0)
-                ? .loaded
-                : .failed(lastErrorMessage ?? L10n.tr("error.request_failed"))
+            phase = (!activity.isEmpty || pendingCount > 0) ? .loaded : .failed(error.localizedDescription)
         }
     }
 
@@ -168,45 +166,47 @@ struct SettingsMediaHistoryPanelView: View {
 
     var body: some View {
         AppNavigationContainer {
-            SettingsPanelChrome(
-                title: L10n.tr("settings.media_history"),
-                onClose: { dismiss() },
-                trailing: {
-                    SettingsPanelIconButton(
-                        systemName: "arrow.clockwise",
-                        accessibilityLabel: L10n.tr("common.retry")
-                    ) {
+            Group {
+                switch viewModel.phase {
+                case .idle, .loading:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failed:
+                    failedState
+                case .loaded:
+                    loadedState
+                }
+            }
+            .background(AppColors.white.ignoresSafeArea())
+            .navigationTitle(L10n.tr("settings.media_history"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(L10n.tr("common.close")) {
+                        dismiss()
+                    }
+                    .font(AppTypography.unbounded(12, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
                         Task {
                             await viewModel.refresh()
                         }
-                    }
-                }
-            ) {
-                Group {
-                    switch viewModel.phase {
-                    case .idle, .loading:
-                        ProgressView()
-                            .tint(.white)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    case .failed:
-                        failedState
-                    case .loaded:
-                        loadedState
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(AppColors.primaryPurple)
                     }
                 }
             }
             .task {
                 manager.refreshStatuses()
-                await viewModel.load(dsn: sessionStore.activeRemoteDSN)
+                await viewModel.load(dsn: sessionStore.dsn)
             }
-            .onChange(of: sessionStore.dsn) { _ in
+            .onChange(of: sessionStore.dsn) { newValue in
                 Task {
-                    await viewModel.load(dsn: sessionStore.activeRemoteDSN)
-                }
-            }
-            .onChange(of: sessionStore.selectedRemoteDSN) { _ in
-                Task {
-                    await viewModel.load(dsn: sessionStore.activeRemoteDSN)
+                    await viewModel.load(dsn: newValue)
                 }
             }
         }
@@ -230,12 +230,12 @@ struct SettingsMediaHistoryPanelView: View {
 
             Text(L10n.tr("settings.media_history_load_failed"))
                 .font(AppTypography.unbounded(13, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.textPrimary)
 
             if let lastErrorMessage = viewModel.lastErrorMessage?.trimmedNonEmpty {
                 Text(lastErrorMessage)
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
@@ -295,7 +295,7 @@ struct SettingsMediaHistoryPanelView: View {
                 if viewModel.recordings.isEmpty && viewModel.activityEvents.isEmpty && viewModel.pendingActionCount == 0 {
                     Text(L10n.tr("settings.media_history_empty"))
                         .font(AppTypography.unbounded(12, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -307,7 +307,7 @@ struct SettingsMediaHistoryPanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L10n.tr("settings.media_history_pending_uploads", "\(viewModel.pendingActionCount)"))
                 .font(AppTypography.unbounded(11, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.textPrimary)
 
             Button(L10n.tr("settings.media_history_retry_pending")) {
                 Task {
@@ -323,13 +323,18 @@ struct SettingsMediaHistoryPanelView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsPanelCard()
+        .background(AppColors.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(AppColors.primaryPurple.opacity(0.12), lineWidth: 1)
+        }
     }
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(AppTypography.unbounded(11, weight: .semibold))
-            .foregroundStyle(AppColors.neutral600)
+            .foregroundStyle(AppColors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -338,7 +343,7 @@ struct SettingsMediaHistoryPanelView: View {
             HStack(spacing: 10) {
                 Label(mediaTypeTitle(event.mediaType), systemImage: mediaTypeIcon(event.mediaType))
                     .font(AppTypography.unbounded(11, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
 
                 Spacer(minLength: 12)
 
@@ -353,17 +358,28 @@ struct SettingsMediaHistoryPanelView: View {
 
             Text(formattedTimestamp(event.createdAt))
                 .font(AppTypography.unbounded(10, weight: .regular))
-                .foregroundStyle(AppColors.neutral600)
+                .foregroundStyle(AppColors.textSecondary)
+
+            if let recordingID = event.recordingID?.trimmedNonEmpty {
+                Text("ID: \(recordingID)")
+                    .font(AppTypography.unbounded(10, weight: .regular))
+                    .foregroundStyle(AppColors.textSecondary)
+            }
 
             if let reason = event.reason?.trimmedNonEmpty {
                 Text(reason)
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsPanelCard()
+        .background(AppColors.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(AppColors.primaryPurple.opacity(0.12), lineWidth: 1)
+        }
     }
 
     private func recordingCard(_ recording: DeviceRecordingTaskResponse) -> some View {
@@ -374,25 +390,22 @@ struct SettingsMediaHistoryPanelView: View {
             HStack(spacing: 10) {
                 Label(typeTitle(recording.type), systemImage: typeIcon(recording.type))
                     .font(AppTypography.unbounded(12, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
 
                 Spacer(minLength: 12)
 
                 Text(statusTitle(recording.status))
                     .font(AppTypography.unbounded(10, weight: .semibold))
-                    .foregroundStyle(recording.status == .completed ? AppColors.primaryPurple : AppColors.neutral600)
+                    .foregroundStyle(recording.status == .completed ? AppColors.primaryPurple : AppColors.textSecondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(
-                        (recording.status == .completed ? AppColors.primaryPurple : AppColors.neutral900)
-                            .opacity(recording.status == .completed ? 0.12 : 1)
-                    )
+                    .background(AppColors.primaryPurple.opacity(recording.status == .completed ? 0.12 : 0.08))
                     .clipShape(Capsule())
             }
 
             Text(formattedTimestamp(recording.createdAt))
                 .font(AppTypography.unbounded(10, weight: .regular))
-                .foregroundStyle(AppColors.neutral600)
+                .foregroundStyle(AppColors.textSecondary)
 
             if recording.status == .completed {
                 Button {
@@ -435,7 +448,12 @@ struct SettingsMediaHistoryPanelView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsPanelCard()
+        .background(AppColors.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(AppColors.primaryPurple.opacity(0.12), lineWidth: 1)
+        }
         .opacity(isDeleting ? 0.6 : 1)
     }
 
@@ -473,7 +491,7 @@ struct SettingsMediaHistoryPanelView: View {
         case .recordingCompleted, .streamStarted:
             return AppColors.primaryPurple
         case .recordingUploadQueued, .recordingDiscarded, .recordingCancelled, .streamStopped:
-            return AppColors.neutral600
+            return AppColors.textSecondary
         case .recordingStarted:
             return AppColors.primaryPurple
         case .recordingFailed, .streamFailed, .streamDeliveryFailed, .permissionRevoked, .foregroundInterrupted:
@@ -574,11 +592,11 @@ private struct SettingsMediaReadinessSummaryCard: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text(L10n.tr("permissions.media_readiness_title"))
                 .font(AppTypography.unbounded(12, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.textPrimary)
 
             Text(manager.mediaReadinessMessage())
                 .font(AppTypography.unbounded(10, weight: .regular))
-                .foregroundStyle(AppColors.neutral600)
+                .foregroundStyle(AppColors.textSecondary)
                 .lineSpacing(2)
 
             VStack(spacing: 8) {
@@ -603,7 +621,7 @@ private struct SettingsMediaReadinessSummaryCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColors.neutral800)
+        .background(AppColors.neutral100)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -626,11 +644,11 @@ private struct SettingsMediaReadinessSummaryCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(capability.title)
                     .font(AppTypography.unbounded(10, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
 
                 Text(capability.detail)
                     .font(AppTypography.unbounded(9, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                     .lineSpacing(2)
             }
 
@@ -646,7 +664,7 @@ private struct SettingsMediaReadinessSummaryCard: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
-        .background(AppColors.neutral900)
+        .background(AppColors.white.opacity(0.65))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

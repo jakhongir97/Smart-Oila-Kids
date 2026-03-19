@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ParentChatRow {
     let id: String
@@ -17,30 +18,24 @@ struct ChatParentListView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 10) {
-                if rows.isEmpty {
-                    Text(L10n.tr("chat.empty"))
-                        .font(AppTypography.unbounded(12, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity, minHeight: 220)
-                } else {
-                    ForEach(rows, id: \.id) { row in
-                        Button {
-                            AppHaptics.tap()
-                            onOpen(row)
-                        } label: {
-                            chatRow(name: row.name, preview: row.preview, unreadCount: row.unreadCount)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(accessibilityLabel(for: row))
-                        .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
+                ForEach(rows, id: \.id) { row in
+                    Button {
+                        AppHaptics.tap()
+                        onOpen(row)
+                    } label: {
+                        chatRow(name: row.name, preview: row.preview, unreadCount: row.unreadCount)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(accessibilityLabel(for: row))
+                    .accessibilityHint(L10n.tr("chat.open_parent_chat_hint"))
                 }
+
+                Spacer()
             }
             .padding(.horizontal, sidePadding)
-            .padding(.top, compact ? 24 : 30)
-            .padding(.bottom, compact ? 24 : 30)
+            .padding(.top, compact ? 18 : 30)
+            .padding(.bottom, 16)
         }
         .refreshable {
             await onRefresh()
@@ -50,26 +45,33 @@ struct ChatParentListView: View {
     private func chatRow(name: String, preview: String, unreadCount: Int) -> some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(AppColors.neutral700)
+                .fill(Color.gray.opacity(0.35))
                 .frame(width: 50, height: 50)
+                .overlay {
+                    if UIImage(named: "UserAvatarGlyph") != nil {
+                        Image("UserAvatarGlyph")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 30, height: 30)
+                    } else {
+                        Image(systemName: "person.fill")
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(name)
                     .font(AppTypography.unbounded(16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .foregroundStyle(AppColors.black)
+                    .lineLimit(2)
 
                 Text(preview)
                     .font(AppTypography.unbounded(12, weight: .regular))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.black)
                     .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .lineSpacing(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 8)
+            Spacer()
 
             if unreadCount > 0 {
                 Text("\(min(99, unreadCount))")
@@ -83,9 +85,9 @@ struct ChatParentListView: View {
             }
         }
         .padding(.horizontal, 15)
-        .frame(maxWidth: .infinity, minHeight: 80, maxHeight: 80, alignment: .leading)
-        .background(AppColors.neutral900)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .frame(minHeight: 80)
+        .background(AppColors.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private func accessibilityLabel(for row: ParentChatRow) -> String {

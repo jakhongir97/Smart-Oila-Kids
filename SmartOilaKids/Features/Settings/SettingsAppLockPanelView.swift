@@ -27,83 +27,91 @@ struct SettingsAppLockPanelView: View {
         let actionTitle = controller.actionTitle
 
         let content = AppNavigationContainer {
-            SettingsPanelChrome(
-                title: L10n.tr("settings.app_lock"),
-                onClose: { dismiss() },
-                trailing: {
-                    SettingsPanelIconButton(
-                        systemName: "arrow.clockwise",
-                        accessibilityLabel: L10n.tr("common.retry")
-                    ) {
-                        controller.refreshProtectionState()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsAppLockStatusCard(
+                        title: L10n.tr("settings.app_lock"),
+                        subtitle: controller.statusSubtitle(),
+                        badgeText: controller.permissionManager.statusText(for: .usageStats),
+                        badgeAccent: isScreenTimeReady ? AppColors.accentGreen : AppColors.primaryPurple
+                    )
+
+                    SettingsAppLockMetricsCard(summary: summary)
+
+                    if !summary.activeLockedApplicationNames.isEmpty {
+                        SettingsActiveRemoteLocksCard(summary: summary)
                     }
+
+                    if mismatchState.hasMismatch {
+                        SettingsUnenforceableRemoteLocksCard(mismatchState: mismatchState)
+                    }
+
+                    if !summary.previewApplicationNames.isEmpty {
+                        SettingsAppLockPreviewCard(summary: summary)
+                    }
+
+                    if controller.shouldShowAppLimits() {
+                        SettingsAppLimitCard(state: appLimitState)
+                    }
+
+                    SettingsAppUsageActivityCard(
+                        summary: controller.usageSummary,
+                        period: $controller.usagePeriod,
+                        isScreenTimeReady: isScreenTimeReady,
+                        actionTitle: actionTitle,
+                        onAllowScreenTime: controller.requestScreenTimeAccess,
+                        onRefresh: controller.refreshUsage
+                    )
+
+                    if controller.shouldShowLockSchedule() {
+                        SettingsLockScheduleCard(
+                            lockState: controller.lockState,
+                            scheduleDiagnostics: scheduleDiagnostics
+                        )
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        if isScreenTimeReady {
+                            Button(L10n.tr("settings.app_lock_button_choose"), action: controller.openPicker)
+                            .buttonStyle(SettingsAppLockPrimaryButtonStyle())
+                        } else if let actionTitle {
+                            Button(actionTitle, action: controller.requestScreenTimeAccess)
+                            .buttonStyle(SettingsAppLockPrimaryButtonStyle())
+                        }
+
+                        if summary.hasSelection {
+                            Button(L10n.tr("settings.app_lock_button_clear"), action: controller.clearSelection)
+                            .buttonStyle(SettingsAppLockSecondaryButtonStyle())
+                        }
+                    }
+
+                    Text(L10n.tr("settings.app_lock_note"))
+                        .font(AppTypography.unbounded(11, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .padding(.top, 4)
                 }
-            ) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        SettingsAppLockStatusCard(
-                            title: L10n.tr("settings.app_lock"),
-                            subtitle: controller.statusSubtitle(),
-                            badgeText: controller.permissionManager.statusText(for: .usageStats),
-                            badgeAccent: isScreenTimeReady ? AppColors.accentGreen : AppColors.primaryPurple
-                        )
-
-                        SettingsAppLockMetricsCard(summary: summary)
-
-                        if !summary.activeLockedApplicationNames.isEmpty {
-                            SettingsActiveRemoteLocksCard(summary: summary)
-                        }
-
-                        if mismatchState.hasMismatch {
-                            SettingsUnenforceableRemoteLocksCard(mismatchState: mismatchState)
-                        }
-
-                        if !summary.previewApplicationNames.isEmpty {
-                            SettingsAppLockPreviewCard(summary: summary)
-                        }
-
-                        if controller.shouldShowAppLimits() {
-                            SettingsAppLimitCard(state: appLimitState)
-                        }
-
-                        SettingsAppUsageActivityCard(
-                            summary: controller.usageSummary,
-                            period: $controller.usagePeriod,
-                            isScreenTimeReady: isScreenTimeReady,
-                            actionTitle: actionTitle,
-                            onAllowScreenTime: controller.requestScreenTimeAccess,
-                            onRefresh: controller.refreshUsage
-                        )
-
-                        if controller.shouldShowLockSchedule() {
-                            SettingsLockScheduleCard(
-                                lockState: controller.lockState,
-                                scheduleDiagnostics: scheduleDiagnostics
-                            )
-                        }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            if isScreenTimeReady {
-                                Button(L10n.tr("settings.app_lock_button_choose"), action: controller.openPicker)
-                                    .buttonStyle(SettingsAppLockPrimaryButtonStyle())
-                            } else if let actionTitle {
-                                Button(actionTitle, action: controller.requestScreenTimeAccess)
-                                    .buttonStyle(SettingsAppLockPrimaryButtonStyle())
-                            }
-
-                            if summary.hasSelection {
-                                Button(L10n.tr("settings.app_lock_button_clear"), action: controller.clearSelection)
-                                    .buttonStyle(SettingsAppLockSecondaryButtonStyle())
-                            }
-                        }
-
-                        Text(L10n.tr("settings.app_lock_note"))
-                            .font(AppTypography.unbounded(11, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
-                            .padding(.top, 4)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(AppColors.white.ignoresSafeArea())
+            .navigationTitle(L10n.tr("settings.app_lock"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(L10n.tr("common.close")) {
+                        dismiss()
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .font(AppTypography.unbounded(12, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        controller.refreshProtectionState()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(AppColors.primaryPurple)
+                    }
                 }
             }
             .onAppear {
@@ -139,11 +147,11 @@ private struct SettingsAppLockStatusCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(title)
                         .font(AppTypography.unbounded(14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
 
                     Text(subtitle)
                         .font(AppTypography.unbounded(11, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
                 }
 
                 Spacer(minLength: 8)
@@ -158,7 +166,8 @@ private struct SettingsAppLockStatusCard: View {
             }
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -185,7 +194,8 @@ private struct SettingsAppLockMetricsCard: View {
             )
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -197,13 +207,13 @@ private struct SettingsAppLockMetricRow: View {
         HStack(spacing: 8) {
             Text(title)
                 .font(AppTypography.unbounded(11, weight: .regular))
-                .foregroundStyle(AppColors.neutral600)
+                .foregroundStyle(AppColors.textSecondary)
 
             Spacer(minLength: 8)
 
             Text(value)
                 .font(AppTypography.unbounded(11, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.black)
         }
     }
 }
@@ -215,12 +225,12 @@ private struct SettingsAppLockPreviewCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L10n.tr("settings.app_lock_preview_title"))
                 .font(AppTypography.unbounded(12, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.black)
 
             ForEach(summary.previewApplicationNames, id: \.self) { name in
                 Text(name)
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(1)
             }
 
@@ -236,7 +246,8 @@ private struct SettingsAppLockPreviewCard: View {
             }
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -249,7 +260,7 @@ private struct SettingsActiveRemoteLocksCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.tr("settings.app_lock_live_title"))
                         .font(AppTypography.unbounded(12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
 
                     Text(
                         L10n.tr(
@@ -258,7 +269,7 @@ private struct SettingsActiveRemoteLocksCard: View {
                         )
                     )
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                 }
 
                 Spacer(minLength: 8)
@@ -275,7 +286,7 @@ private struct SettingsActiveRemoteLocksCard: View {
             ForEach(summary.activeLockedApplicationNames, id: \.self) { name in
                 Text(name)
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(1)
             }
 
@@ -291,7 +302,8 @@ private struct SettingsActiveRemoteLocksCard: View {
             }
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -304,7 +316,7 @@ private struct SettingsUnenforceableRemoteLocksCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.tr("settings.app_lock_unenforceable_title"))
                         .font(AppTypography.unbounded(12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
 
                     Text(
                         L10n.tr(
@@ -313,7 +325,7 @@ private struct SettingsUnenforceableRemoteLocksCard: View {
                         )
                     )
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                 }
 
                 Spacer(minLength: 8)
@@ -330,7 +342,7 @@ private struct SettingsUnenforceableRemoteLocksCard: View {
             ForEach(mismatchState.previewNames, id: \.self) { name in
                 Text(name)
                     .font(AppTypography.unbounded(11, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(1)
             }
 
@@ -347,10 +359,11 @@ private struct SettingsUnenforceableRemoteLocksCard: View {
 
             Text(L10n.tr("settings.app_lock_unenforceable_note"))
                 .font(AppTypography.unbounded(10, weight: .regular))
-                .foregroundStyle(AppColors.neutral600)
+                .foregroundStyle(AppColors.textSecondary)
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -363,12 +376,12 @@ private struct SettingsAppLimitCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.tr("settings.app_limits_title"))
                         .font(AppTypography.unbounded(12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
 
                     if state.items.isEmpty {
                         Text(L10n.tr("settings.app_limits_waiting_selection"))
                             .font(AppTypography.unbounded(10, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
+                            .foregroundStyle(AppColors.textSecondary)
                     } else {
                         Text(
                             state.items.count == 1
@@ -376,7 +389,7 @@ private struct SettingsAppLimitCard: View {
                                 : L10n.tr("settings.app_limits_matched_count", "\(state.items.count)")
                         )
                             .font(AppTypography.unbounded(10, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                 }
 
@@ -396,7 +409,7 @@ private struct SettingsAppLimitCard: View {
             if state.items.isEmpty {
                 Text(L10n.tr("settings.app_limits_unmatched_count", "\(state.unmatchedLimitCount)"))
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
             } else {
                 ForEach(state.items) { item in
                     SettingsAppLimitRow(item: item)
@@ -406,11 +419,12 @@ private struct SettingsAppLimitCard: View {
             if !state.items.isEmpty && state.unmatchedLimitCount > 0 {
                 Text(L10n.tr("settings.app_limits_unmatched_count", "\(state.unmatchedLimitCount)"))
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
             }
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -426,7 +440,7 @@ private struct SettingsAppLimitRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.appName)
                         .font(AppTypography.unbounded(11, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
                         .lineLimit(1)
 
                     Text(
@@ -437,7 +451,7 @@ private struct SettingsAppLimitRow: View {
                         )
                     )
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
 
                     Text(
                         item.isLimitReached
@@ -445,7 +459,7 @@ private struct SettingsAppLimitRow: View {
                             : L10n.tr("settings.app_limits_remaining", durationText(seconds: item.remainingTodaySeconds))
                     )
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(item.isLimitReached ? AppColors.dangerRed : AppColors.neutral600)
+                    .foregroundStyle(item.isLimitReached ? AppColors.dangerRed : AppColors.textSecondary)
                 }
 
                 Spacer(minLength: 8)
@@ -462,7 +476,7 @@ private struct SettingsAppLimitRow: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(AppColors.neutral900)
+                        .fill(AppColors.neutral200)
 
                     Capsule()
                         .fill(item.isLimitReached ? AppColors.dangerRed : AppColors.primaryPurple)
@@ -497,11 +511,11 @@ private struct SettingsAppUsageActivityCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.tr("settings.app_activity_title"))
                         .font(AppTypography.unbounded(12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
 
                     Text(subtitleText)
                         .font(AppTypography.unbounded(10, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
                 }
 
                 Spacer(minLength: 8)
@@ -523,13 +537,12 @@ private struct SettingsAppUsageActivityCard: View {
                 Text(L10n.tr("settings.app_activity_period_month")).tag(ScreenTimeUsageActivityPeriod.monthly)
             }
             .pickerStyle(.segmented)
-            .environment(\.colorScheme, .dark)
 
             if !isScreenTimeReady {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L10n.tr("settings.app_activity_permission_needed"))
                         .font(AppTypography.unbounded(10, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
 
                     if let actionTitle {
                         Button(actionTitle, action: onAllowScreenTime)
@@ -539,16 +552,16 @@ private struct SettingsAppUsageActivityCard: View {
             } else if !summary.isAppGroupAvailable {
                 Text(L10n.tr("settings.app_activity_unavailable"))
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
             } else if !summary.hasSelection {
                 Text(L10n.tr("settings.app_activity_choose_apps"))
                     .font(AppTypography.unbounded(10, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
             } else if summary.items.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L10n.tr("settings.app_activity_collecting"))
                         .font(AppTypography.unbounded(10, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
 
                     Button(L10n.tr("settings.app_activity_refresh"), action: onRefresh)
                         .buttonStyle(SettingsAppLockSecondaryButtonStyle())
@@ -560,7 +573,8 @@ private struct SettingsAppUsageActivityCard: View {
             }
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var subtitleText: String {
@@ -604,12 +618,12 @@ private struct SettingsAppUsageActivityRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.appName)
                         .font(AppTypography.unbounded(11, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
                         .lineLimit(1)
 
                     Text(primaryUsageText)
                         .font(AppTypography.unbounded(10, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
 
                     if item.isLimitReached {
                         Text(L10n.tr("settings.app_activity_limit_badge"))
@@ -624,7 +638,7 @@ private struct SettingsAppUsageActivityRow: View {
                               remainingSeconds > 0 {
                         Text(L10n.tr("settings.app_limits_remaining", durationText(seconds: remainingSeconds)))
                             .font(AppTypography.unbounded(10, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                 }
 
@@ -662,7 +676,7 @@ private struct SettingsAppUsageActivityRow: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(AppColors.neutral900)
+                            .fill(AppColors.neutral200)
 
                         Capsule()
                             .fill(item.isLimitReached ? AppColors.dangerRed : AppColors.primaryPurple)
@@ -723,16 +737,16 @@ private struct SettingsLockScheduleCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L10n.tr("settings.lock_schedule_title"))
                         .font(AppTypography.unbounded(12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
 
                     Text(primaryText(scheduleRange: scheduleRange))
                         .font(AppTypography.unbounded(10, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
 
                     if let localTime {
                         Text(L10n.tr("settings.lock_schedule_device_time", localTime))
                             .font(AppTypography.unbounded(10, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                 }
 
@@ -751,10 +765,11 @@ private struct SettingsLockScheduleCard: View {
 
             Text(secondaryText(scheduleRange: scheduleRange, isScheduleActive: isScheduleActive))
                 .font(AppTypography.unbounded(10, weight: .regular))
-                .foregroundStyle(AppColors.neutral600)
+                .foregroundStyle(AppColors.textSecondary)
         }
         .padding(14)
-        .settingsPanelCard(cornerRadius: 16)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func badgeConfiguration(isScheduleActive: Bool) -> (title: String, foreground: Color, background: Color)? {
@@ -788,8 +803,8 @@ private struct SettingsLockScheduleCard: View {
         case "disabled":
             return (
                 L10n.tr("settings.lock_schedule_disabled_badge"),
-                AppColors.neutral600,
-                AppColors.neutral600
+                AppColors.textSecondary,
+                AppColors.textSecondary
             )
         default:
             return nil
@@ -892,16 +907,12 @@ private struct SettingsAppLockSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(AppTypography.unbounded(12, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(AppColors.primaryPurple)
             .frame(maxWidth: .infinity)
             .frame(height: 42)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(AppColors.neutral900.opacity(configuration.isPressed ? 0.8 : 1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
+                    .fill(AppColors.primaryPurple.opacity(configuration.isPressed ? 0.12 : 0.08))
             )
     }
 }

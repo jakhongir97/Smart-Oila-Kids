@@ -6,33 +6,41 @@ struct SettingsPermissionsPanelView: View {
 
     var body: some View {
         AppNavigationContainer {
-            SettingsPanelChrome(
-                title: L10n.tr("settings.permissions"),
-                onClose: { dismiss() },
-                trailing: {
-                    SettingsPanelIconButton(
-                        systemName: "arrow.clockwise",
-                        accessibilityLabel: L10n.tr("common.retry")
-                    ) {
-                        manager.refreshStatuses()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(L10n.tr("settings.permissions_subtitle"))
+                        .font(AppTypography.unbounded(12, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .padding(.top, 4)
+
+                    SettingsMediaReadinessCard(manager: manager)
+
+                    ForEach(PermissionRequirement.allCases) { requirement in
+                        SettingsPermissionRow(requirement: requirement, manager: manager)
                     }
                 }
-            ) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.tr("settings.permissions_subtitle"))
-                            .font(AppTypography.unbounded(12, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
-                            .padding(.top, 4)
-
-                        SettingsMediaReadinessCard(manager: manager)
-
-                        ForEach(PermissionRequirement.allCases) { requirement in
-                            SettingsPermissionRow(requirement: requirement, manager: manager)
-                        }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .background(AppColors.white.ignoresSafeArea())
+            .navigationTitle(L10n.tr("settings.permissions"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(L10n.tr("common.close")) {
+                        dismiss()
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .font(AppTypography.unbounded(12, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        manager.refreshStatuses()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(AppColors.primaryPurple)
+                    }
                 }
             }
             .onAppear {
@@ -52,11 +60,11 @@ struct SettingsMediaReadinessCard: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text(L10n.tr("permissions.media_readiness_title"))
                 .font(AppTypography.unbounded(12, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.textPrimary)
 
             Text(manager.mediaReadinessMessage())
                 .font(AppTypography.unbounded(10, weight: .regular))
-                .foregroundStyle(AppColors.neutral600)
+                .foregroundStyle(AppColors.textSecondary)
                 .lineSpacing(2)
 
             VStack(spacing: 8) {
@@ -81,7 +89,7 @@ struct SettingsMediaReadinessCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColors.neutral800)
+        .background(AppColors.neutral100)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -104,11 +112,11 @@ struct SettingsMediaReadinessCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(capability.title)
                     .font(AppTypography.unbounded(10, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.textPrimary)
 
                 Text(capability.detail)
                     .font(AppTypography.unbounded(9, weight: .regular))
-                    .foregroundStyle(AppColors.neutral600)
+                    .foregroundStyle(AppColors.textSecondary)
                     .lineSpacing(2)
             }
 
@@ -124,7 +132,7 @@ struct SettingsMediaReadinessCard: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
-        .background(AppColors.neutral900)
+        .background(AppColors.white.opacity(0.65))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -135,7 +143,7 @@ private struct SettingsPermissionRow: View {
 
     var body: some View {
         let isSatisfied = manager.isSatisfied(requirement)
-        let borderColor = isSatisfied ? AppColors.accentGreen : AppColors.neutral700
+        let borderColor = isSatisfied ? AppColors.accentGreen : AppColors.neutral200
         let actionTitle = manager.primaryActionTitle(for: requirement)
         let canAct = manager.isInteractive(requirement) && !isSatisfied && actionTitle != nil
 
@@ -143,7 +151,7 @@ private struct SettingsPermissionRow: View {
             HStack(spacing: 10) {
                 Text(L10n.tr(requirement.titleKey))
                     .font(AppTypography.unbounded(13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.black)
                     .lineLimit(2)
 
                 Spacer(minLength: 8)
@@ -156,7 +164,7 @@ private struct SettingsPermissionRow: View {
 
             Text(manager.statusText(for: requirement))
                 .font(AppTypography.unbounded(11, weight: .regular))
-                .foregroundStyle(isSatisfied ? AppColors.accentGreen : AppColors.neutral600)
+                .foregroundStyle(isSatisfied ? AppColors.accentGreen : AppColors.textSecondary)
                 .lineLimit(3)
 
             HStack {
@@ -182,11 +190,11 @@ private struct SettingsPermissionRow: View {
                 } else {
                     Text(manager.statusText(for: requirement))
                         .font(AppTypography.unbounded(11, weight: .semibold))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(1)
                         .padding(.horizontal, 12)
                         .frame(height: 32)
-                        .background(AppColors.neutral900)
+                        .background(AppColors.neutral200.opacity(0.55))
                         .clipShape(Capsule())
                 }
 
@@ -195,7 +203,7 @@ private struct SettingsPermissionRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(AppColors.neutral800)
+        .background(AppColors.neutral100)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)

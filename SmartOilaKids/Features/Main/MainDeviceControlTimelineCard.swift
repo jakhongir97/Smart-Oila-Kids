@@ -22,11 +22,11 @@ struct MainDeviceControlTimelineCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(L10n.tr("main.device_control_title"))
                             .font(AppTypography.unbounded(13, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.black)
 
                         Text(L10n.tr("main.device_control_subtitle"))
                             .font(AppTypography.unbounded(10, weight: .regular))
-                            .foregroundStyle(AppColors.neutral600)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
 
                     Spacer(minLength: 8)
@@ -43,7 +43,7 @@ struct MainDeviceControlTimelineCard: View {
 
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AppColors.neutral600.opacity(0.8))
+                        .foregroundStyle(AppColors.textSecondary.opacity(0.7))
                 }
 
                 VStack(spacing: 10) {
@@ -57,7 +57,8 @@ struct MainDeviceControlTimelineCard: View {
                     .foregroundStyle(AppColors.primaryPurple)
             }
             .padding(16)
-            .mainDashboardCard()
+            .background(AppColors.neutral100)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -73,30 +74,26 @@ struct MainDeviceControlTimelineCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(item.title.trimmedNonEmpty ?? fallbackTitle(for: item))
                         .font(AppTypography.unbounded(10, weight: item.isRead ? .medium : .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(AppColors.black)
                         .multilineTextAlignment(.leading)
 
                     Spacer(minLength: 6)
 
                     Text(relativeTime(for: item.receivedAt))
                         .font(AppTypography.unbounded(9, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(1)
                 }
 
                 if let body = item.body.trimmedNonEmpty {
                     Text(body)
                         .font(AppTypography.unbounded(10, weight: .regular))
-                        .foregroundStyle(AppColors.neutral600)
+                        .foregroundStyle(AppColors.textSecondary)
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .background(AppColors.neutral900)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

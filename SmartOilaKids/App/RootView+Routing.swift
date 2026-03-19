@@ -6,7 +6,7 @@ extension RootView {
         if sessionStore.apiAccessToken?.trimmedNonEmpty == nil {
             AuthView(viewModel: dependencies.makeAuthViewModel())
         } else {
-            ParentHomeView(viewModel: dependencies.makeParentHomeViewModel())
+            MainView(viewModel: dependencies.makeMainViewModel())
         }
     }
 
@@ -31,6 +31,10 @@ extension RootView {
         case .tasks:
             AppNavigationContainer {
                 TaskView(viewModel: dependencies.makeTaskViewModel(dsn: sessionStore.dsn ?? ""))
+            }
+        case .templates:
+            AppNavigationContainer {
+                TemplatesView()
             }
         }
     }

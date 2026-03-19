@@ -11,7 +11,7 @@ final class AuthViewModel: ObservableObject {
         self.authService = authService
     }
 
-    func submit(parentPhone: String) async -> AuthRegistrationResult? {
+    func submit(parentPhone: String) async -> AuthPhoneSubmitResult? {
         guard !isLoading else { return nil }
         guard let normalizedPhone = AuthInputNormalization.normalizeAndroidParentPhone(parentPhone) else {
             errorText = L10n.tr("auth.phone_invalid")
@@ -25,7 +25,63 @@ final class AuthViewModel: ObservableObject {
         do {
             let result = try await bindByParentPhone(normalizedPhone)
 
-            let isVerified = try await authService.verifyChildBinding(dsn: result.dsn)
+            if result.authorizationHeader?.trimmedNonEmpty != nil {
+                let isVerified = try await authService.verifyChildBinding(
+                    dsn: result.dsn,
+                    authorizationHeader: result.authorizationHeader
+                )
+                guard isVerified else {
+                    errorText = L10n.tr("auth.verify_failed")
+                    return nil
+                }
+
+                return .completed(result)
+            }
+
+            try await authService.requestParentPhoneCode(phone: normalizedPhone)
+            return .confirmationRequired(
+                AuthPhoneConfirmationContext(
+                    dsn: result.dsn,
+                    parentPhone: normalizedPhone
+                )
+            )
+        } catch {
+            errorText = NetworkError.userMessage(for: error)
+        }
+
+        return nil
+    }
+
+    func confirm(
+        confirmation: AuthPhoneConfirmationContext,
+        code: String
+    ) async -> AuthRegistrationResult? {
+        guard !isLoading else { return nil }
+        guard let normalizedCode = AuthInputNormalization.normalizeVerificationCode(code) else {
+            errorText = L10n.tr("auth.code_invalid")
+            return nil
+        }
+
+        isLoading = true
+        errorText = nil
+        defer { isLoading = false }
+
+        do {
+            let tokens = try await authService.confirmParentPhoneCode(
+                phone: confirmation.parentPhone,
+                code: normalizedCode
+            )
+
+            let result = AuthRegistrationResult(
+                dsn: confirmation.dsn,
+                authorizationHeader: tokens.authorizationHeader,
+                refreshToken: tokens.refreshToken
+            )
+
+            let isVerified = try await authService.verifyChildBinding(
+                dsn: result.dsn,
+                authorizationHeader: result.authorizationHeader
+            )
             guard isVerified else {
                 errorText = L10n.tr("auth.verify_failed")
                 return nil
@@ -52,7 +108,10 @@ final class AuthViewModel: ObservableObject {
             }
             let result = try await bindByScanPayload(scannedPayload)
 
-            let isVerified = try await authService.verifyChildBinding(dsn: result.dsn)
+            let isVerified = try await authService.verifyChildBinding(
+                dsn: result.dsn,
+                authorizationHeader: result.authorizationHeader
+            )
             guard isVerified else {
                 errorText = L10n.tr("auth.verify_failed")
                 return nil

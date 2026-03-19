@@ -158,59 +158,54 @@ struct SettingsMediaRecordingPreviewSheet: View {
 
     var body: some View {
         AppNavigationContainer {
-            SettingsPanelChrome(
-                title: L10n.tr("settings.media_history_preview_title"),
-                onClose: { dismiss() },
-                trailing: { Color.clear }
-            ) {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        DeviceRecordingPlayerView(player: player)
-                            .frame(minHeight: 260)
-                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(AppColors.neutral700.opacity(0.7), lineWidth: 1)
-                            }
+            VStack(alignment: .leading, spacing: 16) {
+                DeviceRecordingPlayerView(player: player)
+                    .frame(minHeight: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(typeTitle(preview.recording.type))
-                                .font(AppTypography.unbounded(13, weight: .semibold))
-                                .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(typeTitle(preview.recording.type))
+                        .font(AppTypography.unbounded(13, weight: .semibold))
+                        .foregroundStyle(AppColors.textPrimary)
 
-                            Text(formattedTimestamp(preview.recording.createdAt))
-                                .font(AppTypography.unbounded(10, weight: .regular))
-                                .foregroundStyle(AppColors.neutral600)
+                    Text(formattedTimestamp(preview.recording.createdAt))
+                        .font(AppTypography.unbounded(10, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
 
-                            Label(L10n.tr("settings.media_history_preview_saved_local"), systemImage: "checkmark.circle.fill")
-                                .font(AppTypography.unbounded(10, weight: .semibold))
-                                .foregroundStyle(AppColors.accentGreen)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(AppColors.accentGreen.opacity(0.12))
-                                .clipShape(Capsule())
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .settingsPanelCard()
+                    Text(preview.fileURL.lastPathComponent)
+                        .font(AppTypography.unbounded(10, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(2)
+                }
 
-                        Button {
-                            showShareSheet = true
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "square.and.arrow.up")
-                                Text(L10n.tr("settings.media_history_share"))
-                            }
-                            .font(AppTypography.unbounded(11, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .background(AppColors.primaryPurple)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        }
+                Button {
+                    showShareSheet = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                        Text(L10n.tr("settings.media_history_share"))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .font(AppTypography.unbounded(11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(AppColors.primaryPurple)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+            .background(AppColors.white.ignoresSafeArea())
+            .navigationTitle(L10n.tr("settings.media_history_preview_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(L10n.tr("common.close")) {
+                        dismiss()
+                    }
+                    .font(AppTypography.unbounded(12, weight: .medium))
+                    .foregroundStyle(AppColors.primaryPurple)
                 }
             }
         }
