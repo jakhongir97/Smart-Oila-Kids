@@ -3,11 +3,13 @@
 Date: 2026-03-12
 Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
-> Update (2026-03-19): The OpenAPI gates in this historical report used the old full-backend denominator. The active child-contract gate now passes at REST `28/28`, WebSocket `13/13`, and child-vs-parent contract gap `0/0`.
+> Update (2026-03-19): This report is still a useful history of the Week 6 gate shape, but its original OpenAPI numbers used the old full-backend denominator. The active child-contract gate now passes at REST `28/28`, WebSocket `13/13`, and child-vs-parent contract gap `0/0`. The current full iOS XCTest lane also passes at `394/394`.
 
 ## Gate Summary
 
 - `./scripts/run_script_tests.sh`: PASS (25/25 tests)
+- `bash scripts/run_ios_tests.sh`: PASS
+  - XCTest: `394/394`
 - `python3 scripts/check_child_openapi_baseline.py --min-rest 28 --min-ws 9`: PASS
   - REST coverage: `28/85` (32.9%)
   - WebSocket coverage: `9/23` (39.1%)
@@ -35,7 +37,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
 - Child REST operations detected: 28
 - Child websocket paths detected: 9
-- Week 1 contract triage is closed in `output/doc/week1_members_devices_api_triage_2026-03-12.md`
+- Week 1 contract triage is closed in `output/doc/archive/week1_members_devices_api_triage_2026-03-12.md`
 - Child device streaming now supports `WS /children/device/{dsn}/stream/front_camera`
 - Child Firebase token readback is implemented for diagnostics and parity tracking
 - Diagnostics export now includes app/build/device metadata plus push delivery context (`launch`, `background_fetch`, `foreground_presentation`, `user_response`)

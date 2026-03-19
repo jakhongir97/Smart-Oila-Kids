@@ -1,13 +1,34 @@
 # Smart Oila Child iOS Roadmap Status (2026-03-19)
 
-## Summary
+## Executive Status
 
-The repo now covers the roadmap items that are implementable inside the child iOS codebase without backend signoff or real-device QA.
+This repo is now code-complete for the child-owned scope described by the roadmap and the backend materials.
 
-The original roadmap file is partly stale:
-- SOS was already placed on the main surface before this pass.
+Inputs re-checked for this assessment:
+- roadmap: `/Users/jakhongirnematov/Downloads/child_shipping_roadmap_2026-03-17.md`
+- REST material: `/Users/jakhongirnematov/Downloads/backend_json.txt`
+- WebSocket material: `/Users/jakhongirnematov/Downloads/backend_socket.txt`
+
+The original roadmap included a few stale assumptions:
+- SOS was already present on the main surface before the later shipping pass.
 - Screen Time was already enabled in `Info.plist`.
 - Family Controls entitlements and the shared app group were already checked in for the app and both extensions.
+
+## Client Goal Reconciliation
+
+What the client wanted from the child app is now present in repo-managed code:
+- authenticated child bind/session flow
+- child REST and WebSocket contract coverage for the shipped child feature set
+- chat, tasks, geo, lock, app lock, usage-based app limiting, SOS, push, diagnostics, and media transport
+- regression gates that measure the child app against its own authoritative contract instead of the full backend surface
+
+What is not a repo gap anymore:
+- contract-driven child endpoint coverage
+- contract-driven child websocket coverage
+- Screen Time usage upload path
+- applications sync websocket
+- SOS shipping on the main surface
+- full XCTest stability in this repo
 
 ## Phase Status
 
@@ -16,7 +37,7 @@ The original roadmap file is partly stale:
 - Still required:
   - backend signoff for authoritative QR bind route
   - backend signoff for legacy bind fallback policy
-  - backend signoff for websocket v2 preference policy
+  - backend signoff for websocket `v2` preference policy
 
 ### Phase 1 — Repair child API contract drift
 - Status: done in code
@@ -70,7 +91,7 @@ The original roadmap file is partly stale:
   - audio/camera/front-camera transport
   - upload complete/delete/history flows
   - media failure telemetry and settings history
-  - optional v2 stream socket support with runtime route preference
+  - optional `v2` stream socket support with runtime route preference
 - Still required:
   - real-device soak validation across permissions, backgrounding, reconnect, and backend task invalidation
 
@@ -98,7 +119,7 @@ The original roadmap file is partly stale:
 - Status: manual/release work pending
 - Still required:
   - full physical-device QA matrix
-  - localization smoke pass
+  - localization smoke pass on real release builds
   - release signoff after backend and QA validation
 
 ## Verification Snapshot
@@ -106,6 +127,29 @@ The original roadmap file is partly stale:
 - Child OpenAPI contract baseline: PASS
   - REST `28/28`
   - WebSocket `13/13`
-- Script tests: PASS
-- App target build: PASS
-- Full XCTest target: PASS
+- Child-vs-parent contract parity gap: PASS
+  - REST gap `0`
+  - WebSocket gap `0`
+- Script release-readiness gate: PASS
+- Full iOS XCTest lane: PASS
+  - `394` tests
+  - `0` failures
+
+## Ship Verdict
+
+The app is near ship.
+
+More precisely:
+- It is ready as an RC candidate from a repo/code perspective.
+- It is not yet ready for final production cut until physical-device validation and backend signoff are closed.
+
+The remaining blockers are manual and contractual, not missing implementation in this repo.
+
+## Source Of Truth
+
+Current docs to trust first:
+- `output/doc/child_shipping_roadmap_status_2026-03-19.md`
+- `output/doc/child_openapi_gap_report_2026-03-19.md`
+- `output/doc/week6_release_readiness_report_2026-03-05.md`
+
+Older gap reports and triage notes remain useful only as dated history from the pre-contract-denominator period.

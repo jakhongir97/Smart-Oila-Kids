@@ -2402,12 +2402,11 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
         XCTAssertEqual(Set(TestHTTPURLProtocol.recordedRequests.compactMap(\.url?.path)), expectedPaths)
         XCTAssertEqual(result.deviceID, 42)
         XCTAssertEqual(result.applicationsEndpoint, "members/device/v2/42/applications")
-        XCTAssertEqual(result.lockedEndpoint, "-")
-        XCTAssertEqual(result.authoritativeLockedApplications, [
+        XCTAssertEqual(result.remoteLockedApplications, [
             DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App"),
             DeviceAppSelectionApplication(packageName: "com.example.mail", appName: "Mail App")
         ])
-        XCTAssertEqual(result.authoritativeLockedIdentifiers, [
+        XCTAssertEqual(result.remoteLockedIdentifiers, [
             "com.example.chat",
             "com.example.mail"
         ])
@@ -2434,16 +2433,14 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
         let result = try await service.fetchState(dsn: "child-7")
 
         XCTAssertTrue(result.applications.isEmpty)
-        XCTAssertTrue(result.lockedApplications.isEmpty)
-        XCTAssertTrue(result.authoritativeLockedApplications.isEmpty)
+        XCTAssertTrue(result.remoteLockedApplications.isEmpty)
         XCTAssertEqual(result.payloadSummary, "0 apps, 0 locked")
     }
 
-    func testAuthoritativeLockedApplicationsPreferExplicitNamesAndSortIdentifiers() {
+    func testRemoteLockedApplicationsNormalizeAndSortLockedEntries() {
         let result = DeviceApplicationStateFetchResult(
             deviceID: 5,
             applicationsEndpoint: "applications",
-            lockedEndpoint: "locked",
             applications: [
                 DeviceApplicationRecord(
                     packageName: " COM.example.chat ",
@@ -2469,35 +2466,17 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
                     isLocked: false,
                     lockEndTime: nil
                 )
-            ],
-            lockedApplications: [
-                DeviceApplicationRecord(
-                    packageName: "com.example.chat",
-                    name: "Locked Override",
-                    isLocked: true,
-                    lockEndTime: nil
-                ),
-                DeviceApplicationRecord(
-                    packageName: " COM.example.fallback ",
-                    name: " Fallback Locked ",
-                    isLocked: true,
-                    lockEndTime: nil
-                ),
-                DeviceApplicationRecord(
-                    packageName: "com.example.mail",
-                    name: " Mail ",
-                    isLocked: true,
-                    lockEndTime: nil
-                )
             ]
         )
 
-        XCTAssertEqual(result.authoritativeLockedApplications, [
-            DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App"),
-            DeviceAppSelectionApplication(packageName: "com.example.fallback", appName: "Fallback Locked"),
-            DeviceAppSelectionApplication(packageName: "com.example.mail", appName: "Mail")
+        XCTAssertEqual(result.remoteLockedApplications, [
+            DeviceAppSelectionApplication(
+                packageName: "com.example.fallback",
+                appName: ProductFallbackText.appName()
+            ),
+            DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App")
         ])
-        XCTAssertEqual(result.payloadSummary, "4 apps, 3 locked")
+        XCTAssertEqual(result.payloadSummary, "4 apps, 2 locked")
     }
 }
 

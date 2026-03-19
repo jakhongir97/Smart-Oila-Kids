@@ -389,9 +389,7 @@ private final class DeviceApplicationStateServiceSpy: DeviceApplicationStateServ
         return DeviceApplicationStateFetchResult(
             deviceID: 1,
             applicationsEndpoint: "members/device/v2/1/applications",
-            lockedEndpoint: "-",
-            applications: [],
-            lockedApplications: []
+            applications: []
         )
     }
 }

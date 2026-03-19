@@ -17,42 +17,24 @@ struct DeviceApplicationRecord: Decodable, Equatable {
 struct DeviceApplicationStateFetchResult {
     let deviceID: Int
     let applicationsEndpoint: String
-    let lockedEndpoint: String
     let applications: [DeviceApplicationRecord]
-    let lockedApplications: [DeviceApplicationRecord]
 
-    var authoritativeLockedApplications: [DeviceAppSelectionApplication] {
-        var resolved: [String: DeviceAppSelectionApplication] = [:]
-        let genericFallbackName = ProductFallbackText.appName()
-
-        for application in applications where application.isLocked {
-            guard let normalized = Self.makeApplicationIdentity(from: application) else { continue }
-            resolved[normalized.packageName] = normalized
+    var remoteLockedApplications: [DeviceAppSelectionApplication] {
+        applications.compactMap { application in
+            guard application.isLocked else { return nil }
+            return Self.makeApplicationIdentity(from: application)
         }
-
-        for application in lockedApplications {
-            guard let normalized = Self.makeApplicationIdentity(from: application) else { continue }
-
-            if let existing = resolved[normalized.packageName],
-               existing.appName != existing.packageName,
-               existing.appName != genericFallbackName {
-                continue
-            }
-
-            resolved[normalized.packageName] = normalized
-        }
-
-        return resolved.values.sorted { lhs, rhs in
+        .sorted { lhs, rhs in
             lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
         }
     }
 
-    var authoritativeLockedIdentifiers: Set<String> {
-        Set(authoritativeLockedApplications.map(\.packageName))
+    var remoteLockedIdentifiers: Set<String> {
+        Set(remoteLockedApplications.map(\.packageName))
     }
 
     var payloadSummary: String {
-        "\(applications.count) apps, \(authoritativeLockedIdentifiers.count) locked"
+        "\(applications.count) apps, \(remoteLockedIdentifiers.count) locked"
     }
 
     private static func normalizedIdentifier(_ value: String?) -> String? {
@@ -95,7 +77,6 @@ final class DeviceApplicationStateService: DeviceApplicationStateServicing {
     func fetchState(dsn: String) async throws -> DeviceApplicationStateFetchResult {
         let device = try await memberDevicesService.resolveDevice(byDSN: dsn, limit: 100)
         let applicationsEndpoint = "members/device/v2/\(device.id)/applications"
-        let lockedEndpoint = "-"
 
         async let applicationsTask: [DeviceApplicationRecord]? = client.requestDecodableWithBaseFallback(
             baseURLs: AppConfig.apiBaseCandidates,
@@ -106,14 +87,11 @@ final class DeviceApplicationStateService: DeviceApplicationStateServicing {
         )
 
         let applications = try await applicationsTask ?? []
-        let lockedApplications: [DeviceApplicationRecord] = []
 
         return DeviceApplicationStateFetchResult(
             deviceID: device.id,
             applicationsEndpoint: applicationsEndpoint,
-            lockedEndpoint: lockedEndpoint,
-            applications: applications,
-            lockedApplications: lockedApplications
+            applications: applications
         )
     }
 

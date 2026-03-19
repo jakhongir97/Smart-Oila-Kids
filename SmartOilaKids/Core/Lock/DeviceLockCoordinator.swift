@@ -376,19 +376,19 @@ final class DeviceLockCoordinator: ObservableObject {
             let result = try await applicationStateService.fetchState(dsn: dsn)
             guard currentDSN == dsn else { return false }
 
-            appLockStore.reconcileRemoteLockedIdentifiers(result.authoritativeLockedIdentifiers)
+            appLockStore.reconcileRemoteLockedIdentifiers(result.remoteLockedIdentifiers)
             updateAppLockMismatchState(
                 dsn: dsn,
-                remoteLockedApplications: result.authoritativeLockedApplications,
+                remoteLockedApplications: result.remoteLockedApplications,
                 shouldNotify: true
             )
             lastApplicationStateRefreshAt = Date()
             updateAppLockStateDiagnostics(
                 status: "reconciled",
-                endpoint: "\(result.applicationsEndpoint) | \(result.lockedEndpoint)",
+                endpoint: result.applicationsEndpoint,
                 dsn: dsn,
                 remoteApplicationCount: result.applications.count,
-                remoteLockedCount: result.authoritativeLockedIdentifiers.count,
+                remoteLockedCount: result.remoteLockedIdentifiers.count,
                 remoteUnenforceableCount: appLockMismatchState.count,
                 lastError: "-"
             )

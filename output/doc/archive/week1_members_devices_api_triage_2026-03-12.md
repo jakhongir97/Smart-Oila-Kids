@@ -3,7 +3,7 @@
 Date: 2026-03-12
 Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
-> Update (2026-03-19): This triage snapshot used the old full-backend OpenAPI denominator. The active child gate now uses `OpenAPI/child_openapi_contract.json` and currently passes at REST `28/28`, WebSocket `13/13`, with child-vs-parent contract gap `0/0`.
+> Update (2026-03-19): This is a historical triage snapshot from the pre-contract-denominator period. The active child gate now uses `OpenAPI/child_openapi_contract.json` and currently passes at REST `28/28`, WebSocket `13/13`, with child-vs-parent contract gap `0/0`.
 
 ## Updated Signal
 

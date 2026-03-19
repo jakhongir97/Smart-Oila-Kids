@@ -2,6 +2,8 @@
 
 Date: 2026-03-05
 
+> Historical note (2026-03-19): This report used the old full-backend denominator and is no longer the active release metric. The current child-contract report is `output/doc/child_openapi_gap_report_2026-03-19.md`, which passes at REST `28/28`, WebSocket `13/13`, and gap `0/0`.
+
 ## Coverage Snapshot
 
 | Surface | Spec | Child Covered | Parent Covered | Child Gap With Parent Coverage |
