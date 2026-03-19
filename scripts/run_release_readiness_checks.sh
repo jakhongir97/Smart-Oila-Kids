@@ -11,17 +11,13 @@ echo
 echo "== Child OpenAPI baseline =="
 python3 scripts/check_child_openapi_baseline.py \
   --rest-spec OpenAPI/rest_openapi.json \
-  --ws-spec OpenAPI/ws_openapi.json \
-  --min-rest 28 \
-  --min-ws 9
+  --ws-spec OpenAPI/ws_openapi.json
 echo
 
 echo "== Child-vs-parent parity gap budget =="
 python3 scripts/check_child_parent_gap_budget.py \
   --rest-spec OpenAPI/rest_openapi.json \
-  --ws-spec OpenAPI/ws_openapi.json \
-  --max-rest-gap-with-parent 56 \
-  --max-ws-gap-with-parent 14
+  --ws-spec OpenAPI/ws_openapi.json
 echo
 
 echo "== Localization key parity =="

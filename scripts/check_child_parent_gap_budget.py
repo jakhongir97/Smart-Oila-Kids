@@ -30,8 +30,9 @@ def load_coverage_module() -> object:
 
 
 coverage = load_coverage_module()
-DEFAULT_MAX_REST_GAP_WITH_PARENT = 56
-DEFAULT_MAX_WS_GAP_WITH_PARENT = 14
+DEFAULT_CONTRACT_SPEC_RELATIVE = Path("OpenAPI/child_openapi_contract.json")
+DEFAULT_MAX_REST_GAP_WITH_PARENT = 0
+DEFAULT_MAX_WS_GAP_WITH_PARENT = 0
 
 
 def resolve_rest_hits(spec_ops: Iterable[RestOperation], implemented_ops: Set[RestOperation]) -> Set[RestOperation]:
@@ -73,6 +74,12 @@ def main() -> int:
     )
     parser.add_argument("--rest-spec", type=Path, default=Path("OpenAPI/rest_openapi.json"))
     parser.add_argument("--ws-spec", type=Path, default=Path("OpenAPI/ws_openapi.json"))
+    parser.add_argument(
+        "--contract-spec",
+        type=Path,
+        default=DEFAULT_CONTRACT_SPEC_RELATIVE,
+        help="Child-owned contract JSON (default: OpenAPI/child_openapi_contract.json)",
+    )
     parser.add_argument(
         "--repo-root",
         type=Path,
@@ -125,9 +132,33 @@ def main() -> int:
 
     rest_spec_path = args.rest_spec if args.rest_spec.is_absolute() else (repo_root / args.rest_spec)
     ws_spec_path = args.ws_spec if args.ws_spec.is_absolute() else (repo_root / args.ws_spec)
+    contract_spec_path = (
+        args.contract_spec
+        if args.contract_spec.is_absolute()
+        else (repo_root / args.contract_spec)
+    )
 
     spec_rest = coverage.load_rest_operations(rest_spec_path)
     spec_ws = coverage.load_ws_paths(ws_spec_path)
+    contract_rest, contract_ws = coverage.load_child_contract(contract_spec_path)
+    missing_contract_rest = coverage.find_missing_contract_rest_operations(spec_rest, contract_rest)
+    missing_contract_ws = coverage.find_missing_contract_ws_paths(spec_ws, contract_ws)
+    if missing_contract_rest or missing_contract_ws:
+        print("Child-vs-parent OpenAPI parity gap budget")
+        print(f"- Contract: {contract_spec_path}")
+        print("Result: FAIL")
+        if missing_contract_rest:
+            print("- Missing REST contract operations in OpenAPI spec:")
+            for method, path in missing_contract_rest:
+                print(f"  - {method} {path}")
+        if missing_contract_ws:
+            print("- Missing WebSocket contract routes in OpenAPI spec:")
+            for path in missing_contract_ws:
+                print(f"  - {path}")
+        return 1
+
+    spec_rest = coverage.filter_rest_operations(spec_rest, contract_rest)
+    spec_ws = coverage.filter_ws_paths(spec_ws, contract_ws)
 
     child_rest_ops = coverage.collect_rest_ops_from_path_method(child_source)
     parent_rest_ops = coverage.collect_rest_ops_from_path_method(parent_source)
@@ -149,6 +180,7 @@ def main() -> int:
     )
 
     print("Child-vs-parent OpenAPI parity gap budget")
+    print(f"- Contract: {contract_spec_path}")
     print(f"- REST gap with parent coverage: {result.rest_gap_with_parent}")
     print(f"- WS gap with parent coverage: {result.ws_gap_with_parent}")
     print(

@@ -3,11 +3,13 @@
 Date: 2026-03-12
 Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
+> Update (2026-03-19): The active OpenAPI gates are now contract-based, using `OpenAPI/child_openapi_contract.json`. Current results are REST `28/28`, WebSocket `13/13`, and child-vs-parent contract gap `0/0`.
+
 ## Gate Results
 
 - Script tests: PASS (`./scripts/run_script_tests.sh`, 25/25)
-- Child OpenAPI baseline: PASS (`python3 scripts/check_child_openapi_baseline.py --min-rest 28 --min-ws 9`)
-- Child-vs-parent parity gap budget: PASS (`python3 scripts/check_child_parent_gap_budget.py --max-rest-gap-with-parent 56 --max-ws-gap-with-parent 14`)
+- Child OpenAPI baseline: PASS (`python3 scripts/check_child_openapi_baseline.py`)
+- Child-vs-parent parity gap budget: PASS (`python3 scripts/check_child_parent_gap_budget.py`)
 - Localization parity: PASS (`python3 scripts/check_localization_parity.py --languages en,ru,uz`)
 - Localization format specifiers: PASS (`python3 scripts/check_localization_format_specifiers.py --languages en,ru,uz`)
 - Parent-child simulator smoke: PASS (`RUN_PARENT_CHILD_SIMULATORS=1 bash scripts/run_release_readiness_checks.sh`; parent app `uz.childtracker` and child app `uz.smartoila.kids.go` launch on separate simulators)
@@ -25,7 +27,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
 - Real-device APNs delivery and deep-link behavior still need physical-device validation.
 - Background geo cadence can still diverge on real devices due to iOS power constraints.
-- OpenAPI child coverage guard prevents regression but does not guarantee full endpoint coverage.
+- The contract-based OpenAPI gate is complete for current child-owned routes, but it only stays meaningful if the contract manifest is updated when new child routes are adopted.
 - Human release confidence still depends on completing physical-device validation evidence and sign-offs.
 
 ## Rollback Plan

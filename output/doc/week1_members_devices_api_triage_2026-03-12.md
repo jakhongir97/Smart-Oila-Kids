@@ -3,6 +3,8 @@
 Date: 2026-03-12
 Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
+> Update (2026-03-19): This triage snapshot used the old full-backend OpenAPI denominator. The active child gate now uses `OpenAPI/child_openapi_contract.json` and currently passes at REST `28/28`, WebSocket `13/13`, with child-vs-parent contract gap `0/0`.
+
 ## Updated Signal
 
 - Coverage script improved to resolve simple local `path` variables in Swift service files.
@@ -169,7 +171,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
 ## Immediate Execution Queue
 
-1. Keep the OpenAPI baseline at `REST 28 / WS 9` and parity gap budget at `REST 56 / WS 14`.
+1. Historical note: the old baseline in this document (`REST 28 / WS 9`, parity gap `REST 56 / WS 14`) has been superseded by the 2026-03-19 child-contract gate (`REST 28 / WS 13`, parity gap `REST 0 / WS 0`).
 2. Treat the Week 1 members/devices contract review as closed unless backend explicitly revives REST media control or split app-sync contracts.
 3. Shift the next engineering pass to non-contract release hardening or the next roadmap milestone.
 

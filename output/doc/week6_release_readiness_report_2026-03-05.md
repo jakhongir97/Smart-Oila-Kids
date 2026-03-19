@@ -3,6 +3,8 @@
 Date: 2026-03-12
 Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 
+> Update (2026-03-19): The OpenAPI gates in this historical report used the old full-backend denominator. The active child-contract gate now passes at REST `28/28`, WebSocket `13/13`, and child-vs-parent contract gap `0/0`.
+
 ## Gate Summary
 
 - `./scripts/run_script_tests.sh`: PASS (25/25 tests)
@@ -68,7 +70,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 ## Remaining Risks
 
 - Real-device APNs and background geo behavior still require physical-device validation (simulator cannot fully validate APNs delivery and iOS background execution constraints).
-- OpenAPI child coverage is guarded against regression but still incomplete in absolute terms.
+- Historical note: the statement above used the old full-spec baseline. Under the active child-owned contract, coverage is now complete in repo-managed gates (`28/28`, `13/13`).
 - Final PM / iOS / backend / QA sign-offs remain open.
 
 ## Go / No-Go Decision
@@ -78,4 +80,4 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 - Follow-up before production cut:
   1. Execute RD-01 through RD-08 in `output/doc/week4_real_device_validation_matrix_2026-03-05.md` with exported diagnostics attached, preserving lifecycle and push history rows
   2. Complete PM, iOS, backend, and QA sign-offs in `output/doc/week6_rc_go_no_go_checklist.md`
-  3. Continue incremental child OpenAPI coverage expansion from the current `28/85` REST and `9/23` WebSocket baseline
+  3. Keep the child contract manifest current as new child-owned routes are adopted so the 100% contract gate remains trustworthy
