@@ -3,7 +3,7 @@ import SwiftUI
 extension RootView {
     @ViewBuilder
     var regularRoot: some View {
-        if sessionStore.apiAccessToken?.trimmedNonEmpty == nil {
+        if !sessionStore.hasAuthenticatedSession {
             AuthView(viewModel: dependencies.makeAuthViewModel())
         } else {
             MainView(viewModel: dependencies.makeMainViewModel())

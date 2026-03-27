@@ -15,6 +15,15 @@ struct SettingsMainFormView: View {
     let connectedDevices: [ConnectedDevice]
     let isSaving: Bool
     let nameFieldFocus: FocusState<Bool>.Binding
+    let diagnosticsSubtitle: String
+    let diagnosticsBadgeText: String?
+    let diagnosticsBadgeColor: Color
+    let permissionsSubtitle: String
+    let permissionsBadgeText: String?
+    let permissionsBadgeColor: Color
+    let appLockSubtitle: String
+    let appLockBadgeText: String?
+    let appLockBadgeColor: Color
     let onTapAvatar: () -> Void
     let onSaveName: () -> Void
     let onOpenDiagnostics: () -> Void
@@ -54,6 +63,15 @@ struct SettingsMainFormView: View {
             SettingsQuickActionsSection(
                 compact: compact,
                 sidePadding: sidePadding,
+                diagnosticsSubtitle: diagnosticsSubtitle,
+                diagnosticsBadgeText: diagnosticsBadgeText,
+                diagnosticsBadgeColor: diagnosticsBadgeColor,
+                permissionsSubtitle: permissionsSubtitle,
+                permissionsBadgeText: permissionsBadgeText,
+                permissionsBadgeColor: permissionsBadgeColor,
+                appLockSubtitle: appLockSubtitle,
+                appLockBadgeText: appLockBadgeText,
+                appLockBadgeColor: appLockBadgeColor,
                 onOpenDiagnostics: onOpenDiagnostics,
                 onOpenPermissions: onOpenPermissions,
                 onOpenAppLock: onOpenAppLock,

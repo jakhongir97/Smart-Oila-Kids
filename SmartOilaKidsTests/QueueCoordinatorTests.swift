@@ -2873,6 +2873,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(userDefaults.string(forKey: "APP_THEME"), AppTheme.light.rawValue)
         XCTAssertEqual(store.appLanguage, .ru)
         XCTAssertEqual(userDefaults.string(forKey: "APP_LANGUAGE"), AppLanguage.ru.rawValue)
+        XCTAssertTrue(store.hasAuthenticatedSession)
 
         store.clearSession()
 
@@ -2885,6 +2886,22 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.profileName, "Guardian")
         XCTAssertEqual(store.appTheme, .light)
         XCTAssertEqual(store.appLanguage, .ru)
+        XCTAssertFalse(store.hasAuthenticatedSession)
+    }
+
+    func testHasAuthenticatedSessionUsesRefreshTokenWhenAccessTokenIsMissing() {
+        let suiteName = "SessionStoreRefreshOnlyTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let store = SessionStore(
+            userDefaults: userDefaults,
+            secureTokens: MutableSecureTokenStoreSpy(access: nil, refresh: "refresh-only")
+        )
+
+        XCTAssertNil(store.apiAccessToken)
+        XCTAssertEqual(store.apiRefreshToken, "refresh-only")
+        XCTAssertTrue(store.hasAuthenticatedSession)
     }
 }
 

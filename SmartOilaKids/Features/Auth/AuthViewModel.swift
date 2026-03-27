@@ -74,6 +74,7 @@ final class AuthViewModel: ObservableObject {
 
             let result = AuthRegistrationResult(
                 dsn: confirmation.dsn,
+                deviceID: nil,
                 authorizationHeader: tokens.authorizationHeader,
                 refreshToken: tokens.refreshToken
             )
@@ -107,17 +108,31 @@ final class AuthViewModel: ObservableObject {
                 return nil
             }
             let result = try await bindByScanPayload(scannedPayload)
+            let resolvedAuthorizationHeader = result.authorizationHeader?.trimmedNonEmpty
+                ?? scannedPayload.token?.trimmedNonEmpty
+            let resolvedRefreshToken = result.refreshToken?.trimmedNonEmpty
+                ?? scannedPayload.refreshToken?.trimmedNonEmpty
+            guard resolvedAuthorizationHeader != nil || resolvedRefreshToken != nil else {
+                errorText = L10n.tr("auth.qr_missing_auth_data")
+                return nil
+            }
+            let resolvedResult = AuthRegistrationResult(
+                dsn: result.dsn,
+                deviceID: result.deviceID,
+                authorizationHeader: resolvedAuthorizationHeader,
+                refreshToken: resolvedRefreshToken
+            )
 
             let isVerified = try await authService.verifyChildBinding(
-                dsn: result.dsn,
-                authorizationHeader: result.authorizationHeader
+                dsn: resolvedResult.dsn,
+                authorizationHeader: resolvedResult.authorizationHeader
             )
             guard isVerified else {
                 errorText = L10n.tr("auth.verify_failed")
                 return nil
             }
 
-            return result
+            return resolvedResult
         } catch {
             errorText = NetworkError.userMessage(for: error)
         }

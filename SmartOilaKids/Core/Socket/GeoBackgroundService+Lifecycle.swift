@@ -2,6 +2,32 @@ import CoreLocation
 import Foundation
 
 extension GeoBackgroundService {
+    func locationAuthorizationFailureReason(for authorizationStatus: CLAuthorizationStatus) -> String? {
+        switch authorizationStatus {
+        case .authorizedAlways:
+            return nil
+        case .authorizedWhenInUse:
+            return "Location Always authorization is required for background tracking"
+        case .notDetermined:
+            return "Location permission has not been granted yet"
+        case .denied, .restricted:
+            return "Location access is unavailable for background tracking"
+        @unknown default:
+            return "Location authorization status is unknown"
+        }
+    }
+
+    func shouldStartLocationUpdates(for authorizationStatus: CLAuthorizationStatus) -> Bool {
+        switch authorizationStatus {
+        case .authorizedAlways:
+            return true
+        case .authorizedWhenInUse, .notDetermined, .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
     @discardableResult
     func restart(using dsn: String? = nil) -> Bool {
         let normalizedDSN = dsn?.trimmedNonEmpty ?? state.currentDSN?.trimmedNonEmpty
@@ -130,10 +156,21 @@ extension GeoBackgroundService {
     func startLocationUpdatesIfAuthorized() {
         guard state.isRunning else { return }
 
-        switch locationManager.authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse:
+        let authorizationStatus = locationManager.authorizationStatus
+
+        if let failureReason = locationAuthorizationFailureReason(for: authorizationStatus) {
+            updateDebugSnapshot(
+                status: "not_authorized",
+                lastError: failureReason
+            )
+        } else {
+            updateDebugSnapshot(lastError: "-")
+        }
+
+        switch authorizationStatus {
+        case .authorizedAlways:
             locationManager.startUpdatingLocation()
-        case .notDetermined:
+        case .authorizedWhenInUse, .notDetermined:
             locationManager.requestAlwaysAuthorization()
         case .denied, .restricted:
             break

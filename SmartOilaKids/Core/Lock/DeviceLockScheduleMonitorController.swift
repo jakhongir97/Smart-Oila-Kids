@@ -182,9 +182,20 @@ private extension DeviceLockScheduleMonitorController {
         dsn: String
     ) -> [(String, MonitoringActivity)]? {
         guard let startMinutes = parseMinutes(schedule.startTime),
-              let endMinutes = parseMinutes(schedule.endTime),
-              startMinutes != endMinutes else {
+              let endMinutes = parseMinutes(schedule.endTime) else {
             return nil
+        }
+
+        if startMinutes == endMinutes {
+            guard let activity = makeActivity(
+                dsn: dsn,
+                suffix: "always",
+                startMinutes: 0,
+                endMinutes: (23 * 60) + 59
+            ) else {
+                return nil
+            }
+            return [("0-1439", activity)]
         }
 
         if startMinutes < endMinutes {

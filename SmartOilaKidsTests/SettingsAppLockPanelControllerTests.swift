@@ -5395,6 +5395,35 @@ final class LossyDecodingHelpersTests: XCTestCase {
 
 @MainActor
 final class GeoBackgroundServiceTests: XCTestCase {
+    func testBackgroundTrackingRequiresAlwaysLocationAuthorization() {
+        let service = makeGeoBackgroundServiceForTests()
+        defer { cleanupGeoService(service) }
+
+        XCTAssertTrue(service.shouldStartLocationUpdates(for: .authorizedAlways))
+        XCTAssertFalse(service.shouldStartLocationUpdates(for: .authorizedWhenInUse))
+        XCTAssertFalse(service.shouldStartLocationUpdates(for: .notDetermined))
+        XCTAssertFalse(service.shouldStartLocationUpdates(for: .denied))
+    }
+
+    func testLocationAuthorizationFailureReasonExplainsBackgroundTrackingRequirement() {
+        let service = makeGeoBackgroundServiceForTests()
+        defer { cleanupGeoService(service) }
+
+        XCTAssertNil(service.locationAuthorizationFailureReason(for: .authorizedAlways))
+        XCTAssertEqual(
+            service.locationAuthorizationFailureReason(for: .authorizedWhenInUse),
+            "Location Always authorization is required for background tracking"
+        )
+        XCTAssertEqual(
+            service.locationAuthorizationFailureReason(for: .notDetermined),
+            "Location permission has not been granted yet"
+        )
+        XCTAssertEqual(
+            service.locationAuthorizationFailureReason(for: .denied),
+            "Location access is unavailable for background tracking"
+        )
+    }
+
     func testPendingDebugSnapshotUpdateDoesNotRetainService() {
         weak var weakService: GeoBackgroundService?
 

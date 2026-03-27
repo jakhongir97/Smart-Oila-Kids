@@ -14,8 +14,21 @@ struct QRClaimRequest: Encodable {
 
 struct AuthRegistrationResult {
     let dsn: String
+    let deviceID: Int?
     let authorizationHeader: String?
     let refreshToken: String?
+
+    init(
+        dsn: String,
+        deviceID: Int? = nil,
+        authorizationHeader: String?,
+        refreshToken: String?
+    ) {
+        self.dsn = dsn
+        self.deviceID = deviceID
+        self.authorizationHeader = authorizationHeader
+        self.refreshToken = refreshToken
+    }
 }
 
 struct AuthPhoneConfirmationContext: Equatable {
@@ -45,6 +58,9 @@ struct AuthScanPayload {
     var hasAuthData: Bool {
         token?.trimmedNonEmpty != nil
             || parentPhone?.trimmedNonEmpty != nil
-            || dsn?.trimmedNonEmpty != nil
+            || (
+                refreshToken?.trimmedNonEmpty != nil
+                    && dsn?.trimmedNonEmpty != nil
+            )
     }
 }

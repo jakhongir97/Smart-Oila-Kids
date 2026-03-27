@@ -22,6 +22,7 @@ struct SettingsView: View {
     @StateObject private var permissionManager = LocationPermissionManager()
     @StateObject var settingsProtection = SettingsProtectionController.shared
     @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
+    @ObservedObject private var diagnostics = RuntimeDiagnosticsCenter.shared
     @FocusState private var isNameFieldFocused: Bool
 
     init(viewModel: SettingsViewModel? = nil) {
@@ -64,6 +65,15 @@ struct SettingsView: View {
                                     connectedDevices: viewModel.connectedDevices,
                                     isSaving: viewModel.isSaving,
                                     nameFieldFocus: $isNameFieldFocused,
+                                    diagnosticsSubtitle: diagnosticsSummarySubtitle,
+                                    diagnosticsBadgeText: diagnosticsBadgeText,
+                                    diagnosticsBadgeColor: diagnosticsBadgeColor,
+                                    permissionsSubtitle: permissionsSummarySubtitle,
+                                    permissionsBadgeText: permissionsBadgeText,
+                                    permissionsBadgeColor: permissionsBadgeColor,
+                                    appLockSubtitle: appLockSummarySubtitle,
+                                    appLockBadgeText: appLockBadgeText,
+                                    appLockBadgeColor: appLockBadgeColor,
                                     onTapAvatar: {
                                         showAvatarPicker = true
                                     },
@@ -177,6 +187,7 @@ struct SettingsView: View {
             await loadRemoteDataIfNeeded()
         }
         .onAppear {
+            permissionManager.refreshStatuses()
 #if DEBUG
             logThemeState(event: "onAppear")
 #endif
@@ -292,6 +303,134 @@ struct SettingsView: View {
                 settingsProtection.cancelPINPrompt()
             }
         )
+    }
+
+    private var permissionsTotalCount: Int {
+        PermissionRequirement.settingsCases.filter { permissionManager.isInteractive($0) }.count
+    }
+
+    private var permissionsGrantedCount: Int {
+        PermissionRequirement.settingsCases.filter {
+            permissionManager.isInteractive($0) && permissionManager.isSatisfied($0)
+        }.count
+    }
+
+    private var permissionsSummarySubtitle: String {
+        let locationTitle = L10n.tr(PermissionRequirement.location.titleKey)
+        let screenTimeTitle = L10n.tr(PermissionRequirement.usageStats.titleKey)
+        return "\(locationTitle): \(permissionManager.statusText(for: .location)) • \(screenTimeTitle): \(permissionManager.statusText(for: .usageStats))"
+    }
+
+    private var permissionsBadgeText: String? {
+        "\(permissionsGrantedCount)/\(permissionsTotalCount)"
+    }
+
+    private var permissionsBadgeColor: Color {
+        permissionsGrantedCount == permissionsTotalCount ? AppColors.accentGreen : AppColors.primaryPurple
+    }
+
+    private var diagnosticsSummarySubtitle: String {
+        if let error = firstReleaseDiagnosticsError {
+            return error
+        }
+
+        return "Geo: \(readableStatus(diagnostics.geo.status)) • Push: \(readableStatus(diagnostics.pushToken.status))"
+    }
+
+    private var diagnosticsBadgeText: String? {
+        let issueCount = releaseDiagnosticsIssueCount
+        return issueCount == 0 ? "READY" : "\(issueCount) ISSUE\(issueCount == 1 ? "" : "S")"
+    }
+
+    private var diagnosticsBadgeColor: Color {
+        releaseDiagnosticsIssueCount == 0 ? AppColors.accentGreen : AppColors.dangerRed
+    }
+
+    private var appLockSummarySubtitle: String {
+        guard permissionManager.isSatisfied(.usageStats) else {
+            return permissionManager.statusText(for: .usageStats)
+        }
+
+        if diagnostics.appLimits.remoteCount > 0 || diagnostics.lockSchedule.activityCount > 0 {
+            return "Limits: \(diagnostics.appLimits.matchedCount)/\(diagnostics.appLimits.remoteCount) matched • Lock windows: \(diagnostics.lockSchedule.activityCount)"
+        }
+
+        if diagnostics.appLimits.lastError != "-" {
+            return diagnostics.appLimits.lastError
+        }
+
+        if diagnostics.lockSchedule.lastError != "-" {
+            return diagnostics.lockSchedule.lastError
+        }
+
+        return "No remote limits or lock windows received yet"
+    }
+
+    private var appLockBadgeText: String? {
+        guard permissionManager.isSatisfied(.usageStats) else {
+            return "ACTION"
+        }
+
+        if diagnostics.appLimits.reachedCount > 0 {
+            return "\(diagnostics.appLimits.reachedCount) HIT"
+        }
+
+        if diagnostics.appLimits.remoteCount > 0 || diagnostics.lockSchedule.activityCount > 0 {
+            return "LIVE"
+        }
+
+        return "IDLE"
+    }
+
+    private var appLockBadgeColor: Color {
+        guard permissionManager.isSatisfied(.usageStats) else {
+            return AppColors.primaryPurple
+        }
+
+        if diagnostics.appLimits.reachedCount > 0 {
+            return AppColors.dangerRed
+        }
+
+        if diagnostics.appLimits.remoteCount > 0 || diagnostics.lockSchedule.activityCount > 0 {
+            return AppColors.accentGreen
+        }
+
+        return AppColors.primaryPurple
+    }
+
+    private var releaseDiagnosticsIssueCount: Int {
+        [
+            diagnostics.geo.lastError,
+            diagnostics.pushToken.lastError,
+            diagnostics.appLimits.lastError,
+            diagnostics.lockSchedule.lastError
+        ]
+        .filter { isDiagnosticsIssue($0) }
+        .count
+    }
+
+    private var firstReleaseDiagnosticsError: String? {
+        [
+            diagnostics.geo.lastError,
+            diagnostics.pushToken.lastError,
+            diagnostics.appLimits.lastError,
+            diagnostics.lockSchedule.lastError
+        ]
+        .first(where: isDiagnosticsIssue)
+    }
+
+    private func isDiagnosticsIssue(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != "-"
+    }
+
+    private func readableStatus(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "-" else {
+            return "idle"
+        }
+
+        return trimmed.replacingOccurrences(of: "_", with: " ")
     }
 
 #if DEBUG

@@ -92,6 +92,47 @@ final class DeviceLockScheduleMonitorControllerTests: XCTestCase {
         XCTAssertEqual(diagnostics.last?.schedule, "22:30 - 06:45")
     }
 
+    func testApplyScheduleTreatsEqualStartAndEndAsAllDayLock() throws {
+        var startedActivities: [(DeviceActivityName, DeviceActivitySchedule)] = []
+        var diagnostics: [ScheduleDiagnostics] = []
+
+        let controller = makeController(
+            startMonitoring: { activityName, schedule in
+                startedActivities.append((activityName, schedule))
+            },
+            clearMonitoringStore: {},
+            diagnosticsUpdater: { status, dsn, schedule, activityCount, lastError in
+                diagnostics.append(
+                    ScheduleDiagnostics(
+                        status: status,
+                        dsn: dsn,
+                        schedule: schedule,
+                        activityCount: activityCount,
+                        lastError: lastError
+                    )
+                )
+            }
+        )
+
+        let schedule = try makeSchedule(start: "00:00:00", end: "00:00:00", enabled: true)
+
+        controller.applySchedule(schedule, dsn: "child-always")
+
+        XCTAssertEqual(startedActivities.count, 1)
+        XCTAssertEqual(
+            startedActivities.first?.0.rawValue,
+            DeviceLockScheduleActivityIdentifier.rawValue(dsn: "child-always", suffix: "always")
+        )
+        XCTAssertEqual(startedActivities.first?.1.intervalStart.hour, 0)
+        XCTAssertEqual(startedActivities.first?.1.intervalStart.minute, 0)
+        XCTAssertEqual(startedActivities.first?.1.intervalEnd.hour, 23)
+        XCTAssertEqual(startedActivities.first?.1.intervalEnd.minute, 59)
+        XCTAssertEqual(diagnostics.last?.status, "monitoring")
+        XCTAssertEqual(diagnostics.last?.dsn, "child-always")
+        XCTAssertEqual(diagnostics.last?.schedule, "00:00 - 00:00")
+        XCTAssertEqual(diagnostics.last?.activityCount, 1)
+    }
+
     func testApplyScheduleWithoutAuthorizationSkipsMonitoringAndReportsUnavailable() throws {
         var startedActivities: [(DeviceActivityName, DeviceActivitySchedule)] = []
         var diagnostics: [ScheduleDiagnostics] = []

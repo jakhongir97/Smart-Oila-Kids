@@ -7,6 +7,13 @@ enum AuthDeviceNameSync {
         client: APIClient,
         onDebug: (String) -> Void
     ) async {
+        seedCacheIfPossible(
+            scannedDeviceName: scannedDeviceName,
+            registration: registration,
+            client: client,
+            onDebug: onDebug
+        )
+
         let authorization = registration.authorizationHeader?.trimmedNonEmpty
         var headers: [String: String] = ["Accept": "application/json"]
         if let authorization {
@@ -57,6 +64,26 @@ enum AuthDeviceNameSync {
         } catch {
             onDebug("Skipping QR name sync: \(error.localizedDescription)")
         }
+    }
+
+    static func seedCacheIfPossible(
+        scannedDeviceName: String?,
+        registration: AuthRegistrationResult,
+        client: APIClient,
+        onDebug: (String) -> Void
+    ) {
+        guard let deviceID = registration.deviceID, deviceID > 0 else { return }
+
+        let seededName = scannedDeviceName?.trimmedNonEmpty ?? ProductFallbackText.localDeviceName()
+        MemberDevicesService(client: client).primeCache(
+            with: MemberDeviceRecord(
+                id: deviceID,
+                dsn: registration.dsn,
+                name: seededName,
+                avatarURL: nil
+            )
+        )
+        onDebug("Seeded current child device cache from registration payload for DSN \(registration.dsn).")
     }
 }
 

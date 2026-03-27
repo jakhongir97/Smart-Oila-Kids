@@ -117,6 +117,15 @@ struct SettingsAppearanceSection: View {
 struct SettingsQuickActionsSection: View {
     let compact: Bool
     let sidePadding: CGFloat
+    let diagnosticsSubtitle: String
+    let diagnosticsBadgeText: String?
+    let diagnosticsBadgeColor: Color
+    let permissionsSubtitle: String
+    let permissionsBadgeText: String?
+    let permissionsBadgeColor: Color
+    let appLockSubtitle: String
+    let appLockBadgeText: String?
+    let appLockBadgeColor: Color
     let onOpenDiagnostics: () -> Void
     let onOpenPermissions: () -> Void
     let onOpenAppLock: () -> Void
@@ -128,6 +137,9 @@ struct SettingsQuickActionsSection: View {
             SettingsSecondaryActionButton(
                 iconName: "stethoscope",
                 title: L10n.tr("settings.diagnostics"),
+                subtitle: diagnosticsSubtitle,
+                badgeText: diagnosticsBadgeText,
+                badgeColor: diagnosticsBadgeColor,
                 action: onOpenDiagnostics
             )
             .padding(.horizontal, sidePadding)
@@ -136,6 +148,9 @@ struct SettingsQuickActionsSection: View {
             SettingsSecondaryActionButton(
                 iconName: "hand.raised.fill",
                 title: L10n.tr("settings.permissions"),
+                subtitle: permissionsSubtitle,
+                badgeText: permissionsBadgeText,
+                badgeColor: permissionsBadgeColor,
                 action: onOpenPermissions
             )
             .padding(.horizontal, sidePadding)
@@ -144,6 +159,9 @@ struct SettingsQuickActionsSection: View {
             SettingsSecondaryActionButton(
                 iconName: "app.badge.checkmark",
                 title: L10n.tr("settings.app_lock"),
+                subtitle: appLockSubtitle,
+                badgeText: appLockBadgeText,
+                badgeColor: appLockBadgeColor,
                 action: onOpenAppLock
             )
             .padding(.horizontal, sidePadding)
@@ -501,19 +519,63 @@ struct SettingsProtectionPINSheet: View {
 struct SettingsSecondaryActionButton: View {
     let iconName: String
     let title: String
+    let subtitle: String?
+    let badgeText: String?
+    let badgeColor: Color
     let action: () -> Void
+
+    init(
+        iconName: String,
+        title: String,
+        subtitle: String? = nil,
+        badgeText: String? = nil,
+        badgeColor: Color = AppColors.primaryPurple,
+        action: @escaping () -> Void
+    ) {
+        self.iconName = iconName
+        self.title = title
+        self.subtitle = subtitle
+        self.badgeText = badgeText
+        self.badgeColor = badgeColor
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: iconName)
-                Text(title)
-                    .lineLimit(1)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .lineLimit(1)
+
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(AppTypography.unbounded(9, weight: .regular))
+                            .foregroundStyle(AppColors.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                if let badgeText, !badgeText.isEmpty {
+                    Text(badgeText)
+                        .font(AppTypography.unbounded(8, weight: .semibold))
+                        .foregroundStyle(badgeColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(badgeColor.opacity(0.12))
+                        .clipShape(Capsule())
+                }
             }
             .font(AppTypography.unbounded(12, weight: .semibold))
             .foregroundStyle(AppColors.primaryPurple)
             .frame(maxWidth: .infinity)
-            .frame(height: 40)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(AppColors.white)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }

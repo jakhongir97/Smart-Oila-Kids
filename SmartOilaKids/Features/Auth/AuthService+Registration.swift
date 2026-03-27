@@ -23,6 +23,7 @@ extension AuthService {
             debugLog("Using pre-created DSN from QR payload: \(normalizedDSN)")
             let result = AuthRegistrationResult(
                 dsn: normalizedDSN,
+                deviceID: nil,
                 authorizationHeader: normalizedToken,
                 refreshToken: normalizedRefreshToken
             )
@@ -116,6 +117,7 @@ private extension AuthService {
         if let header = result.authorizationHeader?.trimmedNonEmpty {
             return AuthRegistrationResult(
                 dsn: result.dsn,
+                deviceID: result.deviceID,
                 authorizationHeader: header,
                 refreshToken: resolvedRefreshToken
             )
@@ -125,6 +127,7 @@ private extension AuthService {
             debugLog("Legacy registration succeeded without auth header. Reusing scanned QR token for API authorization.")
             return AuthRegistrationResult(
                 dsn: result.dsn,
+                deviceID: result.deviceID,
                 authorizationHeader: fallbackToken,
                 refreshToken: resolvedRefreshToken
             )
@@ -132,6 +135,7 @@ private extension AuthService {
 
         return AuthRegistrationResult(
             dsn: result.dsn,
+            deviceID: result.deviceID,
             authorizationHeader: result.authorizationHeader,
             refreshToken: resolvedRefreshToken
         )

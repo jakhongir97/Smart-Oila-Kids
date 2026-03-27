@@ -127,6 +127,10 @@ final class SessionStore: ObservableObject {
         selectedRemoteDSN?.trimmedNonEmpty ?? dsn?.trimmedNonEmpty
     }
 
+    var hasAuthenticatedSession: Bool {
+        apiAccessToken?.trimmedNonEmpty != nil || apiRefreshToken?.trimmedNonEmpty != nil
+    }
+
     private func normalizeAccessToken(_ token: String?) -> String? {
         guard let token = token?.trimmedNonEmpty else { return nil }
         let parts = token

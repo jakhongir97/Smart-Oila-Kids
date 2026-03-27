@@ -175,6 +175,69 @@ final class AuthViewModelTests: XCTestCase {
         XCTAssertTrue(authService.registrationCalls.isEmpty)
     }
 
+    func testSubmitScannedPayloadRejectsRegistrationResultWithoutSessionTokens() async {
+        let authService = AuthServiceSpy(
+            registrationResult: AuthRegistrationResult(
+                dsn: "child-no-session",
+                authorizationHeader: nil,
+                refreshToken: nil
+            ),
+            verifyResult: true
+        )
+        let viewModel = AuthViewModel(authService: authService)
+        let payload = AuthScanPayload(
+            token: nil,
+            refreshToken: nil,
+            parentPhone: "+998901234567",
+            dsn: "child-no-session",
+            deviceName: "Kid iPhone"
+        )
+
+        let result = await viewModel.submit(scannedPayload: payload)
+
+        XCTAssertNil(result)
+        XCTAssertEqual(viewModel.errorText, L10n.tr("auth.qr_missing_auth_data"))
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertEqual(authService.registrationCalls.count, 1)
+        XCTAssertTrue(authService.verifiedBindings.isEmpty)
+    }
+
+    func testSubmitScannedPayloadAcceptsRefreshOnlySessionResult() async {
+        let authService = AuthServiceSpy(
+            registrationResult: AuthRegistrationResult(
+                dsn: "child-refresh",
+                authorizationHeader: nil,
+                refreshToken: "refresh-only"
+            ),
+            verifyResult: true
+        )
+        let viewModel = AuthViewModel(authService: authService)
+        let payload = AuthScanPayload(
+            token: nil,
+            refreshToken: "refresh-only",
+            parentPhone: nil,
+            dsn: "child-refresh",
+            deviceName: "Kid iPhone"
+        )
+
+        let result = await viewModel.submit(scannedPayload: payload)
+
+        XCTAssertEqual(
+            result,
+            AuthRegistrationResult(
+                dsn: "child-refresh",
+                authorizationHeader: nil,
+                refreshToken: "refresh-only"
+            )
+        )
+        XCTAssertNil(viewModel.errorText)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertEqual(authService.registrationCalls.count, 1)
+        XCTAssertEqual(authService.verifiedBindings.count, 1)
+        XCTAssertEqual(authService.verifiedBindings.first?.0, "child-refresh")
+        XCTAssertNil(authService.verifiedBindings.first?.1)
+    }
+
     func testSubmitScannedPayloadUsesPreferredDeviceNameAndVerifiesBinding() async {
         let authService = AuthServiceSpy(
             registrationResult: AuthRegistrationResult(
@@ -206,7 +269,7 @@ final class AuthViewModelTests: XCTestCase {
         XCTAssertEqual(authService.registrationCalls[0].deviceName, "Kid iPad")
         XCTAssertEqual(authService.verifiedBindings.count, 1)
         XCTAssertEqual(authService.verifiedBindings.first?.0, "child-scan")
-        XCTAssertNil(authService.verifiedBindings.first?.1)
+        XCTAssertEqual(authService.verifiedBindings.first?.1, "token-123")
     }
 }
 
@@ -431,6 +494,28 @@ final class AuthRegistrationParserTests: XCTestCase {
         XCTAssertEqual(result.refreshToken, "refresh-202")
     }
 
+    func testParseRegistrationResponseCapturesDeviceIDFromNestedPayload() throws {
+        let data = #"""
+        {
+          "data": {
+            "dsn": "child-202a",
+            "device_id": 202,
+            "access_token": "token-202a"
+          }
+        }
+        """#.data(using: .utf8)!
+
+        let result = try AuthRegistrationParser.parseRegistrationResponse(
+            data: data,
+            text: "ok",
+            headers: [:]
+        ) { _ in }
+
+        XCTAssertEqual(result.dsn, "child-202a")
+        XCTAssertEqual(result.deviceID, 202)
+        XCTAssertEqual(result.authorizationHeader, "token-202a")
+    }
+
     func testParseRegistrationResponseFallsBackToTextAndLogsParsedDSN() throws {
         var debugMessages: [String] = []
 
@@ -593,6 +678,7 @@ final class AuthServiceRegistrationTests: XCTestCase {
             let payload = #"""
             {
               "data": {
+                "device_id": 800,
                 "dsn": "child-800",
                 "access_token": "body-token-800",
                 "token_type": "Bearer",
@@ -615,6 +701,7 @@ final class AuthServiceRegistrationTests: XCTestCase {
         )
 
         XCTAssertEqual(result.dsn, "child-800")
+        XCTAssertEqual(result.deviceID, 800)
         XCTAssertEqual(result.authorizationHeader, "Bearer body-token-800")
         XCTAssertEqual(result.refreshToken, "refresh-800")
         XCTAssertEqual(TestHTTPURLProtocol.recordedRequests.count, 1)

@@ -21,9 +21,11 @@ enum AuthRegistrationParser {
                     tokenType: extractString(in: payload, keys: ["token_type", "tokenType", "type"])
                 )
                 let bodyRefreshToken = extractString(in: payload, keys: ["refresh_token", "refreshToken"])
+                let deviceID = extractInt(in: payload, keys: ["device_id", "deviceId", "id"])
 
                 return AuthRegistrationResult(
                     dsn: dsn,
+                    deviceID: deviceID,
                     authorizationHeader: headerAuthorization ?? bodyAuthorization,
                     refreshToken: bodyRefreshToken
                 )
@@ -34,6 +36,7 @@ enum AuthRegistrationParser {
             onDebug("Registration success. Parsed DSN: \(dsn)")
             return AuthRegistrationResult(
                 dsn: dsn,
+                deviceID: nil,
                 authorizationHeader: headerAuthorization,
                 refreshToken: nil
             )
@@ -128,6 +131,25 @@ enum AuthRegistrationParser {
         return nil
     }
 
+    private static func extractInt(in payload: [String: Any], keys: [String]) -> Int? {
+        for key in keys {
+            if let value = readIntValue(from: payload, key: key) {
+                return value
+            }
+        }
+
+        for containerKey in ["data", "result"] {
+            guard let nested = payload[containerKey] as? [String: Any] else { continue }
+            for key in keys {
+                if let value = readIntValue(from: nested, key: key) {
+                    return value
+                }
+            }
+        }
+
+        return nil
+    }
+
     private static func readValue(from payload: [String: Any], key: String) -> String? {
         if let direct = payload[key] {
             return valueToString(direct)
@@ -141,6 +163,19 @@ enum AuthRegistrationParser {
         return nil
     }
 
+    private static func readIntValue(from payload: [String: Any], key: String) -> Int? {
+        if let direct = payload[key] {
+            return valueToInt(direct)
+        }
+
+        if let matchedKey = payload.keys.first(where: { $0.caseInsensitiveCompare(key) == .orderedSame }),
+           let value = payload[matchedKey] {
+            return valueToInt(value)
+        }
+
+        return nil
+    }
+
     private static func valueToString(_ value: Any) -> String? {
         if let value = value as? String {
             return value
@@ -148,6 +183,22 @@ enum AuthRegistrationParser {
 
         if let value = value as? NSNumber {
             return value.stringValue
+        }
+
+        return nil
+    }
+
+    private static func valueToInt(_ value: Any) -> Int? {
+        if let value = value as? Int {
+            return value
+        }
+
+        if let value = value as? NSNumber {
+            return value.intValue
+        }
+
+        if let value = value as? String {
+            return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
         }
 
         return nil
