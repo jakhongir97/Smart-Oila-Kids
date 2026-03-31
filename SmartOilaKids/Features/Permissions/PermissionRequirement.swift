@@ -13,13 +13,20 @@ enum PermissionRequirement: String, CaseIterable, Identifiable {
         .location
     ]
 
-    static let settingsCases: [PermissionRequirement] = [
-        .location,
-        .usageStats,
-        .notifications,
-        .microphone,
-        .camera
-    ]
+    static var settingsCases: [PermissionRequirement] {
+        var requirements: [PermissionRequirement] = [
+            .location,
+            .notifications,
+            .microphone,
+            .camera
+        ]
+
+        if AppRuntime.screenTimeFeaturesEnabled {
+            requirements.insert(.usageStats, at: 1)
+        }
+
+        return requirements
+    }
 
     var titleKey: String {
         switch self {

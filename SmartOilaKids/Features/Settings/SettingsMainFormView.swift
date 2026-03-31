@@ -21,6 +21,7 @@ struct SettingsMainFormView: View {
     let permissionsSubtitle: String
     let permissionsBadgeText: String?
     let permissionsBadgeColor: Color
+    let showsAppLock: Bool
     let appLockSubtitle: String
     let appLockBadgeText: String?
     let appLockBadgeColor: Color
@@ -69,6 +70,7 @@ struct SettingsMainFormView: View {
                 permissionsSubtitle: permissionsSubtitle,
                 permissionsBadgeText: permissionsBadgeText,
                 permissionsBadgeColor: permissionsBadgeColor,
+                showsAppLock: showsAppLock,
                 appLockSubtitle: appLockSubtitle,
                 appLockBadgeText: appLockBadgeText,
                 appLockBadgeColor: appLockBadgeColor,

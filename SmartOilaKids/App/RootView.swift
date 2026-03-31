@@ -50,6 +50,6 @@ struct RootView: View {
 
 private extension RootView {
     var shouldShowDeviceLockOverlay: Bool {
-        shouldRunLocalChildServices && lockCoordinator.state.isLocked
+        AppRuntime.screenTimeFeaturesEnabled && shouldRunLocalChildServices && lockCoordinator.state.isLocked
     }
 }

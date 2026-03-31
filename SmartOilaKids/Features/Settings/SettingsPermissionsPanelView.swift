@@ -15,7 +15,7 @@ struct SettingsPermissionsPanelView: View {
 
                     SettingsMediaReadinessCard(manager: manager)
 
-                    ForEach(PermissionRequirement.allCases) { requirement in
+                    ForEach(PermissionRequirement.settingsCases) { requirement in
                         SettingsPermissionRow(requirement: requirement, manager: manager)
                     }
                 }

@@ -123,6 +123,7 @@ struct SettingsQuickActionsSection: View {
     let permissionsSubtitle: String
     let permissionsBadgeText: String?
     let permissionsBadgeColor: Color
+    let showsAppLock: Bool
     let appLockSubtitle: String
     let appLockBadgeText: String?
     let appLockBadgeColor: Color
@@ -156,16 +157,18 @@ struct SettingsQuickActionsSection: View {
             .padding(.horizontal, sidePadding)
             .padding(.top, 8)
 
-            SettingsSecondaryActionButton(
-                iconName: "app.badge.checkmark",
-                title: L10n.tr("settings.app_lock"),
-                subtitle: appLockSubtitle,
-                badgeText: appLockBadgeText,
-                badgeColor: appLockBadgeColor,
-                action: onOpenAppLock
-            )
-            .padding(.horizontal, sidePadding)
-            .padding(.top, 8)
+            if showsAppLock {
+                SettingsSecondaryActionButton(
+                    iconName: "app.badge.checkmark",
+                    title: L10n.tr("settings.app_lock"),
+                    subtitle: appLockSubtitle,
+                    badgeText: appLockBadgeText,
+                    badgeColor: appLockBadgeColor,
+                    action: onOpenAppLock
+                )
+                .padding(.horizontal, sidePadding)
+                .padding(.top, 8)
+            }
 
             SettingsSecondaryActionButton(
                 iconName: "film.stack",

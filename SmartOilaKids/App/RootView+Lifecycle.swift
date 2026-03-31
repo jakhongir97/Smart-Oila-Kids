@@ -27,7 +27,7 @@ extension RootView {
         clearPersistedBackgroundTimestamp()
         lastBackgroundedAt = nil
         Task {
-            await DeviceApplicationUsageReportCoordinator.shared.updateDSN(sessionStore.dsn)
+            await DeviceApplicationUsageReportCoordinator.shared.updateDSN(screenTimeServiceDSN)
             await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
             await PushInboxStore.shared.reconcileAppBadge()
         }
@@ -43,7 +43,7 @@ extension RootView {
         syncMediaService(with: localServiceDSN)
 
         Task {
-            await DeviceApplicationUsageReportCoordinator.shared.updateDSN(normalizedNewDSN)
+            await DeviceApplicationUsageReportCoordinator.shared.updateDSN(screenTimeServiceDSN)
             await PushTokenSyncCoordinator.shared.updateDSN(normalizedNewDSN)
 
             if let previousDSN,
@@ -70,7 +70,8 @@ extension RootView {
             lastBackgroundedAt = now
             persistBackgroundTimestamp(now)
             DeviceRecordingCoordinator.shared.setApplicationActive(false)
-            if shouldRunLocalChildServices {
+            if shouldRunLocalChildServices,
+               AppRuntime.screenTimeFeaturesEnabled {
                 Task {
                     await DeviceApplicationUsageReportCoordinator.shared.retryNow()
                 }
@@ -107,6 +108,7 @@ extension RootView {
         )
 
         if shouldRunLocalChildServices,
+           AppRuntime.screenTimeFeaturesEnabled,
            shouldArmRecoveryCheck(referenceDate: Date()) {
             lockCoordinator.armForegroundRecoveryCheck()
         }
@@ -115,7 +117,8 @@ extension RootView {
             clearPersistedBackgroundTimestamp()
         }
 
-        if shouldRunLocalChildServices {
+        if shouldRunLocalChildServices,
+           AppRuntime.screenTimeFeaturesEnabled {
             Task {
                 await lockCoordinator.refreshNow()
                 await DeviceAppLockSyncCoordinator.shared.retryNow()
@@ -128,6 +131,7 @@ extension RootView {
     }
 
     func handleLockRefreshNotification(_ notification: Notification) {
+        guard AppRuntime.screenTimeFeaturesEnabled else { return }
         guard shouldRunLocalChildServices else { return }
         guard shouldHandlePush(notification: notification, currentDSN: sessionStore.dsn) else { return }
         Task {
@@ -146,6 +150,10 @@ private extension RootView {
     }
 
     func syncLockService(with dsn: String?, armRecoveryCheck: Bool = false) {
+        guard AppRuntime.screenTimeFeaturesEnabled else {
+            lockCoordinator.stop()
+            return
+        }
         lockCoordinator.start(dsn: dsn, armRecoveryCheck: armRecoveryCheck)
     }
 
@@ -155,6 +163,10 @@ private extension RootView {
 
     var localServiceDSN: String? {
         shouldRunLocalChildServices ? sessionStore.dsn?.trimmedNonEmpty : nil
+    }
+
+    var screenTimeServiceDSN: String? {
+        AppRuntime.screenTimeFeaturesEnabled ? localServiceDSN : nil
     }
 
     func dsnEquals(_ lhs: String, _ rhs: String?) -> Bool {

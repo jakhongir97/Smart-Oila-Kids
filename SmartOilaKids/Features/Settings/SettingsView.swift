@@ -71,6 +71,7 @@ struct SettingsView: View {
                                     permissionsSubtitle: permissionsSummarySubtitle,
                                     permissionsBadgeText: permissionsBadgeText,
                                     permissionsBadgeColor: permissionsBadgeColor,
+                                    showsAppLock: AppRuntime.screenTimeFeaturesEnabled,
                                     appLockSubtitle: appLockSummarySubtitle,
                                     appLockBadgeText: appLockBadgeText,
                                     appLockBadgeColor: appLockBadgeColor,
@@ -317,8 +318,14 @@ struct SettingsView: View {
 
     private var permissionsSummarySubtitle: String {
         let locationTitle = L10n.tr(PermissionRequirement.location.titleKey)
+        let locationStatus = permissionManager.statusText(for: .location)
+
+        guard AppRuntime.screenTimeFeaturesEnabled else {
+            return "\(locationTitle): \(locationStatus)"
+        }
+
         let screenTimeTitle = L10n.tr(PermissionRequirement.usageStats.titleKey)
-        return "\(locationTitle): \(permissionManager.statusText(for: .location)) • \(screenTimeTitle): \(permissionManager.statusText(for: .usageStats))"
+        return "\(locationTitle): \(locationStatus) • \(screenTimeTitle): \(permissionManager.statusText(for: .usageStats))"
     }
 
     private var permissionsBadgeText: String? {

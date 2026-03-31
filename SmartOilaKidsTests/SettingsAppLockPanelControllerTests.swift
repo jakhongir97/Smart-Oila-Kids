@@ -1750,7 +1750,7 @@ final class PermissionRequirementTests: XCTestCase {
         XCTAssertEqual(PermissionRequirement.onboardingCases, [.location])
         XCTAssertEqual(
             PermissionRequirement.settingsCases,
-            [.location, .usageStats, .notifications, .microphone, .camera]
+            [.location, .notifications, .microphone, .camera]
         )
 
         XCTAssertEqual(PermissionRequirement.location.id, PermissionRequirement.location.rawValue)
@@ -5971,7 +5971,7 @@ final class DeviceLockScheduleSupportTests: XCTestCase {
 
 final class AppRuntimeDefaultsTests: XCTestCase {
     func testDebugRuntimeDefaultsReflectUnsetEnvironment() {
-        XCTAssertTrue(AppRuntime.screenTimeFeaturesEnabled)
+        XCTAssertFalse(AppRuntime.screenTimeFeaturesEnabled)
         XCTAssertNil(AppRuntime.debugRoute)
         XCTAssertFalse(AppRuntime.hasDebugRoute)
         XCTAssertNil(AppRuntime.debugAuthStage)
