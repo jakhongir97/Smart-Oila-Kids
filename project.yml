@@ -29,8 +29,8 @@ targets:
       - path: Shared/DeviceAppLimits
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: uz.smartoila.kids.go
-        DEVELOPMENT_TEAM: 7A9V4SQ8LR
+        PRODUCT_BUNDLE_IDENTIFIER: uz.smartoila.kids
+        DEVELOPMENT_TEAM: 3TWN5NW4BL
         INFOPLIST_FILE: SmartOilaKids/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: SmartOilaKids/Resources/SmartOilaKids.entitlements
         INFOPLIST_KEY_CFBundleDisplayName: Smart Oila Kids

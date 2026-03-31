@@ -18,7 +18,7 @@ struct DeviceControlEvent: Codable, Equatable, Identifiable {
 }
 
 struct DeviceControlEventSharedStore {
-    static let darwinNotificationName = "uz.smartoila.kids.go.device-control-events"
+    static let darwinNotificationName = "uz.smartoila.kids.device-control-events"
 
     init(userDefaults: UserDefaults? = DeviceControlEventAppGroup.sharedUserDefaults()) {
         self.userDefaults = userDefaults
@@ -154,8 +154,22 @@ private extension DeviceControlEventSharedStore {
 }
 
 private enum DeviceControlEventAppGroup {
+    private static let envKey = "SMARTOILA_APP_GROUP_IDENTIFIER"
+    private static let fallbackIdentifier = "group.3twn5nw4bl.uz.smartoila.kids"
+
+    static var identifier: String {
+        let rawValue = ProcessInfo.processInfo.environment[envKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let rawValue, !rawValue.isEmpty {
+            return rawValue
+        }
+
+        return fallbackIdentifier
+    }
+
     static func sharedUserDefaults() -> UserDefaults? {
-        UserDefaults(suiteName: "group.uz.smartoila.kids.go")
+        UserDefaults(suiteName: identifier)
     }
 }
 

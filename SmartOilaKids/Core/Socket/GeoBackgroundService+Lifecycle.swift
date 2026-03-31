@@ -85,7 +85,7 @@ extension GeoBackgroundService {
         reconnectWorkItem?.cancel()
         reconnectWorkItem = nil
 
-        locationManager.stopUpdatingLocation()
+        stopLocationUpdates()
         timers.stop()
         webSocketClient.disconnect()
 
@@ -169,13 +169,39 @@ extension GeoBackgroundService {
 
         switch authorizationStatus {
         case .authorizedAlways:
+            if CLLocationManager.significantLocationChangeMonitoringAvailable() {
+                locationManager.startMonitoringSignificantLocationChanges()
+            }
             locationManager.startUpdatingLocation()
+            seedLastKnownLocationIfAvailable()
         case .authorizedWhenInUse, .notDetermined:
+            stopLocationUpdates()
             locationManager.requestAlwaysAuthorization()
         case .denied, .restricted:
-            break
+            stopLocationUpdates()
         @unknown default:
-            break
+            stopLocationUpdates()
         }
+    }
+
+    func stopLocationUpdates() {
+        locationManager.stopUpdatingLocation()
+
+        if CLLocationManager.significantLocationChangeMonitoringAvailable() {
+            locationManager.stopMonitoringSignificantLocationChanges()
+        }
+    }
+
+    func seedLastKnownLocationIfAvailable() {
+        guard let location = locationManager.location else { return }
+
+        if let previousLocation = state.lastKnownLocation {
+            let hasMovedEnough = location.distance(from: previousLocation) >= configuration.minDistance
+            let isNewerReading = location.timestamp.timeIntervalSince(previousLocation.timestamp) > 1
+            guard hasMovedEnough || isNewerReading else { return }
+        }
+
+        state.lastKnownLocation = location
+        sendLocation(location)
     }
 }

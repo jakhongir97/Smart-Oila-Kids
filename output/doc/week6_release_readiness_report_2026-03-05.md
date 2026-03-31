@@ -25,7 +25,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
   - Core child release gates pass without optional cross-repo smoke enabled
 - `RUN_PARENT_CHILD_SIMULATORS=1 bash scripts/run_release_readiness_checks.sh`: PASS
   - Parent app launched on simulator: `iPhone 16` (`uz.childtracker`)
-  - Child app launched on simulator: `iPhone 16 Pro` (`uz.smartoila.kids.go`)
+  - Child app launched on simulator: `iPhone 16 Pro` (`uz.smartoila.kids`)
   - Parent build log: `/tmp/smartoila_parent_build.log`
   - Child build log: `/tmp/smartoila_child_build.log`
 - `python3 scripts/check_build_warnings.py` on parent/child simulator logs: PASS

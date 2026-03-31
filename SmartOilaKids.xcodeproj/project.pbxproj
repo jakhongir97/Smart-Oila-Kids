@@ -1267,14 +1267,14 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					D7FAB55786594D5A927B96E4 = {
-						DevelopmentTeam = 7A9V4SQ8LR;
+						DevelopmentTeam = 3TWN5NW4BL;
 					};
 					F1A0B1C2D3E4F50617283946 = {
-						DevelopmentTeam = 7A9V4SQ8LR;
+						DevelopmentTeam = 3TWN5NW4BL;
 						TestTargetID = 92844C8577B27B0138F9A882;
 					};
 					FC18D17BD5B7480387B00D20 = {
-						DevelopmentTeam = 7A9V4SQ8LR;
+						DevelopmentTeam = 3TWN5NW4BL;
 					};
 				};
 			};
@@ -1679,9 +1679,9 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1690,8 +1690,9 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.go.schedule-monitor";
+				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.schedule-monitor";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -1705,9 +1706,9 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1716,8 +1717,9 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.go.usage-report";
+				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.usage-report";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.1;
@@ -1731,9 +1733,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -1742,7 +1744,8 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1753,9 +1756,9 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1764,8 +1767,9 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.go.schedule-monitor";
+				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.schedule-monitor";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.1;
@@ -1779,9 +1783,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -1790,7 +1794,8 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1864,9 +1869,9 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1875,8 +1880,9 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.go.usage-report";
+				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.usage-report";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -1889,9 +1895,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1900,8 +1906,9 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.1;
@@ -1915,9 +1922,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
-				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1926,8 +1933,9 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.go.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.1;
 				TARGETED_DEVICE_FAMILY = "1,2";

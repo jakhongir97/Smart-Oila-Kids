@@ -12,7 +12,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 - Child-vs-parent parity gap budget: PASS (`python3 scripts/check_child_parent_gap_budget.py --rest-spec OpenAPI/rest_openapi.json --ws-spec OpenAPI/ws_openapi.json`; REST gap `0`, WebSocket gap `0` on 2026-03-27)
 - Localization parity: PASS (`python3 scripts/check_localization_parity.py --base-dir SmartOilaKids/Resources/Localization --source-language en --languages en,ru,uz`; `en/ru/uz` all `576` keys, missing `0`, extra `0` on 2026-03-27)
 - Localization format specifiers: PASS (`python3 scripts/check_localization_format_specifiers.py --base-dir SmartOilaKids/Resources/Localization --source-language en --languages en,ru,uz`; mismatches `0` for `en/ru/uz` on 2026-03-27)
-- Parent-child simulator smoke: PASS (`RUN_PARENT_CHILD_SIMULATORS=1 bash scripts/run_release_readiness_checks.sh`; parent app `uz.childtracker` and child app `uz.smartoila.kids.go` built, installed, and launched on simulators on 2026-03-27)
+- Parent-child simulator smoke: PASS (`RUN_PARENT_CHILD_SIMULATORS=1 bash scripts/run_release_readiness_checks.sh`; parent app `uz.childtracker` and child app `uz.smartoila.kids` built, installed, and launched on simulators on 2026-03-27)
 - Build warning gate: PASS (`python3 scripts/check_build_warnings.py --log .build/test-results/ios-tests.log --max-unapproved 0`; child simulator test log reports `0` warnings on 2026-03-27)
 
 ## Dependencies
@@ -30,7 +30,7 @@ Workspace: `/Users/jakhongirnematov/Desktop/Smart Oila Kids`
 - Push delivery remains a backend-contract risk until the team confirms whether `/api/devices/dsn/{dsn}/firebase_notification_token` accepts APNs device tokens for iOS.
 - Screen Time app limits and full-device lock must be validated with a real parent account because the happy path depends on entitlement state, family controls authorization, and backend timing.
 - Android-style uninstall/admin-removal prevention from `DeviceAdminReceiver.kt` is not implementable on App Store iOS, so PM and client expectations must be aligned before shipment.
-- Final App Store export still needs a clean distribution-signing pass in Xcode or Organizer; the local machine can archive and can read the existing App Store Connect app record for bundle `uz.smartoila.kids.go`, but the unattended CLI export did not complete.
+- Final App Store export still needs a clean distribution-signing pass in Xcode or Organizer; the local machine can archive and can read the existing App Store Connect app record for bundle `uz.smartoila.kids`, but the unattended CLI export did not complete.
 
 ## Rollback Plan
 

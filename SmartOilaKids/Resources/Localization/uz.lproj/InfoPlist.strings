@@ -1,6 +1,7 @@
 "CFBundleDisplayName" = "Smart Oila Kids";
-"NSCameraUsageDescription" = "Ota-ona QR kodini skanerlash uchun kameraga ruxsat kerak.";
-"NSLocationAlwaysAndWhenInUseUsageDescription" = "Ota-ona bolani ko'rishi uchun geolokatsiya ruxsati kerak.";
-"NSLocationAlwaysUsageDescription" = "Ota-ona bolani ko'rishi uchun geolokatsiya ruxsati kerak.";
-"NSLocationWhenInUseUsageDescription" = "Ota-ona bolani ko'rishi uchun geolokatsiya ruxsati kerak.";
-"NSPhotoLibraryUsageDescription" = "Chatga ilova yuborish uchun rasmlarga ruxsat kerak.";
+"NSCameraUsageDescription" = "Kameraga ruxsat bola xavfsizligi funksiyalari, jumladan QR sozlash va ota-ona yuborgan masofaviy tasvir so'rovlari uchun kerak.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini, ilova fonda ishlaganda ham, ko'ra olishi uchun ishlatiladi.";
+"NSLocationAlwaysUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini, ilova fonda ishlaganda ham, ko'ra olishi uchun ishlatiladi.";
+"NSLocationWhenInUseUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini ilova ochiq paytda ko'ra olishi uchun ishlatiladi.";
+"NSMicrophoneUsageDescription" = "Mikrofonga ruxsat ota-ona so'ragan audio xavfsizlik funksiyalarini qo'llab-quvvatlash uchun kerak.";
+"NSPhotoLibraryUsageDescription" = "Foto kutubxonaga ruxsat bola chatga fayl yuborishi uchun kerak.";

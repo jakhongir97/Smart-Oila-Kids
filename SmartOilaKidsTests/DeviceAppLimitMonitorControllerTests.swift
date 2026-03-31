@@ -64,15 +64,16 @@ final class DeviceAppLimitMonitorControllerTests: XCTestCase {
     }
 
     func testActivateWithNoEnabledLimitsPublishesNoLimits() async {
+        let noLimitsResult = DeviceAppLimitFetchResult(
+            deviceID: 7,
+            endpoint: "members/device/v2/7/applications?is_limit_enabled=true",
+            limits: [
+                makeLimit(packageName: "com.example.disabled", minutes: 15, enabled: false, reached: false),
+                makeLimit(packageName: "com.example.zero", minutes: 0, enabled: true, reached: false)
+            ]
+        )
         let service = DeviceAppLimitServiceSpy(
-            results: [.success(DeviceAppLimitFetchResult(
-                deviceID: 7,
-                endpoint: "members/device/v2/7/applications?is_limit_enabled=true",
-                limits: [
-                    makeLimit(packageName: "com.example.disabled", minutes: 15, enabled: false, reached: false),
-                    makeLimit(packageName: "com.example.zero", minutes: 0, enabled: true, reached: false)
-                ]
-            ))]
+            results: [.success(noLimitsResult), .success(noLimitsResult)]
         )
 
         let controller = makeController(service: service)

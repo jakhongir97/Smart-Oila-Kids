@@ -3,7 +3,7 @@ import ManagedSettings
 
 private enum DeviceAppLimitSharedAppGroup {
     private static let envKey = "SMARTOILA_APP_GROUP_IDENTIFIER"
-    private static let fallbackIdentifier = "group.uz.smartoila.kids.go"
+    private static let fallbackIdentifier = "group.3twn5nw4bl.uz.smartoila.kids"
 
     static var identifier: String {
         let rawValue = ProcessInfo.processInfo.environment[envKey]?

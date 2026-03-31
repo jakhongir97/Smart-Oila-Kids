@@ -3308,7 +3308,7 @@ final class ScreenTimeUsageSharedModelsTests: XCTestCase {
         XCTAssertNotNil(ScreenTimeUsageAppGroup.sharedUserDefaults())
 
         unsetenv(key)
-        XCTAssertEqual(ScreenTimeUsageAppGroup.identifier, "group.uz.smartoila.kids.go")
+        XCTAssertEqual(ScreenTimeUsageAppGroup.identifier, "group.3twn5nw4bl.uz.smartoila.kids")
     }
 }
 
@@ -5311,7 +5311,7 @@ func seedMediaActivityEventsForTests(_ events: [MediaActivityEvent]) {
 }
 
 func deviceControlEventSharedDefaultsForTests() -> UserDefaults {
-    UserDefaults(suiteName: "group.uz.smartoila.kids.go")!
+    UserDefaults(suiteName: "group.3twn5nw4bl.uz.smartoila.kids")!
 }
 
 func clearDeviceControlPendingEventsForTests() {

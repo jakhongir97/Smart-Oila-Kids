@@ -1,6 +1,7 @@
 "CFBundleDisplayName" = "Smart Oila Kids";
-"NSCameraUsageDescription" = "Camera access is required to scan the parent's QR code.";
-"NSLocationAlwaysAndWhenInUseUsageDescription" = "Geolocation access is needed so that parent can know where the child is.";
-"NSLocationAlwaysUsageDescription" = "Geolocation access is needed so that parent can know where the child is.";
-"NSLocationWhenInUseUsageDescription" = "Geolocation access is needed so that parent can know where the child is.";
-"NSPhotoLibraryUsageDescription" = "Photo library access is required to send chat attachments.";
+"NSCameraUsageDescription" = "Camera access is used for child safety features, including QR setup and parent-requested remote captures.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
+"NSLocationAlwaysUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
+"NSLocationWhenInUseUsageDescription" = "Location is used so the parent can see the child device location while the app is open.";
+"NSMicrophoneUsageDescription" = "Microphone access supports parent-requested audio safety features.";
+"NSPhotoLibraryUsageDescription" = "Photo library access lets the child send chat attachments.";
