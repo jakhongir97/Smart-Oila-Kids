@@ -1,3 +1,6 @@
+# Reference-only manifest.
+# The checked-in SmartOilaKids.xcodeproj is the canonical project until this file
+# is restored to full parity with all targets and build settings.
 name: SmartOilaKids
 options:
   minimumXcodeGenVersion: 2.40.0

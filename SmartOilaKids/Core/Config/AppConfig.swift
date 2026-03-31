@@ -21,6 +21,7 @@ enum AppConfig {
     )
 
     static let websocketTokenPath = configuredWebSocketTokenPath()
+    static let websocketTokenPathDiagnosticsValue = "/ws/{redacted}"
     static let websocketBaseCandidates = configuredWebSocketBases()
     static var legacyDeviceClaimFallbackEnabled: Bool {
         configuredBool(

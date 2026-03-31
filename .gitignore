@@ -15,6 +15,7 @@ Artifacts/
 # Legacy archives / imported snapshots
 LegacyArchive_20260224/
 __MACOSX/
+tmp/
 
 # Python caches (script tests)
 __pycache__/

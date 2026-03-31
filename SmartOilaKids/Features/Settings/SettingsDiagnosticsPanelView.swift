@@ -149,7 +149,7 @@ struct DiagnosticsPanelView: View {
         [
             (L10n.tr("diagnostics.api_base"), AppConfig.apiBaseURL.absoluteString),
             (L10n.tr("diagnostics.ws_base"), AppConfig.websocketBaseCandidates.joined(separator: ", ")),
-            (L10n.tr("diagnostics.ws_token_path"), AppConfig.websocketTokenPath),
+            (L10n.tr("diagnostics.ws_token_path"), AppConfig.websocketTokenPathDiagnosticsValue),
             (L10n.tr("diagnostics.push_token_status"), diagnostics.pushToken.status),
             (L10n.tr("diagnostics.push_token_dsn"), diagnostics.pushToken.dsn),
             (L10n.tr("diagnostics.push_token_endpoint"), diagnostics.pushToken.endpoint),

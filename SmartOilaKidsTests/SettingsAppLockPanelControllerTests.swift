@@ -5989,6 +5989,48 @@ final class AppRuntimeDefaultsTests: XCTestCase {
     }
 }
 
+final class RootLocalServiceRuntimeTests: XCTestCase {
+    func testRegularAuthenticatedFlowRunsChildServices() {
+        XCTAssertTrue(
+            RootLocalServiceRuntime.shouldRunChildServices(
+                debugRoute: nil,
+                hasAuthenticatedSession: true
+            )
+        )
+    }
+
+    func testRegularUnauthenticatedFlowDoesNotRunChildServices() {
+        XCTAssertFalse(
+            RootLocalServiceRuntime.shouldRunChildServices(
+                debugRoute: nil,
+                hasAuthenticatedSession: false
+            )
+        )
+    }
+
+    func testOnlyMainDebugOverrideRunsChildServices() {
+        XCTAssertTrue(
+            RootLocalServiceRuntime.shouldRunChildServices(
+                debugRoute: .main,
+                hasAuthenticatedSession: false
+            )
+        )
+        XCTAssertFalse(
+            RootLocalServiceRuntime.shouldRunChildServices(
+                debugRoute: .settings,
+                hasAuthenticatedSession: true
+            )
+        )
+    }
+}
+
+final class AppConfigDiagnosticsTests: XCTestCase {
+    func testWebSocketTokenPathIsRedactedInDiagnostics() {
+        XCTAssertEqual(AppConfig.websocketTokenPathDiagnosticsValue, "/ws/{redacted}")
+        XCTAssertNotEqual(AppConfig.websocketTokenPathDiagnosticsValue, AppConfig.websocketTokenPath)
+    }
+}
+
 @MainActor
 final class AppDependenciesTests: XCTestCase {
     func testFactoryMethodsBuildViewModelsWithExpectedDefaultState() {
@@ -6374,6 +6416,131 @@ private func makeUTCDate(
 private func makeJSONObject(from text: String) throws -> [String: Any] {
     let data = try XCTUnwrap(text.data(using: .utf8))
     return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+}
+
+final class ChatWebSocketServiceConcurrencyTests: XCTestCase {
+    func testStaleFailureFromPreviousConnectionDoesNotReconnectCurrentDSN() {
+        let factory = ChatWebSocketTaskFactoryMock()
+        let scheduler = ChatReconnectSchedulerMock()
+        let service = ChatWebSocketService(
+            taskFactory: factory,
+            reconnectScheduler: scheduler.schedule(after:item:)
+        )
+
+        service.connect(dsn: "child-a")
+        let staleTask = factory.createdTasks[0]
+
+        service.connect(dsn: "child-b")
+        XCTAssertEqual(staleTask.cancelCallCount, 1)
+        XCTAssertEqual(factory.createdTasks.count, 2)
+
+        staleTask.complete(with: .failure(ChatWebSocketServiceTestError.sample))
+        service.flushStateQueueForTests()
+
+        XCTAssertEqual(factory.createdTasks.count, 2)
+        XCTAssertTrue(scheduler.scheduledItems.isEmpty)
+        XCTAssertTrue(factory.createdURLs[1].absoluteString.contains("/children/device/child-b/chat/"))
+    }
+
+    func testLateFailureAfterDisconnectDoesNotScheduleReconnect() {
+        let factory = ChatWebSocketTaskFactoryMock()
+        let scheduler = ChatReconnectSchedulerMock()
+        let service = ChatWebSocketService(
+            taskFactory: factory,
+            reconnectScheduler: scheduler.schedule(after:item:)
+        )
+
+        service.connect(dsn: "child-disconnect")
+        let task = factory.createdTasks[0]
+
+        service.disconnect()
+        XCTAssertEqual(task.cancelCallCount, 1)
+
+        task.complete(with: .failure(ChatWebSocketServiceTestError.sample))
+        service.flushStateQueueForTests()
+
+        XCTAssertEqual(factory.createdTasks.count, 1)
+        XCTAssertTrue(scheduler.scheduledItems.isEmpty)
+    }
+
+    func testCancelledReconnectWorkItemFromPreviousConnectionDoesNotStartAnotherSocket() throws {
+        guard AppConfig.websocketBaseCandidates.count == 1 else {
+            throw XCTSkip("Reconnect scheduling test assumes a single websocket base candidate.")
+        }
+
+        let factory = ChatWebSocketTaskFactoryMock()
+        let scheduler = ChatReconnectSchedulerMock()
+        let service = ChatWebSocketService(
+            taskFactory: factory,
+            reconnectScheduler: scheduler.schedule(after:item:)
+        )
+
+        service.connect(dsn: "child-a")
+        let staleTask = factory.createdTasks[0]
+
+        staleTask.complete(with: .failure(ChatWebSocketServiceTestError.sample))
+        service.flushStateQueueForTests()
+
+        let staleReconnect = try XCTUnwrap(scheduler.scheduledItems.first)
+
+        service.connect(dsn: "child-b")
+        XCTAssertEqual(factory.createdTasks.count, 2)
+
+        staleReconnect.perform()
+        service.flushStateQueueForTests()
+
+        XCTAssertEqual(factory.createdTasks.count, 2)
+        XCTAssertTrue(factory.createdURLs[1].absoluteString.contains("/children/device/child-b/chat/"))
+    }
+}
+
+private enum ChatWebSocketServiceTestError: Error {
+    case sample
+}
+
+private final class ChatWebSocketTaskFactoryMock: ChatWebSocketTaskCreating {
+    private(set) var createdTasks: [ChatWebSocketTaskMock] = []
+    private(set) var createdURLs: [URL] = []
+
+    func makeTask(url: URL) -> ChatWebSocketTasking {
+        let task = ChatWebSocketTaskMock()
+        createdTasks.append(task)
+        createdURLs.append(url)
+        return task
+    }
+}
+
+private final class ChatReconnectSchedulerMock {
+    private(set) var scheduledItems: [DispatchWorkItem] = []
+
+    func schedule(after _: TimeInterval, item: DispatchWorkItem) {
+        scheduledItems.append(item)
+    }
+}
+
+private final class ChatWebSocketTaskMock: ChatWebSocketTasking {
+    private var completionHandler: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
+
+    private(set) var resumeCallCount = 0
+    private(set) var cancelCallCount = 0
+
+    func resume() {
+        resumeCallCount += 1
+    }
+
+    func cancel(with _: URLSessionWebSocketTask.CloseCode, reason _: Data?) {
+        cancelCallCount += 1
+    }
+
+    func receive(
+        completionHandler: @Sendable @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void
+    ) {
+        self.completionHandler = completionHandler
+    }
+
+    func complete(with result: Result<URLSessionWebSocketTask.Message, Error>) {
+        completionHandler?(result)
+    }
 }
 
 private func expectedGeoSummaryTime(for date: Date) -> String {

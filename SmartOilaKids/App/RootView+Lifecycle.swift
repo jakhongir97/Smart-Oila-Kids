@@ -1,9 +1,25 @@
 import SwiftUI
 import UIKit
 
+enum RootLocalServiceRuntime {
+    static func shouldRunChildServices(
+        debugRoute: DebugRoute?,
+        hasAuthenticatedSession: Bool
+    ) -> Bool {
+        if debugRoute == .main {
+            return true
+        }
+
+        return debugRoute == nil && hasAuthenticatedSession
+    }
+}
+
 extension RootView {
     var shouldRunLocalChildServices: Bool {
-        AppRuntime.debugRoute == .main
+        RootLocalServiceRuntime.shouldRunChildServices(
+            debugRoute: AppRuntime.debugRoute,
+            hasAuthenticatedSession: sessionStore.hasAuthenticatedSession
+        )
     }
 
     func handleAppear() {
