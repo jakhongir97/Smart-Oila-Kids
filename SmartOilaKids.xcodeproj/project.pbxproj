@@ -279,20 +279,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		705E1A2B3C4D5E6F708192B1 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = D7FAB55786594D5A927B96E4;
-			remoteInfo = SmartOilaKidsUsageReportExtension;
-		};
-		705E1A2B3C4D5E6F708192B2 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = FC18D17BD5B7480387B00D20;
-			remoteInfo = SmartOilaKidsScheduleMonitorExtension;
-		};
 		F1A0B1C2D3E4F50617283941 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
@@ -1693,7 +1679,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
@@ -1743,7 +1729,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
