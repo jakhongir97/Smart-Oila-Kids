@@ -37,9 +37,9 @@ struct GeoPermissionChecklistStageView: View {
                     title: L10n.tr("common.next"),
                     background: AppColors.accentGreen,
                     trailingArrow: true,
-                    disabled: !manager.allChecklistSatisfied
+                    disabled: !manager.onboardingChecklistSatisfied
                 ) {
-                    guard manager.allChecklistSatisfied else { return }
+                    guard manager.onboardingChecklistSatisfied else { return }
                     onContinue()
                 }
                 .padding(.horizontal, 20)
@@ -52,7 +52,7 @@ struct GeoPermissionChecklistStageView: View {
     }
 
     private func permissionRow(requirement: PermissionRequirement) -> some View {
-        let isOn = manager.isSatisfied(requirement)
+        let isOn = manager.isOnboardingSatisfied(requirement)
         let isInteractive = manager.isInteractive(requirement)
         let borderColor = isOn ? AppColors.accentGreen : AppColors.neutral200
         let toggleBinding = permissionBinding(for: requirement)
@@ -65,7 +65,7 @@ struct GeoPermissionChecklistStageView: View {
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
 
-                Text(manager.statusText(for: requirement))
+                Text(manager.onboardingStatusText(for: requirement))
                     .font(AppTypography.unbounded(10, weight: .regular))
                     .foregroundStyle(isOn ? AppColors.accentGreen : AppColors.textSecondary)
                     .lineLimit(2)
@@ -102,7 +102,7 @@ struct GeoPermissionChecklistStageView: View {
 
     private func permissionBinding(for requirement: PermissionRequirement) -> Binding<Bool> {
         Binding(
-            get: { manager.isSatisfied(requirement) },
+            get: { manager.isOnboardingSatisfied(requirement) },
             set: { newValue in
                 AppHaptics.tap()
                 manager.handleToggleChange(for: requirement, isEnabled: newValue)

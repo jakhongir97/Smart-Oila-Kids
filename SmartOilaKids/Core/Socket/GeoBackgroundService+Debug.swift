@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 
 extension GeoBackgroundService {
@@ -6,14 +7,24 @@ extension GeoBackgroundService {
         endpoint: String? = nil,
         lastPayload: String? = nil,
         lastError: String? = nil,
-        reconnectCount: Int? = nil
+        reconnectCount: Int? = nil,
+        lastLatitude: Double? = nil,
+        lastLongitude: Double? = nil,
+        lastLocationAt: Date? = nil,
+        lastHorizontalAccuracy: Double? = nil,
+        recordEvent: Bool = true
     ) {
         updateDebugSnapshot(
             status: status?.rawValue,
             endpoint: endpoint,
             lastPayload: lastPayload,
             lastError: lastError,
-            reconnectCount: reconnectCount
+            reconnectCount: reconnectCount,
+            lastLatitude: lastLatitude,
+            lastLongitude: lastLongitude,
+            lastLocationAt: lastLocationAt,
+            lastHorizontalAccuracy: lastHorizontalAccuracy,
+            recordEvent: recordEvent
         )
     }
 
@@ -22,7 +33,12 @@ extension GeoBackgroundService {
         endpoint: String? = nil,
         lastPayload: String? = nil,
         lastError: String? = nil,
-        reconnectCount: Int? = nil
+        reconnectCount: Int? = nil,
+        lastLatitude: Double? = nil,
+        lastLongitude: Double? = nil,
+        lastLocationAt: Date? = nil,
+        lastHorizontalAccuracy: Double? = nil,
+        recordEvent: Bool = true
     ) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -43,6 +59,18 @@ extension GeoBackgroundService {
             if let reconnectCount {
                 snapshot.reconnectCount = reconnectCount
             }
+            if let lastLatitude {
+                snapshot.lastLatitude = lastLatitude
+            }
+            if let lastLongitude {
+                snapshot.lastLongitude = lastLongitude
+            }
+            if let lastLocationAt {
+                snapshot.lastLocationAt = lastLocationAt
+            }
+            if let lastHorizontalAccuracy {
+                snapshot.lastHorizontalAccuracy = lastHorizontalAccuracy
+            }
             self.setDebugSnapshot(snapshot)
 
             let currentDSN = self.state.currentDSN ?? "-"
@@ -53,10 +81,25 @@ extension GeoBackgroundService {
                     dsn: currentDSN,
                     lastPayload: snapshot.lastPayload,
                     lastError: snapshot.lastError,
-                    reconnectCount: snapshot.reconnectCount
+                    reconnectCount: snapshot.reconnectCount,
+                    lastLatitude: snapshot.lastLatitude,
+                    lastLongitude: snapshot.lastLongitude,
+                    lastLocationAt: snapshot.lastLocationAt,
+                    lastHorizontalAccuracy: snapshot.lastHorizontalAccuracy,
+                    recordEvent: recordEvent
                 )
             }
         }
+    }
+
+    func updateLocationDebugSnapshot(for location: CLLocation, recordEvent: Bool = false) {
+        updateDebugSnapshot(
+            lastLatitude: location.coordinate.latitude,
+            lastLongitude: location.coordinate.longitude,
+            lastLocationAt: location.timestamp,
+            lastHorizontalAccuracy: location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil,
+            recordEvent: recordEvent
+        )
     }
 
     func debugLog(_ message: String) {

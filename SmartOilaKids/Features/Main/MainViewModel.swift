@@ -14,6 +14,7 @@ final class MainViewModel: ObservableObject {
     @Published private(set) var unreadNotificationCount = 0
     @Published private(set) var recentDeviceControlItems: [PushInboxItem] = []
     @Published private(set) var recentMediaItems: [PushInboxItem] = []
+    var isRefreshingDeviceStatus = false
 
     init(
         sosService: SOSServicing,

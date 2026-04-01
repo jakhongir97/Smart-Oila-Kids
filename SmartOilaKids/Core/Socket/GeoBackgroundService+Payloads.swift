@@ -17,6 +17,7 @@ extension GeoBackgroundService {
     func sendLocation(_ location: CLLocation) {
         guard let dsn = state.currentDSN else { return }
         debugLog("Sending location lat=\(location.coordinate.latitude), lon=\(location.coordinate.longitude)")
+        updateLocationDebugSnapshot(for: location)
         do {
             let serialized = try payloadEncoder.encodeLocation(location, dsn: dsn)
             sendSerializedPayload(serialized.text, summary: serialized.summary)

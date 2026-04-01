@@ -1781,6 +1781,7 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
 
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.location, in: satisfied))
         XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.location, in: makePermissionSnapshot(location: .authorizedWhenInUse)))
+        XCTAssertTrue(PermissionChecklistEvaluator.isOnboardingSatisfied(.location, in: makePermissionSnapshot(location: .authorizedWhenInUse)))
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.microphone, in: satisfied))
         XCTAssertFalse(PermissionChecklistEvaluator.isSatisfied(.microphone, in: makePermissionSnapshot(microphone: .denied)))
         XCTAssertTrue(PermissionChecklistEvaluator.isSatisfied(.usageStats, in: satisfied))
@@ -1820,6 +1821,10 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
         XCTAssertEqual(
             PermissionChecklistEvaluator.statusText(for: .location, in: makePermissionSnapshot(location: .authorizedWhenInUse)),
             L10n.tr("permissions.status_location_always_required")
+        )
+        XCTAssertEqual(
+            PermissionChecklistEvaluator.onboardingStatusText(for: .location, in: makePermissionSnapshot(location: .authorizedWhenInUse)),
+            L10n.tr("permissions.status_granted")
         )
         XCTAssertEqual(
             PermissionChecklistEvaluator.primaryActionTitle(for: .location, in: makePermissionSnapshot(location: .authorizedWhenInUse)),
@@ -1918,6 +1923,11 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
         let satisfiedExceptUsageStats = makePermissionSnapshot(displayCapture: .ready, screenTime: .denied)
 
         XCTAssertTrue(PermissionChecklistEvaluator.allChecklistSatisfied(in: satisfiedExceptUsageStats))
+        XCTAssertTrue(
+            PermissionChecklistEvaluator.onboardingChecklistSatisfied(
+                in: makePermissionSnapshot(location: .authorizedWhenInUse, displayCapture: .ready, screenTime: .denied)
+            )
+        )
         XCTAssertTrue(PermissionChecklistEvaluator.mediaReadinessSatisfied(in: satisfiedExceptUsageStats))
         XCTAssertEqual(
             PermissionChecklistEvaluator.mediaReadinessMessage(in: satisfiedExceptUsageStats),
@@ -3932,6 +3942,244 @@ final class SettingsDiagnosticsValueMapperTests: XCTestCase {
         XCTAssertEqual(SettingsDiagnosticsValueMapper.backgroundRefreshStatus(.denied), "denied")
         XCTAssertEqual(SettingsDiagnosticsValueMapper.backgroundRefreshStatus(.restricted), "restricted")
     }
+
+    func testGeoTrackingReadinessReflectsLinkingAndPermissionState() {
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+                dsn: nil,
+                locationAuthorizationStatus: .authorizedAlways
+            ),
+            .notLinked
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+                dsn: " - ",
+                locationAuthorizationStatus: .authorizedAlways
+            ),
+            .notLinked
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+                dsn: "child-dsn",
+                locationAuthorizationStatus: .authorizedAlways
+            ),
+            .backgroundReady
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+                dsn: "child-dsn",
+                locationAuthorizationStatus: .authorizedWhenInUse
+            ),
+            .foregroundOnly
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+                dsn: "child-dsn",
+                locationAuthorizationStatus: .notDetermined
+            ),
+            .notAuthorized
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+                dsn: "child-dsn",
+                locationAuthorizationStatus: .denied
+            ),
+            .notAuthorized
+        )
+    }
+
+    func testGeoFormattingHelpersExposeCoordinateAccuracyAndAge() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 7, minute: 10, second: 5)
+
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoCoordinates(latitude: 41.302468, longitude: 69.250246),
+            "41.302468, 69.250246"
+        )
+        XCTAssertEqual(SettingsDiagnosticsValueMapper.geoCoordinates(latitude: nil, longitude: 69.250246), "-")
+        XCTAssertEqual(SettingsDiagnosticsValueMapper.geoAccuracy(12.34), "12.3 m")
+        XCTAssertEqual(SettingsDiagnosticsValueMapper.geoAccuracy(150.8), "151 m")
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoFixAge(
+                since: date,
+                now: date.addingTimeInterval(125)
+            ),
+            "2m ago"
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoParentVisibilityStatus("checking"),
+            L10n.tr("diagnostics.geo_parent_visibility_value_checking")
+        )
+        XCTAssertEqual(SettingsDiagnosticsValueMapper.geoFixAge(since: nil), "-")
+    }
+
+    func testGeoSettingsSummaryAndBadgeReflectReadinessAndFixFreshness() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 7, minute: 10, second: 5)
+
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsSummary(
+                readiness: .backgroundReady,
+                lastLocationAt: date,
+                now: date.addingTimeInterval(30)
+            ),
+            "Geo: \(L10n.tr("diagnostics.geo_readiness_value_background_ready")) • Fix 30s ago"
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsSummary(
+                readiness: .foregroundOnly,
+                lastLocationAt: nil
+            ),
+            "Geo: \(L10n.tr("diagnostics.geo_readiness_value_foreground_only")) • No fix yet"
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsSummary(
+                readiness: .notAuthorized,
+                lastLocationAt: nil
+            ),
+            "Geo: \(L10n.tr("diagnostics.geo_readiness_value_not_authorized"))"
+        )
+
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsBadgeState(
+                readiness: .backgroundReady,
+                lastLocationAt: date,
+                now: date.addingTimeInterval(120)
+            ),
+            .live
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsBadgeState(
+                readiness: .backgroundReady,
+                lastLocationAt: date,
+                now: date.addingTimeInterval(600)
+            ),
+            .stale
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsBadgeState(
+                readiness: .backgroundReady,
+                lastLocationAt: nil
+            ),
+            .waitingForFix
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsBadgeText(.foregroundOnly),
+            L10n.tr("diagnostics.geo_readiness_badge_foreground_only")
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.geoSettingsBadgeText(.live),
+            L10n.tr("settings.diagnostics_geo_badge_live")
+        )
+    }
+
+    func testMainGeoTrackingSummaryAndDetailExposeParentVisibleState() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 7, minute: 10, second: 5)
+
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingSummary(
+                readiness: .backgroundReady,
+                lastLocationAt: date,
+                now: date.addingTimeInterval(45)
+            ),
+            "\(L10n.tr("diagnostics.geo_readiness_value_background_ready")) • Fix 45s ago"
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingSummary(
+                readiness: .notLinked,
+                lastLocationAt: nil
+            ),
+            L10n.tr("diagnostics.geo_readiness_value_not_linked")
+        )
+
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingDetail(
+                readiness: .backgroundReady,
+                parentLatitude: 41.302468,
+                parentLongitude: 69.250246,
+                localLatitude: nil,
+                localLongitude: nil
+            ),
+            "Parent sees: 41.302468, 69.250246"
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingDetail(
+                readiness: .foregroundOnly,
+                parentLatitude: nil,
+                parentLongitude: nil,
+                localLatitude: 41.302468,
+                localLongitude: 69.250246
+            ),
+            "Phone fix: 41.302468, 69.250246 • waiting for parent-visible update"
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingDetail(
+                readiness: .notAuthorized,
+                parentLatitude: nil,
+                parentLongitude: nil,
+                localLatitude: nil,
+                localLongitude: nil
+            ),
+            L10n.tr("main.parent_tracking_not_authorized")
+        )
+    }
+
+    func testMainGeoTrackingVerificationNoteAndActionReflectParentCheckState() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 8, minute: 20, second: 0)
+
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingVerificationNote(
+                parentVisibilityStatus: "visible",
+                checkedAt: date,
+                now: date.addingTimeInterval(25)
+            ),
+            "Parent-visible location verified 25s ago."
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingVerificationNote(
+                parentVisibilityStatus: "not_visible",
+                checkedAt: date,
+                now: date.addingTimeInterval(125)
+            ),
+            "Last check 2m ago has not reached the parent yet."
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingVerificationNote(
+                parentVisibilityStatus: "checking",
+                checkedAt: nil
+            ),
+            L10n.tr("main.parent_tracking_checking")
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingActionTitle(
+                readiness: .backgroundReady,
+                locationActionTitle: nil,
+                parentVisibilityStatus: "idle"
+            ),
+            L10n.tr("main.parent_tracking_action_check_now")
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingActionTitle(
+                readiness: .backgroundReady,
+                locationActionTitle: nil,
+                parentVisibilityStatus: "checking"
+            ),
+            L10n.tr("main.parent_tracking_action_checking")
+        )
+        XCTAssertEqual(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingActionTitle(
+                readiness: .notAuthorized,
+                locationActionTitle: L10n.tr("permissions.action_allow_location_always"),
+                parentVisibilityStatus: "idle"
+            ),
+            L10n.tr("permissions.action_allow_location_always")
+        )
+        XCTAssertNil(
+            SettingsDiagnosticsValueMapper.mainGeoTrackingActionTitle(
+                readiness: .notLinked,
+                locationActionTitle: nil,
+                parentVisibilityStatus: "idle"
+            )
+        )
+    }
 }
 
 @MainActor
@@ -3940,11 +4188,13 @@ final class RuntimeDiagnosticsHistoryTests: XCTestCase {
         super.setUp()
         RuntimeDiagnosticsCenter.shared.resetLifecycle()
         RuntimeDiagnosticsCenter.shared.resetPush()
+        RuntimeDiagnosticsCenter.shared.resetGeo()
     }
 
     override func tearDown() {
         RuntimeDiagnosticsCenter.shared.resetLifecycle()
         RuntimeDiagnosticsCenter.shared.resetPush()
+        RuntimeDiagnosticsCenter.shared.resetGeo()
         super.tearDown()
     }
 
@@ -4009,6 +4259,10 @@ final class RuntimeDiagnosticsHistoryTests: XCTestCase {
                 lastPayload: "location \(index)",
                 lastError: index.isMultiple(of: 2) ? "-" : "socket not connected",
                 reconnectCount: index,
+                lastLatitude: 41.300000 + (Double(index) * 0.001),
+                lastLongitude: 69.250000 + (Double(index) * 0.001),
+                lastLocationAt: date.addingTimeInterval(-30),
+                lastHorizontalAccuracy: Double(index) + 0.5,
                 eventDate: date
             )
         }
@@ -4016,13 +4270,71 @@ final class RuntimeDiagnosticsHistoryTests: XCTestCase {
         let snapshot = RuntimeDiagnosticsCenter.shared.geo
 
         XCTAssertEqual(snapshot.reconnectCount, 9)
+        XCTAssertNotNil(snapshot.lastLatitude)
+        XCTAssertNotNil(snapshot.lastLongitude)
+        XCTAssertEqual(
+            snapshot.lastLocationAt,
+            makeUTCDate(year: 2026, month: 3, day: 12, hour: 7, minute: 8, second: 30)
+        )
+        XCTAssertNotNil(snapshot.lastHorizontalAccuracy)
+        XCTAssertEqual(snapshot.lastLatitude ?? 0, 41.309000, accuracy: 0.000001)
+        XCTAssertEqual(snapshot.lastLongitude ?? 0, 69.259000, accuracy: 0.000001)
+        XCTAssertEqual(snapshot.lastHorizontalAccuracy ?? 0, 9.5, accuracy: 0.0001)
         XCTAssertEqual(snapshot.recentEvents.count, 8)
         XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("location 0") }))
         XCTAssertFalse(snapshot.recentEvents.contains(where: { $0.contains("location 1") }))
         XCTAssertTrue(snapshot.recentEvents.first?.contains("location 2") ?? false)
         XCTAssertTrue(snapshot.recentEvents.last?.contains("location 9") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("coord=41.309000,69.259000") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("accuracy=9.5m") ?? false)
         XCTAssertTrue(snapshot.recentEvents.last?.contains("retries=9") ?? false)
         XCTAssertTrue(snapshot.recentEvents.last?.contains("error=socket not connected") ?? false)
+    }
+
+    func testGeoSnapshotCanRefreshLocationMetadataWithoutAppendingHistory() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 7, minute: 42, second: 11)
+
+        RuntimeDiagnosticsCenter.shared.updateGeo(
+            status: "connected",
+            dsn: "child-geo",
+            lastLatitude: 41.302468,
+            lastLongitude: 69.250246,
+            lastLocationAt: date,
+            lastHorizontalAccuracy: 12.3,
+            recordEvent: false,
+            eventDate: date
+        )
+
+        let snapshot = RuntimeDiagnosticsCenter.shared.geo
+
+        XCTAssertNotNil(snapshot.lastLatitude)
+        XCTAssertNotNil(snapshot.lastLongitude)
+        XCTAssertEqual(snapshot.lastLocationAt, date)
+        XCTAssertNotNil(snapshot.lastHorizontalAccuracy)
+        XCTAssertEqual(snapshot.lastLatitude ?? 0, 41.302468, accuracy: 0.000001)
+        XCTAssertEqual(snapshot.lastLongitude ?? 0, 69.250246, accuracy: 0.000001)
+        XCTAssertEqual(snapshot.lastHorizontalAccuracy ?? 0, 12.3, accuracy: 0.0001)
+        XCTAssertTrue(snapshot.recentEvents.isEmpty)
+    }
+
+    func testGeoSnapshotStoresParentVisibilityVerification() {
+        let date = makeUTCDate(year: 2026, month: 3, day: 12, hour: 8, minute: 2, second: 10)
+
+        RuntimeDiagnosticsCenter.shared.updateGeoParentVisibility(
+            status: "visible",
+            latitude: 41.302468,
+            longitude: 69.250246,
+            checkedAt: date
+        )
+
+        let snapshot = RuntimeDiagnosticsCenter.shared.geo
+
+        XCTAssertEqual(snapshot.parentVisibilityStatus, "visible")
+        XCTAssertEqual(snapshot.parentVisibleLatitude ?? 0, 41.302468, accuracy: 0.000001)
+        XCTAssertEqual(snapshot.parentVisibleLongitude ?? 0, 69.250246, accuracy: 0.000001)
+        XCTAssertEqual(snapshot.parentVisibilityCheckedAt, date)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("parent=visible") ?? false)
+        XCTAssertTrue(snapshot.recentEvents.last?.contains("parent_coord=41.302468,69.250246") ?? false)
     }
 }
 
@@ -5400,7 +5712,7 @@ final class GeoBackgroundServiceTests: XCTestCase {
         defer { cleanupGeoService(service) }
 
         XCTAssertTrue(service.shouldStartLocationUpdates(for: .authorizedAlways))
-        XCTAssertFalse(service.shouldStartLocationUpdates(for: .authorizedWhenInUse))
+        XCTAssertTrue(service.shouldStartLocationUpdates(for: .authorizedWhenInUse))
         XCTAssertFalse(service.shouldStartLocationUpdates(for: .notDetermined))
         XCTAssertFalse(service.shouldStartLocationUpdates(for: .denied))
     }
@@ -5412,7 +5724,7 @@ final class GeoBackgroundServiceTests: XCTestCase {
         XCTAssertNil(service.locationAuthorizationFailureReason(for: .authorizedAlways))
         XCTAssertEqual(
             service.locationAuthorizationFailureReason(for: .authorizedWhenInUse),
-            "Location Always authorization is required for background tracking"
+            "Location Always authorization is required for background tracking; foreground tracking works only while the app is open"
         )
         XCTAssertEqual(
             service.locationAuthorizationFailureReason(for: .notDetermined),
@@ -5422,6 +5734,19 @@ final class GeoBackgroundServiceTests: XCTestCase {
             service.locationAuthorizationFailureReason(for: .denied),
             "Location access is unavailable for background tracking"
         )
+    }
+
+    func testDiagnosticsLocationPulseRequiresRunningService() {
+        let service = makeGeoBackgroundServiceForTests()
+        defer { cleanupGeoService(service) }
+
+        service.state.currentDSN = "child-dsn"
+
+        XCTAssertFalse(service.triggerDiagnosticsLocationPulse())
+        waitForMainQueue()
+
+        XCTAssertEqual(service.debugStatus, GeoConnectionStatus.stopped.rawValue)
+        XCTAssertEqual(service.debugLastError, "geo service is not running")
     }
 
     func testPendingDebugSnapshotUpdateDoesNotRetainService() {
@@ -5990,20 +6315,20 @@ final class AppRuntimeDefaultsTests: XCTestCase {
 }
 
 final class RootLocalServiceRuntimeTests: XCTestCase {
-    func testRegularAuthenticatedFlowRunsChildServices() {
+    func testRegularLinkedChildFlowRunsChildServices() {
         XCTAssertTrue(
             RootLocalServiceRuntime.shouldRunChildServices(
                 debugRoute: nil,
-                hasAuthenticatedSession: true
+                hasLinkedChildDevice: true
             )
         )
     }
 
-    func testRegularUnauthenticatedFlowDoesNotRunChildServices() {
+    func testRegularUnlinkedChildFlowDoesNotRunChildServices() {
         XCTAssertFalse(
             RootLocalServiceRuntime.shouldRunChildServices(
                 debugRoute: nil,
-                hasAuthenticatedSession: false
+                hasLinkedChildDevice: false
             )
         )
     }
@@ -6012,13 +6337,13 @@ final class RootLocalServiceRuntimeTests: XCTestCase {
         XCTAssertTrue(
             RootLocalServiceRuntime.shouldRunChildServices(
                 debugRoute: .main,
-                hasAuthenticatedSession: false
+                hasLinkedChildDevice: false
             )
         )
         XCTAssertFalse(
             RootLocalServiceRuntime.shouldRunChildServices(
                 debugRoute: .settings,
-                hasAuthenticatedSession: true
+                hasLinkedChildDevice: true
             )
         )
     }

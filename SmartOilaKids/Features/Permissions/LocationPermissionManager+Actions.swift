@@ -24,7 +24,9 @@ extension LocationPermissionManager {
         switch locationAuthorizationStatus {
         case .authorizedAlways:
             break
-        case .notDetermined, .authorizedWhenInUse:
+        case .notDetermined:
+            requestWhenInUseLocationAuthorization()
+        case .authorizedWhenInUse:
             requestAlwaysLocationAuthorization()
         case .denied, .restricted:
             openAppSettings()

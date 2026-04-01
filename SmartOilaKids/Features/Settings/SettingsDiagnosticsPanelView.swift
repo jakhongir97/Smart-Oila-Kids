@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -11,6 +12,10 @@ struct DiagnosticsPanelView: View {
     @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
     @State private var growthMetrics = GrowthMetricsSnapshot.empty
     @State private var diagnosticsSharePayload: DiagnosticsSharePayload?
+    @State private var now = Date()
+
+    private let geoFreshnessTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+    private let geoParentVisibilityVerificationService = SettingsGeoParentVisibilityVerificationService()
 
     var body: some View {
         AppNavigationContainer {
@@ -39,6 +44,13 @@ struct DiagnosticsPanelView: View {
                     SettingsDiagnosticsSectionCard(
                         title: L10n.tr("diagnostics.section_growth"),
                         rows: growthRows
+                    )
+
+                    SettingsDiagnosticsGeoReadinessCard(
+                        readiness: geoTrackingReadiness,
+                        permissionManager: permissionManager,
+                        dsn: geoTrackingDSN,
+                        onSendGeoNow: verifyGeoDeliveryForParent
                     )
 
                     SettingsDiagnosticsSectionCard(
@@ -125,6 +137,9 @@ struct DiagnosticsPanelView: View {
             .onAppear {
                 permissionManager.refreshStatuses()
                 refreshGrowthMetrics()
+            }
+            .onReceive(geoFreshnessTimer) { date in
+                now = date
             }
             .sheet(item: $diagnosticsSharePayload) { payload in
                 ActivityShareSheet(activityItems: payload.activityItems)
@@ -234,8 +249,46 @@ struct DiagnosticsPanelView: View {
 
     private var geoRows: [(String, String)] {
         [
+            (
+                L10n.tr("diagnostics.geo_readiness"),
+                SettingsDiagnosticsValueMapper.geoTrackingReadinessValue(geoTrackingReadiness)
+            ),
             (L10n.tr("diagnostics.state"), diagnostics.geo.status),
             (L10n.tr("diagnostics.geo_dsn"), diagnostics.geo.dsn),
+            (
+                L10n.tr("diagnostics.geo_coordinates"),
+                SettingsDiagnosticsValueMapper.geoCoordinates(
+                    latitude: diagnostics.geo.lastLatitude,
+                    longitude: diagnostics.geo.lastLongitude
+                )
+            ),
+            (
+                L10n.tr("diagnostics.geo_accuracy"),
+                SettingsDiagnosticsValueMapper.geoAccuracy(diagnostics.geo.lastHorizontalAccuracy)
+            ),
+            (
+                L10n.tr("diagnostics.geo_last_fix"),
+                SettingsDiagnosticsValueMapper.timestamp(diagnostics.geo.lastLocationAt)
+            ),
+            (
+                L10n.tr("diagnostics.geo_fix_age"),
+                SettingsDiagnosticsValueMapper.geoFixAge(since: diagnostics.geo.lastLocationAt, now: now)
+            ),
+            (
+                L10n.tr("diagnostics.geo_parent_visibility"),
+                SettingsDiagnosticsValueMapper.geoParentVisibilityStatus(diagnostics.geo.parentVisibilityStatus)
+            ),
+            (
+                L10n.tr("diagnostics.geo_parent_coordinates"),
+                SettingsDiagnosticsValueMapper.geoCoordinates(
+                    latitude: diagnostics.geo.parentVisibleLatitude,
+                    longitude: diagnostics.geo.parentVisibleLongitude
+                )
+            ),
+            (
+                L10n.tr("diagnostics.geo_parent_checked"),
+                SettingsDiagnosticsValueMapper.timestamp(diagnostics.geo.parentVisibilityCheckedAt)
+            ),
             (L10n.tr("diagnostics.endpoint"), diagnostics.geo.endpoint),
             (L10n.tr("diagnostics.last_payload"), diagnostics.geo.lastPayload),
             (L10n.tr("diagnostics.last_error"), diagnostics.geo.lastError),
@@ -246,6 +299,23 @@ struct DiagnosticsPanelView: View {
             ),
             (L10n.tr("diagnostics.updated"), SettingsDiagnosticsValueMapper.timestamp(diagnostics.geo.updatedAt))
         ]
+    }
+
+    private var geoTrackingReadiness: SettingsDiagnosticsValueMapper.GeoTrackingReadiness {
+        SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+            dsn: geoTrackingDSN,
+            locationAuthorizationStatus: permissionManager.locationAuthorizationStatus
+        )
+    }
+
+    private var geoTrackingDSN: String? {
+        let sessionDSN = sessionStore.dsn?.trimmedNonEmpty
+        if sessionDSN != nil {
+            return sessionDSN
+        }
+
+        let diagnosticsDSN = diagnostics.geo.dsn.trimmedNonEmpty
+        return diagnosticsDSN == "-" ? nil : diagnosticsDSN
     }
 
     private var chatRows: [(String, String)] {
@@ -478,6 +548,175 @@ struct DiagnosticsPanelView: View {
             return true
         }
         return changedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
+    }
+
+    private func verifyGeoDeliveryForParent() {
+        guard let dsn = geoTrackingDSN?.trimmedNonEmpty else { return }
+        geoParentVisibilityVerificationService.triggerParentVisibilityCheck(dsn: dsn)
+    }
+}
+
+private struct SettingsDiagnosticsGeoReadinessCard: View {
+    let readiness: SettingsDiagnosticsValueMapper.GeoTrackingReadiness
+    @ObservedObject var permissionManager: LocationPermissionManager
+    let dsn: String?
+    let onSendGeoNow: () -> Void
+
+    var body: some View {
+        let accentColor = badgeAccent
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.tr("diagnostics.geo_readiness_title"))
+                        .font(AppTypography.unbounded(14, weight: .semibold))
+                        .foregroundStyle(AppColors.black)
+
+                    Text(readinessMessage)
+                        .font(AppTypography.unbounded(11, weight: .regular))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineSpacing(2)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(readinessBadgeText)
+                    .font(AppTypography.unbounded(9, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(accentColor.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            if let locationActionTitle = locationActionTitle {
+                actionButton(
+                    title: locationActionTitle,
+                    accent: actionAccent
+                ) {
+                    permissionManager.performAction(for: .location)
+                }
+            }
+
+            if let dsn {
+                actionButton(
+                    title: L10n.tr("diagnostics.geo_restart"),
+                    accent: AppColors.primaryPurple
+                ) {
+                    let didRestart = GeoBackgroundService.shared.restart(using: dsn)
+                    if !didRestart {
+                        RuntimeDiagnosticsCenter.shared.updateGeo(
+                            status: GeoConnectionStatus.stopped.rawValue,
+                            lastError: L10n.tr("diagnostics.geo_restart_unavailable")
+                        )
+                    }
+                }
+            }
+
+            if canSendGeoPulse {
+                actionButton(
+                    title: L10n.tr("diagnostics.geo_send_now"),
+                    accent: AppColors.accentGreen
+                ) {
+                    onSendGeoNow()
+                }
+            }
+        }
+        .padding(14)
+        .background(AppColors.neutral100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accentColor.opacity(0.35), lineWidth: 2)
+        }
+    }
+
+    private var readinessMessage: String {
+        switch readiness {
+        case .backgroundReady:
+            return L10n.tr("diagnostics.geo_readiness_message_background_ready")
+        case .foregroundOnly:
+            return L10n.tr("diagnostics.geo_readiness_message_foreground_only")
+        case .notAuthorized:
+            return L10n.tr("diagnostics.geo_readiness_message_not_authorized")
+        case .notLinked:
+            return L10n.tr("diagnostics.geo_readiness_message_not_linked")
+        }
+    }
+
+    private var readinessBadgeText: String {
+        switch readiness {
+        case .backgroundReady:
+            return L10n.tr("diagnostics.geo_readiness_badge_background_ready")
+        case .foregroundOnly:
+            return L10n.tr("diagnostics.geo_readiness_badge_foreground_only")
+        case .notAuthorized:
+            return L10n.tr("diagnostics.geo_readiness_badge_action_needed")
+        case .notLinked:
+            return L10n.tr("diagnostics.geo_readiness_badge_not_linked")
+        }
+    }
+
+    private var badgeAccent: Color {
+        switch readiness {
+        case .backgroundReady:
+            return AppColors.accentGreen
+        case .foregroundOnly, .notLinked:
+            return AppColors.primaryPurple
+        case .notAuthorized:
+            return AppColors.dangerRed
+        }
+    }
+
+    private var locationActionTitle: String? {
+        switch readiness {
+        case .backgroundReady, .notLinked:
+            return nil
+        case .foregroundOnly, .notAuthorized:
+            return permissionManager.primaryActionTitle(for: .location)
+        }
+    }
+
+    private var actionAccent: Color {
+        switch readiness {
+        case .backgroundReady:
+            return AppColors.accentGreen
+        case .foregroundOnly, .notLinked:
+            return AppColors.primaryPurple
+        case .notAuthorized:
+            return AppColors.dangerRed
+        }
+    }
+
+    private var canSendGeoPulse: Bool {
+        guard dsn?.trimmedNonEmpty != nil else { return false }
+
+        switch readiness {
+        case .backgroundReady, .foregroundOnly:
+            return true
+        case .notAuthorized, .notLinked:
+            return false
+        }
+    }
+
+    @ViewBuilder
+    private func actionButton(
+        title: String,
+        accent: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(title) {
+            AppHaptics.tap()
+            action()
+        }
+        .font(AppTypography.unbounded(10, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(accent)
+        .clipShape(Capsule())
     }
 }
 

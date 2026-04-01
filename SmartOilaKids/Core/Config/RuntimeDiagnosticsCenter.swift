@@ -29,6 +29,10 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         push = PushDiagnosticsSnapshot()
     }
 
+    func resetGeo() {
+        geo = GeoDiagnosticsSnapshot()
+    }
+
     func updateLifecycle(
         scenePhase: String? = nil,
         applicationState: String? = nil,
@@ -162,6 +166,11 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         lastPayload: String? = nil,
         lastError: String? = nil,
         reconnectCount: Int? = nil,
+        lastLatitude: Double? = nil,
+        lastLongitude: Double? = nil,
+        lastLocationAt: Date? = nil,
+        lastHorizontalAccuracy: Double? = nil,
+        recordEvent: Bool = true,
         eventDate: Date = Date()
     ) {
         if let status {
@@ -182,19 +191,79 @@ final class RuntimeDiagnosticsCenter: ObservableObject {
         if let reconnectCount {
             geo.reconnectCount = reconnectCount
         }
+        if let lastLatitude {
+            geo.lastLatitude = lastLatitude
+        }
+        if let lastLongitude {
+            geo.lastLongitude = lastLongitude
+        }
+        if let lastLocationAt {
+            geo.lastLocationAt = lastLocationAt
+        }
+        if let lastHorizontalAccuracy {
+            geo.lastHorizontalAccuracy = lastHorizontalAccuracy
+        }
         geo.updatedAt = eventDate
-        geo.recentEvents = RuntimeDiagnosticsEventHistory.append(
-            geo.recentEvents,
-            entry: RuntimeDiagnosticsEventHistory.geoEntry(
-                status: geo.status,
-                endpoint: geo.endpoint,
-                dsn: geo.dsn,
-                lastPayload: geo.lastPayload,
-                lastError: geo.lastError,
-                reconnectCount: geo.reconnectCount,
-                eventDate: eventDate
+        if recordEvent {
+            geo.recentEvents = RuntimeDiagnosticsEventHistory.append(
+                geo.recentEvents,
+                entry: RuntimeDiagnosticsEventHistory.geoEntry(
+                    status: geo.status,
+                    endpoint: geo.endpoint,
+                    dsn: geo.dsn,
+                    lastPayload: geo.lastPayload,
+                    lastError: geo.lastError,
+                    reconnectCount: geo.reconnectCount,
+                    lastLatitude: geo.lastLatitude,
+                    lastLongitude: geo.lastLongitude,
+                    lastLocationAt: geo.lastLocationAt,
+                    lastHorizontalAccuracy: geo.lastHorizontalAccuracy,
+                    parentVisibilityStatus: geo.parentVisibilityStatus,
+                    parentVisibleLatitude: geo.parentVisibleLatitude,
+                    parentVisibleLongitude: geo.parentVisibleLongitude,
+                    parentVisibilityCheckedAt: geo.parentVisibilityCheckedAt,
+                    eventDate: eventDate
+                )
             )
-        )
+        }
+    }
+
+    func updateGeoParentVisibility(
+        status: String,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        checkedAt: Date? = nil,
+        recordEvent: Bool = true,
+        eventDate: Date = Date()
+    ) {
+        geo.parentVisibilityStatus = status
+        geo.parentVisibleLatitude = latitude
+        geo.parentVisibleLongitude = longitude
+        geo.parentVisibilityCheckedAt = checkedAt
+        geo.updatedAt = eventDate
+
+        if recordEvent {
+            geo.recentEvents = RuntimeDiagnosticsEventHistory.append(
+                geo.recentEvents,
+                entry: RuntimeDiagnosticsEventHistory.geoEntry(
+                    status: geo.status,
+                    endpoint: geo.endpoint,
+                    dsn: geo.dsn,
+                    lastPayload: geo.lastPayload,
+                    lastError: geo.lastError,
+                    reconnectCount: geo.reconnectCount,
+                    lastLatitude: geo.lastLatitude,
+                    lastLongitude: geo.lastLongitude,
+                    lastLocationAt: geo.lastLocationAt,
+                    lastHorizontalAccuracy: geo.lastHorizontalAccuracy,
+                    parentVisibilityStatus: geo.parentVisibilityStatus,
+                    parentVisibleLatitude: geo.parentVisibleLatitude,
+                    parentVisibleLongitude: geo.parentVisibleLongitude,
+                    parentVisibilityCheckedAt: geo.parentVisibilityCheckedAt,
+                    eventDate: eventDate
+                )
+            )
+        }
     }
 
     func updateChat(
@@ -612,6 +681,14 @@ struct GeoDiagnosticsSnapshot {
     var lastPayload: String = "-"
     var lastError: String = "-"
     var reconnectCount: Int = 0
+    var lastLatitude: Double? = nil
+    var lastLongitude: Double? = nil
+    var lastLocationAt: Date? = nil
+    var lastHorizontalAccuracy: Double? = nil
+    var parentVisibilityStatus: String = "idle"
+    var parentVisibleLatitude: Double? = nil
+    var parentVisibleLongitude: Double? = nil
+    var parentVisibilityCheckedAt: Date? = nil
     var recentEvents: [String] = []
     var updatedAt: Date? = nil
 }
@@ -803,6 +880,14 @@ private enum RuntimeDiagnosticsEventHistory {
         lastPayload: String,
         lastError: String,
         reconnectCount: Int,
+        lastLatitude: Double?,
+        lastLongitude: Double?,
+        lastLocationAt: Date?,
+        lastHorizontalAccuracy: Double?,
+        parentVisibilityStatus: String,
+        parentVisibleLatitude: Double?,
+        parentVisibleLongitude: Double?,
+        parentVisibilityCheckedAt: Date?,
         eventDate: Date
     ) -> String? {
         let parts = [
@@ -810,6 +895,12 @@ private enum RuntimeDiagnosticsEventHistory {
             field("status", status),
             field("dsn", dsn),
             field("endpoint", endpoint),
+            coordinateField(latitude: lastLatitude, longitude: lastLongitude),
+            field("fix", lastLocationAt.map(timestamp) ?? "-"),
+            accuracyField(lastHorizontalAccuracy),
+            field("parent", parentVisibilityStatus == "idle" ? "-" : parentVisibilityStatus),
+            coordinateField(name: "parent_coord", latitude: parentVisibleLatitude, longitude: parentVisibleLongitude),
+            field("parent_checked", parentVisibilityCheckedAt.map(timestamp) ?? "-"),
             field("payload", lastPayload),
             field("error", lastError),
             countField("retries", reconnectCount)
@@ -827,8 +918,26 @@ private enum RuntimeDiagnosticsEventHistory {
         return "\(name)=\(trimmed)"
     }
 
+    private static func coordinateField(name: String = "coord", latitude: Double?, longitude: Double?) -> String? {
+        guard let latitude, let longitude else { return nil }
+        return "\(name)=\(formattedCoordinate(latitude)),\(formattedCoordinate(longitude))"
+    }
+
+    private static func accuracyField(_ value: Double?) -> String? {
+        guard let value, value >= 0 else { return nil }
+        return "accuracy=\(formattedAccuracy(value))"
+    }
+
     private static func countField(_ name: String, _ value: Int) -> String {
         "\(name)=\(value)"
+    }
+
+    private static func formattedCoordinate(_ value: Double) -> String {
+        String(format: "%.6f", value)
+    }
+
+    private static func formattedAccuracy(_ value: Double) -> String {
+        String(format: value >= 100 ? "%.0fm" : "%.1fm", value)
     }
 
     private static func timestamp(_ date: Date) -> String {

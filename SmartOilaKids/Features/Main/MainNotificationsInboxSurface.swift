@@ -45,7 +45,7 @@ struct NotificationsInboxSurface: View {
                         Group {
                             if isLoading {
                                 ProgressView()
-                                    .tint(AppColors.white)
+                                    .tint(AppColors.inverseTextPrimary)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                             } else if items.isEmpty {
                                 emptyState
@@ -83,11 +83,11 @@ struct NotificationsInboxSurface: View {
         VStack(spacing: 10) {
             Image(systemName: "bell.slash")
                 .font(.system(size: 36, weight: .regular))
-                .foregroundStyle(AppColors.white.opacity(0.82))
+                .foregroundStyle(AppColors.inverseTextSecondary)
 
             Text(L10n.tr("notifications.empty"))
                 .font(AppTypography.unbounded(13, weight: .medium))
-                .foregroundStyle(AppColors.white.opacity(0.9))
+                .foregroundStyle(AppColors.inverseTextPrimary.opacity(0.9))
                 .multilineTextAlignment(.center)
         }
     }

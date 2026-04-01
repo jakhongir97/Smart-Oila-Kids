@@ -31,6 +31,7 @@ struct SettingsAvatarSection: View {
                         } else if UIImage(named: "IconPencil") != nil {
                             Image("IconPencil")
                                 .resizable()
+                                .renderingMode(.template)
                                 .scaledToFit()
                                 .frame(width: 20, height: 20)
                                 .foregroundStyle(.white)
@@ -119,16 +120,22 @@ struct SettingsDeviceCard: View {
                 AppHaptics.tap()
                 onEdit()
             } label: {
-                if UIImage(named: "IconPencil") != nil {
-                    Image("IconPencil")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 25, height: 25)
-                } else {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(AppColors.black)
+                Group {
+                    if UIImage(named: "IconPencil") != nil {
+                        Image("IconPencil")
+                            .resizable()
+                            .renderingMode(.template)
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
+                    } else {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
                 }
+                .foregroundStyle(AppColors.inverseTextPrimary)
+                .frame(width: 38, height: 38)
+                .background(AppColors.primaryPurple)
+                .clipShape(Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(L10n.tr("settings.edit_device"))

@@ -127,6 +127,10 @@ final class SessionStore: ObservableObject {
         selectedRemoteDSN?.trimmedNonEmpty ?? dsn?.trimmedNonEmpty
     }
 
+    var hasLinkedChildDevice: Bool {
+        dsn?.trimmedNonEmpty != nil
+    }
+
     var hasAuthenticatedSession: Bool {
         apiAccessToken?.trimmedNonEmpty != nil || apiRefreshToken?.trimmedNonEmpty != nil
     }

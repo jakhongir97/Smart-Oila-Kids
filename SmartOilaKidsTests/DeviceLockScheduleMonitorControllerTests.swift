@@ -92,6 +92,43 @@ final class DeviceLockScheduleMonitorControllerTests: XCTestCase {
         XCTAssertEqual(diagnostics.last?.schedule, "22:30 - 06:45")
     }
 
+    func testApplyScheduleTranslatesBackendScheduleIntoDeviceLocalTime() throws {
+        var startedActivities: [(DeviceActivityName, DeviceActivitySchedule)] = []
+
+        let currentDate = try XCTUnwrap(
+            Calendar.autoupdatingCurrent.date(
+                from: DateComponents(year: 2026, month: 1, day: 1, hour: 17, minute: 30)
+            )
+        )
+        let controller = makeController(
+            startMonitoring: { activityName, schedule in
+                startedActivities.append((activityName, schedule))
+            },
+            clearMonitoringStore: {},
+            currentDate: { currentDate }
+        )
+
+        let schedule = try makeSchedule(start: "22:30:00", end: "06:45:00", enabled: true)
+
+        controller.applySchedule(
+            schedule,
+            dsn: "child-translated",
+            referenceLocalTime: "22:30:00"
+        )
+
+        XCTAssertEqual(
+            startedActivities.map(\.0.rawValue),
+            [
+                DeviceLockScheduleActivityIdentifier.rawValue(dsn: "child-translated", suffix: "late"),
+                DeviceLockScheduleActivityIdentifier.rawValue(dsn: "child-translated", suffix: "early")
+            ]
+        )
+        XCTAssertEqual(startedActivities.map { $0.1.intervalStart.hour }, [17, 0])
+        XCTAssertEqual(startedActivities.map { $0.1.intervalStart.minute }, [30, 0])
+        XCTAssertEqual(startedActivities.map { $0.1.intervalEnd.hour }, [23, 1])
+        XCTAssertEqual(startedActivities.map { $0.1.intervalEnd.minute }, [59, 45])
+    }
+
     func testApplyScheduleTreatsEqualStartAndEndAsAllDayLock() throws {
         var startedActivities: [(DeviceActivityName, DeviceActivitySchedule)] = []
         var diagnostics: [ScheduleDiagnostics] = []
@@ -223,6 +260,7 @@ final class DeviceLockScheduleMonitorControllerTests: XCTestCase {
         startMonitoring: DeviceLockScheduleMonitorController.StartMonitoringAction? = nil,
         stopMonitoring: DeviceLockScheduleMonitorController.StopMonitoringAction? = nil,
         clearMonitoringStore: DeviceLockScheduleMonitorController.VoidAction? = nil,
+        currentDate: DeviceLockScheduleMonitorController.CurrentDateAction? = nil,
         diagnosticsUpdater: DeviceLockScheduleMonitorController.DiagnosticsAction? = nil
     ) -> DeviceLockScheduleMonitorController {
         DeviceLockScheduleMonitorController(
@@ -230,6 +268,7 @@ final class DeviceLockScheduleMonitorControllerTests: XCTestCase {
             startMonitoring: startMonitoring ?? { _, _ in },
             stopMonitoring: stopMonitoring ?? { _ in },
             clearMonitoringStore: clearMonitoringStore ?? {},
+            currentDate: currentDate,
             diagnosticsUpdater: diagnosticsUpdater ?? { _, _, _, _, _ in }
         )
     }

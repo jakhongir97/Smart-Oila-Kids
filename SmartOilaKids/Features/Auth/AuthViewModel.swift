@@ -24,27 +24,16 @@ final class AuthViewModel: ObservableObject {
 
         do {
             let result = try await bindByParentPhone(normalizedPhone)
-
-            if result.authorizationHeader?.trimmedNonEmpty != nil {
-                let isVerified = try await authService.verifyChildBinding(
-                    dsn: result.dsn,
-                    authorizationHeader: result.authorizationHeader
-                )
-                guard isVerified else {
-                    errorText = L10n.tr("auth.verify_failed")
-                    return nil
-                }
-
-                return .completed(result)
+            let isVerified = try await authService.verifyChildBinding(
+                dsn: result.dsn,
+                authorizationHeader: result.authorizationHeader
+            )
+            guard isVerified else {
+                errorText = L10n.tr("auth.verify_failed")
+                return nil
             }
 
-            try await authService.requestParentPhoneCode(phone: normalizedPhone)
-            return .confirmationRequired(
-                AuthPhoneConfirmationContext(
-                    dsn: result.dsn,
-                    parentPhone: normalizedPhone
-                )
-            )
+            return .completed(result)
         } catch {
             errorText = NetworkError.userMessage(for: error)
         }

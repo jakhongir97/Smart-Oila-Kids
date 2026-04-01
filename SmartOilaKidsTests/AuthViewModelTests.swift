@@ -46,7 +46,7 @@ final class AuthViewModelTests: XCTestCase {
         XCTAssertEqual(authService.verifiedBindings.first?.1, "Bearer token")
     }
 
-    func testSubmitParentPhoneRequestsSMSCodeWhenLegacyBindReturnsDSNOnly() async {
+    func testSubmitParentPhoneCompletesWhenLegacyBindReturnsDSNOnly() async {
         let authService = AuthServiceSpy(
             registrationResult: AuthRegistrationResult(
                 dsn: "child-confirm",
@@ -59,19 +59,19 @@ final class AuthViewModelTests: XCTestCase {
 
         let result = await viewModel.submit(parentPhone: "+998901234567")
 
-        XCTAssertEqual(
-            result,
-            .confirmationRequired(
-                AuthPhoneConfirmationContext(
-                    dsn: "child-confirm",
-                    parentPhone: "+998901234567"
-                )
+        XCTAssertEqual(result, .completed(
+            AuthRegistrationResult(
+                dsn: "child-confirm",
+                authorizationHeader: nil,
+                refreshToken: nil
             )
-        )
+        ))
         XCTAssertNil(viewModel.errorText)
         XCTAssertFalse(viewModel.isLoading)
-        XCTAssertEqual(authService.requestedCodePhones, ["+998901234567"])
-        XCTAssertTrue(authService.verifiedBindings.isEmpty)
+        XCTAssertEqual(authService.requestedCodePhones, [])
+        XCTAssertEqual(authService.verifiedBindings.count, 1)
+        XCTAssertEqual(authService.verifiedBindings.first?.0, "child-confirm")
+        XCTAssertNil(authService.verifiedBindings.first?.1)
     }
 
     func testSubmitParentPhoneShowsVerifyErrorWhenBindingCheckFails() async {

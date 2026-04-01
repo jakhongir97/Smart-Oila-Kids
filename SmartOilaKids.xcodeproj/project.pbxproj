@@ -236,6 +236,7 @@
 		E0B997DFBFA98D1D8905B1BC /* PermissionChecklistEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905F42DACE8A0D7E411277EE /* PermissionChecklistEvaluator.swift */; };
 		E2DC5C66717C3522752890B1 /* RootView+Lifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B3FFE1159A9637FFBA1F1AE /* RootView+Lifecycle.swift */; };
 		E481746796087CE2A97D9062 /* SmartOilaKidsAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC4D449391970DCABF65CC0 /* SmartOilaKidsAppDelegate.swift */; };
+		E4C5A1120F9A4C18A1B23342 /* SettingsGeoParentVisibilityVerificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4C5A1120F9A4C18A1B23341 /* SettingsGeoParentVisibilityVerificationService.swift */; };
 		E7292B0E34273320673569EE /* PushCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FF2F04EB7460062D6EF53B /* PushCommandRouter.swift */; };
 		E7B4F0D31A9C4E6582B17F01 /* ProductFallbackText.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B4F0D31A9C4E6582B17F02 /* ProductFallbackText.swift */; };
 		E816BB7E243C3A341925BC56 /* ChatThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5602C098BBE7616524A4DA1 /* ChatThreadView.swift */; };
@@ -522,6 +523,7 @@
 		E2585515F2A3C8A3A99FEC33 /* GeoPermissionIntroStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoPermissionIntroStageView.swift; sourceTree = "<group>"; };
 		E35F67AF2A306DA50B1B2381 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E381C1C47BEBF468020D9CF3 /* PushInboxStore+Mutations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushInboxStore+Mutations.swift"; sourceTree = "<group>"; };
+		E4C5A1120F9A4C18A1B23341 /* SettingsGeoParentVisibilityVerificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsGeoParentVisibilityVerificationService.swift; sourceTree = "<group>"; };
 		E754CCA082B78AD3632D642D /* DisplayVideoRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayVideoRecorder.swift; sourceTree = "<group>"; };
 		E7613A83E34A4278DABAA4E3 /* NetworkError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkError.swift; sourceTree = "<group>"; };
 		E7B4F0D31A9C4E6582B17F02 /* ProductFallbackText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductFallbackText.swift; sourceTree = "<group>"; };
@@ -764,6 +766,7 @@
 				C3D52A7B8E9146FA90BC1231 /* SettingsDiagnosticsPanelView.swift */,
 				C3D52A7B8E9146FA90BC1233 /* SettingsDiagnosticsSectionCard.swift */,
 				38A09C3F9BEAB5F94EAA672B /* SettingsDiagnosticsValueMapper.swift */,
+				E4C5A1120F9A4C18A1B23341 /* SettingsGeoParentVisibilityVerificationService.swift */,
 				65D76F2213FCB3EBEA460F58 /* SettingsInviteShareBuilder.swift */,
 				7A3D09284B7AB175EE746298 /* SettingsMainFormSections.swift */,
 				53548F900535D1985D244FC8 /* SettingsMainFormView.swift */,
@@ -1532,6 +1535,7 @@
 				C3D52A7B8E9146FA90BC1232 /* SettingsDiagnosticsPanelView.swift in Sources */,
 				C3D52A7B8E9146FA90BC1234 /* SettingsDiagnosticsSectionCard.swift in Sources */,
 				549053EC342E9E528DD2F8DC /* SettingsDiagnosticsValueMapper.swift in Sources */,
+				E4C5A1120F9A4C18A1B23342 /* SettingsGeoParentVisibilityVerificationService.swift in Sources */,
 				B3E96CE34E5695310F518B1E /* SettingsInviteShareBuilder.swift in Sources */,
 				D3FBF096A3ED2A682BA8DBE5 /* SettingsMainFormSections.swift in Sources */,
 				F5307E1A33489D393AEC4A38 /* SettingsMainFormView.swift in Sources */,
@@ -1679,7 +1683,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
@@ -1729,7 +1733,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";

@@ -8,6 +8,18 @@ struct ChatBubble: View {
         message.userType == "parent"
     }
 
+    private var hasText: Bool {
+        message.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private var isMediaOnly: Bool {
+        !message.attachments.isEmpty && !hasText
+    }
+
+    private var isMixedMedia: Bool {
+        !message.attachments.isEmpty && hasText
+    }
+
     var body: some View {
         HStack {
             if !isIncoming {
@@ -31,31 +43,57 @@ struct ChatBubble: View {
     }
 
     private var bubbleContent: some View {
-        VStack(spacing: 6) {
+        Group {
+            if isMediaOnly {
+                mediaOnlyContent
+            } else if isMixedMedia {
+                mixedMediaContent
+            } else {
+                textBubbleContent
+            }
+        }
+    }
+
+    private var mixedMediaContent: some View {
+        VStack(alignment: isIncoming ? .leading : .trailing, spacing: 8) {
             ForEach(message.attachments, id: \.self) { attachment in
                 AttachmentBubbleImage(urlString: attachment)
             }
 
-            if let text = message.text, !text.isEmpty {
-                Text(text)
-                    .font(AppTypography.unbounded(12, weight: .regular))
-                    .foregroundStyle(isIncoming ? AppColors.black : AppColors.white)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, alignment: .center)
+            textBubble
+        }
+    }
+
+    private var textBubbleContent: some View {
+        textBubble
+    }
+
+    private var textBubble: some View {
+        Text(message.text ?? "")
+            .font(AppTypography.unbounded(12, weight: .regular))
+            .foregroundStyle(isIncoming ? AppColors.black : AppColors.inverseTextPrimary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: preferredWidth ?? (isIncoming ? 280 : 285), alignment: .center)
+            .background(isIncoming ? AppColors.neutral200 : AppColors.surfacePurple)
+            .clipShape(
+                AsymmetricRoundedBubble(
+                    topLeft: 40,
+                    topRight: 40,
+                    bottomRight: isIncoming ? 40 : 5,
+                    bottomLeft: isIncoming ? 5 : 40
+                )
+            )
+    }
+
+    private var mediaOnlyContent: some View {
+        VStack(spacing: 8) {
+            ForEach(message.attachments, id: \.self) { attachment in
+                AttachmentBubbleImage(urlString: attachment)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: preferredWidth ?? (isIncoming ? 280 : 285), alignment: .center)
-        .background(isIncoming ? AppColors.neutral200 : AppColors.surfacePurple)
-        .clipShape(
-            AsymmetricRoundedBubble(
-                topLeft: 40,
-                topRight: 40,
-                bottomRight: isIncoming ? 40 : 5,
-                bottomLeft: isIncoming ? 5 : 40
-            )
-        )
     }
 
     private func shortTime(_ input: String) -> String {
@@ -74,6 +112,7 @@ struct DisplayMessage: Identifiable {
 
 private struct AttachmentBubbleImage: View {
     let urlString: String
+    private let imageSize = CGSize(width: 178, height: 178)
 
     var body: some View {
         if let url = RemoteAssetURLResolver.resolveURL(urlString) {
@@ -83,12 +122,16 @@ private struct AttachmentBubbleImage: View {
                     image
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 150, height: 120)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .frame(width: imageSize.width, height: imageSize.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        }
                 default:
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color.white.opacity(0.2))
-                        .frame(width: 150, height: 120)
+                        .frame(width: imageSize.width, height: imageSize.height)
                         .overlay {
                             ProgressView()
                         }
@@ -97,7 +140,7 @@ private struct AttachmentBubbleImage: View {
         } else {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.white.opacity(0.2))
-                .frame(width: 150, height: 120)
+                .frame(width: imageSize.width, height: imageSize.height)
         }
     }
 }

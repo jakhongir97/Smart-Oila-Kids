@@ -71,6 +71,10 @@ final class LocationPermissionManager: NSObject, ObservableObject {
         locationManager.authorizationStatus
     }
 
+    func requestWhenInUseLocationAuthorization() {
+        locationManager.requestWhenInUseAuthorization()
+    }
+
     func requestAlwaysLocationAuthorization() {
         locationManager.requestAlwaysAuthorization()
     }

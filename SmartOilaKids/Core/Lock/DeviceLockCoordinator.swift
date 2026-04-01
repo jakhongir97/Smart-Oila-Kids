@@ -6,7 +6,7 @@ final class DeviceLockCoordinator: ObservableObject {
     typealias OptionalDSNAction = (String?) -> Void
     typealias VoidAction = () -> Void
     typealias AsyncVoidAction = () async -> Void
-    typealias ScheduleApplyAction = (DeviceFullLockSchedule?, String?) -> Void
+    typealias ScheduleApplyAction = (DeviceFullLockSchedule?, String?, String?) -> Void
     typealias ShieldApplyAction = (Bool, DeviceAppLockShieldConfiguration) -> Void
 
     static let shared = DeviceLockCoordinator()
@@ -95,8 +95,12 @@ final class DeviceLockCoordinator: ObservableObject {
         self.disconnectApplicationsSyncWebSocket = disconnectApplicationsSyncWebSocket ?? { [applicationsSyncWebSocketService] in
             applicationsSyncWebSocketService.disconnect()
         }
-        self.applyScheduleMonitoring = applyScheduleMonitoring ?? { [resolvedScheduleMonitorController] schedule, dsn in
-            resolvedScheduleMonitorController.applySchedule(schedule, dsn: dsn)
+        self.applyScheduleMonitoring = applyScheduleMonitoring ?? { [resolvedScheduleMonitorController] schedule, dsn, referenceLocalTime in
+            resolvedScheduleMonitorController.applySchedule(
+                schedule,
+                dsn: dsn,
+                referenceLocalTime: referenceLocalTime
+            )
         }
         self.stopScheduleMonitoring = stopScheduleMonitoring ?? { [resolvedScheduleMonitorController] in
             resolvedScheduleMonitorController.stop()
@@ -287,7 +291,7 @@ final class DeviceLockCoordinator: ObservableObject {
                 deviceLocalTime: status.normalizedLocalTime,
                 scheduleRange: status.schedule?.normalizedRange
             ))
-            applyScheduleMonitoring(status.schedule, dsn)
+            applyScheduleMonitoring(status.schedule, dsn, status.normalizedLocalTime)
             lastErrorText = nil
             await evaluateForegroundRecoveryIfNeeded(
                 dsn: dsn,
@@ -295,7 +299,7 @@ final class DeviceLockCoordinator: ObservableObject {
             )
         } catch let NetworkError.server(statusCode, _) where statusCode == 404 {
             guard currentDSN == dsn else { return }
-            applyScheduleMonitoring(nil, dsn)
+            applyScheduleMonitoring(nil, dsn, nil)
             let didRefreshApplicationState = await refreshApplicationStateIfNeeded(
                 for: dsn,
                 force: forceApplicationStateRefresh || pendingForegroundRecoveryCheck

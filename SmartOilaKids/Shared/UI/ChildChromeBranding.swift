@@ -17,7 +17,7 @@ struct ChildStatusBar: View {
 }
 
 struct SmartOilaWordmark: View {
-    var foreground: Color = .black
+    var foreground: Color = AppColors.black
 
     var body: some View {
         VStack(spacing: 10) {

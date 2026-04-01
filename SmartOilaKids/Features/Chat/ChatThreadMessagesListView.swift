@@ -24,7 +24,7 @@ struct ChatThreadMessagesListView: View {
                                 Group {
                                     if isLoadingMore {
                                         ProgressView()
-                                            .tint(AppColors.white)
+                                            .tint(AppColors.inverseTextPrimary)
                                     } else {
                                         Text(L10n.tr("chat.load_older"))
                                             .font(AppTypography.unbounded(11, weight: .semibold))

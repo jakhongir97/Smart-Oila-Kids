@@ -6,7 +6,7 @@ extension TaskView {
         switch viewModel.phase {
         case .loading, .idle:
             ProgressView()
-                .tint(AppColors.white)
+                .tint(AppColors.inverseTextPrimary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
         case let .failed(text):
@@ -80,16 +80,16 @@ extension TaskView {
         VStack(spacing: 10) {
             Image(systemName: "checklist")
                 .font(.system(size: 36, weight: .regular))
-                .foregroundStyle(AppColors.white.opacity(0.82))
+                .foregroundStyle(AppColors.inverseTextSecondary)
 
             Text(L10n.tr("tasks.empty_title"))
                 .font(AppTypography.unbounded(13, weight: .medium))
-                .foregroundStyle(AppColors.white.opacity(0.9))
+                .foregroundStyle(AppColors.inverseTextPrimary.opacity(0.9))
                 .multilineTextAlignment(.center)
 
             Text(L10n.tr("tasks.empty_subtitle"))
                 .font(AppTypography.unbounded(11, weight: .regular))
-                .foregroundStyle(AppColors.white.opacity(0.72))
+                .foregroundStyle(AppColors.inverseTextTertiary)
                 .multilineTextAlignment(.center)
         }
     }

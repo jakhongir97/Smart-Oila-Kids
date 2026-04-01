@@ -7,7 +7,7 @@ extension GeoBackgroundService {
         case .authorizedAlways:
             return nil
         case .authorizedWhenInUse:
-            return "Location Always authorization is required for background tracking"
+            return "Location Always authorization is required for background tracking; foreground tracking works only while the app is open"
         case .notDetermined:
             return "Location permission has not been granted yet"
         case .denied, .restricted:
@@ -21,7 +21,9 @@ extension GeoBackgroundService {
         switch authorizationStatus {
         case .authorizedAlways:
             return true
-        case .authorizedWhenInUse, .notDetermined, .denied, .restricted:
+        case .authorizedWhenInUse:
+            return true
+        case .notDetermined, .denied, .restricted:
             return false
         @unknown default:
             return false
@@ -36,6 +38,62 @@ extension GeoBackgroundService {
         stop()
         start(dsn: normalizedDSN)
         return true
+    }
+
+    @discardableResult
+    func triggerDiagnosticsLocationPulse() -> Bool {
+        guard let normalizedDSN = state.currentDSN?.trimmedNonEmpty else {
+            updateDebugSnapshot(
+                status: GeoConnectionStatus.stopped.rawValue,
+                lastError: "geo service has no active dsn"
+            )
+            debugLog("Diagnostics pulse skipped: missing DSN")
+            return false
+        }
+
+        guard state.isRunning else {
+            updateDebugSnapshot(
+                status: GeoConnectionStatus.stopped.rawValue,
+                lastError: "geo service is not running"
+            )
+            debugLog("Diagnostics pulse skipped: service not running")
+            return false
+        }
+
+        let authorizationStatus = locationManager.authorizationStatus
+        guard shouldStartLocationUpdates(for: authorizationStatus) else {
+            updateDebugSnapshot(
+                status: "not_authorized",
+                lastError: locationAuthorizationFailureReason(for: authorizationStatus)
+                    ?? "Location access is unavailable for tracking"
+            )
+            debugLog("Diagnostics pulse skipped: authorization unavailable")
+            return false
+        }
+
+        startLocationUpdatesIfAuthorized()
+
+        if !webSocketClient.isConnected {
+            state.currentBaseIndex = 0
+            connectUsingCurrentBase()
+        }
+
+        if let currentLocation = locationManager.location {
+            state.lastKnownLocation = currentLocation
+        }
+
+        sendSystemInfo(force: true)
+
+        if let lastKnownLocation = state.lastKnownLocation {
+            sendLocation(lastKnownLocation)
+            debugLog("Diagnostics pulse triggered with cached location for DSN \(normalizedDSN)")
+            return true
+        }
+
+        locationManager.requestLocation()
+        updateDebugSnapshot(lastError: "waiting for fresh location fix")
+        debugLog("Diagnostics pulse waiting for a fresh location fix for DSN \(normalizedDSN)")
+        return false
     }
 
     func start(dsn: String) {
@@ -174,7 +232,11 @@ extension GeoBackgroundService {
             }
             locationManager.startUpdatingLocation()
             seedLastKnownLocationIfAvailable()
-        case .authorizedWhenInUse, .notDetermined:
+        case .authorizedWhenInUse:
+            locationManager.startUpdatingLocation()
+            seedLastKnownLocationIfAvailable()
+            locationManager.requestAlwaysAuthorization()
+        case .notDetermined:
             stopLocationUpdates()
             locationManager.requestAlwaysAuthorization()
         case .denied, .restricted:

@@ -32,6 +32,27 @@ extension MainViewModel {
         await refreshDeviceControlTimeline(dsn: dsn)
         await refreshMediaTimeline(dsn: dsn)
     }
+
+    func refreshDeviceStatus(dsn: String?) async {
+        guard let dsn, !dsn.isEmpty else {
+            setDeviceStatus(nil)
+            return
+        }
+
+        guard !isRefreshingDeviceStatus else { return }
+        isRefreshingDeviceStatus = true
+        defer { isRefreshingDeviceStatus = false }
+
+        guard let status = try? await dependencies.dashboardService.fetchDeviceStatus(dsn: dsn) else {
+            return
+        }
+
+        setDeviceStatus(status)
+        let resolvedName = status.deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !resolvedName.isEmpty {
+            setCurrentDeviceName(resolvedName)
+        }
+    }
 }
 
 private extension MainViewModel {

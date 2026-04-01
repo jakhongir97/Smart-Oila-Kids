@@ -94,14 +94,14 @@ final class DeviceLockCoordinatorTests: XCTestCase {
         )
         let applicationStateService = DeviceApplicationStateServiceSpy()
 
-        var appliedSchedules: [(String?, String?)] = []
+        var appliedSchedules: [(String?, String?, String?)] = []
         var appLimitRefreshCount = 0
 
         let coordinator = makeCoordinator(
             service: service,
             applicationStateService: applicationStateService,
-            applyScheduleMonitoring: { schedule, dsn in
-                appliedSchedules.append((dsn, schedule?.normalizedRange))
+            applyScheduleMonitoring: { schedule, dsn, referenceLocalTime in
+                appliedSchedules.append((dsn, schedule?.normalizedRange, referenceLocalTime))
             },
             refreshAppLimitMonitoring: {
                 appLimitRefreshCount += 1
@@ -121,6 +121,7 @@ final class DeviceLockCoordinatorTests: XCTestCase {
         XCTAssertEqual(appLimitRefreshCount, 1)
         XCTAssertEqual(appliedSchedules.map(\.0), ["child-1"])
         XCTAssertEqual(appliedSchedules.map(\.1), ["22:30 - 06:45"])
+        XCTAssertEqual(appliedSchedules.map(\.2), ["08:05"])
     }
 
     func testRefreshNowUsesGlobalFallbackWhenFullStatusReturns404() async {
@@ -280,7 +281,7 @@ final class DeviceLockCoordinatorTests: XCTestCase {
             disconnectAppLockWebSocket: disconnectAppLockWebSocket ?? {},
             connectApplicationsSyncWebSocket: connectApplicationsSyncWebSocket ?? { _ in },
             disconnectApplicationsSyncWebSocket: disconnectApplicationsSyncWebSocket ?? {},
-            applyScheduleMonitoring: applyScheduleMonitoring ?? { _, _ in },
+            applyScheduleMonitoring: applyScheduleMonitoring ?? { _, _, _ in },
             stopScheduleMonitoring: stopScheduleMonitoring ?? {},
             activateAppLimitMonitoring: activateAppLimitMonitoring ?? { _ in },
             stopAppLimitMonitoring: stopAppLimitMonitoring ?? {},

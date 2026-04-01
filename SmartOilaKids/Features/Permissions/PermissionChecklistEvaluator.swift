@@ -28,6 +28,15 @@ enum PermissionChecklistEvaluator {
         }
     }
 
+    static func isOnboardingSatisfied(_ requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> Bool {
+        switch requirement {
+        case .location:
+            return isLocationOnboardingSatisfied(snapshot.locationAuthorizationStatus)
+        case .usageStats, .notifications, .microphone, .camera:
+            return isSatisfied(requirement, in: snapshot)
+        }
+    }
+
     static func statusText(for requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> String {
         switch requirement {
         case .usageStats:
@@ -94,6 +103,18 @@ enum PermissionChecklistEvaluator {
         }
     }
 
+    static func onboardingStatusText(for requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> String {
+        switch requirement {
+        case .location:
+            if isLocationOnboardingSatisfied(snapshot.locationAuthorizationStatus) {
+                return L10n.tr("permissions.status_granted")
+            }
+            return statusText(for: requirement, in: snapshot)
+        case .usageStats, .notifications, .microphone, .camera:
+            return statusText(for: requirement, in: snapshot)
+        }
+    }
+
     static func primaryActionTitle(for requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> String? {
         guard isInteractive(requirement, in: snapshot), !isSatisfied(requirement, in: snapshot) else { return nil }
 
@@ -154,6 +175,11 @@ enum PermissionChecklistEvaluator {
             .allSatisfy { isSatisfied($0, in: snapshot) }
     }
 
+    static func onboardingChecklistSatisfied(in snapshot: PermissionStatusSnapshot) -> Bool {
+        PermissionRequirement.onboardingCases
+            .allSatisfy { isOnboardingSatisfied($0, in: snapshot) }
+    }
+
     static func mediaReadinessSatisfied(in snapshot: PermissionStatusSnapshot) -> Bool {
         isSatisfied(.microphone, in: snapshot)
             && isSatisfied(.camera, in: snapshot)
@@ -176,6 +202,17 @@ enum PermissionChecklistEvaluator {
 
     private static func isLocationSatisfied(_ status: CLAuthorizationStatus) -> Bool {
         status == .authorizedAlways
+    }
+
+    private static func isLocationOnboardingSatisfied(_ status: CLAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return true
+        case .notDetermined, .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
     }
 
     private static func isNotificationSatisfied(_ status: UNAuthorizationStatus) -> Bool {

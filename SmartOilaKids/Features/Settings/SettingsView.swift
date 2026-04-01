@@ -1,3 +1,4 @@
+import Combine
 import UIKit
 import SwiftUI
 
@@ -23,7 +24,10 @@ struct SettingsView: View {
     @StateObject var settingsProtection = SettingsProtectionController.shared
     @ObservedObject private var appLockStore = DeviceAppLockSelectionStore.shared
     @ObservedObject private var diagnostics = RuntimeDiagnosticsCenter.shared
+    @State private var now = Date()
     @FocusState private var isNameFieldFocused: Bool
+
+    private let geoFreshnessTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
     init(viewModel: SettingsViewModel? = nil) {
         _viewModel = StateObject(
@@ -208,6 +212,9 @@ struct SettingsView: View {
             logThemeState(event: "environment colorScheme changed")
 #endif
         }
+        .onReceive(geoFreshnessTimer) { date in
+            now = date
+        }
         .overlay(alignment: .top) {
             if let bannerText = bannerCenter.text {
                 Text(bannerText)
@@ -337,20 +344,33 @@ struct SettingsView: View {
     }
 
     private var diagnosticsSummarySubtitle: String {
-        if let error = firstReleaseDiagnosticsError {
-            return error
-        }
-
-        return "Geo: \(readableStatus(diagnostics.geo.status)) • Push: \(readableStatus(diagnostics.pushToken.status))"
+        SettingsDiagnosticsValueMapper.geoSettingsSummary(
+            readiness: geoTrackingReadiness,
+            lastLocationAt: diagnostics.geo.lastLocationAt,
+            now: now
+        )
     }
 
     private var diagnosticsBadgeText: String? {
         let issueCount = releaseDiagnosticsIssueCount
-        return issueCount == 0 ? "READY" : "\(issueCount) ISSUE\(issueCount == 1 ? "" : "S")"
+        guard issueCount == 0 else {
+            return "\(issueCount) ISSUE\(issueCount == 1 ? "" : "S")"
+        }
+
+        return SettingsDiagnosticsValueMapper.geoSettingsBadgeText(geoSettingsBadgeState)
     }
 
     private var diagnosticsBadgeColor: Color {
-        releaseDiagnosticsIssueCount == 0 ? AppColors.accentGreen : AppColors.dangerRed
+        if releaseDiagnosticsIssueCount > 0 {
+            return AppColors.dangerRed
+        }
+
+        switch geoSettingsBadgeState {
+        case .live:
+            return AppColors.accentGreen
+        case .stale, .waitingForFix, .foregroundOnly, .actionNeeded, .notLinked:
+            return AppColors.primaryPurple
+        }
     }
 
     private var appLockSummarySubtitle: String {
@@ -416,28 +436,24 @@ struct SettingsView: View {
         .count
     }
 
-    private var firstReleaseDiagnosticsError: String? {
-        [
-            diagnostics.geo.lastError,
-            diagnostics.pushToken.lastError,
-            diagnostics.appLimits.lastError,
-            diagnostics.lockSchedule.lastError
-        ]
-        .first(where: isDiagnosticsIssue)
+    private var geoTrackingReadiness: SettingsDiagnosticsValueMapper.GeoTrackingReadiness {
+        SettingsDiagnosticsValueMapper.geoTrackingReadiness(
+            dsn: diagnostics.geo.dsn.trimmedNonEmpty ?? sessionStore.dsn,
+            locationAuthorizationStatus: permissionManager.locationAuthorizationStatus
+        )
+    }
+
+    private var geoSettingsBadgeState: SettingsDiagnosticsValueMapper.GeoSettingsBadgeState {
+        SettingsDiagnosticsValueMapper.geoSettingsBadgeState(
+            readiness: geoTrackingReadiness,
+            lastLocationAt: diagnostics.geo.lastLocationAt,
+            now: now
+        )
     }
 
     private func isDiagnosticsIssue(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && trimmed != "-"
-    }
-
-    private func readableStatus(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != "-" else {
-            return "idle"
-        }
-
-        return trimmed.replacingOccurrences(of: "_", with: " ")
     }
 
 #if DEBUG

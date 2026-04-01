@@ -55,12 +55,24 @@ extension LocationPermissionManager {
         PermissionChecklistEvaluator.isSatisfied(requirement, in: statusSnapshot())
     }
 
+    func isOnboardingSatisfied(_ requirement: PermissionRequirement) -> Bool {
+        PermissionChecklistEvaluator.isOnboardingSatisfied(requirement, in: statusSnapshot())
+    }
+
     var allChecklistSatisfied: Bool {
         PermissionChecklistEvaluator.allChecklistSatisfied(in: statusSnapshot())
     }
 
+    var onboardingChecklistSatisfied: Bool {
+        PermissionChecklistEvaluator.onboardingChecklistSatisfied(in: statusSnapshot())
+    }
+
     func statusText(for requirement: PermissionRequirement) -> String {
         PermissionChecklistEvaluator.statusText(for: requirement, in: statusSnapshot())
+    }
+
+    func onboardingStatusText(for requirement: PermissionRequirement) -> String {
+        PermissionChecklistEvaluator.onboardingStatusText(for: requirement, in: statusSnapshot())
     }
 
     func primaryActionTitle(for requirement: PermissionRequirement) -> String? {

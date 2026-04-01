@@ -123,7 +123,7 @@ struct MainHeaderSection: View {
         } else {
             Image(systemName: "person.fill")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(AppColors.white)
+                .foregroundStyle(AppColors.inverseTextPrimary)
         }
     }
 

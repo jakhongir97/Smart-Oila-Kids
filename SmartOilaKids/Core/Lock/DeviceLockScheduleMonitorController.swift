@@ -8,6 +8,7 @@ final class DeviceLockScheduleMonitorController {
     typealias StartMonitoringAction = (_ activityName: DeviceActivityName, _ schedule: DeviceActivitySchedule) throws -> Void
     typealias StopMonitoringAction = (_ activityNames: [DeviceActivityName]) -> Void
     typealias VoidAction = () -> Void
+    typealias CurrentDateAction = () -> Date
     typealias DiagnosticsAction = (
         _ status: String?,
         _ dsn: String?,
@@ -21,6 +22,7 @@ final class DeviceLockScheduleMonitorController {
         startMonitoring: StartMonitoringAction? = nil,
         stopMonitoring: StopMonitoringAction? = nil,
         clearMonitoringStore: VoidAction? = nil,
+        currentDate: CurrentDateAction? = nil,
         diagnosticsUpdater: DiagnosticsAction? = nil
     ) {
         let activityCenter = DeviceActivityCenter()
@@ -41,6 +43,7 @@ final class DeviceLockScheduleMonitorController {
         self.clearMonitoringStore = clearMonitoringStore ?? {
             DeviceLockManagedSettingsStoreFactory.clearAllSettings(scheduleStore)
         }
+        self.currentDate = currentDate ?? { Date() }
         self.diagnosticsUpdater = diagnosticsUpdater ?? { status, dsn, schedule, activityCount, lastError in
             RuntimeDiagnosticsCenter.shared.updateLockSchedule(
                 status: status,
@@ -52,10 +55,18 @@ final class DeviceLockScheduleMonitorController {
         }
     }
 
-    func applySchedule(_ schedule: DeviceFullLockSchedule?, dsn: String?) {
+    func applySchedule(
+        _ schedule: DeviceFullLockSchedule?,
+        dsn: String?,
+        referenceLocalTime: String? = nil
+    ) {
         let normalizedDSN = normalizedDSN(dsn)
         let authorizationStatus = authorizationStatus()
-        let configuration = makeConfiguration(schedule: schedule, dsn: normalizedDSN)
+        let configuration = makeConfiguration(
+            schedule: schedule,
+            dsn: normalizedDSN,
+            referenceLocalTime: referenceLocalTime
+        )
         let newSignature = configuration?.signature
 
         if newSignature == currentSignature {
@@ -145,6 +156,7 @@ final class DeviceLockScheduleMonitorController {
     private let startMonitoring: StartMonitoringAction
     private let stopMonitoring: StopMonitoringAction
     private let clearMonitoringStore: VoidAction
+    private let currentDate: CurrentDateAction
     private let diagnosticsUpdater: DiagnosticsAction
     private var currentSignature: String?
     private var currentActivities: [DeviceActivityName] = []
@@ -162,11 +174,19 @@ private extension DeviceLockScheduleMonitorController {
         let activities: [MonitoringActivity]
     }
 
-    func makeConfiguration(schedule: DeviceFullLockSchedule?, dsn: String?) -> MonitoringConfiguration? {
+    func makeConfiguration(
+        schedule: DeviceFullLockSchedule?,
+        dsn: String?,
+        referenceLocalTime: String?
+    ) -> MonitoringConfiguration? {
         guard let schedule,
               schedule.isScheduleEnabled ?? true,
               let dsn,
-              let windows = monitoringWindows(from: schedule, dsn: dsn),
+              let windows = monitoringWindows(
+                from: schedule,
+                dsn: dsn,
+                referenceLocalTime: referenceLocalTime
+              ),
               !windows.isEmpty else {
             return nil
         }
@@ -179,14 +199,23 @@ private extension DeviceLockScheduleMonitorController {
 
     func monitoringWindows(
         from schedule: DeviceFullLockSchedule,
-        dsn: String
+        dsn: String,
+        referenceLocalTime: String?
     ) -> [(String, MonitoringActivity)]? {
         guard let startMinutes = parseMinutes(schedule.startTime),
               let endMinutes = parseMinutes(schedule.endTime) else {
             return nil
         }
 
-        if startMinutes == endMinutes {
+        let translatedWindow = translatedScheduleWindow(
+            startMinutes: startMinutes,
+            endMinutes: endMinutes,
+            referenceLocalTime: referenceLocalTime
+        )
+        let translatedStartMinutes = translatedWindow.startMinutes
+        let translatedEndMinutes = translatedWindow.endMinutes
+
+        if translatedStartMinutes == translatedEndMinutes {
             guard let activity = makeActivity(
                 dsn: dsn,
                 suffix: "always",
@@ -198,16 +227,16 @@ private extension DeviceLockScheduleMonitorController {
             return [("0-1439", activity)]
         }
 
-        if startMinutes < endMinutes {
+        if translatedStartMinutes < translatedEndMinutes {
             guard let activity = makeActivity(
                 dsn: dsn,
                 suffix: "primary",
-                startMinutes: startMinutes,
-                endMinutes: endMinutes
+                startMinutes: translatedStartMinutes,
+                endMinutes: translatedEndMinutes
             ) else {
                 return nil
             }
-            return [("\(startMinutes)-\(endMinutes)", activity)]
+            return [("\(translatedStartMinutes)-\(translatedEndMinutes)", activity)]
         }
 
         var windows: [(String, MonitoringActivity)] = []
@@ -215,22 +244,43 @@ private extension DeviceLockScheduleMonitorController {
         if let lateWindow = makeActivity(
             dsn: dsn,
             suffix: "late",
-            startMinutes: startMinutes,
+            startMinutes: translatedStartMinutes,
             endMinutes: (23 * 60) + 59
         ) {
-            windows.append(("\(startMinutes)-1439", lateWindow))
+            windows.append(("\(translatedStartMinutes)-1439", lateWindow))
         }
 
         if let earlyWindow = makeActivity(
             dsn: dsn,
             suffix: "early",
             startMinutes: 0,
-            endMinutes: endMinutes
+            endMinutes: translatedEndMinutes
         ) {
-            windows.append(("0-\(endMinutes)", earlyWindow))
+            windows.append(("0-\(translatedEndMinutes)", earlyWindow))
         }
 
         return windows.isEmpty ? nil : windows
+    }
+
+    func translatedScheduleWindow(
+        startMinutes: Int,
+        endMinutes: Int,
+        referenceLocalTime: String?
+    ) -> (startMinutes: Int, endMinutes: Int) {
+        guard let backendCurrentMinutes = parseMinutes(referenceLocalTime) else {
+            return (startMinutes, endMinutes)
+        }
+
+        let deviceCurrentMinutes = minutesSinceMidnight(for: currentDate())
+        let offsetMinutes = signedMinuteDifference(
+            from: deviceCurrentMinutes,
+            to: backendCurrentMinutes
+        )
+
+        return (
+            normalizeMinutes(startMinutes - offsetMinutes),
+            normalizeMinutes(endMinutes - offsetMinutes)
+        )
     }
 
     func makeActivity(
@@ -269,6 +319,28 @@ private extension DeviceLockScheduleMonitorController {
         }
 
         return (hour * 60) + minute
+    }
+
+    func minutesSinceMidnight(for date: Date) -> Int {
+        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: date)
+        let hour = min(max(components.hour ?? 0, 0), 23)
+        let minute = min(max(components.minute ?? 0, 0), 59)
+        return (hour * 60) + minute
+    }
+
+    func signedMinuteDifference(from current: Int, to target: Int) -> Int {
+        var difference = target - current
+        if difference > 720 {
+            difference -= 1440
+        } else if difference < -720 {
+            difference += 1440
+        }
+        return difference
+    }
+
+    func normalizeMinutes(_ value: Int) -> Int {
+        let normalized = value % 1440
+        return normalized >= 0 ? normalized : normalized + 1440
     }
 
     func timeComponents(from minutes: Int) -> DateComponents {

@@ -3,7 +3,7 @@ import SwiftUI
 extension RootView {
     @ViewBuilder
     var regularRoot: some View {
-        if !sessionStore.hasAuthenticatedSession {
+        if !sessionStore.hasLinkedChildDevice {
             AuthView(viewModel: dependencies.makeAuthViewModel())
         } else {
             MainView(viewModel: dependencies.makeMainViewModel())

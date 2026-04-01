@@ -4,13 +4,13 @@ import UIKit
 enum RootLocalServiceRuntime {
     static func shouldRunChildServices(
         debugRoute: DebugRoute?,
-        hasAuthenticatedSession: Bool
+        hasLinkedChildDevice: Bool
     ) -> Bool {
         if debugRoute == .main {
             return true
         }
 
-        return debugRoute == nil && hasAuthenticatedSession
+        return debugRoute == nil && hasLinkedChildDevice
     }
 }
 
@@ -18,7 +18,7 @@ extension RootView {
     var shouldRunLocalChildServices: Bool {
         RootLocalServiceRuntime.shouldRunChildServices(
             debugRoute: AppRuntime.debugRoute,
-            hasAuthenticatedSession: sessionStore.hasAuthenticatedSession
+            hasLinkedChildDevice: sessionStore.hasLinkedChildDevice
         )
     }
 

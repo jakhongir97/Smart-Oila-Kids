@@ -35,4 +35,9 @@ enum AppColors {
 
     static let textPrimary = dynamic(rgb(18, 18, 18), rgb(242, 242, 247))
     static let textSecondary = dynamic(rgb(0, 0, 0, 0.3), rgb(255, 255, 255, 0.55))
+
+    // Use these on branded/dark surfaces where "white" should stay high-contrast in every theme.
+    static let inverseTextPrimary = Color.white
+    static let inverseTextSecondary = Color.white.opacity(0.82)
+    static let inverseTextTertiary = Color.white.opacity(0.72)
 }
