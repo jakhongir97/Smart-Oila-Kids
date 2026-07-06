@@ -83,6 +83,9 @@ private struct TaskRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if let emoji = task.emoji, !emoji.isEmpty {
+                Text(emoji).font(.system(size: 20))
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(task.title)
                     .font(AppTypography.bodyStrong(14))
@@ -129,7 +132,8 @@ final class BolajonTasksViewModel: ObservableObject {
         self.service = service
     }
 
-    var starTotal: Int { tasks.reduce(0) { $0 + $1.rewardPoints } }
+    // "Collected stars" = reward points from completed tasks (design: Yig'ilgan yulduzlar).
+    var starTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
 
     struct Group: Identifiable {
         let id = UUID()
@@ -145,7 +149,7 @@ final class BolajonTasksViewModel: ObservableObject {
         var undated: [OilaDeviceTask] = []
 
         for task in tasks {
-            guard let date = task.createdAt else { undated.append(task); continue }
+            guard let date = task.groupingDate else { undated.append(task); continue }
             if calendar.isDateInToday(date) { today.append(task) }
             else if calendar.isDateInYesterday(date) { yesterday.append(task) }
             else { other.append(task) }
@@ -165,7 +169,7 @@ final class BolajonTasksViewModel: ObservableObject {
     }
 
     func load() async {
-        do { tasks = try await service.fetchActiveTasks() }
+        do { tasks = try await service.fetchTasks() }
         catch { errorMessage = NetworkError.userMessage(for: error) }
 #if DEBUG
         if tasks.isEmpty && AppRuntime.hasDebugRoute { tasks = BolajonSampleData.tasks; errorMessage = nil }
@@ -175,7 +179,7 @@ final class BolajonTasksViewModel: ObservableObject {
     func complete(_ task: OilaDeviceTask) async {
         do {
             try await service.completeTask(id: task.id)
-            tasks = try await service.fetchActiveTasks()
+            tasks = try await service.fetchTasks()
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
         }

@@ -6,6 +6,7 @@ struct RootView: View {
     @EnvironmentObject var sessionStore: SessionStore
     @StateObject var geoBackgroundService = GeoBackgroundService.shared
     @StateObject var lockCoordinator = DeviceLockCoordinator.shared
+    @StateObject var oilaTelemetry = OilaTelemetryService.shared
     @State var lastSessionDSN: String?
     @State var lastBackgroundedAt: Date?
     @State var didHandleInitialAppear = false
@@ -37,8 +38,8 @@ struct RootView: View {
         .overlay {
             if shouldShowDeviceLockOverlay {
                 DeviceLockOverlay(
-                    localTime: lockCoordinator.state.deviceLocalTime,
-                    scheduleRange: lockCoordinator.state.scheduleRange
+                    localTime: AppRuntime.legacyRootEnabled ? lockCoordinator.state.deviceLocalTime : nil,
+                    scheduleRange: AppRuntime.legacyRootEnabled ? lockCoordinator.state.scheduleRange : nil
                 )
                 .transition(.opacity)
             }
@@ -54,6 +55,11 @@ struct RootView: View {
 
 private extension RootView {
     var shouldShowDeviceLockOverlay: Bool {
-        AppRuntime.screenTimeFeaturesEnabled && shouldRunLocalChildServices && lockCoordinator.state.isLocked
+        // oila360 mode (default): the lock overlay is driven by GET /device/lock/state,
+        // polled by OilaTelemetryService (parent manual-lock + schedules).
+        if !AppRuntime.legacyRootEnabled {
+            return oilaTelemetry.isLocked
+        }
+        return AppRuntime.screenTimeFeaturesEnabled && shouldRunLocalChildServices && lockCoordinator.state.isLocked
     }
 }

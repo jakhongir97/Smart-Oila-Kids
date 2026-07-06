@@ -86,12 +86,15 @@ struct OilaPairResult {
 struct OilaDeviceTask: Identifiable {
     let id: String
     let title: String
-    let status: String
+    let status: String        // Active | Completed | Cancelled
     let rewardPoints: Int
-    let createdAt: Date?
+    let emoji: String?
+    let dueAt: Date?
     let completedAt: Date?
 
     var isCompleted: Bool { status.lowercased() == "completed" }
+    /// The date used to group tasks (Bugun / Kecha) — completion date, else due date.
+    var groupingDate: Date? { completedAt ?? dueAt }
 }
 
 /// One GPS fix for `POST /device/location/batch` (LocationPointDto).
@@ -123,6 +126,8 @@ protocol OilaDeviceServicing {
     func logout() async throws
     func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws
     func fetchActiveTasks() async throws -> [OilaDeviceTask]
+    /// Active + recently-completed tasks (for the tasks screen + collected-stars total).
+    func fetchTasks() async throws -> [OilaDeviceTask]
     func completeTask(id: String) async throws
     func updateFCMToken(_ token: String) async throws
     func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws
@@ -217,6 +222,24 @@ final class OilaDeviceClient: OilaDeviceServicing {
             path: "device/tasks",
             method: .get,
             query: [URLQueryItem(name: "status", value: "Active")],
+            authorized: true
+        )
+        return Self.parseTasks(from: data)
+    }
+
+    func fetchTasks() async throws -> [OilaDeviceTask] {
+        // Active + recently completed, so the tasks screen shows both and the
+        // collected-stars total can be summed from completed tasks.
+        async let active = fetchStatus("Active")
+        async let completed = fetchStatus("Completed")
+        return (try await active) + (try await completed)
+    }
+
+    private func fetchStatus(_ status: String) async throws -> [OilaDeviceTask] {
+        let data = try await requestJSON(
+            path: "device/tasks",
+            method: .get,
+            query: [URLQueryItem(name: "status", value: status)],
             authorized: true
         )
         return Self.parseTasks(from: data)
@@ -412,7 +435,8 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 title: title,
                 status: status,
                 rewardPoints: points,
-                createdAt: date(item, ["createdAt", "created_at", "assignedAt"]),
+                emoji: firstString(item, ["emoji", "icon"]),
+                dueAt: date(item, ["dueAt", "due_at", "createdAt", "created_at", "assignedAt"]),
                 completedAt: date(item, ["completedAt", "completed_at", "finishedAt"])
             )
         }

@@ -116,6 +116,9 @@ extension RootView {
 
         guard newValue == .active else { return }
         DeviceRecordingCoordinator.shared.setApplicationActive(true)
+        if !AppRuntime.legacyRootEnabled {
+            OilaTelemetryService.shared.refreshLockNow()
+        }
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
             scenePhase: phase,
             applicationState: applicationState,

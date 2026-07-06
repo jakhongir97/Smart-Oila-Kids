@@ -16,6 +16,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var lastUploadAt: Date?
+    /// Global device lock resolved from GET /device/lock/state (drives the lock overlay).
+    @Published private(set) var isLocked = false
 
     private let service: OilaDeviceServicing
     private let locationManager = CLLocationManager()
@@ -24,10 +26,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var pendingFixes: [OilaLocationFix] = []
     private var flushTimer: Timer?
     private var statusTimer: Timer?
+    private var lockTimer: Timer?
     private var networkType: String?
 
     private let flushInterval: TimeInterval = 60
     private let statusInterval: TimeInterval = 300
+    private let lockInterval: TimeInterval = 30
     private let maxQueuedFixes = 200
 
     init(service: OilaDeviceServicing = OilaDeviceClient.shared) {
@@ -66,8 +70,18 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         statusTimer = Timer.scheduledTimer(withTimeInterval: statusInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.postStatus() }
         }
-        // Initial status snapshot straight away.
+        lockTimer = Timer.scheduledTimer(withTimeInterval: lockInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.refreshLock() }
+        }
+        // Initial status + lock snapshot straight away.
         Task { await postStatus() }
+        Task { await refreshLock() }
+    }
+
+    /// Re-check lock state immediately (e.g. on foreground or a push).
+    func refreshLockNow() {
+        guard isRunning else { return }
+        Task { await refreshLock() }
     }
 
     func stop() {
@@ -77,9 +91,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         locationManager.stopMonitoringSignificantLocationChanges()
         flushTimer?.invalidate(); flushTimer = nil
         statusTimer?.invalidate(); statusTimer = nil
+        lockTimer?.invalidate(); lockTimer = nil
         pathMonitor?.cancel()
         pathMonitor = nil
         networkType = nil
+        isLocked = false
         pendingFixes.removeAll()
     }
 
@@ -146,6 +162,16 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         let battery: Int? = level >= 0 ? Int((level * 100).rounded()) : nil
         let status = OilaDeviceStatus(battery: battery, networkType: networkType, soundMode: nil)
         try? await service.postDeviceStatus(status)
+    }
+
+    private func refreshLock() async {
+        guard isRunning else { return }
+        do {
+            let state = try await service.fetchLockState()
+            if state.isLocked != isLocked { isLocked = state.isLocked }
+        } catch {
+            // Keep the last known lock state on a transient failure.
+        }
     }
 }
 

@@ -166,14 +166,14 @@ struct BolajonHomeView: View {
                                 .foregroundStyle(AppColors.inkPrimary)
                         }
                     }
-                    if viewModel.tasks.isEmpty {
+                    if viewModel.activeTasks.isEmpty {
                         Text(L10n.tr("home2.tasks.empty"))
                             .font(AppTypography.bodyText(13))
                             .foregroundStyle(AppColors.inkTertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         VStack(spacing: 10) {
-                            ForEach(viewModel.tasks.prefix(3)) { task in
+                            ForEach(viewModel.activeTasks.prefix(3)) { task in
                                 HomeTaskRow(task: task) {
                                     Task { await viewModel.complete(task) }
                                 }
@@ -196,6 +196,9 @@ private struct HomeTaskRow: View {
             Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 18))
                 .foregroundStyle(task.isCompleted ? AppColors.successGreen : AppColors.hairline)
+            if let emoji = task.emoji, !emoji.isEmpty {
+                Text(emoji).font(.system(size: 16))
+            }
             Text(task.title)
                 .font(AppTypography.bodyText(14))
                 .foregroundStyle(task.isCompleted ? AppColors.inkTertiary : AppColors.inkPrimary)
@@ -304,7 +307,10 @@ final class BolajonHomeViewModel: ObservableObject {
         self.service = service
     }
 
-    var starTotal: Int { tasks.reduce(0) { $0 + $1.rewardPoints } }
+    // Collected stars = reward points from completed tasks.
+    var starTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
+    // Home lists the still-to-do tasks.
+    var activeTasks: [OilaDeviceTask] { tasks.filter { !$0.isCompleted } }
 
     var screenTimeText: String { hoursMinutes(todayMinutes) }
     var screenTimeLimitText: String { hoursMinutes(limitMinutes) }
@@ -317,7 +323,7 @@ final class BolajonHomeViewModel: ObservableObject {
     }
 
     func load() async {
-        do { tasks = try await service.fetchActiveTasks() }
+        do { tasks = try await service.fetchTasks() }
         catch { /* keep last tasks; Home stays usable offline */ }
 #if DEBUG
         if tasks.isEmpty && AppRuntime.hasDebugRoute { tasks = BolajonSampleData.tasks }
@@ -327,7 +333,7 @@ final class BolajonHomeViewModel: ObservableObject {
     func complete(_ task: OilaDeviceTask) async {
         do {
             try await service.completeTask(id: task.id)
-            tasks = try await service.fetchActiveTasks()
+            tasks = try await service.fetchTasks()
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
         }
@@ -366,10 +372,10 @@ enum BolajonSampleData {
         let now = Date()
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now)
         return [
-            OilaDeviceTask(id: "1", title: "Uy vazifasini bajarish", status: "Active", rewardPoints: 5, createdAt: now, completedAt: nil),
-            OilaDeviceTask(id: "2", title: "Kitob o'qish — 20 daqiqa", status: "Active", rewardPoints: 3, createdAt: now, completedAt: nil),
-            OilaDeviceTask(id: "3", title: "Xonani yig'ishtirish", status: "Completed", rewardPoints: 3, createdAt: yesterday, completedAt: yesterday),
-            OilaDeviceTask(id: "4", title: "Idishlarni yuvish", status: "Completed", rewardPoints: 4, createdAt: yesterday, completedAt: yesterday)
+            OilaDeviceTask(id: "1", title: "Uy vazifasini bajarish", status: "Active", rewardPoints: 5, emoji: "📚", dueAt: now, completedAt: nil),
+            OilaDeviceTask(id: "2", title: "Kitob o'qish — 20 daqiqa", status: "Active", rewardPoints: 3, emoji: "📖", dueAt: now, completedAt: nil),
+            OilaDeviceTask(id: "3", title: "Xonani yig'ishtirish", status: "Completed", rewardPoints: 3, emoji: "🧹", dueAt: yesterday, completedAt: yesterday),
+            OilaDeviceTask(id: "4", title: "Idishlarni yuvish", status: "Completed", rewardPoints: 4, emoji: "🍽️", dueAt: yesterday, completedAt: yesterday)
         ]
     }
 }
