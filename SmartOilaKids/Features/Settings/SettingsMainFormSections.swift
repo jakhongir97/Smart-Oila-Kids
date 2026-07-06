@@ -110,6 +110,8 @@ struct SettingsAppearanceSection: View {
             return L10n.tr("settings.language.ru")
         case .uz:
             return L10n.tr("settings.language.uz")
+        case .uzCyrl:
+            return language.nativeName
         }
     }
 }

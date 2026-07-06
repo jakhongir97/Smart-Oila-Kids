@@ -49,6 +49,7 @@ enum SettingsDiagnosticsValueMapper {
         case .en: return L10n.tr("settings.language.en")
         case .ru: return L10n.tr("settings.language.ru")
         case .uz: return L10n.tr("settings.language.uz")
+        case .uzCyrl: return language.nativeName
         }
     }
 

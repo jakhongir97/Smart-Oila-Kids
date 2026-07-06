@@ -170,8 +170,14 @@ private struct PermissionStepView: View {
     var body: some View {
         ScreenScaffold(intent: step.intent, progress: progress, onBack: onBack) {
             VStack(spacing: 24) {
-                IconBadge(systemName: step.icon, intent: step.intent)
-                    .padding(.top, 20)
+                Group {
+                    if step.kind == .intro {
+                        BolajonBrandBadge()
+                    } else {
+                        IconBadge(systemName: step.icon, intent: step.intent)
+                    }
+                }
+                .padding(.top, 20)
 
                 VStack(spacing: 12) {
                     Text(L10n.tr(step.titleKey))

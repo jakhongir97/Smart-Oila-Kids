@@ -90,6 +90,67 @@ struct IconBadge: View {
     }
 }
 
+/// The Bolajon360 brand mark (shield + family) inside a white circle badge.
+/// Used on the setup + permissions-intro screens.
+struct BolajonBrandBadge: View {
+    var diameter: CGFloat = 92
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(AppColors.cardWhite)
+                .shadow(color: BolajonMetrics.cardShadow, radius: 16, x: 0, y: 8)
+            Image(systemName: "shield.fill")
+                .font(.system(size: diameter * 0.46))
+                .foregroundStyle(AppColors.glyphPurple)
+            Image(systemName: "person.2.fill")
+                .font(.system(size: diameter * 0.19, weight: .bold))
+                .foregroundStyle(AppColors.cardWhite)
+                .offset(y: diameter * 0.015)
+        }
+        .frame(width: diameter, height: diameter)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A small drawn flag (no emoji — those tofu on the Simulator and aren't guaranteed).
+struct MiniFlag: View {
+    enum Kind { case uz, ru }
+    let kind: Kind
+    var width: CGFloat = 28
+    var height: CGFloat = 20
+
+    var body: some View {
+        stripes
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(AppColors.hairline, lineWidth: 1)
+            )
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var stripes: some View {
+        switch kind {
+        case .uz:
+            VStack(spacing: 0) {
+                Color(red: 60 / 255, green: 175 / 255, blue: 225 / 255)   // sky blue
+                Color(red: 214 / 255, green: 51 / 255, blue: 55 / 255).frame(height: 1) // red fimbriation
+                Color.white
+                Color(red: 214 / 255, green: 51 / 255, blue: 55 / 255).frame(height: 1)
+                Color(red: 30 / 255, green: 170 / 255, blue: 106 / 255)   // green
+            }
+        case .ru:
+            VStack(spacing: 0) {
+                Color.white
+                Color(red: 40 / 255, green: 70 / 255, blue: 160 / 255)
+                Color(red: 200 / 255, green: 40 / 255, blue: 50 / 255)
+            }
+        }
+    }
+}
+
 // MARK: - Buttons
 
 /// Primary call-to-action: full-width purple pill.

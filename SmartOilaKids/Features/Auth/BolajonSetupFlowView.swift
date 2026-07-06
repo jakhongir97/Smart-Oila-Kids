@@ -91,36 +91,47 @@ private struct LanguageStepView: View {
 
     private struct Option: Identifiable {
         let language: AppLanguage
-        let native: String
-        let flag: String
+        let flag: MiniFlag.Kind
         var id: String { language.rawValue }
     }
 
+    // Matches the design: Uzbek (Latin), Uzbek (Cyrillic), Russian.
     private let options: [Option] = [
-        .init(language: .uz, native: "O'zbekcha", flag: "🇺🇿"),
-        .init(language: .ru, native: "Русский", flag: "🇷🇺"),
-        .init(language: .en, native: "English", flag: "🇬🇧")
+        .init(language: .uz, flag: .uz),
+        .init(language: .uzCyrl, flag: .uz),
+        .init(language: .ru, flag: .ru)
     ]
 
     var body: some View {
         ScreenScaffold(intent: .lavender) {
             VStack(spacing: 28) {
-                IconBadge(systemName: "globe", intent: .lavender)
-                    .padding(.top, 24)
+                BolajonBrandBadge()
+                    .padding(.top, 20)
 
                 Text(L10n.tr("setup.language.title"))
                     .font(AppTypography.title(24))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
 
-                VStack(spacing: 12) {
-                    ForEach(options) { option in
-                        languageRow(option)
+                InfoCard(padding: 6) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(options.enumerated()), id: \.element.id) { pair in
+                            if pair.offset > 0 {
+                                Divider().background(AppColors.hairline).padding(.horizontal, 12)
+                            }
+                            languageRow(pair.element)
+                        }
                     }
                 }
 
                 BolajonPrimaryButton(title: L10n.tr("setup.continue"), action: onContinue)
-                    .padding(.top, 8)
+                    .padding(.top, 4)
+            }
+        }
+        .onAppear {
+            // Default the Uzbek app to Uzbek Latin when the device locale isn't offered here.
+            if !options.contains(where: { $0.language == sessionStore.appLanguage }) {
+                sessionStore.setLanguage(.uz)
             }
         }
     }
@@ -130,26 +141,27 @@ private struct LanguageStepView: View {
         return Button {
             sessionStore.setLanguage(option.language)
         } label: {
-            InfoCard(padding: 16) {
-                HStack(spacing: 14) {
-                    Text(option.flag).font(.system(size: 24))
-                    Text(option.native)
-                        .font(AppTypography.heading(16))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    Spacer()
-                    ZStack {
-                        Circle()
-                            .stroke(selected ? AppColors.ctaPurple : AppColors.hairline, lineWidth: 2)
-                            .frame(width: 24, height: 24)
-                        if selected {
-                            Circle().fill(AppColors.ctaPurple).frame(width: 24, height: 24)
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
+            HStack(spacing: 14) {
+                MiniFlag(kind: option.flag)
+                Text(option.language.nativeName)
+                    .font(AppTypography.heading(16))
+                    .foregroundStyle(AppColors.inkPrimary)
+                Spacer()
+                ZStack {
+                    Circle()
+                        .stroke(selected ? AppColors.ctaPurple : AppColors.hairline, lineWidth: 2)
+                        .frame(width: 24, height: 24)
+                    if selected {
+                        Circle().fill(AppColors.ctaPurple).frame(width: 24, height: 24)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
                     }
                 }
             }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 12)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -164,7 +176,7 @@ private struct WelcomeStepView: View {
     var body: some View {
         ScreenScaffold(intent: .lavender, onBack: onBack) {
             VStack(spacing: 24) {
-                IconBadge(systemName: "shield.lefthalf.filled", intent: .lavender)
+                BolajonBrandBadge()
                     .padding(.top, 12)
 
                 VStack(spacing: 10) {
