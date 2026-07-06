@@ -7,6 +7,13 @@ enum AppConfig {
     )
 
     static let apiBaseCandidates = [apiBaseURL]
+
+    /// oila360 device API root (Bolajon360 redesign). Device pairing + telemetry live here.
+    /// Paths are appended without the `/api/v1` prefix, e.g. `device/pair`.
+    static let oilaAPIBaseURL = configuredURL(
+        envKey: "OILA_API_BASE_URL",
+        fallback: "https://api.oila360.uz/api/v1"
+    )
     static let inviteShareURL = configuredURL(
         envKey: "SMARTOILA_INVITE_SHARE_URL",
         fallback: "https://smart-oila.uz"

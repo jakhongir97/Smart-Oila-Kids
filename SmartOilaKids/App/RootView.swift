@@ -24,6 +24,10 @@ struct RootView: View {
         .onChange(of: sessionStore.dsn) { newValue in
             handleDSNChange(newValue)
         }
+        .onChange(of: sessionStore.onboardingCompleted) { _ in
+            // Telemetry is gated on onboarding completion — start it as soon as B11 finishes.
+            handleDSNChange(sessionStore.dsn)
+        }
         .onChange(of: scenePhase) { newValue in
             handleScenePhaseChange(newValue)
         }

@@ -634,3 +634,101 @@
 "diagnostics.export_device" = "Устройство";
 "diagnostics.export_os" = "ОС";
 "diagnostics.open_settings" = "Настройки";
+
+/* MARK: - Bolajon360 setup flow (A1-A4) */
+"setup.language.title" = "Какой язык вам удобен?";
+"setup.continue" = "Продолжить";
+"setup.welcome.title" = "Добро пожаловать в Bolajon360!";
+"setup.welcome.subtitle" = "Это приложение свяжет вас с родителями — они будут спокойны за вашу безопасность.";
+"setup.welcome.feature_contact" = "Всегда на связи с родителями";
+"setup.welcome.feature_protection" = "Защита от вредного контента";
+"setup.welcome.feature_sos" = "SOS-сигнал одной кнопкой";
+"setup.welcome.start" = "Начнём";
+"setup.connect.title" = "Подключаемся к приложению родителя";
+"setup.connect.step1" = "Откройте приложение Oila360 на телефоне родителя";
+"setup.connect.step2" = "Нажмите «Добавить ребёнка»";
+"setup.connect.step3" = "Введите здесь появившийся код";
+"setup.connect.connecting" = "Подключение...";
+"setup.connect.error_generic" = "Ошибка подключения. Попробуйте ещё раз.";
+"setup.success.badge" = "Подключено к родителю";
+"setup.success.title" = "Успешно подключено!";
+"setup.success.subtitle" = "Устройство ребёнка подключено к вашему приложению. Осталось немного настроить.";
+"setup.success.start" = "Начать настройку";
+
+"common.user_default" = "Пользователь";
+
+/* MARK: - Bolajon360 permissions onboarding (B1-B11) */
+"perm2.decline" = "Нет, не нужно";
+"perm2.status.on" = "Включено";
+"perm2.status.off" = "Выключено";
+"perm2.settings.cta" = "Перейти в настройки";
+"perm2.allow.cta" = "Да, разрешить";
+"perm2.always.cta" = "Да, всегда разрешать";
+"perm2.intro.title" = "Настроим приложение Bolajon";
+"perm2.intro.body" = "Для безопасности потребуется несколько разрешений. Настроим их по очереди.";
+"perm2.intro.cta" = "Начать";
+"perm2.notifications.title" = "Разрешить уведомления";
+"perm2.notifications.body" = "Уведомления нужны, чтобы показывать, что приложение активно.";
+"perm2.notifications.cta" = "Включить уведомления";
+"perm2.battery.title" = "Предотвратим остановку приложения";
+"perm2.battery.body" = "Отключите экономию энергии, чтобы телефон не закрывал приложение в фоне.";
+"perm2.location.title" = "Разрешить показывать местоположение?";
+"perm2.location.body" = "Родители смогут видеть вас на карте и задавать безопасные зоны.";
+"perm2.bglocation.title" = "Обновлять местоположение, даже когда приложение закрыто?";
+"perm2.bglocation.body" = "Для постоянного отслеживания выберите «Всегда разрешать».";
+"perm2.usage.title" = "Отслеживание использования приложений";
+"perm2.usage.body" = "Родители увидят, каким приложением вы пользуетесь чаще всего.";
+"perm2.limits.title" = "Возможность ограничивать приложения";
+"perm2.limits.body" = "Родители смогут задавать лимит времени для некоторых приложений.";
+"perm2.autostart.title" = "Запускать приложение автоматически при включении?";
+"perm2.autostart.body" = "Чтобы защита не прерывалась после перезагрузки телефона.";
+"perm2.microphone.title" = "Разрешить слышать звук вокруг";
+"perm2.microphone.body" = "При необходимости родители смогут слушать звук вокруг.";
+"perm2.camera.title" = "Разрешить использовать камеру";
+"perm2.camera.body" = "При необходимости можно будет использовать камеру.";
+"perm2.summary.title" = "Готово! Защита включена";
+"perm2.summary.body" = "Bolajon360 готов вас защищать. Настройки можно изменить позже.";
+"perm2.summary.cta" = "Завершить";
+"perm2.summary.notifications" = "Уведомления";
+"perm2.summary.location" = "Местоположение";
+"perm2.summary.microphone" = "Микрофон";
+"perm2.summary.camera" = "Камера";
+"setup.connect.cta" = "Подключить";
+
+/* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
+"home2.connected" = "Подключено";
+"home2.screentime.title" = "Экранное время сегодня";
+"home2.sos.title" = "SOS — Нужна помощь";
+"home2.sos.subtitle" = "При нажатии — сигнал родителям";
+"home2.tasks.title" = "Задания";
+"home2.tasks.empty" = "Пока нет заданий";
+"sos2.title" = "Позвать на помощь?";
+"sos2.body" = "Родителям будет отправлен экстренный сигнал с вашим местоположением.";
+"sos2.confirm" = "Да, позвать на помощь";
+"sos2.cancel" = "Отмена";
+"sos2.sent" = "Сигнал отправлен";
+"tasks2.title" = "Задания";
+"tasks2.stars_collected" = "Собранные звёзды";
+"tasks2.today" = "Сегодня";
+"tasks2.yesterday" = "Вчера";
+"tasks2.earlier" = "Ранее";
+"tasks2.all" = "Все";
+"tasks2.done" = "Выполнил";
+"tasks2.collected" = "Получено";
+"tasks2.empty" = "Пока нет заданий";
+
+/* MARK: - Bolajon360 Settings / Disconnect (C4-C6) */
+"settings2.section_status" = "Состояние приложения";
+"settings2.section_other" = "Другое";
+"settings2.permissions" = "Состояние разрешений";
+"settings2.permissions_sub" = "Просмотр и управление разрешениями";
+"settings2.connection" = "Состояние подключения";
+"settings2.connection_value" = "Подключено к родителю";
+"settings2.about" = "О приложении";
+"settings2.version" = "Bolajon360 · v1.0.0";
+"settings2.disconnect" = "Отключить связь";
+"settings2.enable" = "Включить";
+"disconnect2.title" = "Отключить связь";
+"disconnect2.body" = "Это отвяжет устройство от вашей семьи. Введите родительский PIN-код, чтобы продолжить.";
+"disconnect2.confirm" = "Отключить";
+"disconnect2.cancel" = "Отмена";

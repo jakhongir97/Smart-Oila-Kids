@@ -25,22 +25,6 @@ struct AppDependencies {
         )
     }
 
-    @MainActor
-    func makeParentHomeViewModel() -> ParentHomeViewModel {
-        let memberDevicesService = MemberDevicesService(client: apiClient)
-        let settingsService = SettingsService(
-            client: apiClient,
-            memberDevicesService: memberDevicesService
-        )
-        return ParentHomeViewModel(
-            profileService: settingsService,
-            memberDevicesService: memberDevicesService,
-            remoteDataSource: MainDashboardRemoteDataSource(
-                client: apiClient,
-                memberDevicesService: memberDevicesService
-            )
-        )
-    }
 
     @MainActor
     func makeChatViewModel(dsn: String) -> ChatViewModel {

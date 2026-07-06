@@ -634,3 +634,101 @@
 "diagnostics.export_device" = "Qurilma";
 "diagnostics.export_os" = "OT";
 "diagnostics.open_settings" = "Sozlamalar";
+
+/* MARK: - Bolajon360 setup flow (A1-A4) */
+"setup.language.title" = "Qaysi til sizga qulay?";
+"setup.continue" = "Davom etish";
+"setup.welcome.title" = "Bolajon360 ga xush kelibsiz!";
+"setup.welcome.subtitle" = "Bu ilova ota-onangiz bilan bog'laydi — ular sizning xavfsizligingizdan xotirjam bo'lishadi.";
+"setup.welcome.feature_contact" = "Ota-onangiz bilan doim aloqada";
+"setup.welcome.feature_protection" = "Xavfli kontentdan himoya";
+"setup.welcome.feature_sos" = "Bir tugma bilan SOS xabar";
+"setup.welcome.start" = "Boshladik";
+"setup.connect.title" = "Ota-ona ilovasiga ulaymiz";
+"setup.connect.step1" = "Ota-ona telefonida Oila360 ilovasini oching";
+"setup.connect.step2" = "«Bola qo'shish» tugmasini bosing";
+"setup.connect.step3" = "Chiqqan kodni shu yerga yozing";
+"setup.connect.connecting" = "Ulanmoqda...";
+"setup.connect.error_generic" = "Ulanishda xatolik. Qaytadan urinib ko'ring.";
+"setup.success.badge" = "Ota-ona bilan ulandi";
+"setup.success.title" = "Muvaffaqiyatli ulandi!";
+"setup.success.subtitle" = "Farzandingiz qurilmasi ilovangizga ulandi. Endi ozgina sozlab olsak kifoya.";
+"setup.success.start" = "Sozlashni boshlash";
+
+"common.user_default" = "Foydalanuvchi";
+
+/* MARK: - Bolajon360 permissions onboarding (B1-B11) */
+"perm2.decline" = "Yo'q, kerak emas";
+"perm2.status.on" = "Yoqildi";
+"perm2.status.off" = "O'chiq";
+"perm2.settings.cta" = "Sozlamaga o'tish";
+"perm2.allow.cta" = "Ha, ruxsat berish";
+"perm2.always.cta" = "Ha, doim ruxsat";
+"perm2.intro.title" = "Bolajon ilovasini sozlaymiz";
+"perm2.intro.body" = "Farzandingiz xavfsizligi uchun bir nechta ruxsat kerak. Keling, birma-bir sozlab olamiz.";
+"perm2.intro.cta" = "Boshlash";
+"perm2.notifications.title" = "Bildirishnomalarga ruxsat";
+"perm2.notifications.body" = "Ilova doimo faol ekanini bildirish uchun bildirishnomalar kerak bo'ladi.";
+"perm2.notifications.cta" = "Bildirishnomalarni yoqish";
+"perm2.battery.title" = "Ilova to'xtab qolishining oldini olish";
+"perm2.battery.body" = "Telefon ilovani fonda o'chirib qo'ymasligi uchun uni energiya tejashdan chiqaring.";
+"perm2.location.title" = "Joylashuvni ko'rsatishga ruxsat berasizmi?";
+"perm2.location.body" = "Ota-onangiz sizni xaritada ko'ra oladi va xavfsiz hududlarni belgilaydi.";
+"perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuv yangilansinmi?";
+"perm2.bglocation.body" = "Doimiy kuzatuv uchun «Doim ruxsat» ni tanlang.";
+"perm2.usage.title" = "Ilovalardan foydalanishni kuzatish";
+"perm2.usage.body" = "Qaysi ilovani ko'p ishlatayotganingizni ota-onangiz ko'ra oladi.";
+"perm2.limits.title" = "Ilovalarni cheklash imkoniyati";
+"perm2.limits.body" = "Ota-onangiz ba'zi ilovalarga vaqt chegarasini qo'yishi mumkin.";
+"perm2.autostart.title" = "Telefon yonganda ilova avtomatik ishga tushsinmi?";
+"perm2.autostart.body" = "Telefon qayta yoqilganda himoya uzilib qolmasligi uchun.";
+"perm2.microphone.title" = "Atrofdagi ovozni eshitishga ruxsat";
+"perm2.microphone.body" = "Kerak bo'lganda ota-onangiz atrofdagi ovozni tinglashi mumkin.";
+"perm2.camera.title" = "Kameradan foydalanishga ruxsat";
+"perm2.camera.body" = "Kerak bo'lganda kameradan foydalanish mumkin bo'ladi.";
+"perm2.summary.title" = "Tayyor! Himoya yoqildi";
+"perm2.summary.body" = "Bolajon360 endi sizni himoya qilishga tayyor. Sozlamalarni keyin ham o'zgartirishingiz mumkin.";
+"perm2.summary.cta" = "Yakunlash";
+"perm2.summary.notifications" = "Bildirishnomalar";
+"perm2.summary.location" = "Joylashuv";
+"perm2.summary.microphone" = "Mikrofon";
+"perm2.summary.camera" = "Kamera";
+"setup.connect.cta" = "Ulanish";
+
+/* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
+"home2.connected" = "Ulangan";
+"home2.screentime.title" = "Bugungi ekran vaqti";
+"home2.sos.title" = "SOS — Yordam kerak";
+"home2.sos.subtitle" = "Bosilsa — ota-onaga xabar ketadi";
+"home2.tasks.title" = "Topshiriqlar";
+"home2.tasks.empty" = "Hozircha topshiriq yo'q";
+"sos2.title" = "Yordam chaqirilsinmi?";
+"sos2.body" = "Ota-onangizga joylashuvingiz bilan favqulodda xabar yuboriladi.";
+"sos2.confirm" = "Ha, yordam chaqir";
+"sos2.cancel" = "Bekor qilish";
+"sos2.sent" = "Xabar yuborildi";
+"tasks2.title" = "Topshiriqlar";
+"tasks2.stars_collected" = "Yig'ilgan yulduzlar";
+"tasks2.today" = "Bugun";
+"tasks2.yesterday" = "Kecha";
+"tasks2.earlier" = "Avvalroq";
+"tasks2.all" = "Barchasi";
+"tasks2.done" = "Bajardim";
+"tasks2.collected" = "Olindi";
+"tasks2.empty" = "Hozircha topshiriq yo'q";
+
+/* MARK: - Bolajon360 Settings / Disconnect (C4-C6) */
+"settings2.section_status" = "Ilova holati";
+"settings2.section_other" = "Boshqa";
+"settings2.permissions" = "Ruxsatlar holati";
+"settings2.permissions_sub" = "Ruxsatlarni ko'rish va boshqarish";
+"settings2.connection" = "Ulanish holati";
+"settings2.connection_value" = "Ota-ona bilan ulangan";
+"settings2.about" = "Ilova haqida";
+"settings2.version" = "Bolajon360 · v1.0.0";
+"settings2.disconnect" = "Aloqani uzish";
+"settings2.enable" = "Yoqish";
+"disconnect2.title" = "Aloqani uzish";
+"disconnect2.body" = "Bu qurilmani oilangizdan ajratadi. Davom etish uchun ota-ona PIN kodini kiriting.";
+"disconnect2.confirm" = "Uzish";
+"disconnect2.cancel" = "Bekor qilish";

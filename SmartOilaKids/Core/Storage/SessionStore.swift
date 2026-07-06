@@ -10,6 +10,10 @@ final class SessionStore: ObservableObject {
         static let profileName = SessionStore.profileNameDefaultsKey
         static let appTheme = "APP_THEME"
         static let appLanguage = "APP_LANGUAGE"
+        static let setupCompleted = "BOLAJON_SETUP_COMPLETED"
+        static let onboardingCompleted = "BOLAJON_ONBOARDING_COMPLETED"
+        static let oilaPaired = "BOLAJON_OILA_PAIRED"
+        static let routingMigrated = "BOLAJON_ROUTING_MIGRATED"
     }
 
     @Published private(set) var dsn: String?
@@ -19,6 +23,13 @@ final class SessionStore: ObservableObject {
     @Published private(set) var apiRefreshToken: String?
     @Published private(set) var appTheme: AppTheme
     @Published private(set) var appLanguage: AppLanguage
+    /// Bolajon360 redesign routing: setup flow (A1–A4) finished.
+    @Published private(set) var setupCompleted: Bool = false
+    /// Bolajon360 redesign routing: permissions onboarding (B1–B11) finished.
+    @Published private(set) var onboardingCompleted: Bool = false
+    /// True only after a successful oila360 `POST /device/pair` issued this install's tokens.
+    /// Gates telemetry — a legacy DSN alone is NOT an oila360 credential.
+    @Published private(set) var oilaPaired: Bool = false
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -39,6 +50,22 @@ final class SessionStore: ObservableObject {
         apiRefreshToken = secureTokens.refreshToken()
         appTheme = AppTheme(rawValue: userDefaults.string(forKey: Keys.appTheme) ?? "") ?? .system
         appLanguage = resolvedLanguage
+
+        // Bolajon360 routing migration (one-time). The oila360 backend replaced the legacy
+        // one, so a legacy DSN carries NO oila360 credentials: existing linked users must
+        // re-pair once (setupCompleted stays false → A1–A3), but they skip the permissions
+        // onboarding they already granted (onboardingCompleted = true). Marking them
+        // "paired" without tokens would leave telemetry silently 401-looping forever.
+        if !userDefaults.bool(forKey: Keys.routingMigrated) {
+            let linked = dsn?.trimmedNonEmpty != nil
+            userDefaults.set(false, forKey: Keys.setupCompleted)
+            userDefaults.set(linked, forKey: Keys.onboardingCompleted)
+            userDefaults.set(false, forKey: Keys.oilaPaired)
+            userDefaults.set(true, forKey: Keys.routingMigrated)
+        }
+        setupCompleted = userDefaults.bool(forKey: Keys.setupCompleted)
+        onboardingCompleted = userDefaults.bool(forKey: Keys.onboardingCompleted)
+        oilaPaired = userDefaults.bool(forKey: Keys.oilaPaired)
 
 #if DEBUG
         SessionStore.debugThemeLog(
@@ -105,11 +132,30 @@ final class SessionStore: ObservableObject {
         L10n.setLanguage(value.rawValue)
     }
 
+    func setSetupCompleted(_ value: Bool) {
+        setupCompleted = value
+        userDefaults.set(value, forKey: Keys.setupCompleted)
+    }
+
+    func setOnboardingCompleted(_ value: Bool) {
+        onboardingCompleted = value
+        userDefaults.set(value, forKey: Keys.onboardingCompleted)
+    }
+
+    func setOilaPaired(_ value: Bool) {
+        oilaPaired = value
+        userDefaults.set(value, forKey: Keys.oilaPaired)
+    }
+
     func clearSession() {
         setDSN(nil)
         setSelectedRemoteDSN(nil)
         setAPIAccessToken(nil)
         setAPIRefreshToken(nil)
+        // Disconnect returns the child to the setup flow.
+        setSetupCompleted(false)
+        setOnboardingCompleted(false)
+        setOilaPaired(false)
     }
 
     private static func defaultLanguage(userDefaults: UserDefaults) -> AppLanguage {

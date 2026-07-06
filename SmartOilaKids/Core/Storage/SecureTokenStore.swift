@@ -13,6 +13,14 @@ protocol SecureTokenStoring {
 final class SecureTokenStore: SecureTokenStoring {
     static let shared = SecureTokenStore()
 
+    /// oila360 device credentials live in their own keychain slots so the two backends'
+    /// tokens can never cross-contaminate (legacy tokens include an auth-header prefix;
+    /// oila360 tokens are raw JWTs sent as "Bearer <token>").
+    static let oila = SecureTokenStore(
+        accessTokenAccount: "oila_access_token",
+        refreshTokenAccount: "oila_refresh_token"
+    )
+
     private enum Constants {
         static let service = Bundle.main.bundleIdentifier ?? "SmartOilaKids"
         static let accessTokenAccount = "api_access_token"
@@ -22,20 +30,31 @@ final class SecureTokenStore: SecureTokenStoring {
         static let legacyRefreshTokenDefaultsKey = "API_REFRESH_TOKEN"
     }
 
+    private let accessTokenAccount: String
+    private let refreshTokenAccount: String
+
+    init(
+        accessTokenAccount: String = Constants.accessTokenAccount,
+        refreshTokenAccount: String = Constants.refreshTokenAccount
+    ) {
+        self.accessTokenAccount = accessTokenAccount
+        self.refreshTokenAccount = refreshTokenAccount
+    }
+
     func accessToken() -> String? {
-        readValue(for: Constants.accessTokenAccount)?.trimmedNonEmpty
+        readValue(for: accessTokenAccount)?.trimmedNonEmpty
     }
 
     func refreshToken() -> String? {
-        readValue(for: Constants.refreshTokenAccount)?.trimmedNonEmpty
+        readValue(for: refreshTokenAccount)?.trimmedNonEmpty
     }
 
     func setAccessToken(_ token: String?) {
-        writeValue(token, for: Constants.accessTokenAccount)
+        writeValue(token, for: accessTokenAccount)
     }
 
     func setRefreshToken(_ token: String?) {
-        writeValue(token, for: Constants.refreshTokenAccount)
+        writeValue(token, for: refreshTokenAccount)
     }
 
     func migrateFromUserDefaults(_ userDefaults: UserDefaults) {

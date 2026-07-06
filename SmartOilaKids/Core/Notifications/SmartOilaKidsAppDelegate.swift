@@ -11,10 +11,13 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
         MediaTelemetryInboxBridge.shared.start()
-        notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            guard granted else { return }
-            DispatchQueue.main.async {
-                application.registerForRemoteNotifications()
+        // Skip the push prompt when previewing a specific screen via SMARTOILA_DEBUG_ROUTE (QA only).
+        if !AppRuntime.hasDebugRoute {
+            notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+                guard granted else { return }
+                DispatchQueue.main.async {
+                    application.registerForRemoteNotifications()
+                }
             }
         }
 
@@ -44,7 +47,16 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     ) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
         Task {
-            await PushTokenSyncCoordinator.shared.updateToken(token)
+            if AppRuntime.legacyRootEnabled {
+                await PushTokenSyncCoordinator.shared.updateToken(token)
+            } else {
+                // oila360 mode: persist for RedeemPairingDto/syncPushToken, and register
+                // event-driven so a token that arrives or rotates mid-session lands too.
+                UserDefaults.standard.set(token, forKey: "PUSH_NOTIFICATION_TOKEN")
+                if UserDefaults.standard.bool(forKey: "BOLAJON_OILA_PAIRED") {
+                    try? await OilaDeviceClient.shared.updateFCMToken(token)
+                }
+            }
         }
     }
 

@@ -6,47 +6,38 @@ struct DeviceLockOverlay: View {
 
     var body: some View {
         ZStack {
-            AppColors.primaryPurple
-                .opacity(0.96)
+            // Bolajon360 look: soft lavender ground, white card, purple-tinted icon badge.
+            AppColors.bgLavender
                 .ignoresSafeArea()
 
-            VStack(spacing: 16) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 56, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.bottom, 4)
+            InfoCard(padding: 28, radius: BolajonMetrics.cardRadiusLarge) {
+                VStack(spacing: 16) {
+                    IconBadge(systemName: "lock.fill", intent: .lavender, diameter: 84)
 
-                Text(L10n.tr("lock.title"))
-                    .font(AppTypography.unbounded(20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-
-                Text(L10n.tr("lock.subtitle"))
-                    .font(AppTypography.unbounded(12, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-
-                if let scheduleRange, !scheduleRange.isEmpty {
-                    Text(L10n.tr("lock.schedule", scheduleRange))
-                        .font(AppTypography.unbounded(12, weight: .medium))
-                        .foregroundStyle(.white)
+                    Text(L10n.tr("lock.title"))
+                        .font(AppTypography.title(20))
+                        .foregroundStyle(AppColors.inkPrimary)
                         .multilineTextAlignment(.center)
-                }
 
-                if let localTime, !localTime.isEmpty {
-                    Text(L10n.tr("lock.local_time", localTime))
-                        .font(AppTypography.unbounded(11, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.85))
+                    Text(L10n.tr("lock.subtitle"))
+                        .font(AppTypography.bodyText(13))
+                        .foregroundStyle(AppColors.inkSecondary)
                         .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+
+                    if let scheduleRange, !scheduleRange.isEmpty {
+                        StatusPill(text: L10n.tr("lock.schedule", scheduleRange), state: .neutral)
+                    }
+
+                    if let localTime, !localTime.isEmpty {
+                        Text(L10n.tr("lock.local_time", localTime))
+                            .font(AppTypography.caption(11))
+                            .foregroundStyle(AppColors.inkTertiary)
+                            .multilineTextAlignment(.center)
+                    }
                 }
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 24)
-            .background(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(Color.black.opacity(0.28))
-            )
             .padding(.horizontal, 22)
         }
         .allowsHitTesting(true)

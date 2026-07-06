@@ -634,3 +634,101 @@
 "diagnostics.export_device" = "Device";
 "diagnostics.export_os" = "OS";
 "diagnostics.open_settings" = "Settings";
+
+/* MARK: - Bolajon360 setup flow (A1-A4) */
+"setup.language.title" = "Which language suits you?";
+"setup.continue" = "Continue";
+"setup.welcome.title" = "Welcome to Bolajon360!";
+"setup.welcome.subtitle" = "This app connects you with your parents so they can rest assured about your safety.";
+"setup.welcome.feature_contact" = "Always in touch with your parents";
+"setup.welcome.feature_protection" = "Protection from harmful content";
+"setup.welcome.feature_sos" = "One-tap SOS alert";
+"setup.welcome.start" = "Let's start";
+"setup.connect.title" = "Connecting to the parent app";
+"setup.connect.step1" = "Open the Oila360 app on your parent's phone";
+"setup.connect.step2" = "Tap 'Add child'";
+"setup.connect.step3" = "Enter the code shown here";
+"setup.connect.connecting" = "Connecting...";
+"setup.connect.error_generic" = "Connection error. Please try again.";
+"setup.success.badge" = "Connected to parent";
+"setup.success.title" = "Successfully connected!";
+"setup.success.subtitle" = "Your child's device is connected to your app. Just a little setup left.";
+"setup.success.start" = "Start setup";
+
+"common.user_default" = "User";
+
+/* MARK: - Bolajon360 permissions onboarding (B1-B11) */
+"perm2.decline" = "No, not needed";
+"perm2.status.on" = "On";
+"perm2.status.off" = "Off";
+"perm2.settings.cta" = "Open Settings";
+"perm2.allow.cta" = "Yes, allow";
+"perm2.always.cta" = "Yes, always allow";
+"perm2.intro.title" = "Let's set up Bolajon";
+"perm2.intro.body" = "A few permissions keep you safe. Let's set them up one by one.";
+"perm2.intro.cta" = "Start";
+"perm2.notifications.title" = "Allow notifications";
+"perm2.notifications.body" = "Notifications are needed to show that the app is active.";
+"perm2.notifications.cta" = "Enable notifications";
+"perm2.battery.title" = "Prevent the app from stopping";
+"perm2.battery.body" = "Turn off power saving so the phone doesn't close the app in the background.";
+"perm2.location.title" = "Allow showing your location?";
+"perm2.location.body" = "Your parents can see you on the map and set safe zones.";
+"perm2.bglocation.title" = "Update location even when the app is closed?";
+"perm2.bglocation.body" = "For continuous tracking, choose 'Always Allow'.";
+"perm2.usage.title" = "App usage tracking";
+"perm2.usage.body" = "Your parents can see which app you use the most.";
+"perm2.limits.title" = "Ability to limit apps";
+"perm2.limits.body" = "Your parents can set time limits for some apps.";
+"perm2.autostart.title" = "Start the app automatically on boot?";
+"perm2.autostart.body" = "So protection isn't interrupted after the phone restarts.";
+"perm2.microphone.title" = "Allow hearing the sound around you";
+"perm2.microphone.body" = "When needed, your parents can listen to the sound around you.";
+"perm2.camera.title" = "Allow using the camera";
+"perm2.camera.body" = "When needed, the camera can be used.";
+"perm2.summary.title" = "Done! Protection is on";
+"perm2.summary.body" = "Bolajon360 is ready to protect you. You can change settings later.";
+"perm2.summary.cta" = "Finish";
+"perm2.summary.notifications" = "Notifications";
+"perm2.summary.location" = "Location";
+"perm2.summary.microphone" = "Microphone";
+"perm2.summary.camera" = "Camera";
+"setup.connect.cta" = "Connect";
+
+/* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
+"home2.connected" = "Connected";
+"home2.screentime.title" = "Screen time today";
+"home2.sos.title" = "SOS — Need help";
+"home2.sos.subtitle" = "Tapping alerts your parents";
+"home2.tasks.title" = "Tasks";
+"home2.tasks.empty" = "No tasks yet";
+"sos2.title" = "Call for help?";
+"sos2.body" = "An emergency alert with your location will be sent to your parents.";
+"sos2.confirm" = "Yes, call for help";
+"sos2.cancel" = "Cancel";
+"sos2.sent" = "Alert sent";
+"tasks2.title" = "Tasks";
+"tasks2.stars_collected" = "Stars collected";
+"tasks2.today" = "Today";
+"tasks2.yesterday" = "Yesterday";
+"tasks2.earlier" = "Earlier";
+"tasks2.all" = "All";
+"tasks2.done" = "Done";
+"tasks2.collected" = "Collected";
+"tasks2.empty" = "No tasks yet";
+
+/* MARK: - Bolajon360 Settings / Disconnect (C4-C6) */
+"settings2.section_status" = "App status";
+"settings2.section_other" = "Other";
+"settings2.permissions" = "Permissions status";
+"settings2.permissions_sub" = "View and manage permissions";
+"settings2.connection" = "Connection status";
+"settings2.connection_value" = "Connected to parent";
+"settings2.about" = "About";
+"settings2.version" = "Bolajon360 · v1.0.0";
+"settings2.disconnect" = "Disconnect";
+"settings2.enable" = "Enable";
+"disconnect2.title" = "Disconnect";
+"disconnect2.body" = "This will unlink the device from your family. Enter the parent PIN to continue.";
+"disconnect2.confirm" = "Disconnect";
+"disconnect2.cancel" = "Cancel";

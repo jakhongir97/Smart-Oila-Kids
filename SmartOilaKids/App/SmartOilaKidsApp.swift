@@ -27,8 +27,11 @@ struct SmartOilaKidsApp: App {
                     applyDebugLaunchOverridesIfNeeded()
 #endif
                     Task {
-                        await PushTokenSyncCoordinator.shared.bootstrapFromDefaults()
-                        await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
+                        // Legacy push-token sync targets the retired backend — legacy mode only.
+                        if AppRuntime.legacyRootEnabled {
+                            await PushTokenSyncCoordinator.shared.bootstrapFromDefaults()
+                            await PushTokenSyncCoordinator.shared.updateDSN(sessionStore.dsn)
+                        }
                         await PushInboxStore.shared.reconcileAppBadge()
                     }
                 }

@@ -30,6 +30,15 @@ enum AppTypography {
         )
     }
 
+    // MARK: - Bolajon360 redesign role helpers
+    // One place for the new type scale so screens don't hardcode raw sizes.
+    static func title(_ size: CGFloat = 22) -> Font { unbounded(size, weight: .semibold) }
+    static func heading(_ size: CGFloat = 18) -> Font { sora(size, weight: .semibold) }
+    static func bodyText(_ size: CGFloat = 14) -> Font { roboto(size, weight: .regular) }
+    static func bodyStrong(_ size: CGFloat = 14) -> Font { roboto(size, weight: .medium) }
+    static func caption(_ size: CGFloat = 11) -> Font { roboto(size, weight: .regular) }
+    static func buttonLabel(_ size: CGFloat = 16) -> Font { unbounded(size, weight: .regular) }
+
     private static func custom(
         family: String,
         fallbackCandidates: [String],

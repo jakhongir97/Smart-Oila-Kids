@@ -21,6 +21,12 @@ enum AppRuntime {
         configuredBool("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY") ?? false
     }
 
+    /// Emergency rollback to the legacy AuthView/MainView root without a rebuild.
+    /// Default is the new Bolajon360 flow.
+    static var legacyRootEnabled: Bool {
+        configuredBool("SMARTOILA_USE_LEGACY_ROOT") ?? false
+    }
+
     static var debugRoute: DebugRoute? {
 #if DEBUG
         guard let value = trimmed("SMARTOILA_DEBUG_ROUTE") else { return nil }
@@ -52,6 +58,15 @@ enum AppRuntime {
 #endif
     }
 
+    static var debugSetupStep: DebugSetupStep? {
+#if DEBUG
+        guard let value = trimmed("SMARTOILA_DEBUG_SETUP_STEP") else { return nil }
+        return DebugSetupStep(rawValue: value)
+#else
+        return nil
+#endif
+    }
+
     static var debugDSN: String? {
 #if DEBUG
         return trimmed("SMARTOILA_DEBUG_DSN")
@@ -78,6 +93,11 @@ enum DebugRoute: String {
     case chat
     case tasks
     case templates
+    case bolajonSetup = "setup"
+    case bolajonPermissions = "perm2"
+    case bolajonHome = "home2"
+    case bolajonTasks = "tasks2"
+    case bolajonSettings = "settings2"
 }
 
 enum DebugAuthStage: String {
@@ -91,6 +111,13 @@ enum DebugPermissionsStage: String {
     case intro
     case checklist
     case done
+}
+
+enum DebugSetupStep: String {
+    case language
+    case welcome
+    case connect
+    case success
 }
 
 private extension AppRuntime {
