@@ -647,7 +647,7 @@
 "setup.connect.title" = "Ota-ona ilovasiga ulaymiz";
 "setup.connect.step1" = "Ota-ona telefonida Oila360 ilovasini oching";
 "setup.connect.step2" = "«Bola qo'shish» tugmasini bosing";
-"setup.connect.step3" = "Chiqqan kodni shu yerga yozing";
+"setup.connect.step3" = "Chiqqan 5 xonali kodni shu yerga yozing";
 "setup.connect.connecting" = "Ulanmoqda...";
 "setup.connect.error_generic" = "Ulanishda xatolik. Qaytadan urinib ko'ring.";
 "setup.success.badge" = "Ota-ona bilan ulandi";

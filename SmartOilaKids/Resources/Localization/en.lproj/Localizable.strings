@@ -647,7 +647,7 @@
 "setup.connect.title" = "Connecting to the parent app";
 "setup.connect.step1" = "Open the Oila360 app on your parent's phone";
 "setup.connect.step2" = "Tap 'Add child'";
-"setup.connect.step3" = "Enter the code shown here";
+"setup.connect.step3" = "Enter the 5-digit code shown here";
 "setup.connect.connecting" = "Connecting...";
 "setup.connect.error_generic" = "Connection error. Please try again.";
 "setup.success.badge" = "Connected to parent";

@@ -647,7 +647,7 @@
 "setup.connect.title" = "Подключаемся к приложению родителя";
 "setup.connect.step1" = "Откройте приложение Oila360 на телефоне родителя";
 "setup.connect.step2" = "Нажмите «Добавить ребёнка»";
-"setup.connect.step3" = "Введите здесь появившийся код";
+"setup.connect.step3" = "Введите здесь появившийся 5-значный код";
 "setup.connect.connecting" = "Подключение...";
 "setup.connect.error_generic" = "Ошибка подключения. Попробуйте ещё раз.";
 "setup.success.badge" = "Подключено к родителю";

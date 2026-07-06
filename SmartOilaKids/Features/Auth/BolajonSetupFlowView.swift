@@ -257,7 +257,7 @@ private struct ConnectStepView: View {
                     code: $viewModel.code,
                     length: codeLength,
                     intent: .lavender,
-                    autoSubmit: false
+                    onComplete: { _ in submit() }
                 )
                 .disabled(viewModel.isConnecting)
 
@@ -268,18 +268,23 @@ private struct ConnectStepView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                BolajonPrimaryButton(
-                    title: L10n.tr("setup.connect.cta"),
-                    isLoading: viewModel.isConnecting,
-                    disabled: viewModel.code.count < codeLength,
-                    action: submit
-                )
+                if viewModel.isConnecting {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(AppColors.ctaPurple)
+                        Text(L10n.tr("setup.connect.connecting"))
+                            .font(AppTypography.bodyText(14))
+                            .foregroundStyle(AppColors.inkSecondary)
+                    }
+                }
             }
         }
     }
 
-    // Backend pairing codes are a minimum of 8 characters; adjust if the issued length differs.
-    private let codeLength = 8
+    // Pairing code length per the design (5-digit, auto-submits — no button).
+    // NOTE: the live oila360 POST /device/pair currently validates code >= 8 chars, so the
+    // backend's pairing-code generation + validation must be changed to 5 digits for this
+    // to succeed. Change this one constant if the issued length differs.
+    private let codeLength = 5
 
     private func stepRow(_ number: Int, _ key: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
