@@ -304,24 +304,29 @@ struct StatusPill: View {
 
 // MARK: - Connected avatar
 
-/// Emoji-in-circle avatar with an optional green "connected" ring + check.
+/// Emoji-in-circle avatar with a green "connected" indicator + check.
+/// `filled` = solid green circle (A4 success); otherwise white circle with a green ring.
 struct ConnectedAvatar: View {
     var emoji: String = "🦁"
     var diameter: CGFloat = 96
     var isConnected: Bool = true
     var ringColor: Color = AppColors.successGreen
+    var filled: Bool = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             ZStack {
-                Circle().fill(AppColors.cardWhite)
+                Circle().fill(filled ? ringColor : AppColors.cardWhite)
                 Text(emoji).font(.system(size: diameter * 0.5))
             }
             .frame(width: diameter, height: diameter)
             .overlay(
-                Circle().stroke(isConnected ? ringColor : AppColors.hairline, lineWidth: 4)
+                Circle().stroke(
+                    filled ? Color.clear : (isConnected ? ringColor : AppColors.hairline),
+                    lineWidth: 4
+                )
             )
-            .shadow(color: BolajonMetrics.cardShadow, radius: 14, x: 0, y: 8)
+            .shadow(color: filled ? ringColor.opacity(0.35) : BolajonMetrics.cardShadow, radius: 16, x: 0, y: 8)
 
             if isConnected {
                 ZStack {
@@ -350,11 +355,13 @@ struct CodeEntryField: View {
     /// A3 Connect sets this false and submits via an explicit button, since the backend
     /// pairing code is a *minimum* of 8 chars — auto-firing at exactly 8 could truncate.
     var autoSubmit: Bool = true
+    /// Render filled dots instead of per-digit boxes (used for the C6 disconnect PIN).
+    var dotStyle: Bool = false
     var onComplete: ((String) -> Void)?
 
     var body: some View {
         VStack(spacing: 26) {
-            boxes
+            if dotStyle { dots } else { boxes }
             if showKeypad {
                 NumericKeypad(
                     onDigit: appendDigit,
@@ -362,6 +369,23 @@ struct CodeEntryField: View {
                 )
             }
         }
+    }
+
+    private var dots: some View {
+        HStack(spacing: 18) {
+            ForEach(0 ..< length, id: \.self) { index in
+                Circle()
+                    .fill(index < code.count ? AppColors.ctaPurple : Color.clear)
+                    .frame(width: 16, height: 16)
+                    .overlay(
+                        Circle().stroke(
+                            index < code.count ? Color.clear : AppColors.inkTertiary.opacity(0.4),
+                            lineWidth: 2
+                        )
+                    )
+            }
+        }
+        .frame(height: 40)
     }
 
     private var boxes: some View {

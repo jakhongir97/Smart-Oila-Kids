@@ -639,7 +639,7 @@
 "setup.language.title" = "Which language suits you?";
 "setup.continue" = "Continue";
 "setup.welcome.title" = "Welcome to Bolajon360!";
-"setup.welcome.subtitle" = "This app connects you with your parents so they can rest assured about your safety.";
+"setup.welcome.subtitle" = "This app links the phone with your parents so they can rest assured about your safety.";
 "setup.welcome.feature_contact" = "Always in touch with your parents";
 "setup.welcome.feature_protection" = "Protection from harmful content";
 "setup.welcome.feature_sos" = "One-tap SOS alert";
@@ -665,29 +665,29 @@
 "perm2.allow.cta" = "Yes, allow";
 "perm2.always.cta" = "Yes, always allow";
 "perm2.intro.title" = "Let's set up Bolajon";
-"perm2.intro.body" = "A few permissions keep you safe. Let's set them up one by one.";
+"perm2.intro.body" = "A few permissions are needed to keep your child safe. Let's set them up one by one, clearly.";
 "perm2.intro.cta" = "Start";
-"perm2.notifications.title" = "Allow notifications";
-"perm2.notifications.body" = "Notifications are needed to show that the app is active.";
+"perm2.notifications.title" = "Want your child's phone under your watch?";
+"perm2.notifications.body" = "Bolajon360 needs notifications to show it's active. Without them the app won't work correctly.";
 "perm2.notifications.cta" = "Enable notifications";
 "perm2.battery.title" = "Prevent the app from stopping";
-"perm2.battery.body" = "Turn off power saving so the phone doesn't close the app in the background.";
-"perm2.location.title" = "Allow showing your location?";
-"perm2.location.body" = "Your parents can see you on the map and set safe zones.";
+"perm2.battery.body" = "So the phone doesn't close the app in the background, exclude it from battery saving.";
+"perm2.location.title" = "Want to know where your child is?";
+"perm2.location.body" = "You'll see the location on the map in real time and can set safe zones.";
 "perm2.bglocation.title" = "Update location even when the app is closed?";
-"perm2.bglocation.body" = "For continuous tracking, choose 'Always Allow'.";
-"perm2.usage.title" = "App usage tracking";
-"perm2.usage.body" = "Your parents can see which app you use the most.";
-"perm2.limits.title" = "Ability to limit apps";
-"perm2.limits.body" = "Your parents can set time limits for some apps.";
-"perm2.autostart.title" = "Start the app automatically on boot?";
-"perm2.autostart.body" = "So protection isn't interrupted after the phone restarts.";
-"perm2.microphone.title" = "Allow hearing the sound around you";
-"perm2.microphone.body" = "When needed, your parents can listen to the sound around you.";
-"perm2.camera.title" = "Allow using the camera";
-"perm2.camera.body" = "When needed, the camera can be used.";
+"perm2.bglocation.body" = "For continuous tracking, choose 'Always Allow' on the next screen.";
+"perm2.usage.title" = "Curious which app your child uses most?";
+"perm2.usage.body" = "You'll see how much time each app takes and can set time limits.";
+"perm2.limits.title" = "Want to be able to restrict apps?";
+"perm2.limits.body" = "You'll be able to block apps at any time.";
+"perm2.autostart.title" = "Start the app automatically after a reboot?";
+"perm2.autostart.body" = "After the phone restarts the app launches itself, so protection isn't interrupted.";
+"perm2.microphone.title" = "Want to hear the sound around your child?";
+"perm2.microphone.body" = "When needed you can turn on the phone's microphone and listen to the surroundings.";
+"perm2.camera.title" = "Want to use the camera when needed?";
+"perm2.camera.body" = "You'll be able to record video from the phone's camera remotely.";
 "perm2.summary.title" = "Done! Protection is on";
-"perm2.summary.body" = "Bolajon360 is ready to protect you. You can change settings later.";
+"perm2.summary.body" = "Bolajon360 is now ready to protect your child. You can change settings any time.";
 "perm2.summary.cta" = "Finish";
 "perm2.summary.notifications" = "Notifications";
 "perm2.summary.location" = "Location";
@@ -732,3 +732,32 @@
 "disconnect2.body" = "This will unlink the device from your family. Enter the parent PIN to continue.";
 "disconnect2.confirm" = "Disconnect";
 "disconnect2.cancel" = "Cancel";
+
+"perm2.decline_bg" = "No, only when open";
+
+"perm2.item.notifications" = "Notifications";
+
+"perm2.item.battery" = "Battery saving off";
+
+"perm2.item.screen" = "Display over screen";
+
+"perm2.item.usage" = "Usage tracking";
+
+"perm2.item.autostart" = "Auto-start";
+
+"perm2.item.location" = "Location";
+
+"perm2.item.bglocation" = "Background location";
+
+"perm2.item.microphone" = "Microphone";
+
+"perm2.item.camera" = "Camera";
+
+"home2.header_subtitle" = "Your family is connected to you";
+"home2.unit_h" = "h";
+"home2.unit_m" = "m";
+"home2.screentime.remaining" = "%d min left";
+"settings2.title" = "Settings";
+"settings2.status_subtitle" = "The following should be enabled for the app to work correctly.";
+"settings2.status_on" = "On";
+"settings2.status_off" = "Off";

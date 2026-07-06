@@ -113,14 +113,9 @@ private struct LanguageStepView: View {
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
 
-                InfoCard(padding: 6) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(options.enumerated()), id: \.element.id) { pair in
-                            if pair.offset > 0 {
-                                Divider().background(AppColors.hairline).padding(.horizontal, 12)
-                            }
-                            languageRow(pair.element)
-                        }
+                VStack(spacing: 12) {
+                    ForEach(options) { option in
+                        languageRow(option)
                     }
                 }
 
@@ -159,8 +154,17 @@ private struct LanguageStepView: View {
                     }
                 }
             }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 12)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .background(
+                RoundedRectangle(cornerRadius: BolajonMetrics.controlRadius, style: .continuous)
+                    .fill(AppColors.cardWhite)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: BolajonMetrics.controlRadius, style: .continuous)
+                    .stroke(selected ? AppColors.ctaPurple : Color.clear, lineWidth: 2)
+            )
+            .shadow(color: BolajonMetrics.cardShadow, radius: 10, x: 0, y: 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -190,25 +194,31 @@ private struct WelcomeStepView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                InfoCard {
-                    VStack(alignment: .leading, spacing: 16) {
-                        featureRow("phone.circle.fill", "setup.welcome.feature_contact")
-                        featureRow("lock.shield.fill", "setup.welcome.feature_protection")
-                        featureRow("sos.circle.fill", "setup.welcome.feature_sos")
-                    }
+                VStack(alignment: .leading, spacing: 18) {
+                    featureRow("phone.fill", "setup.welcome.feature_contact")
+                    featureRow("lock.shield.fill", "setup.welcome.feature_protection")
+                    featureRow("sos", "setup.welcome.feature_sos")
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+                .padding(.horizontal, 8)
+
+                Spacer(minLength: 8)
 
                 BolajonPrimaryButton(title: L10n.tr("setup.welcome.start"), action: onStart)
             }
+            .frame(minHeight: 520)
         }
     }
 
     private func featureRow(_ symbol: String, _ key: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 22))
-                .foregroundStyle(AppColors.glyphPurple)
-                .frame(width: 28)
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(AppColors.ctaPurple.opacity(0.12)).frame(width: 40, height: 40)
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppColors.glyphPurple)
+            }
             Text(L10n.tr(key))
                 .font(AppTypography.bodyText(14))
                 .foregroundStyle(AppColors.inkPrimary)
@@ -303,35 +313,36 @@ private struct SuccessStepView: View {
 
     var body: some View {
         ScreenScaffold(intent: .lavender) {
-            VStack(spacing: 22) {
-                ConnectedAvatar(emoji: "🦁", diameter: 104, isConnected: true)
-                    .padding(.top, 40)
+            VStack(spacing: 18) {
+                ConnectedAvatar(emoji: "🦁", diameter: 108, isConnected: true, filled: true)
+                    .padding(.top, 48)
 
                 VStack(spacing: 6) {
                     Text(childName.isEmpty ? L10n.tr("common.user_default") : childName)
-                        .font(AppTypography.title(22))
+                        .font(AppTypography.title(24))
                         .foregroundStyle(AppColors.inkPrimary)
                     Text(L10n.tr("setup.success.badge"))
                         .font(AppTypography.bodyText(14))
                         .foregroundStyle(AppColors.successGreen)
                 }
 
-                InfoCard {
-                    VStack(spacing: 8) {
-                        Text(L10n.tr("setup.success.title"))
-                            .font(AppTypography.heading(18))
-                            .foregroundStyle(AppColors.inkPrimary)
-                        Text(L10n.tr("setup.success.subtitle"))
-                            .font(AppTypography.bodyText(14))
-                            .foregroundStyle(AppColors.inkSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
+                VStack(spacing: 8) {
+                    Text(L10n.tr("setup.success.title"))
+                        .font(AppTypography.heading(19))
+                        .foregroundStyle(AppColors.inkPrimary)
+                    Text(L10n.tr("setup.success.subtitle"))
+                        .font(AppTypography.bodyText(14))
+                        .foregroundStyle(AppColors.inkSecondary)
+                        .multilineTextAlignment(.center)
                 }
+                .padding(.top, 12)
+                .padding(.horizontal, 12)
+
+                Spacer(minLength: 12)
 
                 BolajonPrimaryButton(title: L10n.tr("setup.success.start"), action: onStart)
-                    .padding(.top, 8)
             }
+            .frame(minHeight: 560)
         }
     }
 }

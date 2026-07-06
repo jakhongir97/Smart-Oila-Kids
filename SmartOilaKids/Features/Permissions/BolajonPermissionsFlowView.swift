@@ -30,6 +30,7 @@ struct BolajonPermissionStep: Identifiable {
     let bodyKey: String
     let primaryKey: String
     let isMandatory: Bool
+    var declineKey: String = "perm2.decline"
 
     var id: String { "\(kind)" }
     var showsDecline: Bool { !isMandatory && kind != .intro && kind != .summary }
@@ -44,7 +45,8 @@ struct BolajonPermissionStep: Identifiable {
         .init(kind: .location, icon: "location.fill", intent: .peach,
               titleKey: "perm2.location.title", bodyKey: "perm2.location.body", primaryKey: "perm2.allow.cta", isMandatory: false),
         .init(kind: .backgroundLocation, icon: "location.circle.fill", intent: .peach,
-              titleKey: "perm2.bglocation.title", bodyKey: "perm2.bglocation.body", primaryKey: "perm2.always.cta", isMandatory: false),
+              titleKey: "perm2.bglocation.title", bodyKey: "perm2.bglocation.body", primaryKey: "perm2.always.cta", isMandatory: false,
+              declineKey: "perm2.decline_bg"),
         .init(kind: .usage, icon: "chart.bar.fill", intent: .peach,
               titleKey: "perm2.usage.title", bodyKey: "perm2.usage.body", primaryKey: "perm2.settings.cta", isMandatory: false),
         .init(kind: .appLimits, icon: "square.stack.3d.up.fill", intent: .peach,
@@ -197,7 +199,7 @@ private struct PermissionStepView: View {
                 VStack(spacing: 6) {
                     BolajonPrimaryButton(title: L10n.tr(step.primaryKey), action: onPrimary)
                     if step.showsDecline {
-                        GhostButton(title: L10n.tr("perm2.decline"), action: onDecline)
+                        GhostButton(title: L10n.tr(step.declineKey), action: onDecline)
                     }
                 }
             }
@@ -216,26 +218,45 @@ private struct PermissionSummaryView: View {
 
     private struct Row: Identifiable {
         let id = UUID()
+        let icon: String
         let labelKey: String
         let granted: Bool
     }
 
+    private var notificationsGranted: Bool {
+        [.authorized, .provisional, .ephemeral].contains(manager.notificationAuthorizationStatus)
+    }
+    private var locationGranted: Bool {
+        [.authorizedAlways, .authorizedWhenInUse].contains(manager.locationAuthorizationStatus)
+    }
+
+    // The design's full checklist (B11). OS-grantable rows reflect live status; the
+    // Settings-education rows (battery/screen/usage/auto-start) show as enabled.
     private var rows: [Row] {
         [
-            Row(labelKey: "perm2.summary.notifications", granted:
-                [.authorized, .provisional, .ephemeral].contains(manager.notificationAuthorizationStatus)),
-            Row(labelKey: "perm2.summary.location", granted:
-                [.authorizedAlways, .authorizedWhenInUse].contains(manager.locationAuthorizationStatus)),
-            Row(labelKey: "perm2.summary.microphone", granted: manager.microphonePermission == .granted),
-            Row(labelKey: "perm2.summary.camera", granted: manager.cameraAuthorizationStatus == .authorized)
+            Row(icon: "bell.fill", labelKey: "perm2.item.notifications", granted: notificationsGranted),
+            Row(icon: "bolt.fill", labelKey: "perm2.item.battery", granted: true),
+            Row(icon: "rectangle.on.rectangle", labelKey: "perm2.item.screen", granted: true),
+            Row(icon: "chart.bar.fill", labelKey: "perm2.item.usage", granted: true),
+            Row(icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart", granted: true),
+            Row(icon: "location.fill", labelKey: "perm2.item.location", granted: locationGranted),
+            Row(icon: "location.circle.fill", labelKey: "perm2.item.bglocation", granted: manager.locationAuthorizationStatus == .authorizedAlways),
+            Row(icon: "mic.fill", labelKey: "perm2.item.microphone", granted: manager.microphonePermission == .granted),
+            Row(icon: "camera.fill", labelKey: "perm2.item.camera", granted: manager.cameraAuthorizationStatus == .authorized)
         ]
     }
 
     var body: some View {
         ScreenScaffold(intent: .lavender, progress: progress, onBack: onBack) {
-            VStack(spacing: 22) {
-                IconBadge(systemName: "checkmark.shield.fill", intent: .lavender)
-                    .padding(.top, 16)
+            VStack(spacing: 20) {
+                ZStack {
+                    Circle().fill(AppColors.successGreen).frame(width: 64, height: 64)
+                        .shadow(color: BolajonMetrics.cardShadow, radius: 12, x: 0, y: 6)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .padding(.top, 8)
 
                 VStack(spacing: 10) {
                     Text(L10n.tr("perm2.summary.title"))
@@ -254,17 +275,22 @@ private struct PermissionSummaryView: View {
                             if pair.offset > 0 {
                                 Divider().background(AppColors.hairline)
                             }
-                            HStack {
+                            HStack(spacing: 12) {
+                                Image(systemName: pair.element.icon)
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(AppColors.glyphPurple)
+                                    .frame(width: 22)
                                 Text(L10n.tr(pair.element.labelKey))
-                                    .font(AppTypography.bodyText(14))
+                                    .font(AppTypography.bodyText(13.5))
                                     .foregroundStyle(AppColors.inkPrimary)
-                                Spacer()
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
                                 StatusPill(
                                     text: L10n.tr(pair.element.granted ? "perm2.status.on" : "perm2.status.off"),
                                     state: pair.element.granted ? .granted : .off
                                 )
                             }
-                            .padding(.vertical, 12)
+                            .padding(.vertical, 11)
                         }
                     }
                 }

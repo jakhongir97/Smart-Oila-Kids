@@ -13,6 +13,12 @@ struct BolajonTasksView: View {
     var body: some View {
         ScreenScaffold(intent: .lavender, onBack: onBack) {
             VStack(spacing: 20) {
+                Text(L10n.tr("tasks2.title"))
+                    .font(AppTypography.title(22))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+
                 starHeader
 
                 if viewModel.tasks.isEmpty {

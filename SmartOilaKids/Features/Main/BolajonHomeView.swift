@@ -21,17 +21,27 @@ struct BolajonHomeView: View {
             }
         }
         .task { await viewModel.load() }
-        .fullScreenCover(isPresented: $showSOSConfirm) {
-            SOSConfirmView(
-                isSending: viewModel.isSendingSOS,
-                sent: viewModel.sosSent,
-                onConfirm: { Task { await viewModel.sendSOS() } },
-                onClose: {
-                    showSOSConfirm = false
-                    viewModel.resetSOS()
-                }
-            )
+        .onAppear {
+#if DEBUG
+            if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SOS"] == "1" { showSOSConfirm = true }
+#endif
         }
+        .overlay {
+            if showSOSConfirm {
+                SOSConfirmSheet(
+                    isSending: viewModel.isSendingSOS,
+                    sent: viewModel.sosSent,
+                    onConfirm: { Task { await viewModel.sendSOS() } },
+                    onClose: {
+                        showSOSConfirm = false
+                        viewModel.resetSOS()
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showSOSConfirm)
         .fullScreenCover(isPresented: $showSettings) {
             BolajonSettingsView(
                 onBack: { showSettings = false },
@@ -46,12 +56,22 @@ struct BolajonHomeView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            ConnectedAvatar(emoji: "🦁", diameter: 46, isConnected: true)
+            ConnectedAvatar(emoji: "🦁", diameter: 48, isConnected: true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(sessionStore.profileName)
-                    .font(AppTypography.heading(17))
-                    .foregroundStyle(AppColors.inkPrimary)
-                StatusPill(text: L10n.tr("home2.connected"), state: .granted)
+                HStack(spacing: 8) {
+                    Text(sessionStore.profileName)
+                        .font(AppTypography.heading(17))
+                        .foregroundStyle(AppColors.inkPrimary)
+                    HStack(spacing: 4) {
+                        Circle().fill(AppColors.successGreen).frame(width: 7, height: 7)
+                        Text(L10n.tr("home2.connected"))
+                            .font(AppTypography.caption(12))
+                            .foregroundStyle(AppColors.successGreen)
+                    }
+                }
+                Text(L10n.tr("home2.header_subtitle"))
+                    .font(AppTypography.caption(12))
+                    .foregroundStyle(AppColors.inkTertiary)
             }
             Spacer()
             Button(action: { showSettings = true }) {
@@ -68,17 +88,20 @@ struct BolajonHomeView: View {
 
     private var screenTimeCard: some View {
         InfoCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.tr("home2.screentime.title"))
-                    .font(AppTypography.bodyStrong(14))
-                    .foregroundStyle(AppColors.inkSecondary)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(viewModel.screenTimeText)
-                        .font(AppTypography.title(26))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(L10n.tr("home2.screentime.title"))
+                        .font(AppTypography.bodyStrong(14))
                         .foregroundStyle(AppColors.inkPrimary)
-                    Text("/ \(viewModel.screenTimeLimitText)")
-                        .font(AppTypography.bodyText(14))
-                        .foregroundStyle(AppColors.inkTertiary)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Text(viewModel.screenTimeText)
+                            .font(AppTypography.bodyStrong(15))
+                            .foregroundStyle(AppColors.ctaPurple)
+                        Text("/ \(viewModel.screenTimeLimitText)")
+                            .font(AppTypography.caption(12))
+                            .foregroundStyle(AppColors.inkTertiary)
+                    }
                 }
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -88,6 +111,9 @@ struct BolajonHomeView: View {
                     }
                 }
                 .frame(height: 8)
+                Text(viewModel.screenTimeRemainingText)
+                    .font(AppTypography.caption(12))
+                    .foregroundStyle(AppColors.inkTertiary)
             }
         }
     }
@@ -194,25 +220,30 @@ private struct HomeTaskRow: View {
 
 // MARK: - C2 SOS confirm
 
-private struct SOSConfirmView: View {
+/// Bottom sheet over a dimmed Home (design C2), iOS 15-compatible (no presentationDetents).
+private struct SOSConfirmSheet: View {
     let isSending: Bool
     let sent: Bool
     let onConfirm: () -> Void
     let onClose: () -> Void
 
     var body: some View {
-        ScreenScaffold(intent: .lavender) {
-            VStack(spacing: 22) {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture { if !isSending { onClose() } }
+
+            VStack(spacing: 18) {
                 ZStack {
-                    Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 96, height: 96)
+                    Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 84, height: 84)
                     Image(systemName: sent ? "checkmark" : "sos")
-                        .font(.system(size: 34, weight: .bold))
+                        .font(.system(size: 30, weight: .bold))
                         .foregroundStyle(AppColors.sosCoral)
                 }
-                .padding(.top, 60)
+                .padding(.top, 8)
 
                 Text(sent ? L10n.tr("sos2.sent") : L10n.tr("sos2.title"))
-                    .font(AppTypography.title(23))
+                    .font(AppTypography.title(22))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
 
@@ -223,10 +254,9 @@ private struct SOSConfirmView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                Spacer(minLength: 20)
-
                 if sent {
                     BolajonPrimaryButton(title: L10n.tr("common.done"), action: onClose)
+                        .padding(.top, 4)
                 } else {
                     VStack(spacing: 6) {
                         BolajonPrimaryButton(
@@ -237,9 +267,18 @@ private struct SOSConfirmView: View {
                         )
                         GhostButton(title: L10n.tr("sos2.cancel"), action: onClose)
                     }
+                    .padding(.top, 4)
                 }
             }
-            .frame(minHeight: 560)
+            .padding(24)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity)
+            .background(
+                TopRoundedShape(radius: 28)
+                    .fill(AppColors.cardWhite)
+                    .ignoresSafeArea(edges: .bottom)
+            )
+            .transition(.move(edge: .bottom))
         }
     }
 }
@@ -267,8 +306,11 @@ final class BolajonHomeViewModel: ObservableObject {
 
     var starTotal: Int { tasks.reduce(0) { $0 + $1.rewardPoints } }
 
-    var screenTimeText: String { format(todayMinutes) }
-    var screenTimeLimitText: String { format(limitMinutes) }
+    var screenTimeText: String { hoursMinutes(todayMinutes) }
+    var screenTimeLimitText: String { hoursMinutes(limitMinutes) }
+    var screenTimeRemainingText: String {
+        L10n.tr("home2.screentime.remaining", max(0, limitMinutes - todayMinutes))
+    }
     var screenTimeFraction: Double {
         guard limitMinutes > 0 else { return 0 }
         return min(1, Double(todayMinutes) / Double(limitMinutes))
@@ -308,8 +350,12 @@ final class BolajonHomeViewModel: ObservableObject {
         errorMessage = nil
     }
 
-    private func format(_ minutes: Int) -> String {
-        String(format: "%d:%02d", minutes / 60, minutes % 60)
+    private func hoursMinutes(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        let hu = L10n.tr("home2.unit_h"), mu = L10n.tr("home2.unit_m")
+        if h > 0 && m > 0 { return "\(h)\(hu) \(m)\(mu)" }
+        if h > 0 { return "\(h)\(hu)" }
+        return "\(m)\(mu)"
     }
 }
 

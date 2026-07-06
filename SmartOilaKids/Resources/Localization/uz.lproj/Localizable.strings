@@ -639,7 +639,7 @@
 "setup.language.title" = "Qaysi til sizga qulay?";
 "setup.continue" = "Davom etish";
 "setup.welcome.title" = "Bolajon360 ga xush kelibsiz!";
-"setup.welcome.subtitle" = "Bu ilova ota-onangiz bilan bog'laydi — ular sizning xavfsizligingizdan xotirjam bo'lishadi.";
+"setup.welcome.subtitle" = "Bu ilova telefoningizni ota-onangiz bilan bog'laydi — ular sizning xavfsizligingizdan xotirjam bo'lishadi.";
 "setup.welcome.feature_contact" = "Ota-onangiz bilan doim aloqada";
 "setup.welcome.feature_protection" = "Xavfli kontentdan himoya";
 "setup.welcome.feature_sos" = "Bir tugma bilan SOS xabar";
@@ -652,7 +652,7 @@
 "setup.connect.error_generic" = "Ulanishda xatolik. Qaytadan urinib ko'ring.";
 "setup.success.badge" = "Ota-ona bilan ulandi";
 "setup.success.title" = "Muvaffaqiyatli ulandi!";
-"setup.success.subtitle" = "Farzandingiz qurilmasi ilovangizga ulandi. Endi ozgina sozlab olsak kifoya.";
+"setup.success.subtitle" = "Farzandingiz qurilmasi sizning ilovangizga ulandi. Endi ozgina sozlab olsak kifoya.";
 "setup.success.start" = "Sozlashni boshlash";
 
 "common.user_default" = "Foydalanuvchi";
@@ -665,29 +665,29 @@
 "perm2.allow.cta" = "Ha, ruxsat berish";
 "perm2.always.cta" = "Ha, doim ruxsat";
 "perm2.intro.title" = "Bolajon ilovasini sozlaymiz";
-"perm2.intro.body" = "Farzandingiz xavfsizligi uchun bir nechta ruxsat kerak. Keling, birma-bir sozlab olamiz.";
+"perm2.intro.body" = "Farzandingiz xavfsizligi uchun bir nechta ruxsat kerak bo'ladi. Keling, birma-bir, tushunarli qilib sozlaymiz.";
 "perm2.intro.cta" = "Boshlash";
-"perm2.notifications.title" = "Bildirishnomalarga ruxsat";
-"perm2.notifications.body" = "Ilova doimo faol ekanini bildirish uchun bildirishnomalar kerak bo'ladi.";
+"perm2.notifications.title" = "Farzanding telefoni sizni nazoratingizda bo'lsinmi?";
+"perm2.notifications.body" = "Bolajon360 doimo faol ekanini bildirish uchun bildirishnomalarga ruxsat kerak. Busiz ilova to'g'ri ishlamaydi.";
 "perm2.notifications.cta" = "Bildirishnomalarni yoqish";
 "perm2.battery.title" = "Ilova to'xtab qolishining oldini olish";
-"perm2.battery.body" = "Telefon ilovani fonda o'chirib qo'ymasligi uchun uni energiya tejashdan chiqaring.";
-"perm2.location.title" = "Joylashuvni ko'rsatishga ruxsat berasizmi?";
-"perm2.location.body" = "Ota-onangiz sizni xaritada ko'ra oladi va xavfsiz hududlarni belgilaydi.";
-"perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuv yangilansinmi?";
-"perm2.bglocation.body" = "Doimiy kuzatuv uchun «Doim ruxsat» ni tanlang.";
-"perm2.usage.title" = "Ilovalardan foydalanishni kuzatish";
-"perm2.usage.body" = "Qaysi ilovani ko'p ishlatayotganingizni ota-onangiz ko'ra oladi.";
-"perm2.limits.title" = "Ilovalarni cheklash imkoniyati";
-"perm2.limits.body" = "Ota-onangiz ba'zi ilovalarga vaqt chegarasini qo'yishi mumkin.";
-"perm2.autostart.title" = "Telefon yonganda ilova avtomatik ishga tushsinmi?";
-"perm2.autostart.body" = "Telefon qayta yoqilganda himoya uzilib qolmasligi uchun.";
-"perm2.microphone.title" = "Atrofdagi ovozni eshitishga ruxsat";
-"perm2.microphone.body" = "Kerak bo'lganda ota-onangiz atrofdagi ovozni tinglashi mumkin.";
-"perm2.camera.title" = "Kameradan foydalanishga ruxsat";
-"perm2.camera.body" = "Kerak bo'lganda kameradan foydalanish mumkin bo'ladi.";
+"perm2.battery.body" = "Telefon ilovani fonda o'chirib qo'ymasligi uchun uni energiya tejashdan chiqarish kerak.";
+"perm2.location.title" = "Farzandingiz qayerda yurganini bilishni xohlaysizmi?";
+"perm2.location.body" = "Xaritada real vaqtda joylashuvni ko'rasiz va xavfsiz hududlar belgilay olasiz.";
+"perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuvni yangilab tursinmi?";
+"perm2.bglocation.body" = "Doimiy kuzatuv uchun keyingi oynada «Doim ruxsat»ni tanlang.";
+"perm2.usage.title" = "Farzandingiz qaysi ilovani ko'p ishlatyapti, qiziqmi?";
+"perm2.usage.body" = "Har bir ilovaga qancha vaqt sarflanganini ko'rasiz va vaqt chegarasini qo'yasiz.";
+"perm2.limits.title" = "Ilovalarni cheklash imkoniyatini xohlaysizmi?";
+"perm2.limits.body" = "Ilovalarni istalgan vaqtda bloklay olasiz.";
+"perm2.autostart.title" = "Telefon o'chib-yonganda ilova avtomatik yonsinmi?";
+"perm2.autostart.body" = "Telefon qayta yoqilganda ilova o'zi ishga tushadi va himoya uzilib qolmaydi.";
+"perm2.microphone.title" = "Farzandingiz atrofidagi ovozni eshitmoqchimisiz?";
+"perm2.microphone.body" = "Kerak bo'lganda telefon mikrofonini yoqib atrofdagi ovozni tinglay olasiz.";
+"perm2.camera.title" = "Kerak bo'lganda kameradan foydalanmoqchimisiz?";
+"perm2.camera.body" = "Masofadan turib telefon kamerasidan video olishingiz mumkin bo'ladi.";
 "perm2.summary.title" = "Tayyor! Himoya yoqildi";
-"perm2.summary.body" = "Bolajon360 endi sizni himoya qilishga tayyor. Sozlamalarni keyin ham o'zgartirishingiz mumkin.";
+"perm2.summary.body" = "Bolajon360 endi farzandingizni himoya qilishga tayyor. Xohlagan payt sozlamalardan o'zgartirishingiz mumkin.";
 "perm2.summary.cta" = "Yakunlash";
 "perm2.summary.notifications" = "Bildirishnomalar";
 "perm2.summary.location" = "Joylashuv";
@@ -732,3 +732,32 @@
 "disconnect2.body" = "Bu qurilmani oilangizdan ajratadi. Davom etish uchun ota-ona PIN kodini kiriting.";
 "disconnect2.confirm" = "Uzish";
 "disconnect2.cancel" = "Bekor qilish";
+
+"perm2.decline_bg" = "Yo'q, faqat ochiqda";
+
+"perm2.item.notifications" = "Bildirishnomalar";
+
+"perm2.item.battery" = "Energiya tejashdan chiqarildi";
+
+"perm2.item.screen" = "Ekran ustida ko'rsatish";
+
+"perm2.item.usage" = "Foydalanishni kuzatish";
+
+"perm2.item.autostart" = "Avtomatik ishga tushish";
+
+"perm2.item.location" = "Joylashuv";
+
+"perm2.item.bglocation" = "Fon joylashuvi";
+
+"perm2.item.microphone" = "Mikrofon";
+
+"perm2.item.camera" = "Kamera";
+
+"home2.header_subtitle" = "Oilangiz sizi bilan bog'langan";
+"home2.unit_h" = "s";
+"home2.unit_m" = "d";
+"home2.screentime.remaining" = "%d daqiqa qoldi";
+"settings2.title" = "Sozlamalar";
+"settings2.status_subtitle" = "Ilova to'g'ri ishlashi uchun quyidagilar yoqilgan bo'lishi kerak.";
+"settings2.status_on" = "Yoqilgan";
+"settings2.status_off" = "O'chiq";
