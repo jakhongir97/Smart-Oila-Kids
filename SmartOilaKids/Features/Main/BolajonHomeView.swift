@@ -328,6 +328,10 @@ private struct SOSConfirmTakeover: View {
             .frame(maxWidth: .infinity)
         }
         // Dark takeover: force dark styling inside the cover so the status bar goes light.
+        // Known cosmetic edge (verified in-simulator): if the device lock engages while
+        // this cover is up, the lock cover presents during this dark override and keeps
+        // the app's dark-variant palette until re-presented — acceptable, both are
+        // designed states and the lock cover still appears reliably.
         .preferredColorScheme(.dark)
     }
 }
