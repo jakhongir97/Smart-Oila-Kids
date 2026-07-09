@@ -99,6 +99,41 @@ Auth flow wired to the real contract + PIN fixed. Files changed:
 
 ---
 
+## ✅ SESSION 3 (2026-07-09) — native navigation + backend completion sprint
+
+All landed on `redesign/bolajon360-oila360` (commits `95a99b3`, `064b392`, `24cba15`,
+`6ed0a2b` + merges). **460 tests green, release-readiness exit 0 (Decision: GO),
+OpenAPI gate 32/32 REST + 13/13 WS.** Verified live: legacy `backend.smart-oila.uz`
+is DOWN (all 13 WS services point at a dead host → dead code in production);
+`api.oila360.uz` is REST-only + FCM (no WS). Key changes:
+
+1. **Fully native navigation** — `BolajonScreen` rebuilt on the system nav bar +
+   system back button (`.navigationTitle` inline, progress capsules as
+   `ToolbarItem(.principal)`, `blocksBack` for A4); deleted `BolajonTopBar`,
+   `SwipeBackEnabler`, `NavToken` stage cross-fade (instant root swap);
+   `DeviceLockOverlay` + SOS confirm are native `.fullScreenCover`s (SOS is now the
+   design's dark takeover; Home dismisses SOS cover when lock engages);
+   `.bolajonNavigationTint()` fixes the green asset AccentColor on back chevrons.
+2. **Backend gaps closed** — `GET /device/tasks` sends required
+   `page/limit/sortOrder` + drains pages; lock push → `refreshLockNow()` immediately
+   (was 30s poll); new `OilaRecordingTriggerService` (push → audio capture →
+   `PUT /device/recordings/{id}/complete`; video deferred — needs foreground);
+   device files CRUD in `OilaDeviceClient` (+tests); tolerant recording-push parsing
+   in `PushCommandRouter`; DEBUG `SMARTOILA_DEBUG_TRIGGER_RECORDING` hook.
+3. **Coverage gate honest** — contract migrated off stale legacy paths
+   (`devices`/`applications` → `device`/`apps`) + 4 files ops added → 32/32.
+4. **Design fidelity** — B5 bg-location skipped when B4 declined; B1 no progress bar;
+   B11 shield badge + board order; "Ha, sozlamaga o'tish" CTA; SOS dark takeover;
+   purple stars header; completed-task preview row + leading checkmarks; settings
+   off-permission coral count badge; disconnect subtitle; bundle-driven version row;
+   uz "siz bilan" typo; dead strings pruned (736 keys ×3 locales).
+
+**Still open:** #5 Firebase (blocked on team config `uz.oila360.child` — APNs token
+sent as `fcmToken` interim; push-driven lock/recording paths are wired and will work
+once FCM lands); video-over-push (needs background-capable capture); apps
+sync/usage not ported to oila360 (iOS can't enumerate installed apps — product
+decision, Screen Time flag stays off); live pair E2E on a real parent account.
+
 ## 🔧 REMAINING WORK (with file:line anchors + acceptance criteria)
 
 > **Status (Session 2):** items **#1–#4 are DONE + unit-tested + build-verified** (441 tests green).
