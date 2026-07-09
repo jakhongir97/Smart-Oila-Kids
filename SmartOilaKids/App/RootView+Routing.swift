@@ -14,9 +14,13 @@ extension RootView {
             }
             .environmentObject(sessionStore)
         } else if !sessionStore.onboardingCompleted {
-            BolajonPermissionsFlowView {
+            // NOTE: the label is load-bearing. BolajonPermissionsFlowView has TWO closure
+            // params (onFinished:onExit:); an unlabeled trailing closure binds to onExit
+            // under Swift's backward-scan compatibility rule, leaving onFinished as the
+            // default no-op — which made B11 "Yakunlash" dead on every device.
+            BolajonPermissionsFlowView(onFinished: {
                 sessionStore.setOnboardingCompleted(true)
-            }
+            })
         } else {
             BolajonHomeView()
                 .environmentObject(sessionStore)
@@ -53,7 +57,11 @@ extension RootView {
             BolajonSetupFlowView()
                 .environmentObject(sessionStore)
         case .bolajonPermissions:
-            BolajonPermissionsFlowView()
+            // Debug route also completes onboarding for real, so a debug-launched flow
+            // can never present a dead "Yakunlash" (see the label note in regularRoot).
+            BolajonPermissionsFlowView(onFinished: {
+                sessionStore.setOnboardingCompleted(true)
+            })
         case .bolajonHome:
             BolajonHomeView()
                 .environmentObject(sessionStore)
