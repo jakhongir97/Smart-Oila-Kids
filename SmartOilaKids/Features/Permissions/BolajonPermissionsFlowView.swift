@@ -75,6 +75,11 @@ struct BolajonPermissionsFlowView: View {
 
     private let steps = BolajonPermissionStep.all
 
+    /// Number of permission markers shown in the progress bar (excludes intro + summary).
+    private var permissionStepCount: Int {
+        steps.filter { $0.kind != .intro && $0.kind != .summary }.count
+    }
+
     enum PermRoute: Hashable { case step(Int), summary }
 
     init(onFinished: @escaping () -> Void = {}, onExit: @escaping () -> Void = {}) {
@@ -99,14 +104,15 @@ struct BolajonPermissionsFlowView: View {
                 case let .step(i):
                     PermissionStepView(
                         step: steps[i],
-                        progress: (i + 1, steps.count),
+                        // Progress tracks the permission steps only (B2–B10 = 9 markers);
+                        // intro/summary are excluded. Step index i maps 1:1 to marker i.
+                        progress: (i, permissionStepCount),
                         onPrimary: { handlePrimary(index: i) },
                         onDecline: { handleDecline(from: i) }
                     )
                 case .summary:
                     PermissionSummaryView(
                         manager: manager,
-                        progress: (steps.count, steps.count),
                         onFinish: onFinished
                     )
                 }
@@ -188,41 +194,45 @@ private struct PermissionStepView: View {
     let onPrimary: () -> Void
     let onDecline: () -> Void
 
+    private var isIntro: Bool { step.kind == .intro }
+
     var body: some View {
-        BolajonScreen(intent: step.intent, progress: progress) {
-            VStack(spacing: 24) {
-                Group {
-                    if step.kind == .intro {
-                        BolajonBrandBadge()
-                    } else {
-                        IconBadge(systemName: step.icon, intent: step.intent)
-                    }
-                }
-                .padding(.top, 20)
-
-                VStack(spacing: 12) {
-                    Text(L10n.tr(step.titleKey))
-                        .font(AppTypography.title(23))
-                        .foregroundStyle(AppColors.inkPrimary)
-                        .multilineTextAlignment(.center)
-                    Text(L10n.tr(step.bodyKey))
-                        .font(AppTypography.bodyText(14))
-                        .foregroundStyle(AppColors.inkSecondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 4)
-
-                Spacer(minLength: 12)
-
-                VStack(spacing: 6) {
-                    BolajonPrimaryButton(title: L10n.tr(step.primaryKey), action: onPrimary)
-                    if step.showsDecline {
-                        GhostButton(title: L10n.tr(step.declineKey), action: onDecline)
-                    }
-                }
+        BolajonHeroSheet(
+            intent: step.intent,
+            deepHero: isIntro,
+            blocksBack: isIntro,
+            progress: progress
+        ) {
+            if isIntro {
+                BolajonBrandBadge(diameter: 132)
+            } else {
+                IconBadge(systemName: step.icon, intent: step.intent, diameter: 130)
             }
-            .frame(minHeight: 520)
+        } sheet: {
+            VStack(spacing: 14) {
+                Text(L10n.tr(step.titleKey))
+                    .font(AppTypography.title(23))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+                Text(L10n.tr(step.bodyKey))
+                    .font(AppTypography.bodyText(14))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 18)
+
+                // On the optional steps the outline decline sits ABOVE the purple primary.
+                VStack(spacing: 10) {
+                    if step.showsDecline {
+                        OutlineButton(title: L10n.tr(step.declineKey), action: onDecline)
+                    }
+                    BolajonPrimaryButton(title: L10n.tr(step.primaryKey), action: onPrimary)
+                }
+                .padding(.bottom, 6)
+            }
         }
     }
 }
@@ -231,7 +241,6 @@ private struct PermissionStepView: View {
 
 private struct PermissionSummaryView: View {
     @ObservedObject var manager: LocationPermissionManager
-    let progress: (current: Int, total: Int)
     let onFinish: () -> Void
 
     // Full checklist driven by live authorization; battery/auto-start (unreadable on iOS)
@@ -239,29 +248,34 @@ private struct PermissionSummaryView: View {
     // — see BolajonPermissionChecklist.
     private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
 
-    private func summaryPill(for availability: BolajonPermissionState.Availability) -> StatusPill {
+    // The design tints the first five permission icons purple and the last four (location,
+    // bg-location, mic, camera) orange.
+    private let orangeIcons: Set<String> = ["location", "bglocation", "microphone", "camera"]
+
+    @ViewBuilder
+    private func summaryPill(for availability: BolajonPermissionState.Availability) -> some View {
         switch availability {
         case .granted:
-            return StatusPill(text: L10n.tr("perm2.status.on"), state: .granted)
+            StatusPill(text: L10n.tr("perm2.status.on"), state: .granted)
         case .notGranted:
-            return StatusPill(text: L10n.tr("perm2.status.off"), state: .off)
+            StatusPill(text: L10n.tr("perm2.status.off"), state: .off)
         case .openSettings:
-            return StatusPill(text: L10n.tr("perm2.settings.cta"), state: .neutral)
+            // iOS can't read battery-saver / boot auto-start — neutral "Open Settings" chip.
+            StatusPill(text: L10n.tr("perm2.settings.cta"), state: .neutral)
         }
     }
 
     var body: some View {
-        BolajonScreen(intent: .lavender, progress: progress) {
-            VStack(spacing: 20) {
-                ZStack {
-                    Circle().fill(AppColors.cardWhite).frame(width: 64, height: 64)
-                        .shadow(color: BolajonMetrics.cardShadow, radius: 12, x: 0, y: 6)
-                    Image(systemName: "checkmark.shield.fill")
-                        .font(.system(size: 34))
-                        .foregroundStyle(AppColors.successGreen)
-                }
-                .padding(.top, 8)
-
+        BolajonHeroSheet(intent: .lavender, blocksBack: true) {
+            ZStack {
+                Circle().fill(AppColors.cardWhite).frame(width: 84, height: 84)
+                    .shadow(color: BolajonMetrics.cardShadow, radius: 16, x: 0, y: 8)
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(AppColors.successGreen)
+            }
+        } sheet: {
+            VStack(spacing: 16) {
                 VStack(spacing: 10) {
                     Text(L10n.tr("perm2.summary.title"))
                         .font(AppTypography.title(23))
@@ -271,33 +285,32 @@ private struct PermissionSummaryView: View {
                         .font(AppTypography.bodyText(14))
                         .foregroundStyle(AppColors.inkSecondary)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.top, 2)
 
-                InfoCard {
-                    VStack(spacing: 0) {
-                        ForEach(Array(states.enumerated()), id: \.element.id) { pair in
-                            if pair.offset > 0 {
-                                Divider().background(AppColors.hairline)
-                            }
-                            HStack(spacing: 12) {
-                                Image(systemName: pair.element.icon)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(AppColors.glyphPurple)
-                                    .frame(width: 22)
-                                Text(L10n.tr(pair.element.labelKey))
-                                    .font(AppTypography.bodyText(13.5))
-                                    .foregroundStyle(AppColors.inkPrimary)
-                                    .lineLimit(1)
-                                Spacer(minLength: 8)
-                                summaryPill(for: pair.element.availability)
-                            }
-                            .padding(.vertical, 11)
+                // Rows sit directly on the white sheet (no inner card / dividers).
+                VStack(spacing: 14) {
+                    ForEach(states) { state in
+                        HStack(spacing: 12) {
+                            Image(systemName: state.icon)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(orangeIcons.contains(state.id) ? AppColors.glyphOrange : AppColors.glyphPurple)
+                                .frame(width: 26)
+                            Text(L10n.tr(state.labelKey))
+                                .font(AppTypography.bodyStrong(15))
+                                .foregroundStyle(AppColors.inkPrimary)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            summaryPill(for: state.availability)
                         }
                     }
                 }
+                .padding(.top, 2)
 
                 BolajonPrimaryButton(title: L10n.tr("perm2.summary.cta"), action: onFinish)
-                    .padding(.top, 4)
+                    .padding(.top, 6)
+                    .padding(.bottom, 6)
             }
         }
         .onAppear { manager.refreshStatuses() }

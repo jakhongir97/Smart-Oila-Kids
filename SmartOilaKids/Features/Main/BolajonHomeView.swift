@@ -35,7 +35,7 @@ struct BolajonHomeView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScreenScaffold(intent: .lavender) {
+            ScreenScaffold(intent: .lavender, background: AppColors.screenBackground) {
                 VStack(spacing: BolajonMetrics.stackSpacing) {
                     header
                     if viewModel.showsScreenTimeCard {
@@ -74,27 +74,32 @@ struct BolajonHomeView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             ConnectedAvatar(
                 emoji: sessionStore.childAvatarEmoji ?? "🦁",
-                diameter: 48,
+                diameter: 62,
                 isConnected: true,
-                tint: Color(hex: sessionStore.childProfileColor)
+                filled: true,
+                showRing: true,
+                fallbackText: sessionStore.profileName
             )
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(sessionStore.profileName)
-                        .font(AppTypography.heading(17))
+                        .font(AppTypography.title(20))
                         .foregroundStyle(AppColors.inkPrimary)
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Circle().fill(AppColors.successGreen).frame(width: 7, height: 7)
                         Text(L10n.tr("home2.connected"))
-                            .font(AppTypography.caption(12))
+                            .font(AppTypography.bodyStrong(12))
                             .foregroundStyle(AppColors.successGreen)
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(AppColors.successGreen.opacity(0.14)))
                 }
                 Text(L10n.tr("home2.header_subtitle"))
-                    .font(AppTypography.caption(12))
+                    .font(AppTypography.bodyText(13))
                     .foregroundStyle(AppColors.inkTertiary)
             }
             Spacer()
@@ -102,8 +107,9 @@ struct BolajonHomeView: View {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 20))
                     .foregroundStyle(AppColors.inkSecondary)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 46, height: 46)
                     .background(Circle().fill(AppColors.cardWhite))
+                    .shadow(color: BolajonMetrics.cardShadow, radius: 8, x: 0, y: 4)
             }
             .buttonStyle(.plain)
         }
@@ -144,23 +150,20 @@ struct BolajonHomeView: View {
             InfoCard {
                 HStack(spacing: 14) {
                     ZStack {
-                        Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 46, height: 46)
-                        Image(systemName: "sos")
-                            .font(.system(size: 18, weight: .bold))
+                        Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 54, height: 54)
+                        Text("SOS")
+                            .font(AppTypography.title(15))
                             .foregroundStyle(AppColors.sosCoral)
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(L10n.tr("home2.sos.title"))
-                            .font(AppTypography.heading(16))
-                            .foregroundStyle(AppColors.sosCoral)
+                            .font(AppTypography.heading(17))
+                            .foregroundStyle(AppColors.inkPrimary)
                         Text(L10n.tr("home2.sos.subtitle"))
-                            .font(AppTypography.caption(12))
+                            .font(AppTypography.bodyText(13))
                             .foregroundStyle(AppColors.inkTertiary)
                     }
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(AppColors.inkTertiary)
                 }
             }
         }
@@ -176,25 +179,29 @@ struct BolajonHomeView: View {
     private var tasksCardBody: some View {
         InfoCard {
             VStack(spacing: 14) {
-                HStack {
+                HStack(spacing: 10) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppColors.ctaPurple)
                     Text(L10n.tr("home2.tasks.title"))
-                        .font(AppTypography.heading(16))
+                        .font(AppTypography.heading(17))
                         .foregroundStyle(AppColors.inkPrimary)
                     Spacer()
-                    HStack(spacing: 6) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(AppColors.glyphCoral)
-                            Text("\(viewModel.starTotal)")
-                                .font(AppTypography.bodyStrong(14))
-                                .foregroundStyle(AppColors.inkPrimary)
-                        }
-                        // Disclosure chevron — the whole card pushes the Tasks screen.
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(AppColors.inkTertiary)
+                    HStack(spacing: 5) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppColors.starAmber)
+                        Text("\(viewModel.starTotal)")
+                            .font(AppTypography.bodyStrong(14))
+                            .foregroundStyle(AppColors.starAmber)
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(AppColors.starAmber.opacity(0.14)))
+                    // Disclosure chevron — the whole card pushes the Tasks screen.
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppColors.inkTertiary)
                 }
                 if viewModel.previewTasks.isEmpty {
                     Text(L10n.tr("home2.tasks.empty"))
@@ -220,23 +227,28 @@ private struct HomeTaskRow: View {
     let onDone: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 18))
-                .foregroundStyle(task.isCompleted ? AppColors.successGreen : AppColors.hairline)
-            if let emoji = task.emoji, !emoji.isEmpty {
-                Text(emoji).font(.system(size: 16))
-            }
+        HStack(spacing: 8) {
             Text(task.title)
                 .font(AppTypography.bodyText(14))
                 .foregroundStyle(task.isCompleted ? AppColors.inkTertiary : AppColors.inkPrimary)
+                .strikethrough(task.isCompleted, color: AppColors.inkTertiary)
                 .lineLimit(1)
-            Spacer()
+            Spacer(minLength: 6)
+            if task.rewardPoints > 0 {
+                HStack(spacing: 3) {
+                    Text("+\(task.rewardPoints)")
+                        .font(AppTypography.bodyStrong(13))
+                        .foregroundStyle(AppColors.starAmber)
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppColors.starAmber)
+                }
+            }
             if task.isCompleted {
                 // Design's Home preview marks the done row with a green "Bajarildi ✓".
                 HStack(spacing: 4) {
                     Text(L10n.tr("home2.tasks.done_badge"))
-                        .font(AppTypography.caption(12))
+                        .font(AppTypography.bodyStrong(13))
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .bold))
                 }
@@ -244,10 +256,10 @@ private struct HomeTaskRow: View {
             } else {
                 Button(action: onDone) {
                     Text(L10n.tr("tasks2.done"))
-                        .font(AppTypography.caption(12))
+                        .font(AppTypography.bodyStrong(13))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                         .background(Capsule().fill(AppColors.ctaPurple))
                 }
                 .buttonStyle(.plain)
@@ -271,68 +283,73 @@ private struct SOSConfirmTakeover: View {
 
     /// Fixed dark indigo backdrop (design board) — deliberately identical in light and
     /// dark mode, like the brand gradient endpoints.
-    private let backdrop = Color(.sRGB, red: 42 / 255, green: 37 / 255, blue: 64 / 255, opacity: 1) // #2A2540
+    private let backdrop = Color(.sRGB, red: 74 / 255, green: 70 / 255, blue: 104 / 255, opacity: 1) // slate indigo
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             backdrop.ignoresSafeArea()
-            VStack(spacing: 18) {
-                Spacer(minLength: 24)
 
+            // White bottom card (design board "SOS — Tasdiqlash"): dark backdrop up top, a
+            // rounded-top white sheet below carrying the dark title / body / actions.
+            VStack(spacing: 16) {
                 ZStack {
                     Circle()
-                        .fill(sent ? AppColors.successGreen : AppColors.sosCoral)
-                        .frame(width: 96, height: 96)
-                        .shadow(color: (sent ? AppColors.successGreen : AppColors.sosCoral).opacity(0.35),
-                                radius: 18, x: 0, y: 10)
-                    Image(systemName: sent ? "checkmark" : "sos")
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(.white)
+                        .fill((sent ? AppColors.successGreen : AppColors.sosCoral).opacity(0.14))
+                        .frame(width: 92, height: 92)
+                    if sent {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 34, weight: .bold))
+                            .foregroundStyle(AppColors.successGreen)
+                    } else {
+                        Text("SOS")
+                            .font(AppTypography.title(22))
+                            .foregroundStyle(AppColors.sosCoral)
+                    }
                 }
+                .padding(.top, 6)
 
                 Text(sent ? L10n.tr("sos2.sent") : L10n.tr("sos2.title"))
                     .font(AppTypography.title(24))
-                    .foregroundStyle(AppColors.inverseTextPrimary)
+                    .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
-                    .padding(.top, 6)
 
                 if !sent {
                     Text(L10n.tr("sos2.body"))
                         .font(AppTypography.bodyText(15))
-                        .foregroundStyle(AppColors.inverseTextSecondary)
+                        .foregroundStyle(AppColors.inkSecondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 4)
                 }
-
-                Spacer(minLength: 24)
 
                 if sent {
                     BolajonPrimaryButton(title: L10n.tr("common.done"), action: onClose)
+                        .padding(.top, 6)
                 } else {
-                    VStack(spacing: 6) {
+                    VStack(spacing: 4) {
                         BolajonPrimaryButton(
                             title: L10n.tr("sos2.confirm"),
                             fill: AppColors.sosCoral,
                             isLoading: isSending,
                             action: onConfirm
                         )
-                        GhostButton(title: L10n.tr("sos2.cancel"), tint: AppColors.inverseTextSecondary, action: onClose)
+                        GhostButton(title: L10n.tr("sos2.cancel"), action: onClose)
                             .disabled(isSending)
                             .opacity(isSending ? 0.4 : 1)
                     }
+                    .padding(.top, 6)
                 }
             }
             .padding(.horizontal, BolajonMetrics.screenPadding)
-            .padding(.bottom, 16)
+            .padding(.top, 30)
+            .padding(.bottom, 14)
             .frame(maxWidth: .infinity)
+            .background(
+                TopRoundedRectangle(radius: 38)
+                    .fill(AppColors.cardWhite)
+                    .ignoresSafeArea(edges: .bottom)
+            )
         }
-        // Dark takeover: force dark styling inside the cover so the status bar goes light.
-        // Known cosmetic edge (verified in-simulator): if the device lock engages while
-        // this cover is up, the lock cover presents during this dark override and keeps
-        // the app's dark-variant palette until re-presented — acceptable, both are
-        // designed states and the lock cover still appears reliably.
-        .preferredColorScheme(.dark)
     }
 }
 

@@ -66,49 +66,46 @@ struct SettingsRootView: View {
     }
 
     var body: some View {
-        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.title")) {
-            VStack(spacing: 20) {
+        BolajonScreen(intent: .lavender, background: AppColors.screenBackground, title: L10n.tr("settings2.title")) {
+            VStack(spacing: 22) {
                 InfoCard {
                     HStack(spacing: 14) {
                         ConnectedAvatar(
                             emoji: sessionStore.childAvatarEmoji ?? "🦁",
-                            diameter: 52,
+                            diameter: 56,
                             isConnected: true,
-                            tint: Color(hex: sessionStore.childProfileColor)
+                            filled: true,
+                            fallbackText: sessionStore.profileName
                         )
                         VStack(alignment: .leading, spacing: 4) {
                             Text(sessionStore.profileName)
-                                .font(AppTypography.heading(17))
+                                .font(AppTypography.title(19))
                                 .foregroundStyle(AppColors.inkPrimary)
-                            HStack(spacing: 4) {
-                                Circle().fill(AppColors.successGreen).frame(width: 7, height: 7)
-                                Text(L10n.tr("home2.connected"))
-                                    .font(AppTypography.caption(12))
-                                    .foregroundStyle(AppColors.successGreen)
-                            }
+                            Text(L10n.tr("home2.connected"))
+                                .font(AppTypography.bodyStrong(14))
+                                .foregroundStyle(AppColors.successGreen)
                         }
                         Spacer()
                     }
                 }
 
                 section(title: "settings2.section_status") {
-                    row(icon: "checklist", tint: AppColors.glyphPurple,
-                        title: "settings2.permissions", subtitle: "settings2.permissions_sub",
-                        badge: offPermissionCount > 0
-                            ? (text: L10n.tr("settings2.permissions_off_count", offPermissionCount), state: .off)
-                            : nil,
+                    row(glyph: .symbol("shield.fill"), tint: AppColors.glyphPurple,
+                        title: "settings2.permissions",
+                        subtitle: offPermissionCount > 0 ? nil : "settings2.permissions_sub",
+                        subtitleLiteral: offPermissionCount > 0
+                            ? L10n.tr("settings2.permissions_off_count", offPermissionCount) : nil,
+                        offCount: offPermissionCount,
                         action: { path.append(.settingsPermissions) })
-                    Divider().background(AppColors.hairline)
-                    row(icon: "link", tint: AppColors.successGreen,
+                    row(glyph: .connection, tint: AppColors.glyphPurple,
                         title: "settings2.connection", subtitle: "settings2.connection_value",
                         action: nil)
                 }
 
                 section(title: "settings2.section_other") {
-                    row(icon: "info.circle", tint: AppColors.glyphPurple,
+                    row(glyph: .symbol("info.circle.fill"), tint: AppColors.glyphPurple,
                         title: "settings2.about", subtitleLiteral: appVersionText, action: nil)
-                    Divider().background(AppColors.hairline)
-                    row(icon: "link.badge.plus", tint: AppColors.sosCoral,
+                    row(glyph: .brokenLink, tint: AppColors.sosCoral,
                         title: "settings2.disconnect", subtitle: "settings2.disconnect_sub",
                         titleColor: AppColors.sosCoral, action: { path.append(.settingsDisconnect) })
                 }
@@ -117,60 +114,102 @@ struct SettingsRootView: View {
         .onAppear { permissionManager.refreshStatuses() }
     }
 
+    private enum RowGlyph {
+        case symbol(String)
+        case connection
+        case brokenLink
+    }
+
     @ViewBuilder
     private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(L10n.tr(title))
-                .font(AppTypography.caption(12))
+                .font(AppTypography.bodyStrong(12))
                 .foregroundStyle(AppColors.inkTertiary)
                 .textCase(.uppercase)
-            InfoCard { VStack(spacing: 0) { content() } }
+                .padding(.leading, 4)
+            // Each row is its own white card (design C4).
+            content()
         }
     }
 
     @ViewBuilder
-    private func row(icon: String, tint: Color, title: String,
+    private func row(glyph: RowGlyph, tint: Color, title: String,
                      subtitle: String? = nil, subtitleLiteral: String? = nil,
                      titleColor: Color = AppColors.inkPrimary,
-                     badge: (text: String, state: StatusPill.State)? = nil,
+                     offCount: Int = 0,
                      action: (() -> Void)?) -> some View {
-        Button {
-            action?()
-        } label: {
-            HStack(spacing: 12) {
+        // Non-actionable rows render as a plain card (no disabled Button, which would dim them).
+        if let action {
+            Button(action: action) { rowCard(glyph: glyph, tint: tint, title: title, subtitle: subtitle,
+                                              subtitleLiteral: subtitleLiteral, titleColor: titleColor,
+                                              offCount: offCount, showsChevron: true) }
+                .buttonStyle(.plain)
+        } else {
+            rowCard(glyph: glyph, tint: tint, title: title, subtitle: subtitle,
+                    subtitleLiteral: subtitleLiteral, titleColor: titleColor,
+                    offCount: offCount, showsChevron: false)
+        }
+    }
+
+    private func rowCard(glyph: RowGlyph, tint: Color, title: String,
+                         subtitle: String?, subtitleLiteral: String?,
+                         titleColor: Color, offCount: Int, showsChevron: Bool) -> some View {
+        InfoCard(padding: 14) {
+            HStack(spacing: 14) {
                 ZStack {
-                    Circle().fill(tint.opacity(0.14)).frame(width: 36, height: 36)
-                    Image(systemName: icon).font(.system(size: 16)).foregroundStyle(tint)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(tint.opacity(0.14))
+                        .frame(width: 46, height: 46)
+                    rowIcon(glyph, tint: tint)
                 }
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(L10n.tr(title))
-                        .font(AppTypography.bodyStrong(15))
+                        .font(AppTypography.heading(16))
                         .foregroundStyle(titleColor)
                     if let subtitleLiteral {
                         Text(subtitleLiteral)
-                            .font(AppTypography.caption(12))
+                            .font(AppTypography.bodyText(13))
                             .foregroundStyle(AppColors.inkTertiary)
                     } else if let subtitle {
                         Text(L10n.tr(subtitle))
-                            .font(AppTypography.caption(12))
+                            .font(AppTypography.bodyText(13))
                             .foregroundStyle(AppColors.inkTertiary)
                     }
                 }
-                Spacer()
-                if let badge {
-                    StatusPill(text: badge.text, state: badge.state)
+                Spacer(minLength: 8)
+                if offCount > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                        Text("\(offCount)")
+                            .font(AppTypography.bodyStrong(13))
+                    }
+                    .foregroundStyle(AppColors.sosCoral)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(AppColors.sosCoral.opacity(0.14)))
                 }
-                if action != nil {
+                if showsChevron {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(AppColors.inkTertiary)
                 }
             }
-            .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(action == nil)
+    }
+
+    @ViewBuilder
+    private func rowIcon(_ glyph: RowGlyph, tint: Color) -> some View {
+        switch glyph {
+        case let .symbol(name):
+            Image(systemName: name).font(.system(size: 19)).foregroundStyle(tint)
+        case .connection:
+            ConnectionGlyph(size: 22, tint: tint)
+        case .brokenLink:
+            BrokenLinkIcon(size: 16, tint: tint)
+        }
     }
 }
 
@@ -183,14 +222,15 @@ struct SettingsPermissionsScreen: View {
     private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
 
     var body: some View {
-        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.permissions")) {
+        BolajonScreen(intent: .lavender, background: AppColors.screenBackground, title: L10n.tr("settings2.permissions")) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L10n.tr("settings2.status_subtitle"))
-                    .font(AppTypography.bodyText(13))
+                    .font(AppTypography.bodyText(14))
                     .foregroundStyle(AppColors.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
 
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     ForEach(states) { state in
                         row(state)
                     }
@@ -204,10 +244,12 @@ struct SettingsPermissionsScreen: View {
     private func row(_ state: BolajonPermissionState) -> some View {
         switch state.availability {
         case .granted:
-            compactRow(state, pillText: L10n.tr("settings2.status_on"), pillState: .granted, onTap: nil)
+            compactRow(state, pillText: L10n.tr("settings2.status_on"), pillState: .granted,
+                       pillIcon: "checkmark.circle.fill", onTap: nil)
         case .openSettings:
             // iOS can't read battery-saver / auto-start — neutral chip that opens Settings.
-            compactRow(state, pillText: L10n.tr("perm2.settings.cta"), pillState: .neutral, onTap: openSystemSettings)
+            compactRow(state, pillText: L10n.tr("perm2.settings.cta"), pillState: .neutral,
+                       pillIcon: nil, onTap: openSystemSettings)
         case .notGranted:
             attentionRow(state)
         }
@@ -215,16 +257,19 @@ struct SettingsPermissionsScreen: View {
 
     @ViewBuilder
     private func compactRow(_ state: BolajonPermissionState, pillText: String,
-                            pillState: StatusPill.State, onTap: (() -> Void)?) -> some View {
+                            pillState: StatusPill.State, pillIcon: String?, onTap: (() -> Void)?) -> some View {
         let card = InfoCard(padding: 14) {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 iconBadge(state.icon, tint: AppColors.glyphPurple)
                 Text(L10n.tr(state.labelKey))
-                    .font(AppTypography.bodyStrong(14))
+                    .font(AppTypography.heading(16))
                     .foregroundStyle(AppColors.inkPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                StatusPill(text: pillText, state: pillState)
+                StatusPill(text: pillText, state: pillState, icon: pillIcon)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColors.inkTertiary.opacity(0.5))
             }
         }
         if let onTap {
@@ -236,18 +281,21 @@ struct SettingsPermissionsScreen: View {
 
     // Highlighted "needs attention" card (design: coral border + description + Yoqish).
     private func attentionRow(_ state: BolajonPermissionState) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 14) {
                 iconBadge(state.icon, tint: AppColors.glyphCoral)
                 Text(L10n.tr(state.labelKey))
-                    .font(AppTypography.bodyStrong(14))
+                    .font(AppTypography.heading(16))
                     .foregroundStyle(AppColors.inkPrimary)
                 Spacer(minLength: 8)
-                StatusPill(text: L10n.tr("settings2.status_off"), state: .off)
+                StatusPill(text: L10n.tr("settings2.status_off"), state: .off, icon: "exclamationmark.circle.fill")
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColors.inkTertiary.opacity(0.5))
             }
             if let descriptionKey = state.descriptionKey {
                 Text(L10n.tr(descriptionKey))
-                    .font(AppTypography.caption(12))
+                    .font(AppTypography.bodyText(13))
                     .foregroundStyle(AppColors.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -255,29 +303,30 @@ struct SettingsPermissionsScreen: View {
                 if let requirement = state.requirement { manager.performAction(for: requirement) }
             } label: {
                 Text(L10n.tr("settings2.enable"))
-                    .font(AppTypography.bodyStrong(14))
+                    .font(AppTypography.buttonLabel(15))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 42)
-                    .background(Capsule().fill(AppColors.glyphCoral))
+                    .frame(height: 48)
+                    .background(Capsule().fill(AppColors.glyphOrange))
             }
             .buttonStyle(.plain)
         }
-        .padding(14)
+        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
-                .fill(AppColors.glyphCoral.opacity(0.06))
+                .fill(AppColors.cardWhite)
         )
         .overlay(
             RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
-                .stroke(AppColors.glyphCoral.opacity(0.4), lineWidth: 1.5)
+                .stroke(AppColors.glyphOrange.opacity(0.7), lineWidth: 1.5)
         )
     }
 
     private func iconBadge(_ symbol: String, tint: Color) -> some View {
         ZStack {
-            Circle().fill(tint.opacity(0.12)).frame(width: 34, height: 34)
-            Image(systemName: symbol).font(.system(size: 15)).foregroundStyle(tint)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(tint.opacity(0.14)).frame(width: 44, height: 44)
+            Image(systemName: symbol).font(.system(size: 18)).foregroundStyle(tint)
         }
     }
 
@@ -323,60 +372,124 @@ struct SettingsDisconnectScreen: View {
         }
     }
 
+    private var isComplete: Bool { !showsPINField || pin.count == pinLength }
+
     var body: some View {
-        BolajonScreen(intent: .lavender, title: L10n.tr("disconnect2.title")) {
-            VStack(spacing: 20) {
+        ZStack {
+            AppColors.screenBackground.ignoresSafeArea()
+            VStack(spacing: 0) {
                 brokenLinkBadge
-                    .padding(.top, 12)
+                    .padding(.top, 8)
 
                 // The screen title ("Aloqani uzish") lives in the native navigation bar.
                 Text(bodyText)
-                    .font(AppTypography.bodyText(14))
+                    .font(AppTypography.bodyText(15))
                     .foregroundStyle(AppColors.inkSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 18)
+                    .padding(.horizontal, 6)
+
+                if showsPINField {
+                    pinDots.padding(.top, 22)
+                }
 
                 if let errorText {
                     Text(errorText)
                         .font(AppTypography.caption(12))
                         .foregroundStyle(AppColors.sosCoral)
                         .multilineTextAlignment(.center)
+                        .padding(.top, 12)
                 }
+
+                Spacer(minLength: 16)
 
                 if showsPINField {
-                    CodeEntryField(code: $pin, length: pinLength, intent: .lavender, autoSubmit: false, dotStyle: true)
+                    NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendPIN, onBackspace: removePIN)
                         .disabled(busy)
+                        .padding(.bottom, 12)
                 }
 
-                BolajonPrimaryButton(
-                    title: L10n.tr("disconnect2.confirm"),
-                    fill: AppColors.sosCoral,
-                    isLoading: busy,
-                    disabled: showsPINField && pin.count < pinLength,
-                    action: handlePrimary
-                )
+                uzishButton
                 GhostButton(title: L10n.tr("disconnect2.cancel"), action: { dismiss() })
             }
+            .padding(.horizontal, BolajonMetrics.screenPadding)
+            .padding(.bottom, 8)
         }
+        .navigationTitle(L10n.tr("disconnect2.title"))
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: resolveMode)
+    }
+
+    private var pinDots: some View {
+        HStack(spacing: 20) {
+            ForEach(0 ..< pinLength, id: \.self) { index in
+                Circle()
+                    .fill(index < pin.count ? AppColors.inkPrimary : Color.clear)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Circle().stroke(index < pin.count ? Color.clear : AppColors.inkTertiary.opacity(0.4),
+                                        lineWidth: 2)
+                    )
+            }
+        }
+    }
+
+    private var uzishButton: some View {
+        Button {
+            AppHaptics.tap()
+            handlePrimary()
+        } label: {
+            ZStack {
+                if busy {
+                    ProgressView().tint(AppColors.sosCoral)
+                } else {
+                    Text(L10n.tr("disconnect2.confirm"))
+                        .font(AppTypography.buttonLabel(16))
+                        .foregroundStyle(isComplete ? .white : AppColors.sosCoral)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: BolajonMetrics.buttonHeight)
+            .background(Capsule().fill(isComplete ? AppColors.sosCoral : AppColors.sosCoral.opacity(0.16)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isComplete || busy)
+    }
+
+    private func appendPIN(_ digit: String) {
+        guard showsPINField, pin.count < pinLength, !busy else { return }
+        pin += digit
+        AppHaptics.tap()
+    }
+
+    private func removePIN() {
+        guard showsPINField, !pin.isEmpty, !busy else { return }
+        pin.removeLast()
+        AppHaptics.tap()
     }
 
     private var brokenLinkBadge: some View {
         ZStack {
-            Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 84, height: 84)
-            Image(systemName: "link")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(AppColors.sosCoral)
-            // Diagonal slash → "broken link".
-            Capsule()
-                .fill(AppColors.sosCoral)
-                .frame(width: 40, height: 3)
-                .rotationEffect(.degrees(-45))
+            Circle().fill(AppColors.sosCoral.opacity(0.12)).frame(width: 88, height: 88)
+            BrokenLinkIcon(size: 28, tint: AppColors.sosCoral)
         }
     }
 
     private func resolveMode() {
         protection.refreshAvailability()
+#if DEBUG
+        // Screenshot hook: force the PIN-entry variant (keypad + dots) regardless of the
+        // device's biometric availability. Verification only — never validates/disconnects.
+        if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_DISCONNECT_MODE"] == "pin" {
+            mode = .verifyPIN
+            createStage = .enter
+            pin = ""
+            firstPIN = ""
+            errorText = nil
+            return
+        }
+#endif
         if protection.hasCustomPIN {
             mode = .verifyPIN
         } else if protection.isDeviceAuthenticationAvailable {

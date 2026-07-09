@@ -57,6 +57,8 @@ enum AppColors {
     static let glyphPurple = dynamic(rgb(108, 76, 224), rgb(150, 120, 255)) // #6C4CE0
     /// Glyph tint inside white icon badges on peach screens.
     static let glyphCoral = dynamic(rgb(240, 96, 90), rgb(255, 122, 116))   // #F0605A
+    /// Warm orange glyph tint for the optional-permission icons (peach hero steps).
+    static let glyphOrange = dynamic(rgb(240, 133, 66), rgb(247, 148, 82))  // #F08542
 
     /// Success / connected state (avatar ring, "Yoqildi" pills).
     static let successGreen = dynamic(rgb(59, 201, 125), rgb(54, 208, 143)) // #3BC97D
@@ -71,6 +73,28 @@ enum AppColors {
     static let hairline = dynamic(rgb(228, 222, 245), rgb(58, 54, 74))
     /// Neutral chip / inactive keypad key fill.
     static let chipNeutral = dynamic(rgb(240, 238, 249), rgb(46, 43, 58))
+
+    // MARK: - Hero / sheet two-zone system (A1–A4 setup + B1–B11 permissions)
+    // The redesigned flows paint a tinted HERO zone (top) behind a white bottom SHEET.
+    // These endpoints drive the hero gradient; the sheet uses `cardWhite`.
+
+    /// Standard lavender hero gradient (setup + mandatory permission steps).
+    static let heroLavenderTop = dynamic(rgb(228, 220, 246), rgb(38, 33, 54))     // #E4DCF6
+    static let heroLavenderBottom = dynamic(rgb(238, 233, 251), rgb(30, 27, 44))  // #EEE9FB
+    /// Deeper lavender for the B1 intro hero.
+    static let heroLavenderDeepTop = dynamic(rgb(213, 202, 242), rgb(46, 40, 70)) // #D5CAF2
+    /// Peach hero gradient (optional permission steps B4–B10).
+    static let heroPeachTop = dynamic(rgb(250, 230, 213), rgb(46, 36, 27))        // #FAE6D5
+    static let heroPeachBottom = dynamic(rgb(253, 242, 233), rgb(36, 30, 24))     // #FDF2E9
+    /// Soft white radial glow layered over the hero, centred behind the icon circle.
+    static let heroGlow = dynamic(rgb(255, 255, 255, 0.55), rgb(255, 255, 255, 0.06))
+
+    /// Neutral app background for the "C" list screens (Home, Tasks, Settings, status, PIN).
+    /// Lighter and greyer than `bgLavender` to match the design board's near-white ground.
+    static let screenBackground = dynamic(rgb(243, 242, 248), rgb(20, 18, 30))    // #F3F2F8
+
+    /// Warm star / reward accent (task points, "N ⭐" chips).
+    static let starAmber = dynamic(rgb(240, 176, 32), rgb(247, 191, 66))          // #F0B020
 }
 
 extension Color {

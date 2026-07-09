@@ -9,8 +9,8 @@ struct BolajonTasksView: View {
     @StateObject private var viewModel = BolajonTasksViewModel()
 
     var body: some View {
-        BolajonScreen(intent: .lavender, title: L10n.tr("tasks2.title")) {
-            VStack(spacing: 20) {
+        BolajonScreen(intent: .lavender, background: AppColors.screenBackground, title: L10n.tr("tasks2.title")) {
+            VStack(spacing: 18) {
                 starHeader
 
                 if viewModel.tasks.isEmpty {
@@ -20,23 +20,20 @@ struct BolajonTasksView: View {
                         .padding(.top, 40)
                 } else {
                     ForEach(viewModel.groups) { group in
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 12) {
                             Text(L10n.tr(group.titleKey))
-                                .font(AppTypography.caption(12))
+                                .font(AppTypography.bodyStrong(12))
                                 .foregroundStyle(AppColors.inkTertiary)
                                 .textCase(.uppercase)
-                            InfoCard {
-                                VStack(spacing: 0) {
-                                    ForEach(Array(group.tasks.enumerated()), id: \.element.id) { pair in
-                                        if pair.offset > 0 {
-                                            Divider().background(AppColors.hairline)
-                                        }
-                                        TaskRow(task: pair.element) {
-                                            Task { await viewModel.complete(pair.element) }
-                                        }
-                                        .padding(.vertical, 12)
+                                .padding(.leading, 4)
+                            // Each task is its own white card (design C3).
+                            ForEach(group.tasks) { task in
+                                InfoCard(padding: 16) {
+                                    TaskRow(task: task) {
+                                        Task { await viewModel.complete(task) }
                                     }
                                 }
+                                .opacity(task.isCompleted ? 0.75 : 1)
                             }
                         }
                     }
@@ -46,22 +43,21 @@ struct BolajonTasksView: View {
         .task { await viewModel.load() }
     }
 
-    // Design C3: a purple-FILLED card with a white star and white text (not the inverted
-    // white-card/purple-star variant).
+    // Design C3: a purple-gradient card with a gold star and white text.
     private var starHeader: some View {
         HStack(spacing: 16) {
             ZStack {
                 Circle().fill(Color.white.opacity(0.22)).frame(width: 58, height: 58)
                 Image(systemName: "star.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 26))
+                    .foregroundStyle(AppColors.starAmber)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(viewModel.starTotal)")
-                    .font(AppTypography.title(28))
+                    .font(AppTypography.title(30))
                     .foregroundStyle(AppColors.inverseTextPrimary)
                 Text(L10n.tr("tasks2.stars_collected"))
-                    .font(AppTypography.bodyText(13))
+                    .font(AppTypography.bodyText(14))
                     .foregroundStyle(AppColors.inverseTextSecondary)
             }
             Spacer()
@@ -70,7 +66,15 @@ struct BolajonTasksView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: BolajonMetrics.cardRadiusLarge, style: .continuous)
-                .fill(AppColors.ctaPurple)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(.sRGB, red: 140 / 255, green: 108 / 255, blue: 255 / 255, opacity: 1),
+                            Color(.sRGB, red: 108 / 255, green: 72 / 255, blue: 236 / 255, opacity: 1)
+                        ],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
         )
         .shadow(color: AppColors.ctaPurple.opacity(0.25),
                 radius: BolajonMetrics.cardShadowRadius, x: 0, y: BolajonMetrics.cardShadowY)
@@ -82,45 +86,62 @@ private struct TaskRow: View {
     let onDone: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            if task.isCompleted {
-                // Design shows a leading green circled check on completed rows.
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(AppColors.successGreen)
-            }
-            if let emoji = task.emoji, !emoji.isEmpty {
-                Text(emoji).font(.system(size: 20))
-            }
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 14) {
+            checkbox
+            VStack(alignment: .leading, spacing: 5) {
                 Text(task.title)
-                    .font(AppTypography.bodyStrong(14))
+                    .font(AppTypography.bodyStrong(15))
                     .foregroundStyle(task.isCompleted ? AppColors.inkTertiary : AppColors.inkPrimary)
-                if task.rewardPoints > 0 {
-                    HStack(spacing: 3) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(AppColors.glyphCoral)
-                        Text("+\(task.rewardPoints)")
-                            .font(AppTypography.caption(12))
-                            .foregroundStyle(AppColors.inkTertiary)
-                    }
+                    .strikethrough(task.isCompleted, color: AppColors.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !task.isCompleted, task.rewardPoints > 0 {
+                    reward(color: AppColors.starAmber)
                 }
             }
-            Spacer()
+            Spacer(minLength: 8)
             if task.isCompleted {
-                StatusPill(text: L10n.tr("tasks2.collected"), state: .granted)
+                HStack(spacing: 4) {
+                    reward(color: AppColors.successGreen)
+                    Text(L10n.tr("tasks2.collected"))
+                        .font(AppTypography.bodyStrong(14))
+                        .foregroundStyle(AppColors.successGreen)
+                }
             } else {
                 Button(action: onDone) {
                     Text(L10n.tr("tasks2.done"))
-                        .font(AppTypography.caption(12))
+                        .font(AppTypography.bodyStrong(14))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
                         .background(Capsule().fill(AppColors.ctaPurple))
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    private var checkbox: some View {
+        ZStack {
+            if task.isCompleted {
+                Circle().fill(AppColors.successGreen.opacity(0.16)).frame(width: 30, height: 30)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(AppColors.successGreen)
+            } else {
+                Circle().stroke(AppColors.inkTertiary.opacity(0.4), lineWidth: 2)
+                    .frame(width: 30, height: 30)
+            }
+        }
+    }
+
+    private func reward(color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text("+\(task.rewardPoints)")
+                .font(AppTypography.bodyStrong(14))
+                .foregroundStyle(color)
+            Image(systemName: "star.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(AppColors.starAmber)
         }
     }
 }

@@ -104,6 +104,7 @@ private struct LanguageStepView: View {
     }
 
     // Matches the design: Uzbek (Latin), Uzbek (Cyrillic), Russian.
+    // Flags are drawn (not emoji — regional-indicator emoji tofu on the Simulator).
     private let options: [Option] = [
         .init(language: .uz, flag: .uz),
         .init(language: .uzCyrl, flag: .uz),
@@ -112,15 +113,15 @@ private struct LanguageStepView: View {
 
     var body: some View {
         // A1 is the stack root: no back exists, and the native bar stays empty (no title).
-        BolajonScreen(intent: .lavender) {
-            VStack(spacing: 28) {
-                BolajonBrandBadge()
-                    .padding(.top, 20)
-
+        BolajonHeroSheet(intent: .lavender) {
+            BolajonBrandBadge(diameter: 132)
+        } sheet: {
+            VStack(spacing: 20) {
                 Text(L10n.tr("setup.language.title"))
                     .font(AppTypography.title(24))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
+                    .padding(.top, 6)
 
                 VStack(spacing: 12) {
                     ForEach(options) { option in
@@ -128,8 +129,10 @@ private struct LanguageStepView: View {
                     }
                 }
 
+                Spacer(minLength: 8)
+
                 BolajonPrimaryButton(title: L10n.tr("setup.continue"), action: onContinue)
-                    .padding(.top, 4)
+                    .padding(.bottom, 6)
             }
         }
         .onAppear {
@@ -146,34 +149,36 @@ private struct LanguageStepView: View {
             sessionStore.setLanguage(option.language)
         } label: {
             HStack(spacing: 14) {
-                MiniFlag(kind: option.flag)
-                Text(option.language.nativeName)
-                    .font(AppTypography.heading(16))
-                    .foregroundStyle(AppColors.inkPrimary)
-                Spacer()
                 ZStack {
                     Circle()
-                        .stroke(selected ? AppColors.ctaPurple : AppColors.hairline, lineWidth: 2)
-                        .frame(width: 24, height: 24)
-                    if selected {
-                        Circle().fill(AppColors.ctaPurple).frame(width: 24, height: 24)
+                        .fill(selected ? AppColors.ctaPurple.opacity(0.12) : BolajonPalette.cream)
+                        .frame(width: 44, height: 44)
+                    MiniFlag(kind: option.flag, width: 26, height: 18)
+                }
+                Text(option.language.nativeName)
+                    .font(AppTypography.heading(17))
+                    .foregroundStyle(AppColors.inkPrimary)
+                Spacer()
+                if selected {
+                    ZStack {
+                        Circle().fill(AppColors.ctaPurple).frame(width: 26, height: 26)
                         Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }
             }
-            .padding(.vertical, 16)
-            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .padding(.horizontal, 14)
             .background(
-                RoundedRectangle(cornerRadius: BolajonMetrics.controlRadius, style: .continuous)
-                    .fill(AppColors.cardWhite)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(selected ? AppColors.ctaPurple.opacity(0.06) : AppColors.cardWhite)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: BolajonMetrics.controlRadius, style: .continuous)
-                    .stroke(selected ? AppColors.ctaPurple : Color.clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(selected ? AppColors.ctaPurple : AppColors.hairline,
+                            lineWidth: selected ? 2 : 1)
             )
-            .shadow(color: BolajonMetrics.cardShadow, radius: 10, x: 0, y: 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -186,49 +191,56 @@ private struct WelcomeStepView: View {
     let onStart: () -> Void
 
     var body: some View {
-        BolajonScreen(intent: .lavender) {
-            VStack(spacing: 24) {
-                BolajonBrandBadge()
-                    .padding(.top, 12)
-
+        BolajonHeroSheet(intent: .lavender) {
+            BolajonBrandBadge(diameter: 132)
+        } sheet: {
+            VStack(spacing: 18) {
                 VStack(spacing: 10) {
                     Text(L10n.tr("setup.welcome.title"))
                         .font(AppTypography.title(24))
                         .foregroundStyle(AppColors.inkPrimary)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(L10n.tr("setup.welcome.subtitle"))
                         .font(AppTypography.bodyText(14))
                         .foregroundStyle(AppColors.inkSecondary)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.top, 4)
 
                 VStack(alignment: .leading, spacing: 18) {
-                    featureRow("phone.fill", "setup.welcome.feature_contact")
-                    featureRow("lock.shield.fill", "setup.welcome.feature_protection")
-                    featureRow("sos", "setup.welcome.feature_sos")
+                    featureRow("setup.welcome.feature_contact") { ConnectionGlyph(size: 20) }
+                    featureRow("setup.welcome.feature_protection") {
+                        Image(systemName: "lock.shield.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AppColors.glyphPurple)
+                    }
+                    featureRow("setup.welcome.feature_sos") {
+                        Text("SOS").font(AppTypography.title(11)).foregroundStyle(AppColors.glyphPurple)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 4)
-                .padding(.horizontal, 8)
+                .padding(.top, 8)
 
                 Spacer(minLength: 8)
 
                 BolajonPrimaryButton(title: L10n.tr("setup.welcome.start"), action: onStart)
+                    .padding(.bottom, 6)
             }
-            .frame(minHeight: 520)
         }
     }
 
-    private func featureRow(_ symbol: String, _ key: String) -> some View {
+    private func featureRow<Icon: View>(_ key: String, @ViewBuilder icon: () -> Icon) -> some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().fill(AppColors.ctaPurple.opacity(0.12)).frame(width: 40, height: 40)
-                Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppColors.glyphPurple)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(AppColors.ctaPurple.opacity(0.12))
+                    .frame(width: 46, height: 46)
+                icon()
             }
             Text(L10n.tr(key))
-                .font(AppTypography.bodyText(14))
+                .font(AppTypography.bodyText(15))
                 .foregroundStyle(AppColors.inkPrimary)
             Spacer(minLength: 0)
         }
@@ -242,23 +254,26 @@ private struct ConnectStepView: View {
     let onPaired: (OilaPairResult) -> Void
 
     var body: some View {
-        BolajonScreen(intent: .lavender) {
-            VStack(spacing: 22) {
-                IconBadge(systemName: "person.2.fill", intent: .lavender)
-                    .padding(.top, 4)
-
+        BolajonHeroSheet(intent: .lavender) {
+            IconBadge(systemName: "person.2.fill", intent: .lavender, diameter: 108)
+        } sheet: {
+            VStack(spacing: 18) {
                 Text(L10n.tr("setup.connect.title"))
                     .font(AppTypography.title(22))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
 
-                InfoCard {
-                    VStack(alignment: .leading, spacing: 14) {
-                        stepRow(1, "setup.connect.step1")
-                        stepRow(2, "setup.connect.step2")
-                        stepRow(3, "setup.connect.step3")
-                    }
+                VStack(alignment: .leading, spacing: 14) {
+                    stepRow(1, "setup.connect.step1")
+                    stepRow(2, "setup.connect.step2")
+                    stepRow(3, "setup.connect.step3")
                 }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(AppColors.bgLavender)
+                )
 
                 CodeEntryField(
                     code: $viewModel.code,
@@ -283,6 +298,8 @@ private struct ConnectStepView: View {
                             .foregroundStyle(AppColors.inkSecondary)
                     }
                 }
+
+                Spacer(minLength: 4)
             }
         }
     }
@@ -297,14 +314,15 @@ private struct ConnectStepView: View {
     private func stepRow(_ number: Int, _ key: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
-                Circle().fill(AppColors.bgLavender).frame(width: 26, height: 26)
+                Circle().fill(AppColors.ctaPurple).frame(width: 26, height: 26)
                 Text("\(number)")
                     .font(AppTypography.bodyStrong(13))
-                    .foregroundStyle(AppColors.glyphPurple)
+                    .foregroundStyle(.white)
             }
             Text(L10n.tr(key))
                 .font(AppTypography.bodyText(14))
                 .foregroundStyle(AppColors.inkPrimary)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
     }
@@ -328,37 +346,42 @@ private struct SuccessStepView: View {
     var body: some View {
         // The path is replaced with [.success] after pairing, so back would pop to A1 —
         // block the back button here (the native way to make a step terminal).
-        BolajonScreen(intent: .lavender, blocksBack: true) {
-            VStack(spacing: 18) {
-                ConnectedAvatar(emoji: childEmoji ?? "🦁", diameter: 108, isConnected: true, filled: true)
-                    .padding(.top, 48)
-
-                VStack(spacing: 6) {
-                    Text(childName.isEmpty ? L10n.tr("common.user_default") : childName)
-                        .font(AppTypography.title(24))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    Text(L10n.tr("setup.success.badge"))
-                        .font(AppTypography.bodyText(14))
-                        .foregroundStyle(AppColors.successGreen)
-                }
-
-                VStack(spacing: 8) {
-                    Text(L10n.tr("setup.success.title"))
-                        .font(AppTypography.heading(19))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    Text(L10n.tr("setup.success.subtitle"))
-                        .font(AppTypography.bodyText(14))
-                        .foregroundStyle(AppColors.inkSecondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.top, 12)
-                .padding(.horizontal, 12)
+        BolajonHeroSheet(intent: .lavender, blocksBack: true) {
+            VStack(spacing: 16) {
+                ConnectedAvatar(emoji: childEmoji ?? "🦁", diameter: 132, isConnected: true,
+                                filled: true, showRing: true, showCheck: true,
+                                fallbackText: childName.isEmpty ? L10n.tr("common.user_default") : childName)
+                Text(childName.isEmpty ? L10n.tr("common.user_default") : childName)
+                    .font(AppTypography.title(26))
+                    .foregroundStyle(AppColors.inkPrimary)
+                // White "connected" pill chip.
+                Text(L10n.tr("setup.success.badge"))
+                    .font(AppTypography.bodyStrong(13))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(AppColors.cardWhite))
+                    .overlay(Capsule().stroke(AppColors.hairline, lineWidth: 1))
+                    .shadow(color: BolajonMetrics.cardShadow, radius: 8, x: 0, y: 4)
+            }
+        } sheet: {
+            VStack(spacing: 10) {
+                Text(L10n.tr("setup.success.title"))
+                    .font(AppTypography.title(23))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 6)
+                Text(L10n.tr("setup.success.subtitle"))
+                    .font(AppTypography.bodyText(14))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Spacer(minLength: 12)
 
                 BolajonPrimaryButton(title: L10n.tr("setup.success.start"), action: onStart)
+                    .padding(.bottom, 6)
             }
-            .frame(minHeight: 560)
         }
     }
 }
