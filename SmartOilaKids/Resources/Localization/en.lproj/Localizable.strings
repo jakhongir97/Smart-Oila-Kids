@@ -662,6 +662,7 @@
 "perm2.status.on" = "On";
 "perm2.status.off" = "Off";
 "perm2.settings.cta" = "Open Settings";
+"perm2.settings.cta_yes" = "Yes, open Settings";
 "perm2.allow.cta" = "Yes, allow";
 "perm2.always.cta" = "Yes, always allow";
 "perm2.intro.title" = "Let's set up Bolajon";
@@ -689,11 +690,6 @@
 "perm2.summary.title" = "Done! Protection is on";
 "perm2.summary.body" = "Bolajon360 is now ready to protect your child. You can change settings any time.";
 "perm2.summary.cta" = "Finish";
-"perm2.summary.notifications" = "Notifications";
-"perm2.summary.location" = "Location";
-"perm2.summary.microphone" = "Microphone";
-"perm2.summary.camera" = "Camera";
-"setup.connect.cta" = "Connect";
 
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Connected";
@@ -703,6 +699,7 @@
 "home2.sos.subtitle" = "Tapping alerts your parents";
 "home2.tasks.title" = "Tasks";
 "home2.tasks.empty" = "No tasks yet";
+"home2.tasks.done_badge" = "Done";
 "sos2.title" = "Call for help?";
 "sos2.body" = "An emergency alert with your location will be sent to your parents.";
 "sos2.confirm" = "Yes, call for help";
@@ -723,11 +720,13 @@
 "settings2.section_other" = "Other";
 "settings2.permissions" = "Permissions status";
 "settings2.permissions_sub" = "View and manage permissions";
+"settings2.permissions_off_count" = "%d permissions off";
 "settings2.connection" = "Connection status";
 "settings2.connection_value" = "Connected to parent";
 "settings2.about" = "About";
-"settings2.version" = "Bolajon360 · v1.0.0";
+"settings2.version" = "Bolajon360 · v";
 "settings2.disconnect" = "Disconnect";
+"settings2.disconnect_sub" = "Parent PIN required";
 "settings2.enable" = "Enable";
 "disconnect2.title" = "Disconnect";
 "disconnect2.body" = "This will unlink the device from your family. Enter the parent PIN to continue.";
@@ -763,7 +762,6 @@
 "home2.header_subtitle" = "Your family is connected to you";
 "home2.unit_h" = "h";
 "home2.unit_m" = "m";
-"home2.screentime.remaining" = "%d min left";
 "settings2.title" = "Settings";
 "settings2.status_subtitle" = "The following should be enabled for the app to work correctly.";
 "settings2.status_on" = "On";

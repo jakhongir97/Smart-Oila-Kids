@@ -662,6 +662,7 @@
 "perm2.status.on" = "Yoqildi";
 "perm2.status.off" = "O'chiq";
 "perm2.settings.cta" = "Sozlamaga o'tish";
+"perm2.settings.cta_yes" = "Ha, sozlamaga o'tish";
 "perm2.allow.cta" = "Ha, ruxsat berish";
 "perm2.always.cta" = "Ha, doim ruxsat";
 "perm2.intro.title" = "Bolajon ilovasini sozlaymiz";
@@ -689,11 +690,6 @@
 "perm2.summary.title" = "Tayyor! Himoya yoqildi";
 "perm2.summary.body" = "Bolajon360 endi farzandingizni himoya qilishga tayyor. Xohlagan payt sozlamalardan o'zgartirishingiz mumkin.";
 "perm2.summary.cta" = "Yakunlash";
-"perm2.summary.notifications" = "Bildirishnomalar";
-"perm2.summary.location" = "Joylashuv";
-"perm2.summary.microphone" = "Mikrofon";
-"perm2.summary.camera" = "Kamera";
-"setup.connect.cta" = "Ulanish";
 
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Ulangan";
@@ -703,6 +699,7 @@
 "home2.sos.subtitle" = "Bosilsa — ota-onaga xabar ketadi";
 "home2.tasks.title" = "Topshiriqlar";
 "home2.tasks.empty" = "Hozircha topshiriq yo'q";
+"home2.tasks.done_badge" = "Bajarildi";
 "sos2.title" = "Yordam chaqirilsinmi?";
 "sos2.body" = "Ota-onangizga joylashuvingiz bilan favqulodda xabar yuboriladi.";
 "sos2.confirm" = "Ha, yordam chaqir";
@@ -723,11 +720,13 @@
 "settings2.section_other" = "Boshqa";
 "settings2.permissions" = "Ruxsatlar holati";
 "settings2.permissions_sub" = "Ruxsatlarni ko'rish va boshqarish";
+"settings2.permissions_off_count" = "%d ta ruxsat o'chiq";
 "settings2.connection" = "Ulanish holati";
 "settings2.connection_value" = "Ota-ona bilan ulangan";
 "settings2.about" = "Ilova haqida";
-"settings2.version" = "Bolajon360 · v1.0.0";
+"settings2.version" = "Bolajon360 · v";
 "settings2.disconnect" = "Aloqani uzish";
+"settings2.disconnect_sub" = "Ota-ona PIN kodi talab qilinadi";
 "settings2.enable" = "Yoqish";
 "disconnect2.title" = "Aloqani uzish";
 "disconnect2.body" = "Bu qurilmani oilangizdan ajratadi. Davom etish uchun ota-ona PIN kodini kiriting.";
@@ -760,10 +759,9 @@
 
 "perm2.item.camera" = "Kamera";
 
-"home2.header_subtitle" = "Oilangiz sizi bilan bog'langan";
+"home2.header_subtitle" = "Oilangiz siz bilan bog'langan";
 "home2.unit_h" = "s";
 "home2.unit_m" = "d";
-"home2.screentime.remaining" = "%d daqiqa qoldi";
 "settings2.title" = "Sozlamalar";
 "settings2.status_subtitle" = "Ilova to'g'ri ishlashi uchun quyidagilar yoqilgan bo'lishi kerak.";
 "settings2.status_on" = "Yoqilgan";

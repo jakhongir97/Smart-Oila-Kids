@@ -78,9 +78,10 @@ final class BolajonPermissionChecklistTests: XCTestCase {
     func testChecklistShapeIsStableSoBothScreensMatch() {
         // B11 and C5 build from this one ordered list, so the id set keeps them in sync.
         let ids = BolajonPermissionChecklist.states(from: snapshot()).map(\.id)
+        // Order matches the design board's B11 summary (and the C5 status list).
         XCTAssertEqual(ids, [
-            "notifications", "location", "bglocation", "usage",
-            "screen", "microphone", "camera", "battery", "autostart"
+            "notifications", "battery", "screen", "usage", "autostart",
+            "location", "bglocation", "microphone", "camera"
         ])
     }
 }

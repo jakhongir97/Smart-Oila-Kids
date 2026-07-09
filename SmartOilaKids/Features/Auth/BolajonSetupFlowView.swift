@@ -59,8 +59,8 @@ struct BolajonSetupFlowView: View {
                     }
                 }
         }
+        .bolajonNavigationTint()
         .environmentObject(sessionStore)
-        .bolajonSwipeBack()
     }
 
     private func handlePaired(_ result: OilaPairResult) {
@@ -111,7 +111,8 @@ private struct LanguageStepView: View {
     ]
 
     var body: some View {
-        BolajonScreen(intent: .lavender, leading: .none) {
+        // A1 is the stack root: no back exists, and the native bar stays empty (no title).
+        BolajonScreen(intent: .lavender) {
             VStack(spacing: 28) {
                 BolajonBrandBadge()
                     .padding(.top, 20)
@@ -185,7 +186,7 @@ private struct WelcomeStepView: View {
     let onStart: () -> Void
 
     var body: some View {
-        BolajonScreen(intent: .lavender, leading: .autoBack) {
+        BolajonScreen(intent: .lavender) {
             VStack(spacing: 24) {
                 BolajonBrandBadge()
                     .padding(.top, 12)
@@ -241,7 +242,7 @@ private struct ConnectStepView: View {
     let onPaired: (OilaPairResult) -> Void
 
     var body: some View {
-        BolajonScreen(intent: .lavender, leading: .autoBack) {
+        BolajonScreen(intent: .lavender) {
             VStack(spacing: 22) {
                 IconBadge(systemName: "person.2.fill", intent: .lavender)
                     .padding(.top, 4)
@@ -325,7 +326,9 @@ private struct SuccessStepView: View {
     let onStart: () -> Void
 
     var body: some View {
-        BolajonScreen(intent: .lavender, leading: .none) {
+        // The path is replaced with [.success] after pairing, so back would pop to A1 —
+        // block the back button here (the native way to make a step terminal).
+        BolajonScreen(intent: .lavender, blocksBack: true) {
             VStack(spacing: 18) {
                 ConnectedAvatar(emoji: childEmoji ?? "🦁", diameter: 108, isConnected: true, filled: true)
                     .padding(.top, 48)

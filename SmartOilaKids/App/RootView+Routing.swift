@@ -2,22 +2,10 @@ import SwiftUI
 
 extension RootView {
     // Bolajon360 redesign flow: setup (A1–A4) → permissions (B1–B11) → home (C1).
+    // Standard SwiftUI gate pattern: each stage is its own NavigationStack and the swap is
+    // an instant root swap — no custom transition.
     @ViewBuilder
     var regularRoot: some View {
-        stageContent
-            // Animate the stage swap (was a hard cut). Each stage is its own NavigationStack.
-            .animation(NavToken.fade, value: stageToken)
-    }
-
-    /// 0 = setup, 1 = permissions, 2 = home. Drives the cross-fade between stages.
-    private var stageToken: Int {
-        if !sessionStore.setupCompleted { return 0 }
-        if !sessionStore.onboardingCompleted { return 1 }
-        return 2
-    }
-
-    @ViewBuilder
-    private var stageContent: some View {
         if !sessionStore.setupCompleted {
             // Resume at Success only when THIS install actually paired with oila360 —
             // a migrated legacy DSN is not a credential and must go through Connect.
@@ -70,7 +58,9 @@ extension RootView {
             BolajonHomeView()
                 .environmentObject(sessionStore)
         case .bolajonTasks:
-            BolajonTasksView()
+            // Standalone debug entry: production reaches Tasks as a push on the Home stack.
+            NavigationStack { BolajonTasksView() }
+                .bolajonNavigationTint()
         case .bolajonSettings:
             BolajonSettingsView()
                 .environmentObject(sessionStore)

@@ -35,17 +35,17 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshLockState)) { notification in
             handleLockRefreshNotification(notification)
         }
-        .overlay {
-            if shouldShowDeviceLockOverlay {
-                DeviceLockOverlay(
-                    localTime: nil,
-                    scheduleRange: nil
-                )
-                .transition(.opacity)
-            }
+        // Device-lock takeover as a NATIVE full-screen presentation. The binding ignores
+        // dismissal attempts, so presentation is driven solely by the polled lock state:
+        // it re-presents while locked and cannot be swiped away (full-screen covers have
+        // no interactive dismissal). BolajonHomeView dismisses its SOS cover the moment
+        // the lock engages, so this cover is never stuck behind another presentation.
+        .fullScreenCover(isPresented: deviceLockCoverPresented) {
+            DeviceLockOverlay(
+                localTime: nil,
+                scheduleRange: nil
+            )
         }
-        // The declared .transition needs an animation driver, else the lock overlay hard-cuts.
-        .animation(NavToken.fade, value: oilaTelemetry.isLocked)
         .background(alignment: .topLeading) {
             if shouldRunLocalChildServices,
                AppRuntime.screenTimeFeaturesEnabled {
@@ -56,9 +56,13 @@ struct RootView: View {
 }
 
 private extension RootView {
-    var shouldShowDeviceLockOverlay: Bool {
-        // The lock overlay is driven by GET /device/lock/state, polled by
-        // OilaTelemetryService (parent manual-lock + schedules).
-        oilaTelemetry.isLocked
+    /// Presents the device-lock takeover. Driven by GET /device/lock/state, polled by
+    /// OilaTelemetryService (parent manual-lock + schedules). The setter is intentionally
+    /// a no-op: only the lock state may hide the cover.
+    var deviceLockCoverPresented: Binding<Bool> {
+        Binding(
+            get: { oilaTelemetry.isLocked },
+            set: { _ in }
+        )
     }
 }

@@ -40,7 +40,7 @@ struct BolajonPermissionStep: Identifiable {
               titleKey: "perm2.intro.title", bodyKey: "perm2.intro.body", primaryKey: "perm2.intro.cta", isMandatory: true),
         .init(kind: .notifications, icon: "bell.fill", intent: .lavender,
               titleKey: "perm2.notifications.title", bodyKey: "perm2.notifications.body", primaryKey: "perm2.notifications.cta", isMandatory: true),
-        .init(kind: .battery, icon: "bolt.fill", intent: .lavender,
+        .init(kind: .battery, icon: "battery.100.bolt", intent: .lavender,
               titleKey: "perm2.battery.title", bodyKey: "perm2.battery.body", primaryKey: "perm2.settings.cta", isMandatory: true),
         .init(kind: .location, icon: "location.fill", intent: .peach,
               titleKey: "perm2.location.title", bodyKey: "perm2.location.body", primaryKey: "perm2.allow.cta", isMandatory: false),
@@ -48,11 +48,11 @@ struct BolajonPermissionStep: Identifiable {
               titleKey: "perm2.bglocation.title", bodyKey: "perm2.bglocation.body", primaryKey: "perm2.always.cta", isMandatory: false,
               declineKey: "perm2.decline_bg"),
         .init(kind: .usage, icon: "chart.bar.fill", intent: .peach,
-              titleKey: "perm2.usage.title", bodyKey: "perm2.usage.body", primaryKey: "perm2.settings.cta", isMandatory: false),
+              titleKey: "perm2.usage.title", bodyKey: "perm2.usage.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
         .init(kind: .appLimits, icon: "square.stack.3d.up.fill", intent: .peach,
-              titleKey: "perm2.limits.title", bodyKey: "perm2.limits.body", primaryKey: "perm2.settings.cta", isMandatory: false),
+              titleKey: "perm2.limits.title", bodyKey: "perm2.limits.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
         .init(kind: .autostart, icon: "arrow.clockwise.circle.fill", intent: .peach,
-              titleKey: "perm2.autostart.title", bodyKey: "perm2.autostart.body", primaryKey: "perm2.settings.cta", isMandatory: false),
+              titleKey: "perm2.autostart.title", bodyKey: "perm2.autostart.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
         .init(kind: .microphone, icon: "mic.fill", intent: .peach,
               titleKey: "perm2.microphone.title", bodyKey: "perm2.microphone.body", primaryKey: "perm2.allow.cta", isMandatory: false),
         .init(kind: .camera, icon: "camera.fill", intent: .peach,
@@ -85,11 +85,12 @@ struct BolajonPermissionsFlowView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            // Intro is the stack root (no back); each subsequent step pushes.
+            // Intro is the stack root (no back, and — per design — no progress bar);
+            // each subsequent step pushes natively and shows the progress capsules in
+            // the navigation bar.
             PermissionStepView(
                 step: steps[0],
-                progress: (1, steps.count),
-                leading: .none,
+                progress: nil,
                 onPrimary: { handlePrimary(index: 0) },
                 onDecline: { advance(from: 0) }
             )
@@ -99,21 +100,19 @@ struct BolajonPermissionsFlowView: View {
                     PermissionStepView(
                         step: steps[i],
                         progress: (i + 1, steps.count),
-                        leading: .autoBack,
                         onPrimary: { handlePrimary(index: i) },
-                        onDecline: { advance(from: i) }
+                        onDecline: { handleDecline(from: i) }
                     )
                 case .summary:
                     PermissionSummaryView(
                         manager: manager,
                         progress: (steps.count, steps.count),
-                        leading: .autoBack,
                         onFinish: onFinished
                     )
                 }
             }
         }
-        .bolajonSwipeBack()
+        .bolajonNavigationTint()
     }
 
     private func handlePrimary(index: Int) {
@@ -148,6 +147,18 @@ struct BolajonPermissionsFlowView: View {
         path.append(steps[next].kind == .summary ? .summary : .step(next))
     }
 
+    /// Decline handler. Declining the location step (B4) skips the conditional
+    /// background-location step (B5) — the design labels B5 "4-qadam «Ha» bo'lsa", so it only
+    /// appears when the child accepted foreground location.
+    private func handleDecline(from index: Int) {
+        if steps[index].kind == .location,
+           index + 1 < steps.count, steps[index + 1].kind == .backgroundLocation {
+            advance(from: index + 1)
+            return
+        }
+        advance(from: index)
+    }
+
     private static func openSystemSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString),
               UIApplication.shared.canOpenURL(url) else { return }
@@ -172,13 +183,13 @@ struct BolajonPermissionsFlowView: View {
 
 private struct PermissionStepView: View {
     let step: BolajonPermissionStep
-    let progress: (current: Int, total: Int)
-    var leading: BolajonScreenLeading = .autoBack
+    /// Nil on the B1 intro root — the design shows no progress bar there.
+    let progress: (current: Int, total: Int)?
     let onPrimary: () -> Void
     let onDecline: () -> Void
 
     var body: some View {
-        BolajonScreen(intent: step.intent, leading: leading, progress: progress) {
+        BolajonScreen(intent: step.intent, progress: progress) {
             VStack(spacing: 24) {
                 Group {
                     if step.kind == .intro {
@@ -221,7 +232,6 @@ private struct PermissionStepView: View {
 private struct PermissionSummaryView: View {
     @ObservedObject var manager: LocationPermissionManager
     let progress: (current: Int, total: Int)
-    var leading: BolajonScreenLeading = .autoBack
     let onFinish: () -> Void
 
     // Full checklist driven by live authorization; battery/auto-start (unreadable on iOS)
@@ -241,14 +251,14 @@ private struct PermissionSummaryView: View {
     }
 
     var body: some View {
-        BolajonScreen(intent: .lavender, leading: leading, progress: progress) {
+        BolajonScreen(intent: .lavender, progress: progress) {
             VStack(spacing: 20) {
                 ZStack {
-                    Circle().fill(AppColors.successGreen).frame(width: 64, height: 64)
+                    Circle().fill(AppColors.cardWhite).frame(width: 64, height: 64)
                         .shadow(color: BolajonMetrics.cardShadow, radius: 12, x: 0, y: 6)
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.white)
+                    Image(systemName: "checkmark.shield.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(AppColors.successGreen)
                 }
                 .padding(.top, 8)
 
@@ -331,25 +341,28 @@ enum BolajonPermissionChecklist {
 
         func live(_ granted: Bool) -> BolajonPermissionState.Availability { granted ? .granted : .notGranted }
 
+        // Order matches the design board's B11 summary (and therefore the C5 status list):
+        // notifications, battery, screen(overlay), usage, autostart, location, bg-location,
+        // microphone, camera.
         return [
             BolajonPermissionState(id: "notifications", icon: "bell.fill", labelKey: "perm2.item.notifications",
                                    descriptionKey: "perm2.notifications.body", availability: live(notifications), requirement: .notifications),
+            BolajonPermissionState(id: "battery", icon: "battery.100.bolt", labelKey: "perm2.item.battery",
+                                   descriptionKey: "perm2.battery.body", availability: .openSettings, requirement: nil),
+            BolajonPermissionState(id: "screen", icon: "square.stack.3d.up.fill", labelKey: "perm2.item.screen",
+                                   descriptionKey: "perm2.limits.body", availability: live(screenTime), requirement: .usageStats),
+            BolajonPermissionState(id: "usage", icon: "chart.bar.fill", labelKey: "perm2.item.usage",
+                                   descriptionKey: "perm2.usage.body", availability: live(screenTime), requirement: .usageStats),
+            BolajonPermissionState(id: "autostart", icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart",
+                                   descriptionKey: "perm2.autostart.body", availability: .openSettings, requirement: nil),
             BolajonPermissionState(id: "location", icon: "location.fill", labelKey: "perm2.item.location",
                                    descriptionKey: "perm2.location.body", availability: live(location), requirement: .location),
             BolajonPermissionState(id: "bglocation", icon: "location.circle.fill", labelKey: "perm2.item.bglocation",
                                    descriptionKey: "perm2.bglocation.body", availability: live(backgroundLocation), requirement: .location),
-            BolajonPermissionState(id: "usage", icon: "chart.bar.fill", labelKey: "perm2.item.usage",
-                                   descriptionKey: "perm2.usage.body", availability: live(screenTime), requirement: .usageStats),
-            BolajonPermissionState(id: "screen", icon: "square.stack.3d.up.fill", labelKey: "perm2.item.screen",
-                                   descriptionKey: "perm2.limits.body", availability: live(screenTime), requirement: .usageStats),
             BolajonPermissionState(id: "microphone", icon: "mic.fill", labelKey: "perm2.item.microphone",
                                    descriptionKey: "perm2.microphone.body", availability: live(microphone), requirement: .microphone),
             BolajonPermissionState(id: "camera", icon: "camera.fill", labelKey: "perm2.item.camera",
-                                   descriptionKey: "perm2.camera.body", availability: live(camera), requirement: .camera),
-            BolajonPermissionState(id: "battery", icon: "bolt.fill", labelKey: "perm2.item.battery",
-                                   descriptionKey: "perm2.battery.body", availability: .openSettings, requirement: nil),
-            BolajonPermissionState(id: "autostart", icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart",
-                                   descriptionKey: "perm2.autostart.body", availability: .openSettings, requirement: nil)
+                                   descriptionKey: "perm2.camera.body", availability: live(camera), requirement: .camera)
         ]
     }
 

@@ -216,30 +216,27 @@ struct GhostButton: View {
 
 // MARK: - Permission progress bar
 
-/// Segmented top progress: filled pills (purple→coral) for `current` of `total`, with a back chevron.
+/// Segmented progress capsules (purple→coral) for `current` of `total`. Back navigation is
+/// the system back button; this view is sized for the navigation bar's principal slot
+/// (see `BolajonScreen.progress`).
 struct PermissionProgressBar: View {
     let current: Int
     let total: Int
-    var onBack: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let onBack {
-                ChildTopBackButton(foreground: AppColors.inkPrimary, action: onBack)
-            } else {
-                Color.clear.frame(width: 30, height: 30)
+        HStack(spacing: 5) {
+            ForEach(0 ..< max(total, 1), id: \.self) { index in
+                Capsule()
+                    .fill(index < current ? fillColor(for: index) : AppColors.hairline)
+                    .frame(height: 5)
             }
-
-            HStack(spacing: 5) {
-                ForEach(0 ..< max(total, 1), id: \.self) { index in
-                    Capsule()
-                        .fill(index < current ? fillColor(for: index) : AppColors.hairline)
-                        .frame(height: 5)
-                }
-            }
-            .animation(.easeInOut(duration: 0.25), value: current)
         }
-        .padding(.horizontal, BolajonMetrics.screenPadding)
+        // Fixed width: principal toolbar items get no proposed width, and the capsules have
+        // no intrinsic width of their own.
+        .frame(width: 200, height: 5)
+        .animation(.easeInOut(duration: 0.25), value: current)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: "\(current)/\(total)"))
     }
 
     private func fillColor(for index: Int) -> Color {
@@ -477,40 +474,24 @@ struct NumericKeypad: View {
 
 // MARK: - Screen scaffold
 
-/// Full-bleed tinted screen with an optional permission progress header and
-/// a scrollable content column. Replaces per-view ZStack + ignoresSafeArea.
+/// Full-bleed tinted screen with a scrollable content column. Used at the Home stack ROOT,
+/// which keeps its navigation bar hidden in favor of the in-content header (design chrome);
+/// pushed destinations use `BolajonScreen` and get the native bar.
 struct ScreenScaffold<Content: View>: View {
     var intent: ScreenIntent = .lavender
-    var progress: (current: Int, total: Int)?
-    var onBack: (() -> Void)?
     @ViewBuilder var content: Content
 
     var body: some View {
         ZStack(alignment: .top) {
             intent.ground.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                if let progress {
-                    PermissionProgressBar(current: progress.current, total: progress.total, onBack: onBack)
-                        .padding(.top, 8)
-                        .padding(.bottom, 18)
-                } else if let onBack {
-                    HStack {
-                        ChildTopBackButton(foreground: AppColors.inkPrimary, action: onBack)
-                        Spacer()
-                    }
+            ScrollView {
+                content
                     .padding(.horizontal, BolajonMetrics.screenPadding)
                     .padding(.top, 8)
-                }
-
-                ScrollView {
-                    content
-                        .padding(.horizontal, BolajonMetrics.screenPadding)
-                        .padding(.top, progress == nil && onBack == nil ? 8 : 0)
-                        .padding(.bottom, 28)
-                }
-                .appHiddenScrollIndicators()
+                    .padding(.bottom, 28)
             }
+            .appHiddenScrollIndicators()
         }
     }
 }
@@ -527,148 +508,61 @@ private extension View {
     }
 }
 
-// MARK: - Native navigation kit (Option A)
-//
-// One transition standard + one screen scaffold + one top bar, so every new-design screen
-// pushes/presents natively inside a NavigationStack while keeping the lavender chrome.
-// (ChildTopBackButton is reused here pending its re-home into this kit during cleanup.)
+// MARK: - Screen scaffold v2 (native chrome)
 
-enum NavToken {
-    /// Fade used for the top-level stage swap + the lock overlay (pair with .animation(value:)).
-    static let fade = Animation.easeInOut(duration: 0.25)
-    /// Corner radius for presented sheets (matches the retired TopRoundedShape look).
-    static let sheetCornerRadius: CGFloat = 28
-}
-
-/// The single nav bar: leading (back / none) + a centered title OR a progress row + optional trailing.
-/// Replaces the four divergent headers (Home gear header, bare chevron, PermissionProgressBar, legacy ChildTitleBar).
-struct BolajonTopBar: View {
-    enum Leading { case none, back(() -> Void) }
-    enum Header { case none, title(String), progress(current: Int, total: Int) }
-
-    var intent: ScreenIntent = .lavender
-    var header: Header = .none
-    var leading: Leading = .none
-    var trailing: AnyView? = nil
-
-    var body: some View {
-        switch header {
-        case let .progress(current, total):
-            PermissionProgressBar(current: current, total: total, onBack: backAction)
-                .padding(.top, 8)
-                .padding(.bottom, 18)
-        case .title, .none:
-            ZStack {
-                if case let .title(text) = header {
-                    Text(text)
-                        .font(AppTypography.heading(17))
-                        .foregroundStyle(AppColors.inkPrimary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 44)
-                }
-                HStack(spacing: 8) {
-                    leadingView
-                    Spacer(minLength: 0)
-                    trailing
-                }
-            }
-            .frame(height: 44)
-            .padding(.horizontal, BolajonMetrics.screenPadding)
-            .padding(.top, 8)
-        }
-    }
-
-    private var backAction: (() -> Void)? {
-        if case let .back(action) = leading { return action }
-        return nil
-    }
-
-    @ViewBuilder private var leadingView: some View {
-        if case let .back(action) = leading {
-            ChildTopBackButton(foreground: AppColors.inkPrimary, action: action)
-        } else {
-            Color.clear.frame(width: 30, height: 30)
-        }
-    }
-}
-
-/// Leading control for `BolajonScreen`'s bar. Top-level (not nested in the generic
-/// `BolajonScreen`) so it can be named as a property type without spelling `Content`.
-enum BolajonScreenLeading { case autoBack, none, custom(() -> Void) }
-
-/// Scaffold v2 — a destination container that lives INSIDE a NavigationStack: tinted ground,
-/// a pinned `BolajonTopBar` (title / progress / back / trailing) and a scrolling content column.
-/// Hides the system nav bar so the lavender look is preserved. Successor to `ScreenScaffold`.
+/// Scaffold for destination screens inside a NavigationStack: tinted ground + scrolling
+/// content column with NATIVE navigation chrome — the system navigation bar, the system
+/// back button (and its edge-swipe pop), an inline `.navigationTitle`, and optional
+/// permission-progress capsules in the bar's principal slot.
+///
+/// The lavender/peach grounds are uniform, so the default transparent scroll-edge
+/// appearance is correct — no `.toolbarBackground` override needed.
 struct BolajonScreen<Content: View>: View {
     var intent: ScreenIntent = .lavender
     var title: String? = nil
-    var leading: BolajonScreenLeading = .autoBack
-    var trailing: AnyView? = nil
+    /// Blocks the system back button. Only for screens where popping would be wrong
+    /// (A4 Success: the path was replaced, so back would return past a used pairing code).
+    var blocksBack: Bool = false
     var progress: (current: Int, total: Int)? = nil
     @ViewBuilder var content: Content
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             intent.ground.ignoresSafeArea()
-            VStack(spacing: 0) {
-                BolajonTopBar(intent: intent, header: headerMode, leading: leadingMode, trailing: trailing)
-                ScrollView {
-                    content
-                        .padding(.horizontal, BolajonMetrics.screenPadding)
-                        .padding(.top, 4)
-                        .padding(.bottom, 28)
-                }
-                .appHiddenScrollIndicators()
+            ScrollView {
+                content
+                    .padding(.horizontal, BolajonMetrics.screenPadding)
+                    .padding(.top, 4)
+                    .padding(.bottom, 28)
             }
+            .appHiddenScrollIndicators()
         }
-        .appHiddenNavBar()
-        .navigationBarBackButtonHidden(true)
-    }
-
-    private var headerMode: BolajonTopBar.Header {
-        if let progress { return .progress(current: progress.current, total: progress.total) }
-        if let title { return .title(title) }
-        return .none
-    }
-
-    private var leadingMode: BolajonTopBar.Leading {
-        switch leading {
-        case .none: return .none
-        case .autoBack: return .back { dismiss() }
-        case let .custom(action): return .back(action)
-        }
-    }
-}
-
-/// Restores the interactive left-edge swipe-to-go-back that a hidden nav bar disables.
-/// Apply once at a NavigationStack's root via `.bolajonSwipeBack()`.
-private struct SwipeBackEnabler: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> UIViewController { Controller() }
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
-
-    final class Controller: UIViewController {
-        override func didMove(toParent parent: UIViewController?) {
-            super.didMove(toParent: parent)
-            guard let gesture = navigationController?.interactivePopGestureRecognizer else { return }
-            gesture.delegate = nil
-            gesture.isEnabled = true
+        .navigationTitle(title ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(blocksBack)
+        .toolbar {
+            if let progress {
+                ToolbarItem(placement: .principal) {
+                    PermissionProgressBar(current: progress.current, total: progress.total)
+                }
+            }
         }
     }
 }
 
 extension View {
-    /// Re-enables left-edge swipe-to-go-back under a hidden nav bar. Place at the stack root.
-    func bolajonSwipeBack() -> some View { background(SwipeBackEnabler()) }
-
-    /// Hides the system navigation bar so the custom `BolajonTopBar` is the only chrome.
+    /// Hides the system navigation bar. Used ONLY at the Home stack root (C1), whose design
+    /// chrome is the in-content header (avatar + name + gear); every pushed destination
+    /// shows the native bar again, which also restores the native edge-swipe back.
     func appHiddenNavBar() -> some View {
         toolbar(.hidden, for: .navigationBar)
     }
 
-    /// Standard compact bottom-sheet sizing for confirm sheets (SOS, disconnect, …).
-    func compactSheetDetents() -> some View {
-        presentationDetents([.medium]).presentationDragIndicator(.visible)
+    /// Brand tint for native navigation chrome (back chevron). Applied at each
+    /// NavigationStack — the bar's controls take their tint from the stack, not from the
+    /// destination's content. Content is unaffected in practice: Bolajon screens set
+    /// their colors explicitly.
+    func bolajonNavigationTint() -> some View {
+        tint(AppColors.ctaPurple)
     }
 }

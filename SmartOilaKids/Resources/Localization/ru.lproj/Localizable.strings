@@ -662,6 +662,7 @@
 "perm2.status.on" = "Включено";
 "perm2.status.off" = "Выключено";
 "perm2.settings.cta" = "Перейти в настройки";
+"perm2.settings.cta_yes" = "Да, перейти в настройки";
 "perm2.allow.cta" = "Да, разрешить";
 "perm2.always.cta" = "Да, всегда разрешать";
 "perm2.intro.title" = "Настроим приложение Bolajon";
@@ -689,11 +690,6 @@
 "perm2.summary.title" = "Готово! Защита включена";
 "perm2.summary.body" = "Bolajon360 теперь готов защищать вашего ребёнка. Настройки можно изменить в любой момент.";
 "perm2.summary.cta" = "Завершить";
-"perm2.summary.notifications" = "Уведомления";
-"perm2.summary.location" = "Местоположение";
-"perm2.summary.microphone" = "Микрофон";
-"perm2.summary.camera" = "Камера";
-"setup.connect.cta" = "Подключить";
 
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Подключено";
@@ -703,6 +699,7 @@
 "home2.sos.subtitle" = "При нажатии — сигнал родителям";
 "home2.tasks.title" = "Задания";
 "home2.tasks.empty" = "Пока нет заданий";
+"home2.tasks.done_badge" = "Выполнено";
 "sos2.title" = "Позвать на помощь?";
 "sos2.body" = "Родителям будет отправлен экстренный сигнал с вашим местоположением.";
 "sos2.confirm" = "Да, позвать на помощь";
@@ -723,11 +720,13 @@
 "settings2.section_other" = "Другое";
 "settings2.permissions" = "Состояние разрешений";
 "settings2.permissions_sub" = "Просмотр и управление разрешениями";
+"settings2.permissions_off_count" = "%d разрешение выключено";
 "settings2.connection" = "Состояние подключения";
 "settings2.connection_value" = "Подключено к родителю";
 "settings2.about" = "О приложении";
-"settings2.version" = "Bolajon360 · v1.0.0";
+"settings2.version" = "Bolajon360 · v";
 "settings2.disconnect" = "Отключить связь";
+"settings2.disconnect_sub" = "Требуется родительский PIN-код";
 "settings2.enable" = "Включить";
 "disconnect2.title" = "Отключить связь";
 "disconnect2.body" = "Это отвяжет устройство от вашей семьи. Введите родительский PIN-код, чтобы продолжить.";
@@ -763,7 +762,6 @@
 "home2.header_subtitle" = "Ваша семья на связи с вами";
 "home2.unit_h" = "ч";
 "home2.unit_m" = "м";
-"home2.screentime.remaining" = "осталось %d мин";
 "settings2.title" = "Настройки";
 "settings2.status_subtitle" = "Для правильной работы приложения нижеперечисленное должно быть включено.";
 "settings2.status_on" = "Включено";

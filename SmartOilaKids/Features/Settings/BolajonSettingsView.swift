@@ -41,7 +41,7 @@ struct BolajonSettingsView: View {
                     homeRouteDestination(route, path: $path)
                 }
         }
-        .bolajonSwipeBack()
+        .bolajonNavigationTint()
     }
 }
 
@@ -50,9 +50,23 @@ struct BolajonSettingsView: View {
 struct SettingsRootView: View {
     @Binding var path: [HomeRoute]
     @EnvironmentObject private var sessionStore: SessionStore
+    @StateObject private var permissionManager = LocationPermissionManager()
+
+    /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). The
+    /// battery/auto-start rows are unreadable on iOS, so they never count as "off".
+    private var offPermissionCount: Int {
+        BolajonPermissionChecklist.states(from: permissionManager)
+            .filter { $0.availability == .notGranted }.count
+    }
+
+    /// "Bolajon360 · v" + the real bundle version, so the row never drifts from the build.
+    private var appVersionText: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        return L10n.tr("settings2.version") + version
+    }
 
     var body: some View {
-        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.title"), leading: .autoBack) {
+        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.title")) {
             VStack(spacing: 20) {
                 InfoCard {
                     HStack(spacing: 14) {
@@ -80,6 +94,9 @@ struct SettingsRootView: View {
                 section(title: "settings2.section_status") {
                     row(icon: "checklist", tint: AppColors.glyphPurple,
                         title: "settings2.permissions", subtitle: "settings2.permissions_sub",
+                        badge: offPermissionCount > 0
+                            ? (text: L10n.tr("settings2.permissions_off_count", offPermissionCount), state: .off)
+                            : nil,
                         action: { path.append(.settingsPermissions) })
                     Divider().background(AppColors.hairline)
                     row(icon: "link", tint: AppColors.successGreen,
@@ -89,14 +106,15 @@ struct SettingsRootView: View {
 
                 section(title: "settings2.section_other") {
                     row(icon: "info.circle", tint: AppColors.glyphPurple,
-                        title: "settings2.about", subtitle: "settings2.version", action: nil)
+                        title: "settings2.about", subtitleLiteral: appVersionText, action: nil)
                     Divider().background(AppColors.hairline)
                     row(icon: "link.badge.plus", tint: AppColors.sosCoral,
-                        title: "settings2.disconnect", subtitle: nil,
+                        title: "settings2.disconnect", subtitle: "settings2.disconnect_sub",
                         titleColor: AppColors.sosCoral, action: { path.append(.settingsDisconnect) })
                 }
             }
         }
+        .onAppear { permissionManager.refreshStatuses() }
     }
 
     @ViewBuilder
@@ -111,8 +129,11 @@ struct SettingsRootView: View {
     }
 
     @ViewBuilder
-    private func row(icon: String, tint: Color, title: String, subtitle: String?,
-                     titleColor: Color = AppColors.inkPrimary, action: (() -> Void)?) -> some View {
+    private func row(icon: String, tint: Color, title: String,
+                     subtitle: String? = nil, subtitleLiteral: String? = nil,
+                     titleColor: Color = AppColors.inkPrimary,
+                     badge: (text: String, state: StatusPill.State)? = nil,
+                     action: (() -> Void)?) -> some View {
         Button {
             action?()
         } label: {
@@ -125,13 +146,20 @@ struct SettingsRootView: View {
                     Text(L10n.tr(title))
                         .font(AppTypography.bodyStrong(15))
                         .foregroundStyle(titleColor)
-                    if let subtitle {
+                    if let subtitleLiteral {
+                        Text(subtitleLiteral)
+                            .font(AppTypography.caption(12))
+                            .foregroundStyle(AppColors.inkTertiary)
+                    } else if let subtitle {
                         Text(L10n.tr(subtitle))
                             .font(AppTypography.caption(12))
                             .foregroundStyle(AppColors.inkTertiary)
                     }
                 }
                 Spacer()
+                if let badge {
+                    StatusPill(text: badge.text, state: badge.state)
+                }
                 if action != nil {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
@@ -155,7 +183,7 @@ struct SettingsPermissionsScreen: View {
     private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
 
     var body: some View {
-        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.permissions"), leading: .autoBack) {
+        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.permissions")) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L10n.tr("settings2.status_subtitle"))
                     .font(AppTypography.bodyText(13))
@@ -296,21 +324,17 @@ struct SettingsDisconnectScreen: View {
     }
 
     var body: some View {
-        BolajonScreen(intent: .lavender, leading: .autoBack) {
+        BolajonScreen(intent: .lavender, title: L10n.tr("disconnect2.title")) {
             VStack(spacing: 20) {
                 brokenLinkBadge
                     .padding(.top, 12)
 
-                VStack(spacing: 10) {
-                    Text(L10n.tr("disconnect2.title"))
-                        .font(AppTypography.title(22))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    Text(bodyText)
-                        .font(AppTypography.bodyText(14))
-                        .foregroundStyle(AppColors.inkSecondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                // The screen title ("Aloqani uzish") lives in the native navigation bar.
+                Text(bodyText)
+                    .font(AppTypography.bodyText(14))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let errorText {
                     Text(errorText)

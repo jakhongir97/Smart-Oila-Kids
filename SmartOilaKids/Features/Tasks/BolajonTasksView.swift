@@ -9,7 +9,7 @@ struct BolajonTasksView: View {
     @StateObject private var viewModel = BolajonTasksViewModel()
 
     var body: some View {
-        BolajonScreen(intent: .lavender, title: L10n.tr("tasks2.title"), leading: .autoBack) {
+        BolajonScreen(intent: .lavender, title: L10n.tr("tasks2.title")) {
             VStack(spacing: 20) {
                 starHeader
 
@@ -46,26 +46,34 @@ struct BolajonTasksView: View {
         .task { await viewModel.load() }
     }
 
+    // Design C3: a purple-FILLED card with a white star and white text (not the inverted
+    // white-card/purple-star variant).
     private var starHeader: some View {
-        InfoCard(radius: BolajonMetrics.cardRadiusLarge) {
-            HStack(spacing: 16) {
-                ZStack {
-                    Circle().fill(AppColors.ctaPurple).frame(width: 58, height: 58)
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.white)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(viewModel.starTotal)")
-                        .font(AppTypography.title(28))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    Text(L10n.tr("tasks2.stars_collected"))
-                        .font(AppTypography.bodyText(13))
-                        .foregroundStyle(AppColors.inkSecondary)
-                }
-                Spacer()
+        HStack(spacing: 16) {
+            ZStack {
+                Circle().fill(Color.white.opacity(0.22)).frame(width: 58, height: 58)
+                Image(systemName: "star.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.white)
             }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(viewModel.starTotal)")
+                    .font(AppTypography.title(28))
+                    .foregroundStyle(AppColors.inverseTextPrimary)
+                Text(L10n.tr("tasks2.stars_collected"))
+                    .font(AppTypography.bodyText(13))
+                    .foregroundStyle(AppColors.inverseTextSecondary)
+            }
+            Spacer()
         }
+        .padding(BolajonMetrics.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: BolajonMetrics.cardRadiusLarge, style: .continuous)
+                .fill(AppColors.ctaPurple)
+        )
+        .shadow(color: AppColors.ctaPurple.opacity(0.25),
+                radius: BolajonMetrics.cardShadowRadius, x: 0, y: BolajonMetrics.cardShadowY)
     }
 }
 
@@ -75,6 +83,12 @@ private struct TaskRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            if task.isCompleted {
+                // Design shows a leading green circled check on completed rows.
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(AppColors.successGreen)
+            }
             if let emoji = task.emoji, !emoji.isEmpty {
                 Text(emoji).font(.system(size: 20))
             }

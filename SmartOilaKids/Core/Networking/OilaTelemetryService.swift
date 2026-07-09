@@ -41,6 +41,19 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         locationManager.distanceFilter = 25
         locationManager.pausesLocationUpdatesAutomatically = true
+#if DEBUG
+        // TEMPORARY LOCAL EXPERIMENT — DO NOT COMMIT. Simulates the parent lock engaging
+        // (and later releasing) at runtime so the lock-cover presentation can be verified.
+        if let raw = ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_LOCK_AFTER"],
+           let secs = Double(raw) {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(secs * 1_000_000_000))
+                self.isLocked = true
+                try? await Task.sleep(nanoseconds: UInt64(secs * 2_000_000_000))
+                self.isLocked = false
+            }
+        }
+#endif
     }
 
     func start() {
