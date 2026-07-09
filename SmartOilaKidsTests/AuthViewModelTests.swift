@@ -1027,3 +1027,274 @@ private func makeJWT(payloadJSON: String) -> String {
         "signature"
     ].joined(separator: ".")
 }
+
+// MARK: - oila360 auth transport (OTP + Telegram)
+
+final class OilaAuthClientTests: XCTestCase {
+    private let baseURL = URL(string: "https://api.oila360.uz/api/v1")!
+
+    override func setUp() {
+        super.setUp()
+        TestHTTPURLProtocol.reset()
+    }
+
+    override func tearDown() {
+        TestHTTPURLProtocol.reset()
+        super.tearDown()
+    }
+
+    private func makeClient() -> (OilaDeviceClient, OilaRecordingTokenStore) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestHTTPURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let tokens = OilaRecordingTokenStore()
+        let defaults = UserDefaults(suiteName: "OilaAuthClientTests.\(UUID().uuidString)")!
+        let client = OilaDeviceClient(
+            baseURL: baseURL,
+            session: session,
+            secureTokens: tokens,
+            userDefaults: defaults
+        )
+        return (client, tokens)
+    }
+
+    func testRequestOtpPostsPhoneToOtpRequest() async throws {
+        var recordedBody: [String: Any]?
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/auth/otp/request")
+            if let body = TestHTTPURLProtocol.bodyData(for: request) {
+                recordedBody = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+            }
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(#"{"success":true}"#.utf8))
+        }
+
+        let (client, _) = makeClient()
+        try await client.requestOtp(phone: "+998901234567")
+
+        XCTAssertEqual(recordedBody?["phone"] as? String, "+998901234567")
+    }
+
+    // Locks in the agreed `POST /device/pair` contract (android↔backend discussion):
+    // request carries a 5-digit `code`, `platform: "Ios"`, and a non-empty `dsn`; the
+    // response returns the long-lived `deviceToken` (no refresh) plus the child identity
+    // (name / avatarEmoji / profileColor).
+    func testPairSendsFiveDigitCodeParsesDeviceTokenAndChildIdentity() async throws {
+        var recordedBody: [String: Any]?
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/device/pair")
+            if let body = TestHTTPURLProtocol.bodyData(for: request) {
+                recordedBody = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+            }
+            // Double-pound raw delimiter: the payload contains `"#F0605A"`, whose `"#`
+            // would prematurely close a single-pound `#"..."#` raw string.
+            let payload = ##"{"success":true,"data":{"deviceToken":"dev-1","deviceId":"srv-1","child":{"name":"Sardor","profileColor":"#F0605A","avatarEmoji":"🦁","profilePictureUrl":null}}}"##
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(payload.utf8))
+        }
+
+        let (client, tokens) = makeClient()
+        let result = try await client.pair(code: "12345")
+
+        // Request shape agreed with the backend.
+        XCTAssertEqual(recordedBody?["code"] as? String, "12345")
+        XCTAssertEqual(recordedBody?["platform"] as? String, "Ios")
+        XCTAssertFalse((recordedBody?["dsn"] as? String ?? "").isEmpty)
+
+        // Response: deviceToken becomes the session (access) token; no refresh token issued.
+        XCTAssertEqual(result.tokens.accessToken, "dev-1")
+        XCTAssertNil(result.tokens.refreshToken)
+        XCTAssertEqual(tokens.access, "dev-1")
+
+        // Child identity is parsed so the UI can drop the hardcoded placeholder avatar.
+        XCTAssertEqual(result.child?.name, "Sardor")
+        XCTAssertEqual(result.child?.avatarEmoji, "🦁")
+        XCTAssertEqual(result.child?.profileColor, "#F0605A")
+        XCTAssertFalse(result.dsn.isEmpty)
+    }
+
+    func testVerifyOtpSendsSixDigitCodePersistsTokensAndReturnsChild() async throws {
+        var recordedBody: [String: Any]?
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/auth/otp/verify")
+            if let body = TestHTTPURLProtocol.bodyData(for: request) {
+                recordedBody = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+            }
+            let payload = #"{"success":true,"data":{"accessToken":"acc-1","refreshToken":"ref-1","child":{"id":"c1","name":"Ali"}}}"#
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(payload.utf8))
+        }
+
+        let (client, tokens) = makeClient()
+        let result = try await client.verifyOtp(phone: "+998901234567", code: "123456")
+
+        XCTAssertEqual(recordedBody?["phone"] as? String, "+998901234567")
+        XCTAssertEqual(recordedBody?["code"] as? String, "123456")
+        XCTAssertEqual(result.tokens.accessToken, "acc-1")
+        XCTAssertEqual(result.tokens.refreshToken, "ref-1")
+        XCTAssertEqual(result.child?.name, "Ali")
+        XCTAssertEqual(tokens.access, "acc-1")
+        XCTAssertEqual(tokens.refresh, "ref-1")
+    }
+
+    func testVerifyOtpThrowsWhenTokensMissing() async {
+        TestHTTPURLProtocol.requestHandler = { request in
+            (makeHTTPResponse(for: request.url!, statusCode: 200), Data(#"{"success":true,"data":{}}"#.utf8))
+        }
+
+        let (client, _) = makeClient()
+        do {
+            _ = try await client.verifyOtp(phone: "+998901234567", code: "123456")
+            XCTFail("Expected missing-token error")
+        } catch let error as OilaAPIError {
+            XCTAssertEqual(error.errorCode, "OTP_NO_TOKEN")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testTelegramInitReturnsSessionAndURL() async throws {
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/auth/telegram/init")
+            let payload = #"{"success":true,"data":{"sessionId":"s-1","url":"https://t.me/bot?start=s-1"}}"#
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(payload.utf8))
+        }
+
+        let (client, _) = makeClient()
+        let session = try await client.telegramInit()
+
+        XCTAssertEqual(session.sessionId, "s-1")
+        XCTAssertEqual(session.url, "https://t.me/bot?start=s-1")
+    }
+
+    func testTelegramStatusReportsPendingThenAuthorizedAndPersistsTokens() async throws {
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/auth/telegram/status/s-1")
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(#"{"success":true,"data":{"status":"pending"}}"#.utf8))
+        }
+
+        let (client, tokens) = makeClient()
+        let pending = try await client.telegramStatus(sessionId: "s-1")
+        guard case .pending = pending else {
+            return XCTFail("Expected pending, got \(pending)")
+        }
+
+        TestHTTPURLProtocol.requestHandler = { request in
+            (makeHTTPResponse(for: request.url!, statusCode: 200), Data(#"{"success":true,"data":{"accessToken":"acc-2","refreshToken":"ref-2"}}"#.utf8))
+        }
+        let authorized = try await client.telegramStatus(sessionId: "s-1")
+        guard case let .authorized(issued, _) = authorized else {
+            return XCTFail("Expected authorized, got \(authorized)")
+        }
+        XCTAssertEqual(issued.accessToken, "acc-2")
+        XCTAssertEqual(tokens.access, "acc-2")
+    }
+}
+
+private final class OilaRecordingTokenStore: SecureTokenStoring {
+    var access: String?
+    var refresh: String?
+
+    func accessToken() -> String? { access }
+    func refreshToken() -> String? { refresh }
+    func setAccessToken(_ token: String?) { access = token }
+    func setRefreshToken(_ token: String?) { refresh = token }
+    func migrateFromUserDefaults(_ userDefaults: UserDefaults) {}
+    func clear() { access = nil; refresh = nil }
+}
+
+// MARK: - oila360 device app endpoints
+
+final class OilaDeviceAppsTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        TestHTTPURLProtocol.reset()
+    }
+
+    override func tearDown() {
+        TestHTTPURLProtocol.reset()
+        super.tearDown()
+    }
+
+    func testReportRemovalAttemptPostsCamelCaseBodyWithDeviceBearer() async throws {
+        var recordedBody: [String: Any]?
+        var authHeader: String?
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/device/apps/removal-attempt")
+            authHeader = request.value(forHTTPHeaderField: "Authorization")
+            if let body = TestHTTPURLProtocol.bodyData(for: request) {
+                recordedBody = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+            }
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(#"{"success":true}"#.utf8))
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestHTTPURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let tokens = OilaRecordingTokenStore()
+        tokens.access = "dev-bearer"
+        let defaults = UserDefaults(suiteName: "OilaDeviceAppsTests.\(UUID().uuidString)")!
+        let client = OilaDeviceClient(
+            baseURL: URL(string: "https://api.oila360.uz/api/v1")!,
+            session: session,
+            secureTokens: tokens,
+            userDefaults: defaults
+        )
+
+        try await client.reportRemovalAttempt(packageName: "com.game.x", applicationName: "Game X")
+
+        XCTAssertEqual(authHeader, "Bearer dev-bearer")
+        XCTAssertEqual(recordedBody?["packageName"] as? String, "com.game.x")
+        XCTAssertEqual(recordedBody?["applicationName"] as? String, "Game X")
+    }
+
+    func testCompleteRecordingUploadsMultipartWithDurationAndBearer() async throws {
+        var path: String?
+        var httpMethod: String?
+        var contentType: String?
+        var authHeader: String?
+        var bodyString: String?
+        TestHTTPURLProtocol.requestHandler = { request in
+            path = request.url?.path
+            httpMethod = request.httpMethod
+            contentType = request.value(forHTTPHeaderField: "Content-Type")
+            authHeader = request.value(forHTTPHeaderField: "Authorization")
+            if let body = TestHTTPURLProtocol.bodyData(for: request) {
+                bodyString = String(decoding: body, as: UTF8.self)
+            }
+            let payload = #"{"success":true,"data":{"status":"completed","url":"https://cdn/x.m4a"}}"#
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(payload.utf8))
+        }
+
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a")
+        try Data("audio-bytes".utf8).write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestHTTPURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let tokens = OilaRecordingTokenStore()
+        tokens.access = "dev-bearer"
+        let defaults = UserDefaults(suiteName: "OilaRec.\(UUID().uuidString)")!
+        let client = OilaDeviceClient(
+            baseURL: URL(string: "https://api.oila360.uz/api/v1")!,
+            session: session,
+            secureTokens: tokens,
+            userDefaults: defaults
+        )
+
+        let data = try await client.completeRecording(recordingID: "rec-9", fileURL: tmp, durationSeconds: 12)
+
+        XCTAssertEqual(path, "/api/v1/device/recordings/rec-9/complete")
+        XCTAssertEqual(httpMethod, "PUT")
+        XCTAssertEqual(authHeader, "Bearer dev-bearer")
+        XCTAssertEqual(contentType?.hasPrefix("multipart/form-data; boundary="), true)
+        XCTAssertEqual(bodyString?.contains("name=\"file\""), true)
+        XCTAssertEqual(bodyString?.contains("name=\"durationSeconds\""), true)
+        XCTAssertEqual(bodyString?.contains("12"), true)
+        XCTAssertEqual(data["status"] as? String, "completed")
+    }
+}

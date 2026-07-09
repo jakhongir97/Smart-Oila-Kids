@@ -81,34 +81,3 @@ struct SmartOilaMark: View {
         }
     }
 }
-
-struct LanguageBadgeRU: View {
-    var body: some View {
-        HStack(spacing: 4) {
-            if UIImage(named: "FlagRU") != nil {
-                Image("FlagRU")
-                    .resizable()
-                    .frame(width: 18, height: 18)
-            } else {
-                Text("🇷🇺")
-                    .font(.system(size: 13))
-            }
-
-            Text("Ру")
-                .font(AppTypography.unbounded(12, weight: .regular))
-                .foregroundStyle(AppColors.black)
-
-            if UIImage(named: "ChevronDownSmall") != nil {
-                Image("ChevronDownSmall")
-                    .resizable()
-                    .frame(width: 10, height: 5)
-            } else {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(AppColors.black)
-            }
-        }
-        .padding(.horizontal, 6)
-        .frame(height: 20)
-    }
-}

@@ -698,6 +698,7 @@
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Ulangan";
 "home2.screentime.title" = "Bugungi ekran vaqti";
+"home2.screentime.tracked_subtitle" = "Kuzatilayotgan ilovalarda";
 "home2.sos.title" = "SOS — Yordam kerak";
 "home2.sos.subtitle" = "Bosilsa — ota-onaga xabar ketadi";
 "home2.tasks.title" = "Topshiriqlar";
@@ -732,6 +733,12 @@
 "disconnect2.body" = "Bu qurilmani oilangizdan ajratadi. Davom etish uchun ota-ona PIN kodini kiriting.";
 "disconnect2.confirm" = "Uzish";
 "disconnect2.cancel" = "Bekor qilish";
+"disconnect2.pin_incorrect" = "PIN kod noto'g'ri. Qayta urinib ko'ring.";
+"disconnect2.create_hint" = "Ota-ona PIN kodi hali o'rnatilmagan. Uzishni himoyalash uchun 4 xonali PIN kod yarating.";
+"disconnect2.confirm_hint" = "Tasdiqlash uchun PIN kodni qayta kiriting.";
+"disconnect2.mismatch" = "PIN kodlar mos kelmadi. Qayta urinib ko'ring.";
+"disconnect2.biometric_hint" = "Uzish uchun Face ID, Touch ID yoki qurilma paroli bilan tasdiqlang.";
+"disconnect2.biometric_failed" = "Tasdiqlab bo'lmadi. Qayta urinib ko'ring.";
 
 "perm2.decline_bg" = "Yo'q, faqat ochiqda";
 

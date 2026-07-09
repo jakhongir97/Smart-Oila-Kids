@@ -698,6 +698,7 @@
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Подключено";
 "home2.screentime.title" = "Экранное время сегодня";
+"home2.screentime.tracked_subtitle" = "В отслеживаемых приложениях";
 "home2.sos.title" = "SOS — Нужна помощь";
 "home2.sos.subtitle" = "При нажатии — сигнал родителям";
 "home2.tasks.title" = "Задания";
@@ -732,6 +733,12 @@
 "disconnect2.body" = "Это отвяжет устройство от вашей семьи. Введите родительский PIN-код, чтобы продолжить.";
 "disconnect2.confirm" = "Отключить";
 "disconnect2.cancel" = "Отмена";
+"disconnect2.pin_incorrect" = "Неверный PIN-код. Попробуйте снова.";
+"disconnect2.create_hint" = "Родительский PIN-код ещё не задан. Создайте 4-значный PIN-код для защиты отвязки.";
+"disconnect2.confirm_hint" = "Введите PIN-код ещё раз для подтверждения.";
+"disconnect2.mismatch" = "PIN-коды не совпадают. Попробуйте снова.";
+"disconnect2.biometric_hint" = "Подтвердите через Face ID, Touch ID или код-пароль, чтобы отключить.";
+"disconnect2.biometric_failed" = "Не удалось подтвердить. Попробуйте снова.";
 
 "perm2.decline_bg" = "Нет, только при открытом";
 

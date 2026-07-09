@@ -8,6 +8,8 @@ final class SessionStore: ObservableObject {
         static let dsn = "DSN"
         static let selectedRemoteDSN = "SELECTED_REMOTE_DSN"
         static let profileName = SessionStore.profileNameDefaultsKey
+        static let childAvatarEmoji = "CHILD_AVATAR_EMOJI"
+        static let childProfileColor = "CHILD_PROFILE_COLOR"
         static let appTheme = "APP_THEME"
         static let appLanguage = "APP_LANGUAGE"
         static let setupCompleted = "BOLAJON_SETUP_COMPLETED"
@@ -19,6 +21,10 @@ final class SessionStore: ObservableObject {
     @Published private(set) var dsn: String?
     @Published private(set) var selectedRemoteDSN: String?
     @Published var profileName: String
+    /// Emoji avatar the parent chose for this child (from `POST /device/pair` → child.avatarEmoji).
+    @Published private(set) var childAvatarEmoji: String?
+    /// Hex profile color the parent chose for this child (child.profileColor, e.g. "#F0605A").
+    @Published private(set) var childProfileColor: String?
     @Published private(set) var apiAccessToken: String?
     @Published private(set) var apiRefreshToken: String?
     @Published private(set) var appTheme: AppTheme
@@ -46,6 +52,8 @@ final class SessionStore: ObservableObject {
         dsn = userDefaults.string(forKey: Keys.dsn)?.trimmedNonEmpty
         selectedRemoteDSN = userDefaults.string(forKey: Keys.selectedRemoteDSN)?.trimmedNonEmpty
         profileName = userDefaults.string(forKey: Keys.profileName) ?? L10n.tr("common.user_default")
+        childAvatarEmoji = userDefaults.string(forKey: Keys.childAvatarEmoji)?.trimmedNonEmpty
+        childProfileColor = userDefaults.string(forKey: Keys.childProfileColor)?.trimmedNonEmpty
         apiAccessToken = secureTokens.accessToken()
         apiRefreshToken = secureTokens.refreshToken()
         appTheme = AppTheme(rawValue: userDefaults.string(forKey: Keys.appTheme) ?? "") ?? .system
@@ -97,6 +105,26 @@ final class SessionStore: ObservableObject {
     func setProfileName(_ name: String) {
         profileName = name
         userDefaults.set(name, forKey: Keys.profileName)
+    }
+
+    func setChildAvatarEmoji(_ emoji: String?) {
+        let normalized = emoji?.trimmedNonEmpty
+        childAvatarEmoji = normalized
+        if let normalized {
+            userDefaults.set(normalized, forKey: Keys.childAvatarEmoji)
+        } else {
+            userDefaults.removeObject(forKey: Keys.childAvatarEmoji)
+        }
+    }
+
+    func setChildProfileColor(_ hex: String?) {
+        let normalized = hex?.trimmedNonEmpty
+        childProfileColor = normalized
+        if let normalized {
+            userDefaults.set(normalized, forKey: Keys.childProfileColor)
+        } else {
+            userDefaults.removeObject(forKey: Keys.childProfileColor)
+        }
     }
 
     func setAPIAccessToken(_ token: String?) {
@@ -152,6 +180,8 @@ final class SessionStore: ObservableObject {
         setSelectedRemoteDSN(nil)
         setAPIAccessToken(nil)
         setAPIRefreshToken(nil)
+        setChildAvatarEmoji(nil)
+        setChildProfileColor(nil)
         // Disconnect returns the child to the setup flow.
         setSetupCompleted(false)
         setOnboardingCompleted(false)

@@ -1,100 +1,69 @@
 import SwiftUI
+import UIKit
 
 // Bolajon360 Settings (C4) → Permissions status (C5) → Disconnect / parent PIN (C6).
-// Slim child-facing settings: status + about + disconnect. Disconnect reuses the oila360
-// logout + SessionStore.clearSession (which routes back to Auth). The 4-digit gate UI is
-// built; verifying it against a real parent secret is open decision #5.
+// These screens are pushed onto the Home NavigationStack (see homeRouteDestination); the
+// standalone `BolajonSettingsView` below is a self-contained stack used only by the debug
+// route. Disconnect reuses the oila360 logout + SessionStore.clearSession (which routes back
+// to pairing). The parent-PIN gate is local (SettingsProtectionController) — decision #5.
 
+/// Standalone Settings stack (debug route only). The production flow pushes the Settings
+/// screens directly onto the Home stack.
 struct BolajonSettingsView: View {
     var onBack: () -> Void = {}
     var onDisconnected: () -> Void = {}
 
     @EnvironmentObject private var sessionStore: SessionStore
-    @StateObject private var manager = LocationPermissionManager()
-    @State private var route: Route
-    @State private var isDisconnecting = false
-
-    enum Route { case root, permissions, disconnect }
+    @State private var path: [HomeRoute]
 
     init(onBack: @escaping () -> Void = {}, onDisconnected: @escaping () -> Void = {}) {
         self.onBack = onBack
         self.onDisconnected = onDisconnected
-        _route = State(initialValue: Self.initialRoute())
+        _path = State(initialValue: Self.initialPath())
     }
 
-    private static func initialRoute() -> Route {
+    private static func initialPath() -> [HomeRoute] {
 #if DEBUG
         switch ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SETTINGS_ROUTE"] {
-        case "permissions": return .permissions
-        case "disconnect": return .disconnect
-        default: return .root
+        case "permissions": return [.settingsPermissions]
+        case "disconnect": return [.settingsDisconnect]
+        default: return []
         }
 #else
-        return .root
+        return []
 #endif
     }
 
     var body: some View {
-        Group {
-            switch route {
-            case .root:
-                SettingsRootView(
-                    name: sessionStore.profileName,
-                    onBack: onBack,
-                    onPermissions: { route = .permissions },
-                    onDisconnect: { route = .disconnect }
-                )
-            case .permissions:
-                PermissionsStatusView(manager: manager, onBack: { route = .root })
-            case .disconnect:
-                DisconnectView(
-                    isBusy: isDisconnecting,
-                    onBack: { route = .root },
-                    onConfirm: disconnect
-                )
-            }
+        NavigationStack(path: $path) {
+            SettingsRootView(path: $path)
+                .navigationDestination(for: HomeRoute.self) { route in
+                    homeRouteDestination(route, path: $path)
+                }
         }
-        .transition(.opacity)
-    }
-
-    private func disconnect(pin: String) {
-        // TODO(decision #5): verify `pin` against the parent-provisioned PIN (or the local
-        // SettingsProtectionController) before proceeding. Currently any 4 digits continue.
-        guard !isDisconnecting else { return }
-        isDisconnecting = true
-        Task {
-            try? await OilaDeviceClient.shared.logout()
-            await MainActor.run {
-                sessionStore.clearSession()
-                isDisconnecting = false
-                onDisconnected()
-            }
-        }
+        .bolajonSwipeBack()
     }
 }
 
 // MARK: - C4 Root
 
-private struct SettingsRootView: View {
-    let name: String
-    let onBack: () -> Void
-    let onPermissions: () -> Void
-    let onDisconnect: () -> Void
+struct SettingsRootView: View {
+    @Binding var path: [HomeRoute]
+    @EnvironmentObject private var sessionStore: SessionStore
 
     var body: some View {
-        ScreenScaffold(intent: .lavender, onBack: onBack) {
+        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.title"), leading: .autoBack) {
             VStack(spacing: 20) {
-                Text(L10n.tr("settings2.title"))
-                    .font(AppTypography.title(22))
-                    .foregroundStyle(AppColors.inkPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
-
                 InfoCard {
                     HStack(spacing: 14) {
-                        ConnectedAvatar(emoji: "🦁", diameter: 52, isConnected: true)
+                        ConnectedAvatar(
+                            emoji: sessionStore.childAvatarEmoji ?? "🦁",
+                            diameter: 52,
+                            isConnected: true,
+                            tint: Color(hex: sessionStore.childProfileColor)
+                        )
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(name)
+                            Text(sessionStore.profileName)
                                 .font(AppTypography.heading(17))
                                 .foregroundStyle(AppColors.inkPrimary)
                             HStack(spacing: 4) {
@@ -111,7 +80,7 @@ private struct SettingsRootView: View {
                 section(title: "settings2.section_status") {
                     row(icon: "checklist", tint: AppColors.glyphPurple,
                         title: "settings2.permissions", subtitle: "settings2.permissions_sub",
-                        action: onPermissions)
+                        action: { path.append(.settingsPermissions) })
                     Divider().background(AppColors.hairline)
                     row(icon: "link", tint: AppColors.successGreen,
                         title: "settings2.connection", subtitle: "settings2.connection_value",
@@ -124,7 +93,7 @@ private struct SettingsRootView: View {
                     Divider().background(AppColors.hairline)
                     row(icon: "link.badge.plus", tint: AppColors.sosCoral,
                         title: "settings2.disconnect", subtitle: nil,
-                        titleColor: AppColors.sosCoral, action: onDisconnect)
+                        titleColor: AppColors.sosCoral, action: { path.append(.settingsDisconnect) })
                 }
             }
         }
@@ -179,54 +148,23 @@ private struct SettingsRootView: View {
 
 // MARK: - C5 Permissions status
 
-private struct PermissionsStatusView: View {
-    @ObservedObject var manager: LocationPermissionManager
-    let onBack: () -> Void
+struct SettingsPermissionsScreen: View {
+    @StateObject private var manager = LocationPermissionManager()
 
-    private struct Item: Identifiable {
-        let id = UUID()
-        let icon: String
-        let labelKey: String
-        let isOn: Bool
-        var descKey: String?
-        var requirement: PermissionRequirement?
-    }
-
-    private var items: [Item] {
-        [
-            Item(icon: "bell.fill", labelKey: "perm2.item.notifications",
-                 isOn: [.authorized, .provisional, .ephemeral].contains(manager.notificationAuthorizationStatus),
-                 descKey: "perm2.notifications.body", requirement: .notifications),
-            Item(icon: "bolt.fill", labelKey: "perm2.item.battery", isOn: true),
-            Item(icon: "chart.bar.fill", labelKey: "perm2.item.usage", isOn: true),
-            Item(icon: "location.fill", labelKey: "perm2.item.location",
-                 isOn: [.authorizedAlways, .authorizedWhenInUse].contains(manager.locationAuthorizationStatus),
-                 descKey: "perm2.location.body", requirement: .location),
-            Item(icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart", isOn: true),
-            Item(icon: "mic.fill", labelKey: "perm2.item.microphone",
-                 isOn: manager.microphonePermission == .granted,
-                 descKey: "perm2.microphone.body", requirement: .microphone),
-            Item(icon: "camera.fill", labelKey: "perm2.item.camera",
-                 isOn: manager.cameraAuthorizationStatus == .authorized,
-                 descKey: "perm2.camera.body", requirement: .camera)
-        ]
-    }
+    // Shared with the B11 onboarding summary so both screens cover the same set + status.
+    private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
 
     var body: some View {
-        ScreenScaffold(intent: .lavender, onBack: onBack) {
+        BolajonScreen(intent: .lavender, title: L10n.tr("settings2.permissions"), leading: .autoBack) {
             VStack(alignment: .leading, spacing: 14) {
-                Text(L10n.tr("settings2.permissions"))
-                    .font(AppTypography.title(22))
-                    .foregroundStyle(AppColors.inkPrimary)
-                    .padding(.top, 4)
                 Text(L10n.tr("settings2.status_subtitle"))
                     .font(AppTypography.bodyText(13))
                     .foregroundStyle(AppColors.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(spacing: 10) {
-                    ForEach(items) { item in
-                        row(item)
+                    ForEach(states) { state in
+                        row(state)
                     }
                 }
             }
@@ -235,58 +173,77 @@ private struct PermissionsStatusView: View {
     }
 
     @ViewBuilder
-    private func row(_ item: Item) -> some View {
-        if item.isOn {
-            InfoCard(padding: 14) {
-                HStack(spacing: 12) {
-                    iconBadge(item.icon, tint: AppColors.glyphPurple)
-                    Text(L10n.tr(item.labelKey))
-                        .font(AppTypography.bodyStrong(14))
-                        .foregroundStyle(AppColors.inkPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    StatusPill(text: L10n.tr("settings2.status_on"), state: .granted)
-                }
-            }
-        } else {
-            // Highlighted "needs attention" card (design: coral border + description + Yoqish).
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    iconBadge(item.icon, tint: AppColors.glyphCoral)
-                    Text(L10n.tr(item.labelKey))
-                        .font(AppTypography.bodyStrong(14))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    Spacer(minLength: 8)
-                    StatusPill(text: L10n.tr("settings2.status_off"), state: .off)
-                }
-                if let descKey = item.descKey {
-                    Text(L10n.tr(descKey))
-                        .font(AppTypography.caption(12))
-                        .foregroundStyle(AppColors.inkSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Button {
-                    if let requirement = item.requirement { manager.performAction(for: requirement) }
-                } label: {
-                    Text(L10n.tr("settings2.enable"))
-                        .font(AppTypography.bodyStrong(14))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 42)
-                        .background(Capsule().fill(AppColors.glyphCoral))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
-                    .fill(AppColors.glyphCoral.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
-                    .stroke(AppColors.glyphCoral.opacity(0.4), lineWidth: 1.5)
-            )
+    private func row(_ state: BolajonPermissionState) -> some View {
+        switch state.availability {
+        case .granted:
+            compactRow(state, pillText: L10n.tr("settings2.status_on"), pillState: .granted, onTap: nil)
+        case .openSettings:
+            // iOS can't read battery-saver / auto-start — neutral chip that opens Settings.
+            compactRow(state, pillText: L10n.tr("perm2.settings.cta"), pillState: .neutral, onTap: openSystemSettings)
+        case .notGranted:
+            attentionRow(state)
         }
+    }
+
+    @ViewBuilder
+    private func compactRow(_ state: BolajonPermissionState, pillText: String,
+                            pillState: StatusPill.State, onTap: (() -> Void)?) -> some View {
+        let card = InfoCard(padding: 14) {
+            HStack(spacing: 12) {
+                iconBadge(state.icon, tint: AppColors.glyphPurple)
+                Text(L10n.tr(state.labelKey))
+                    .font(AppTypography.bodyStrong(14))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                StatusPill(text: pillText, state: pillState)
+            }
+        }
+        if let onTap {
+            Button(action: onTap) { card }.buttonStyle(.plain)
+        } else {
+            card
+        }
+    }
+
+    // Highlighted "needs attention" card (design: coral border + description + Yoqish).
+    private func attentionRow(_ state: BolajonPermissionState) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                iconBadge(state.icon, tint: AppColors.glyphCoral)
+                Text(L10n.tr(state.labelKey))
+                    .font(AppTypography.bodyStrong(14))
+                    .foregroundStyle(AppColors.inkPrimary)
+                Spacer(minLength: 8)
+                StatusPill(text: L10n.tr("settings2.status_off"), state: .off)
+            }
+            if let descriptionKey = state.descriptionKey {
+                Text(L10n.tr(descriptionKey))
+                    .font(AppTypography.caption(12))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                if let requirement = state.requirement { manager.performAction(for: requirement) }
+            } label: {
+                Text(L10n.tr("settings2.enable"))
+                    .font(AppTypography.bodyStrong(14))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 42)
+                    .background(Capsule().fill(AppColors.glyphCoral))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
+                .fill(AppColors.glyphCoral.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
+                .stroke(AppColors.glyphCoral.opacity(0.4), lineWidth: 1.5)
+        )
     }
 
     private func iconBadge(_ symbol: String, tint: Color) -> some View {
@@ -295,55 +252,187 @@ private struct PermissionsStatusView: View {
             Image(systemName: symbol).font(.system(size: 15)).foregroundStyle(tint)
         }
     }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString),
+              UIApplication.shared.canOpenURL(url) else { return }
+        UIApplication.shared.open(url)
+    }
 }
 
 // MARK: - C6 Disconnect / parent PIN
 
-private struct DisconnectView: View {
-    let isBusy: Bool
-    let onBack: () -> Void
-    let onConfirm: (String) -> Void
+struct SettingsDisconnectScreen: View {
+    @EnvironmentObject private var sessionStore: SessionStore
+    @ObservedObject private var protection = SettingsProtectionController.shared
+    @Environment(\.dismiss) private var dismiss
 
+    // Gate order: a parent-set PIN is the real secret the child doesn't know, so it wins over
+    // biometrics (which is the child's own face on their device). Biometric is the fallback
+    // when no PIN is set; a create/confirm flow establishes one when neither exists.
+    private enum Mode { case verifyPIN, biometric, createPIN }
+    private enum CreateStage { case enter, confirm }
+
+    @State private var mode: Mode = .verifyPIN
+    @State private var createStage: CreateStage = .enter
     @State private var pin = ""
+    @State private var firstPIN = ""
+    @State private var errorText: String?
+    @State private var isAuthenticating = false
+    @State private var isDisconnecting = false
+
     private let pinLength = 4
 
+    private var showsPINField: Bool { mode == .verifyPIN || mode == .createPIN }
+    private var busy: Bool { isDisconnecting || isAuthenticating }
+
+    private var bodyText: String {
+        switch mode {
+        case .biometric: return L10n.tr("disconnect2.biometric_hint")
+        case .verifyPIN: return L10n.tr("disconnect2.body")
+        case .createPIN:
+            return L10n.tr(createStage == .enter ? "disconnect2.create_hint" : "disconnect2.confirm_hint")
+        }
+    }
+
     var body: some View {
-        ScreenScaffold(intent: .lavender, onBack: onBack) {
+        BolajonScreen(intent: .lavender, leading: .autoBack) {
             VStack(spacing: 20) {
-                ZStack {
-                    Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 84, height: 84)
-                    Image(systemName: "link")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(AppColors.sosCoral)
-                    // Diagonal slash → "broken link".
-                    Capsule()
-                        .fill(AppColors.sosCoral)
-                        .frame(width: 40, height: 3)
-                        .rotationEffect(.degrees(-45))
-                }
-                .padding(.top, 12)
+                brokenLinkBadge
+                    .padding(.top, 12)
 
                 VStack(spacing: 10) {
                     Text(L10n.tr("disconnect2.title"))
                         .font(AppTypography.title(22))
                         .foregroundStyle(AppColors.inkPrimary)
-                    Text(L10n.tr("disconnect2.body"))
+                    Text(bodyText)
                         .font(AppTypography.bodyText(14))
                         .foregroundStyle(AppColors.inkSecondary)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                CodeEntryField(code: $pin, length: pinLength, intent: .lavender, autoSubmit: false, dotStyle: true)
-                    .disabled(isBusy)
+                if let errorText {
+                    Text(errorText)
+                        .font(AppTypography.caption(12))
+                        .foregroundStyle(AppColors.sosCoral)
+                        .multilineTextAlignment(.center)
+                }
+
+                if showsPINField {
+                    CodeEntryField(code: $pin, length: pinLength, intent: .lavender, autoSubmit: false, dotStyle: true)
+                        .disabled(busy)
+                }
 
                 BolajonPrimaryButton(
                     title: L10n.tr("disconnect2.confirm"),
                     fill: AppColors.sosCoral,
-                    isLoading: isBusy,
-                    disabled: pin.count < pinLength,
-                    action: { onConfirm(pin) }
+                    isLoading: busy,
+                    disabled: showsPINField && pin.count < pinLength,
+                    action: handlePrimary
                 )
-                GhostButton(title: L10n.tr("disconnect2.cancel"), action: onBack)
+                GhostButton(title: L10n.tr("disconnect2.cancel"), action: { dismiss() })
+            }
+        }
+        .onAppear(perform: resolveMode)
+    }
+
+    private var brokenLinkBadge: some View {
+        ZStack {
+            Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 84, height: 84)
+            Image(systemName: "link")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(AppColors.sosCoral)
+            // Diagonal slash → "broken link".
+            Capsule()
+                .fill(AppColors.sosCoral)
+                .frame(width: 40, height: 3)
+                .rotationEffect(.degrees(-45))
+        }
+    }
+
+    private func resolveMode() {
+        protection.refreshAvailability()
+        if protection.hasCustomPIN {
+            mode = .verifyPIN
+        } else if protection.isDeviceAuthenticationAvailable {
+            mode = .biometric
+        } else {
+            mode = .createPIN
+        }
+        createStage = .enter
+        pin = ""
+        firstPIN = ""
+        errorText = nil
+    }
+
+    private func handlePrimary() {
+        guard !busy else { return }
+        switch mode {
+        case .biometric: authenticateBiometric()
+        case .verifyPIN: validateEnteredPIN()
+        case .createPIN: advanceCreateFlow()
+        }
+    }
+
+    private func validateEnteredPIN() {
+        if protection.verifyCustomPIN(pin) {
+            errorText = nil
+            performDisconnect()
+        } else {
+            errorText = L10n.tr("disconnect2.pin_incorrect")
+            pin = ""
+        }
+    }
+
+    private func advanceCreateFlow() {
+        switch createStage {
+        case .enter:
+            firstPIN = pin
+            pin = ""
+            errorText = nil
+            createStage = .confirm
+        case .confirm:
+            if pin == firstPIN {
+                protection.saveCustomPIN(pin)
+                errorText = nil
+                performDisconnect()
+            } else {
+                errorText = L10n.tr("disconnect2.mismatch")
+                pin = ""
+                firstPIN = ""
+                createStage = .enter
+            }
+        }
+    }
+
+    private func authenticateBiometric() {
+        isAuthenticating = true
+        errorText = nil
+        Task {
+            let success = await protection.confirmDeviceOwner()
+            await MainActor.run {
+                isAuthenticating = false
+                if success {
+                    performDisconnect()
+                } else {
+                    errorText = L10n.tr("disconnect2.biometric_failed")
+                }
+            }
+        }
+    }
+
+    /// Runs only after the parent PIN (or biometric) has been validated. Clearing the session
+    /// swaps the app root back to pairing, which tears down this Settings stack. Local by design
+    /// (no backend parent-PIN endpoint).
+    private func performDisconnect() {
+        guard !isDisconnecting else { return }
+        isDisconnecting = true
+        Task {
+            try? await OilaDeviceClient.shared.logout()
+            await MainActor.run {
+                sessionStore.clearSession()
+                isDisconnecting = false
             }
         }
     }

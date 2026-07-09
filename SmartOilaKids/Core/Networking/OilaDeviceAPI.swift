@@ -74,6 +74,10 @@ struct OilaChildProfile {
     let id: String?
     let name: String?
     let avatarURL: String?
+    /// Emoji the parent picked for the child (PairResult `child.avatarEmoji`, may be null).
+    let avatarEmoji: String?
+    /// Hex profile color the parent picked (PairResult `child.profileColor`, e.g. "#F0605A").
+    let profileColor: String?
 }
 
 struct OilaPairResult {
@@ -118,12 +122,40 @@ struct OilaLockState {
     let raw: [String: Any]
 }
 
+/// Result of a successful phone OTP verification (`POST /auth/otp/verify`).
+struct OilaOtpResult {
+    let tokens: OilaTokens
+    let child: OilaChildProfile?
+}
+
+/// A Telegram magic-link login session started by `POST /auth/telegram/init`.
+struct OilaTelegramSession {
+    let sessionId: String
+    /// Deep link / URL that opens the Telegram bot, when the backend returns one.
+    let url: String?
+}
+
+/// Poll result for `GET /auth/telegram/status/{sessionId}`.
+enum OilaTelegramStatus {
+    case pending
+    case authorized(OilaTokens, child: OilaChildProfile?)
+    case expired
+}
+
 // MARK: - Service protocol
 
 protocol OilaDeviceServicing {
     func pair(code: String) async throws -> OilaPairResult
     func refreshSession() async throws
     func logout() async throws
+    /// Request a one-time phone login code (`POST /auth/otp/request`).
+    func requestOtp(phone: String) async throws
+    /// Verify a phone login code and persist the issued session (`POST /auth/otp/verify`).
+    func verifyOtp(phone: String, code: String) async throws -> OilaOtpResult
+    /// Start a Telegram magic-link login session (`POST /auth/telegram/init`).
+    func telegramInit() async throws -> OilaTelegramSession
+    /// Poll a Telegram login session; persists tokens once authorized (`GET /auth/telegram/status/{id}`).
+    func telegramStatus(sessionId: String) async throws -> OilaTelegramStatus
     func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws
     func fetchActiveTasks() async throws -> [OilaDeviceTask]
     /// Active + recently-completed tasks (for the tasks screen + collected-stars total).
@@ -133,6 +165,11 @@ protocol OilaDeviceServicing {
     func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws
     func postDeviceStatus(_ status: OilaDeviceStatus) async throws
     func fetchLockState() async throws -> OilaLockState
+    /// Report an app removal/tamper attempt (`POST /device/apps/removal-attempt`).
+    func reportRemovalAttempt(packageName: String, applicationName: String) async throws
+    /// Upload a finished recording clip (`PUT /device/recordings/{id}/complete`, multipart).
+    /// Returns the tolerant unwrapped `data` object (response shape is undocumented).
+    func completeRecording(recordingID: String, fileURL: URL, durationSeconds: Int?) async throws -> [String: Any]
 }
 
 // MARK: - Client
@@ -155,6 +192,10 @@ final class OilaDeviceClient: OilaDeviceServicing {
     // MARK: Pairing / session
 
     func pair(code: String) async throws -> OilaPairResult {
+        // `dsn` is a persisted per-install UUID. iOS/Android 10+ can't read a real hardware
+        // serial, so the backend is dropping `dsn` from the pair contract; until then it only
+        // validates a non-empty string, and the agreed interim is "send a random value". The
+        // server's own device id comes back as `deviceId` in the response.
         let dsn = OilaDeviceIdentity.deviceDSN(userDefaults: userDefaults)
         var body: [String: Any] = [
             "code": code,
@@ -204,6 +245,68 @@ final class OilaDeviceClient: OilaDeviceServicing {
             body: ["refreshToken": refresh],
             authorized: true
         )
+    }
+
+    // MARK: Phone / Telegram login (public — no session required)
+
+    func requestOtp(phone: String) async throws {
+        _ = try await requestJSON(
+            path: "auth/otp/request",
+            method: .post,
+            body: ["phone": phone],
+            authorized: false
+        )
+    }
+
+    func verifyOtp(phone: String, code: String) async throws -> OilaOtpResult {
+        let data = try await requestJSON(
+            path: "auth/otp/verify",
+            method: .post,
+            body: ["phone": phone, "code": code],
+            authorized: false
+        )
+        guard let tokens = Self.parseTokens(from: data) else {
+            throw OilaAPIError(
+                statusCode: 200,
+                message: "Verification response missing tokens",
+                errorCode: "OTP_NO_TOKEN",
+                fieldErrors: []
+            )
+        }
+        persist(tokens)
+        return OilaOtpResult(tokens: tokens, child: Self.parseChild(from: data))
+    }
+
+    func telegramInit() async throws -> OilaTelegramSession {
+        let data = try await requestJSON(path: "auth/telegram/init", method: .post, authorized: false)
+        let object = (data as? [String: Any]) ?? [:]
+        guard let sessionId = Self.firstString(object, ["sessionId", "session_id", "id"]) else {
+            throw OilaAPIError(
+                statusCode: 200,
+                message: "Telegram init response missing sessionId",
+                errorCode: "TG_NO_SESSION",
+                fieldErrors: []
+            )
+        }
+        let url = Self.firstString(object, ["url", "link", "deepLink", "magicLink", "tgUrl", "botUrl"])
+        return OilaTelegramSession(sessionId: sessionId, url: url)
+    }
+
+    func telegramStatus(sessionId: String) async throws -> OilaTelegramStatus {
+        let encoded = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId
+        let data = try await requestJSON(path: "auth/telegram/status/\(encoded)", method: .get, authorized: false)
+        if let tokens = Self.parseTokens(from: data) {
+            persist(tokens)
+            return .authorized(tokens, child: Self.parseChild(from: data))
+        }
+        let object = (data as? [String: Any]) ?? [:]
+        let status = (Self.firstString(object, ["status", "state"]) ?? "pending").lowercased()
+        switch status {
+        case "expired", "cancelled", "canceled", "failed", "rejected", "timeout":
+            return .expired
+        default:
+            return .pending
+        }
     }
 
     // MARK: Device surface
@@ -295,6 +398,70 @@ final class OilaDeviceClient: OilaDeviceServicing {
         return OilaLockState(isLocked: locked, raw: object)
     }
 
+    func reportRemovalAttempt(packageName: String, applicationName: String) async throws {
+        _ = try await requestJSON(
+            path: "device/apps/removal-attempt",
+            method: .post,
+            body: ["packageName": packageName, "applicationName": applicationName],
+            authorized: true
+        )
+    }
+
+    func completeRecording(recordingID: String, fileURL: URL, durationSeconds: Int?) async throws -> [String: Any] {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let bodyData = try Self.multipartBody(
+            fileURL: fileURL,
+            durationSeconds: durationSeconds,
+            boundary: boundary
+        )
+        let encodedID = recordingID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? recordingID
+        let data = try await send(
+            path: "device/recordings/\(encodedID)/complete",
+            method: .put,
+            bodyData: bodyData,
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            authorized: true
+        )
+        return (data as? [String: Any]) ?? [:]
+    }
+
+    private static func multipartBody(fileURL: URL, durationSeconds: Int?, boundary: String) throws -> Data {
+        let fileData = try Data(contentsOf: fileURL)
+        let lineBreak = "\r\n"
+        var body = Data()
+
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\(lineBreak)"
+                .data(using: .utf8)!
+        )
+        body.append("Content-Type: \(mimeType(for: fileURL))\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append(fileData)
+        body.append(lineBreak.data(using: .utf8)!)
+
+        if let durationSeconds {
+            body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"durationSeconds\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+            body.append("\(durationSeconds)\(lineBreak)".data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
+        return body
+    }
+
+    private static func mimeType(for fileURL: URL) -> String {
+        switch fileURL.pathExtension.lowercased() {
+        case "m4a":
+            return "audio/mp4"
+        case "mp4":
+            return "video/mp4"
+        case "mov":
+            return "video/quicktime"
+        default:
+            return "application/octet-stream"
+        }
+    }
+
     // MARK: - Core request
 
     @discardableResult
@@ -303,6 +470,30 @@ final class OilaDeviceClient: OilaDeviceServicing {
         method: HTTPMethod,
         query: [URLQueryItem] = [],
         body: Any? = nil,
+        authorized: Bool,
+        allowRefresh: Bool = true
+    ) async throws -> Any {
+        let bodyData = try body.map { try JSONSerialization.data(withJSONObject: $0) }
+        return try await send(
+            path: path,
+            method: method,
+            query: query,
+            bodyData: bodyData,
+            contentType: body == nil ? nil : "application/json",
+            authorized: authorized,
+            allowRefresh: allowRefresh
+        )
+    }
+
+    /// Body-agnostic transport shared by the JSON helpers and the multipart upload:
+    /// applies the `{ success, data }` envelope, device Bearer, and single-flight 401 refresh.
+    @discardableResult
+    private func send(
+        path: String,
+        method: HTTPMethod,
+        query: [URLQueryItem] = [],
+        bodyData: Data?,
+        contentType: String?,
         authorized: Bool,
         allowRefresh: Bool = true
     ) async throws -> Any {
@@ -319,9 +510,11 @@ final class OilaDeviceClient: OilaDeviceServicing {
         request.httpMethod = method.rawValue
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let bodyData {
+            request.httpBody = bodyData
+            if let contentType {
+                request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+            }
         }
         if authorized, let token = secureTokens.accessToken()?.trimmedNonEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -349,8 +542,9 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 guard let self else { return }
                 try await self.refreshSession()
             }
-            return try await requestJSON(
-                path: path, method: method, query: query, body: body,
+            return try await send(
+                path: path, method: method, query: query,
+                bodyData: bodyData, contentType: contentType,
                 authorized: authorized, allowRefresh: false
             )
         }
@@ -394,9 +588,15 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let source = (object["tokens"] as? [String: Any])
             ?? (object["session"] as? [String: Any])
             ?? object
-        guard let access = firstString(source, ["accessToken", "access_token", "token", "jwt"]) else {
+        // `POST /device/pair` returns the child device's long-lived credential as
+        // `deviceToken` (per the backend's PairResult contract) — check it FIRST. The
+        // `access*`/`token`/`jwt` spellings are kept for the parent OTP/Telegram flows,
+        // which do return an access + refresh pair.
+        guard let access = firstString(source, ["deviceToken", "device_token", "accessToken", "access_token", "token", "jwt"]) else {
             return nil
         }
+        // A paired device gets a single long-lived token (no refresh). The OTP/Telegram
+        // logins still return a refresh token, so keep reading it when present.
         let refresh = firstString(source, ["refreshToken", "refresh_token", "refresh"])
         return OilaTokens(accessToken: access, refreshToken: refresh)
     }
@@ -406,9 +606,12 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let source = (object["child"] as? [String: Any]) ?? object
         let id = firstString(source, ["id", "childId", "_id"])
         let name = firstString(source, ["name", "childName", "displayName", "fullName"])
-        let avatar = firstString(source, ["avatarUrl", "avatarURL", "avatar", "photoUrl"])
-        if id == nil && name == nil && avatar == nil { return nil }
-        return OilaChildProfile(id: id, name: name, avatarURL: avatar)
+        // PairResult uses `profilePictureUrl`; keep the older spellings for other endpoints.
+        let avatar = firstString(source, ["profilePictureUrl", "profilePicture", "avatarUrl", "avatarURL", "avatar", "photoUrl"])
+        let emoji = firstString(source, ["avatarEmoji", "emoji", "avatar_emoji"])
+        let color = firstString(source, ["profileColor", "color", "profile_color"])
+        if id == nil && name == nil && avatar == nil && emoji == nil && color == nil { return nil }
+        return OilaChildProfile(id: id, name: name, avatarURL: avatar, avatarEmoji: emoji, profileColor: color)
     }
 
     static func parseTasks(from data: Any) -> [OilaDeviceTask] {

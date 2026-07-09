@@ -687,6 +687,11 @@ private extension Error {
             }
         }
 
+        // oila360's client surfaces "recording task gone" as a 404 OilaAPIError.
+        if let oilaError = self as? OilaAPIError {
+            return oilaError.statusCode == 404
+        }
+
         return false
     }
 }

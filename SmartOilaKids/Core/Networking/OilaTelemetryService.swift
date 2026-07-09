@@ -202,3 +202,45 @@ extension OilaTelemetryService: CLLocationManagerDelegate {
         // Transient CoreLocation errors are expected (e.g. kCLErrorLocationUnknown); queue keeps state.
     }
 }
+
+// MARK: - SOS context
+
+/// One-shot telemetry attached to an SOS: the latest known location fix (if any) plus the
+/// current battery percentage (0–100, matching `battery` in `POST /device/status`). Any field
+/// is nil when unavailable; the SOS call omits missing fields and still succeeds.
+struct OilaSOSContext {
+    var lat: Double?
+    var lng: Double?
+    var accuracy: Double?
+    var batteryPercent: Int?
+}
+
+/// Supplies a one-shot SOS context. Abstracted so the Home view model's SOS call can be
+/// unit-tested without real CoreLocation / battery hardware.
+@MainActor
+protocol SOSTelemetryProviding {
+    func currentSOSContext() -> OilaSOSContext
+}
+
+extension OilaTelemetryService: SOSTelemetryProviding {
+    /// Reads the location manager's most recent fix + the current battery level. Location is
+    /// nil when not authorized or not yet resolved; battery is nil when monitoring can't
+    /// report a value (e.g. simulator).
+    func currentSOSContext() -> OilaSOSContext {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let level = UIDevice.current.batteryLevel
+        let batteryPercent: Int? = level >= 0 ? Int((level * 100).rounded()) : nil
+
+        let location = locationManager.location
+        let accuracy: Double? = {
+            guard let horizontal = location?.horizontalAccuracy, horizontal >= 0 else { return nil }
+            return horizontal
+        }()
+        return OilaSOSContext(
+            lat: location?.coordinate.latitude,
+            lng: location?.coordinate.longitude,
+            accuracy: accuracy,
+            batteryPercent: batteryPercent
+        )
+    }
+}

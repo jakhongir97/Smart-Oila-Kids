@@ -25,7 +25,6 @@ struct AppDependencies {
         )
     }
 
-
     @MainActor
     func makeChatViewModel(dsn: String) -> ChatViewModel {
         ChatViewModel(

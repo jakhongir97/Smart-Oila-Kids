@@ -13,10 +13,11 @@ struct BolajonSetupFlowView: View {
 
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var viewModel = BolajonSetupViewModel()
-    @State private var step: Step
+    @State private var path: [SetupRoute]
     @State private var childName: String = ""
+    @State private var childEmoji: String?
 
-    enum Step { case language, welcome, connect, success }
+    enum SetupRoute: Hashable { case welcome, connect, success }
 
     /// When true (device already paired but setup not marked complete), resume at A4 Success
     /// instead of restarting at language — avoids re-running a one-time pairing code.
@@ -25,40 +26,41 @@ struct BolajonSetupFlowView: View {
     init(startAtSuccess: Bool = false, onFinished: @escaping () -> Void = {}) {
         self.startAtSuccess = startAtSuccess
         self.onFinished = onFinished
-        _step = State(initialValue: Self.initialStep(startAtSuccess: startAtSuccess))
+        _path = State(initialValue: Self.initialPath(startAtSuccess: startAtSuccess))
     }
 
-    private static func initialStep(startAtSuccess: Bool) -> Step {
+    private static func initialPath(startAtSuccess: Bool) -> [SetupRoute] {
         if let debug = AppRuntime.debugSetupStep {
             switch debug {
-            case .welcome: return .welcome
-            case .connect: return .connect
-            case .success: return .success
-            case .language: return .language
+            case .language: return []
+            case .welcome: return [.welcome]
+            case .connect: return [.welcome, .connect]
+            case .success: return [.success]
             }
         }
-        return startAtSuccess ? .success : .language
+        return startAtSuccess ? [.success] : []
     }
 
     var body: some View {
-        Group {
-            switch step {
-            case .language:
-                LanguageStepView(onContinue: { go(.welcome) })
-            case .welcome:
-                WelcomeStepView(onBack: { go(.language) }, onStart: { go(.connect) })
-            case .connect:
-                ConnectStepView(viewModel: viewModel, onBack: { go(.welcome) }, onPaired: handlePaired)
-            case .success:
-                SuccessStepView(childName: childName, onStart: onFinished)
-            }
+        NavigationStack(path: $path) {
+            LanguageStepView(onContinue: { path.append(.welcome) })
+                .navigationDestination(for: SetupRoute.self) { route in
+                    switch route {
+                    case .welcome:
+                        WelcomeStepView(onStart: { path.append(.connect) })
+                    case .connect:
+                        ConnectStepView(viewModel: viewModel, onPaired: handlePaired)
+                    case .success:
+                        SuccessStepView(
+                            childName: childName.isEmpty ? sessionStore.profileName : childName,
+                            childEmoji: childEmoji ?? sessionStore.childAvatarEmoji,
+                            onStart: onFinished
+                        )
+                    }
+                }
         }
-        .transition(.opacity)
         .environmentObject(sessionStore)
-    }
-
-    private func go(_ next: Step) {
-        withAnimation(.easeInOut(duration: 0.25)) { step = next }
+        .bolajonSwipeBack()
     }
 
     private func handlePaired(_ result: OilaPairResult) {
@@ -75,11 +77,17 @@ struct BolajonSetupFlowView: View {
         } else {
             childName = sessionStore.profileName
         }
+        // Persist the parent-chosen avatar + color so Home/Settings/Success render the real
+        // child identity instead of a hardcoded placeholder.
+        sessionStore.setChildAvatarEmoji(result.child?.avatarEmoji)
+        sessionStore.setChildProfileColor(result.child?.profileColor)
+        childEmoji = result.child?.avatarEmoji?.trimmedNonEmpty
         // Mark this install as oila360-paired — the flag that gates telemetry.
         sessionStore.setOilaPaired(true)
         // Set DSN last: it flips `hasLinkedChildDevice` and starts child services.
         sessionStore.setDSN(result.dsn)
-        go(.success)
+        // Replace the stack (not append) so back/swipe can't return to the used pairing code.
+        path = [.success]
     }
 }
 
@@ -103,7 +111,7 @@ private struct LanguageStepView: View {
     ]
 
     var body: some View {
-        ScreenScaffold(intent: .lavender) {
+        BolajonScreen(intent: .lavender, leading: .none) {
             VStack(spacing: 28) {
                 BolajonBrandBadge()
                     .padding(.top, 20)
@@ -174,11 +182,10 @@ private struct LanguageStepView: View {
 // MARK: - A2 Welcome
 
 private struct WelcomeStepView: View {
-    let onBack: () -> Void
     let onStart: () -> Void
 
     var body: some View {
-        ScreenScaffold(intent: .lavender, onBack: onBack) {
+        BolajonScreen(intent: .lavender, leading: .autoBack) {
             VStack(spacing: 24) {
                 BolajonBrandBadge()
                     .padding(.top, 12)
@@ -231,11 +238,10 @@ private struct WelcomeStepView: View {
 
 private struct ConnectStepView: View {
     @ObservedObject var viewModel: BolajonSetupViewModel
-    let onBack: () -> Void
     let onPaired: (OilaPairResult) -> Void
 
     var body: some View {
-        ScreenScaffold(intent: .lavender, onBack: onBack) {
+        BolajonScreen(intent: .lavender, leading: .autoBack) {
             VStack(spacing: 22) {
                 IconBadge(systemName: "person.2.fill", intent: .lavender)
                     .padding(.top, 4)
@@ -280,10 +286,11 @@ private struct ConnectStepView: View {
         }
     }
 
-    // Pairing code length per the design (5-digit, auto-submits — no button).
-    // NOTE: the live oila360 POST /device/pair currently validates code >= 8 chars, so the
-    // backend's pairing-code generation + validation must be changed to 5 digits for this
-    // to succeed. Change this one constant if the issued length differs.
+    // Pairing code length (auto-submits once full — no button). The oila360 backend issues
+    // 5-digit numeric codes for POST /device/pair (`RedeemPairingDto.code` = `^[0-9]{5}$`),
+    // confirmed by the backend team: "5 xonali qilsez bo'ladi ... 5 xona turaversin".
+    // The localized instructions ("5 xonali kod") already match. Change this one constant if
+    // the issued length ever changes.
     private let codeLength = 5
 
     private func stepRow(_ number: Int, _ key: String) -> some View {
@@ -314,12 +321,13 @@ private struct ConnectStepView: View {
 
 private struct SuccessStepView: View {
     let childName: String
+    var childEmoji: String?
     let onStart: () -> Void
 
     var body: some View {
-        ScreenScaffold(intent: .lavender) {
+        BolajonScreen(intent: .lavender, leading: .none) {
             VStack(spacing: 18) {
-                ConnectedAvatar(emoji: "🦁", diameter: 108, isConnected: true, filled: true)
+                ConnectedAvatar(emoji: childEmoji ?? "🦁", diameter: 108, isConnected: true, filled: true)
                     .padding(.top, 48)
 
                 VStack(spacing: 6) {

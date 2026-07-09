@@ -21,12 +21,6 @@ enum AppRuntime {
         configuredBool("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY") ?? false
     }
 
-    /// Emergency rollback to the legacy AuthView/MainView root without a rebuild.
-    /// Default is the new Bolajon360 flow.
-    static var legacyRootEnabled: Bool {
-        configuredBool("SMARTOILA_USE_LEGACY_ROOT") ?? false
-    }
-
     static var debugRoute: DebugRoute? {
 #if DEBUG
         guard let value = trimmed("SMARTOILA_DEBUG_ROUTE") else { return nil }

@@ -6,42 +6,23 @@ struct DeviceApplicationRemovalAttemptEntry: Codable, Equatable, Hashable {
     let appName: String
 }
 
-private struct DeviceApplicationRemovalAttemptRequest: Encodable {
-    let packageName: String
-    let appName: String
-
-    enum CodingKeys: String, CodingKey {
-        case packageName = "package_name"
-        case appName = "application_name"
-    }
-}
-
 protocol DeviceApplicationRemovalAttemptServicing {
     func reportRemovalAttempt(dsn: String, packageName: String, appName: String) async throws
 }
 
 final class DeviceApplicationRemovalAttemptService: DeviceApplicationRemovalAttemptServicing {
-    init(client: APIClient = APIClient()) {
-        self.client = client
+    init(oila: OilaDeviceServicing = OilaDeviceClient.shared) {
+        self.oila = oila
     }
 
     func reportRemovalAttempt(dsn: String, packageName: String, appName: String) async throws {
-        let request = DeviceApplicationRemovalAttemptRequest(
-            packageName: packageName,
-            appName: appName
-        )
-        let body = try JSONEncoder().encode(request)
-        _ = try await client.requestDataWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "devices/\(dsn)/applications/removal-attempt",
-            method: .post,
-            headers: ["Accept": "application/json"],
-            body: body,
-            contentType: "application/json"
-        )
+        // oila360 identifies the device from its Bearer token (issued at pairing), so `dsn`
+        // is only used by the coordinator for dedup/diagnostics — the request body carries
+        // just the app. `POST /device/apps/removal-attempt` → ReportRemovalAttemptDto.
+        try await oila.reportRemovalAttempt(packageName: packageName, applicationName: appName)
     }
 
-    private let client: APIClient
+    private let oila: OilaDeviceServicing
 }
 
 actor DeviceApplicationRemovalAttemptCoordinator {
@@ -152,7 +133,7 @@ actor DeviceApplicationRemovalAttemptCoordinator {
     }
 
     private func endpoint(for entry: DeviceApplicationRemovalAttemptEntry) -> String {
-        "\(AppConfig.apiBaseURL.absoluteString)/devices/\(entry.dsn)/applications/removal-attempt"
+        "\(AppConfig.oilaAPIBaseURL.absoluteString)/device/apps/removal-attempt"
     }
 
     private func updateDiagnostics(

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // Bolajon360 (Yumshoq lavanda) shared component kit.
 // Additive design-system layer for the redesigned flows. Legacy screens keep their
@@ -312,11 +313,14 @@ struct ConnectedAvatar: View {
     var isConnected: Bool = true
     var ringColor: Color = AppColors.successGreen
     var filled: Bool = false
+    /// Optional child profile color (from `child.profileColor`); softly tints the avatar
+    /// circle when not `filled`. Nil falls back to the plain white card surface.
+    var tint: Color?
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             ZStack {
-                Circle().fill(filled ? ringColor : AppColors.cardWhite)
+                Circle().fill(filled ? ringColor : (tint?.opacity(0.20) ?? AppColors.cardWhite))
                 Text(emoji).font(.system(size: diameter * 0.5))
             }
             .frame(width: diameter, height: diameter)
@@ -344,16 +348,15 @@ struct ConnectedAvatar: View {
 
 // MARK: - Code entry (pairing / PIN)
 
-/// Per-digit boxes + a custom numeric keypad. Reused by A3 Connect (8 digits)
-/// and C6 Disconnect PIN (4 digits). Backend pairing codes are >= 8 chars.
+/// Per-digit boxes + a custom numeric keypad. Reused by A3 Connect (5-digit pairing code)
+/// and C6 Disconnect PIN (4 digits). Every call site passes an explicit `length`.
 struct CodeEntryField: View {
     @Binding var code: String
-    var length: Int = 8
+    var length: Int = 5
     var intent: ScreenIntent = .lavender
     var showKeypad: Bool = true
     /// When true, fires `onComplete` automatically once `length` digits are entered.
-    /// A3 Connect sets this false and submits via an explicit button, since the backend
-    /// pairing code is a *minimum* of 8 chars — auto-firing at exactly 8 could truncate.
+    /// A3 Connect keeps this true and auto-submits once the fixed-length pairing code is full.
     var autoSubmit: Bool = true
     /// Render filled dots instead of per-digit boxes (used for the C6 disconnect PIN).
     var dotStyle: Bool = false
@@ -521,5 +524,151 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+// MARK: - Native navigation kit (Option A)
+//
+// One transition standard + one screen scaffold + one top bar, so every new-design screen
+// pushes/presents natively inside a NavigationStack while keeping the lavender chrome.
+// (ChildTopBackButton is reused here pending its re-home into this kit during cleanup.)
+
+enum NavToken {
+    /// Fade used for the top-level stage swap + the lock overlay (pair with .animation(value:)).
+    static let fade = Animation.easeInOut(duration: 0.25)
+    /// Corner radius for presented sheets (matches the retired TopRoundedShape look).
+    static let sheetCornerRadius: CGFloat = 28
+}
+
+/// The single nav bar: leading (back / none) + a centered title OR a progress row + optional trailing.
+/// Replaces the four divergent headers (Home gear header, bare chevron, PermissionProgressBar, legacy ChildTitleBar).
+struct BolajonTopBar: View {
+    enum Leading { case none, back(() -> Void) }
+    enum Header { case none, title(String), progress(current: Int, total: Int) }
+
+    var intent: ScreenIntent = .lavender
+    var header: Header = .none
+    var leading: Leading = .none
+    var trailing: AnyView? = nil
+
+    var body: some View {
+        switch header {
+        case let .progress(current, total):
+            PermissionProgressBar(current: current, total: total, onBack: backAction)
+                .padding(.top, 8)
+                .padding(.bottom, 18)
+        case .title, .none:
+            ZStack {
+                if case let .title(text) = header {
+                    Text(text)
+                        .font(AppTypography.heading(17))
+                        .foregroundStyle(AppColors.inkPrimary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 44)
+                }
+                HStack(spacing: 8) {
+                    leadingView
+                    Spacer(minLength: 0)
+                    trailing
+                }
+            }
+            .frame(height: 44)
+            .padding(.horizontal, BolajonMetrics.screenPadding)
+            .padding(.top, 8)
+        }
+    }
+
+    private var backAction: (() -> Void)? {
+        if case let .back(action) = leading { return action }
+        return nil
+    }
+
+    @ViewBuilder private var leadingView: some View {
+        if case let .back(action) = leading {
+            ChildTopBackButton(foreground: AppColors.inkPrimary, action: action)
+        } else {
+            Color.clear.frame(width: 30, height: 30)
+        }
+    }
+}
+
+/// Leading control for `BolajonScreen`'s bar. Top-level (not nested in the generic
+/// `BolajonScreen`) so it can be named as a property type without spelling `Content`.
+enum BolajonScreenLeading { case autoBack, none, custom(() -> Void) }
+
+/// Scaffold v2 — a destination container that lives INSIDE a NavigationStack: tinted ground,
+/// a pinned `BolajonTopBar` (title / progress / back / trailing) and a scrolling content column.
+/// Hides the system nav bar so the lavender look is preserved. Successor to `ScreenScaffold`.
+struct BolajonScreen<Content: View>: View {
+    var intent: ScreenIntent = .lavender
+    var title: String? = nil
+    var leading: BolajonScreenLeading = .autoBack
+    var trailing: AnyView? = nil
+    var progress: (current: Int, total: Int)? = nil
+    @ViewBuilder var content: Content
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            intent.ground.ignoresSafeArea()
+            VStack(spacing: 0) {
+                BolajonTopBar(intent: intent, header: headerMode, leading: leadingMode, trailing: trailing)
+                ScrollView {
+                    content
+                        .padding(.horizontal, BolajonMetrics.screenPadding)
+                        .padding(.top, 4)
+                        .padding(.bottom, 28)
+                }
+                .appHiddenScrollIndicators()
+            }
+        }
+        .appHiddenNavBar()
+        .navigationBarBackButtonHidden(true)
+    }
+
+    private var headerMode: BolajonTopBar.Header {
+        if let progress { return .progress(current: progress.current, total: progress.total) }
+        if let title { return .title(title) }
+        return .none
+    }
+
+    private var leadingMode: BolajonTopBar.Leading {
+        switch leading {
+        case .none: return .none
+        case .autoBack: return .back { dismiss() }
+        case let .custom(action): return .back(action)
+        }
+    }
+}
+
+/// Restores the interactive left-edge swipe-to-go-back that a hidden nav bar disables.
+/// Apply once at a NavigationStack's root via `.bolajonSwipeBack()`.
+private struct SwipeBackEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController { Controller() }
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+
+    final class Controller: UIViewController {
+        override func didMove(toParent parent: UIViewController?) {
+            super.didMove(toParent: parent)
+            guard let gesture = navigationController?.interactivePopGestureRecognizer else { return }
+            gesture.delegate = nil
+            gesture.isEnabled = true
+        }
+    }
+}
+
+extension View {
+    /// Re-enables left-edge swipe-to-go-back under a hidden nav bar. Place at the stack root.
+    func bolajonSwipeBack() -> some View { background(SwipeBackEnabler()) }
+
+    /// Hides the system navigation bar so the custom `BolajonTopBar` is the only chrome.
+    func appHiddenNavBar() -> some View {
+        toolbar(.hidden, for: .navigationBar)
+    }
+
+    /// Standard compact bottom-sheet sizing for confirm sheets (SOS, disconnect, …).
+    func compactSheetDetents() -> some View {
+        presentationDetents([.medium]).presentationDragIndicator(.visible)
     }
 }

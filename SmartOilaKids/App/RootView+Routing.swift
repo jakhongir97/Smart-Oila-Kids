@@ -1,18 +1,23 @@
 import SwiftUI
 
 extension RootView {
-    @ViewBuilder
-    var regularRoot: some View {
-        if AppRuntime.legacyRootEnabled {
-            legacyRoot
-        } else {
-            bolajonRoot
-        }
-    }
-
     // Bolajon360 redesign flow: setup (A1–A4) → permissions (B1–B11) → home (C1).
     @ViewBuilder
-    private var bolajonRoot: some View {
+    var regularRoot: some View {
+        stageContent
+            // Animate the stage swap (was a hard cut). Each stage is its own NavigationStack.
+            .animation(NavToken.fade, value: stageToken)
+    }
+
+    /// 0 = setup, 1 = permissions, 2 = home. Drives the cross-fade between stages.
+    private var stageToken: Int {
+        if !sessionStore.setupCompleted { return 0 }
+        if !sessionStore.onboardingCompleted { return 1 }
+        return 2
+    }
+
+    @ViewBuilder
+    private var stageContent: some View {
         if !sessionStore.setupCompleted {
             // Resume at Success only when THIS install actually paired with oila360 —
             // a migrated legacy DSN is not a credential and must go through Connect.
@@ -27,16 +32,6 @@ extension RootView {
         } else {
             BolajonHomeView()
                 .environmentObject(sessionStore)
-        }
-    }
-
-    // Legacy root — preserved for emergency rollback via SMARTOILA_USE_LEGACY_ROOT=1.
-    @ViewBuilder
-    private var legacyRoot: some View {
-        if !sessionStore.hasLinkedChildDevice {
-            AuthView(viewModel: dependencies.makeAuthViewModel())
-        } else {
-            MainView(viewModel: dependencies.makeMainViewModel())
         }
     }
 

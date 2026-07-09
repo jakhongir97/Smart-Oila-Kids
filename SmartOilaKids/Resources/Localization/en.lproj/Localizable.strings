@@ -698,6 +698,7 @@
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Connected";
 "home2.screentime.title" = "Screen time today";
+"home2.screentime.tracked_subtitle" = "In tracked apps";
 "home2.sos.title" = "SOS — Need help";
 "home2.sos.subtitle" = "Tapping alerts your parents";
 "home2.tasks.title" = "Tasks";
@@ -732,6 +733,12 @@
 "disconnect2.body" = "This will unlink the device from your family. Enter the parent PIN to continue.";
 "disconnect2.confirm" = "Disconnect";
 "disconnect2.cancel" = "Cancel";
+"disconnect2.pin_incorrect" = "Incorrect PIN. Try again.";
+"disconnect2.create_hint" = "No parent PIN is set yet. Create a 4-digit PIN to protect disconnecting.";
+"disconnect2.confirm_hint" = "Re-enter the PIN to confirm.";
+"disconnect2.mismatch" = "PINs don't match. Try again.";
+"disconnect2.biometric_hint" = "Confirm with Face ID, Touch ID, or your passcode to disconnect.";
+"disconnect2.biometric_failed" = "Couldn't confirm. Try again.";
 
 "perm2.decline_bg" = "No, only when open";
 

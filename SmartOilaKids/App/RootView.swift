@@ -38,12 +38,14 @@ struct RootView: View {
         .overlay {
             if shouldShowDeviceLockOverlay {
                 DeviceLockOverlay(
-                    localTime: AppRuntime.legacyRootEnabled ? lockCoordinator.state.deviceLocalTime : nil,
-                    scheduleRange: AppRuntime.legacyRootEnabled ? lockCoordinator.state.scheduleRange : nil
+                    localTime: nil,
+                    scheduleRange: nil
                 )
                 .transition(.opacity)
             }
         }
+        // The declared .transition needs an animation driver, else the lock overlay hard-cuts.
+        .animation(NavToken.fade, value: oilaTelemetry.isLocked)
         .background(alignment: .topLeading) {
             if shouldRunLocalChildServices,
                AppRuntime.screenTimeFeaturesEnabled {
@@ -55,11 +57,8 @@ struct RootView: View {
 
 private extension RootView {
     var shouldShowDeviceLockOverlay: Bool {
-        // oila360 mode (default): the lock overlay is driven by GET /device/lock/state,
-        // polled by OilaTelemetryService (parent manual-lock + schedules).
-        if !AppRuntime.legacyRootEnabled {
-            return oilaTelemetry.isLocked
-        }
-        return AppRuntime.screenTimeFeaturesEnabled && shouldRunLocalChildServices && lockCoordinator.state.isLocked
+        // The lock overlay is driven by GET /device/lock/state, polled by
+        // OilaTelemetryService (parent manual-lock + schedules).
+        oilaTelemetry.isLocked
     }
 }

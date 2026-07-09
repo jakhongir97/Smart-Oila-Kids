@@ -6,19 +6,11 @@ import SwiftUI
 // unconfirmed — falls back to a single "Barchasi" group when dates are absent).
 
 struct BolajonTasksView: View {
-    var onBack: () -> Void = {}
-
     @StateObject private var viewModel = BolajonTasksViewModel()
 
     var body: some View {
-        ScreenScaffold(intent: .lavender, onBack: onBack) {
+        BolajonScreen(intent: .lavender, title: L10n.tr("tasks2.title"), leading: .autoBack) {
             VStack(spacing: 20) {
-                Text(L10n.tr("tasks2.title"))
-                    .font(AppTypography.title(22))
-                    .foregroundStyle(AppColors.inkPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
-
                 starHeader
 
                 if viewModel.tasks.isEmpty {

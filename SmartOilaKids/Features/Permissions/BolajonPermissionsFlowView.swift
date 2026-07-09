@@ -71,41 +71,53 @@ struct BolajonPermissionsFlowView: View {
     var onExit: () -> Void = {}
 
     @StateObject private var manager = LocationPermissionManager()
-    @State private var index: Int
+    @State private var path: [PermRoute]
 
     private let steps = BolajonPermissionStep.all
+
+    enum PermRoute: Hashable { case step(Int), summary }
 
     init(onFinished: @escaping () -> Void = {}, onExit: @escaping () -> Void = {}) {
         self.onFinished = onFinished
         self.onExit = onExit
-        _index = State(initialValue: Self.initialIndex(count: BolajonPermissionStep.all.count))
+        _path = State(initialValue: Self.initialPath())
     }
 
     var body: some View {
-        let step = steps[index]
-        Group {
-            if step.kind == .summary {
-                PermissionSummaryView(
-                    manager: manager,
-                    progress: (index + 1, steps.count),
-                    onBack: goBack,
-                    onFinish: onFinished
-                )
-            } else {
-                PermissionStepView(
-                    step: step,
-                    progress: (index + 1, steps.count),
-                    onBack: goBack,
-                    onPrimary: { handlePrimary(step) },
-                    onDecline: goNext
-                )
+        NavigationStack(path: $path) {
+            // Intro is the stack root (no back); each subsequent step pushes.
+            PermissionStepView(
+                step: steps[0],
+                progress: (1, steps.count),
+                leading: .none,
+                onPrimary: { handlePrimary(index: 0) },
+                onDecline: { advance(from: 0) }
+            )
+            .navigationDestination(for: PermRoute.self) { route in
+                switch route {
+                case let .step(i):
+                    PermissionStepView(
+                        step: steps[i],
+                        progress: (i + 1, steps.count),
+                        leading: .autoBack,
+                        onPrimary: { handlePrimary(index: i) },
+                        onDecline: { advance(from: i) }
+                    )
+                case .summary:
+                    PermissionSummaryView(
+                        manager: manager,
+                        progress: (steps.count, steps.count),
+                        leading: .autoBack,
+                        onFinish: onFinished
+                    )
+                }
             }
         }
-        .transition(.opacity)
+        .bolajonSwipeBack()
     }
 
-    private func handlePrimary(_ step: BolajonPermissionStep) {
-        switch step.kind {
+    private func handlePrimary(index: Int) {
+        switch steps[index].kind {
         case .intro:
             break
         case .notifications:
@@ -126,21 +138,14 @@ struct BolajonPermissionsFlowView: View {
             onFinished()
             return
         }
-        goNext()
+        advance(from: index)
     }
 
-    private func goNext() {
-        withAnimation(.easeInOut(duration: 0.22)) {
-            index = min(index + 1, steps.count - 1)
-        }
-    }
-
-    private func goBack() {
-        if index == 0 {
-            onExit()
-        } else {
-            withAnimation(.easeInOut(duration: 0.22)) { index -= 1 }
-        }
+    /// Push the next step (or the summary) onto the stack.
+    private func advance(from index: Int) {
+        let next = index + 1
+        guard next < steps.count else { return }
+        path.append(steps[next].kind == .summary ? .summary : .step(next))
     }
 
     private static func openSystemSettings() {
@@ -149,14 +154,17 @@ struct BolajonPermissionsFlowView: View {
         UIApplication.shared.open(url)
     }
 
-    private static func initialIndex(count: Int) -> Int {
+    private static func initialPath() -> [PermRoute] {
+        let all = BolajonPermissionStep.all
 #if DEBUG
         if let raw = ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_PERM_INDEX"],
            let value = Int(raw.trimmingCharacters(in: .whitespaces)) {
-            return max(0, min(value, count - 1))
+            let target = max(0, min(value, all.count - 1))
+            guard target > 0 else { return [] }
+            return (1 ... target).map { all[$0].kind == .summary ? .summary : .step($0) }
         }
 #endif
-        return 0
+        return []
     }
 }
 
@@ -165,12 +173,12 @@ struct BolajonPermissionsFlowView: View {
 private struct PermissionStepView: View {
     let step: BolajonPermissionStep
     let progress: (current: Int, total: Int)
-    let onBack: () -> Void
+    var leading: BolajonScreenLeading = .autoBack
     let onPrimary: () -> Void
     let onDecline: () -> Void
 
     var body: some View {
-        ScreenScaffold(intent: step.intent, progress: progress, onBack: onBack) {
+        BolajonScreen(intent: step.intent, leading: leading, progress: progress) {
             VStack(spacing: 24) {
                 Group {
                     if step.kind == .intro {
@@ -213,41 +221,27 @@ private struct PermissionStepView: View {
 private struct PermissionSummaryView: View {
     @ObservedObject var manager: LocationPermissionManager
     let progress: (current: Int, total: Int)
-    let onBack: () -> Void
+    var leading: BolajonScreenLeading = .autoBack
     let onFinish: () -> Void
 
-    private struct Row: Identifiable {
-        let id = UUID()
-        let icon: String
-        let labelKey: String
-        let granted: Bool
-    }
+    // Full checklist driven by live authorization; battery/auto-start (unreadable on iOS)
+    // show a neutral chip. Shared with the C5 settings-status screen so the two always match
+    // — see BolajonPermissionChecklist.
+    private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
 
-    private var notificationsGranted: Bool {
-        [.authorized, .provisional, .ephemeral].contains(manager.notificationAuthorizationStatus)
-    }
-    private var locationGranted: Bool {
-        [.authorizedAlways, .authorizedWhenInUse].contains(manager.locationAuthorizationStatus)
-    }
-
-    // The design's full checklist (B11). OS-grantable rows reflect live status; the
-    // Settings-education rows (battery/screen/usage/auto-start) show as enabled.
-    private var rows: [Row] {
-        [
-            Row(icon: "bell.fill", labelKey: "perm2.item.notifications", granted: notificationsGranted),
-            Row(icon: "bolt.fill", labelKey: "perm2.item.battery", granted: true),
-            Row(icon: "rectangle.on.rectangle", labelKey: "perm2.item.screen", granted: true),
-            Row(icon: "chart.bar.fill", labelKey: "perm2.item.usage", granted: true),
-            Row(icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart", granted: true),
-            Row(icon: "location.fill", labelKey: "perm2.item.location", granted: locationGranted),
-            Row(icon: "location.circle.fill", labelKey: "perm2.item.bglocation", granted: manager.locationAuthorizationStatus == .authorizedAlways),
-            Row(icon: "mic.fill", labelKey: "perm2.item.microphone", granted: manager.microphonePermission == .granted),
-            Row(icon: "camera.fill", labelKey: "perm2.item.camera", granted: manager.cameraAuthorizationStatus == .authorized)
-        ]
+    private func summaryPill(for availability: BolajonPermissionState.Availability) -> StatusPill {
+        switch availability {
+        case .granted:
+            return StatusPill(text: L10n.tr("perm2.status.on"), state: .granted)
+        case .notGranted:
+            return StatusPill(text: L10n.tr("perm2.status.off"), state: .off)
+        case .openSettings:
+            return StatusPill(text: L10n.tr("perm2.settings.cta"), state: .neutral)
+        }
     }
 
     var body: some View {
-        ScreenScaffold(intent: .lavender, progress: progress, onBack: onBack) {
+        BolajonScreen(intent: .lavender, leading: leading, progress: progress) {
             VStack(spacing: 20) {
                 ZStack {
                     Circle().fill(AppColors.successGreen).frame(width: 64, height: 64)
@@ -271,7 +265,7 @@ private struct PermissionSummaryView: View {
 
                 InfoCard {
                     VStack(spacing: 0) {
-                        ForEach(Array(rows.enumerated()), id: \.element.id) { pair in
+                        ForEach(Array(states.enumerated()), id: \.element.id) { pair in
                             if pair.offset > 0 {
                                 Divider().background(AppColors.hairline)
                             }
@@ -285,10 +279,7 @@ private struct PermissionSummaryView: View {
                                     .foregroundStyle(AppColors.inkPrimary)
                                     .lineLimit(1)
                                 Spacer(minLength: 8)
-                                StatusPill(
-                                    text: L10n.tr(pair.element.granted ? "perm2.status.on" : "perm2.status.off"),
-                                    state: pair.element.granted ? .granted : .off
-                                )
+                                summaryPill(for: pair.element.availability)
                             }
                             .padding(.vertical, 11)
                         }
@@ -300,5 +291,70 @@ private struct PermissionSummaryView: View {
             }
         }
         .onAppear { manager.refreshStatuses() }
+    }
+}
+
+// MARK: - Shared permission checklist (B11 summary + C5 settings status)
+
+/// Single source of truth for the Bolajon360 permission checklist. Both the B11 onboarding
+/// summary and the C5 settings-status screen build their rows from this list, so they always
+/// show the same permission set and the same live authorization state.
+struct BolajonPermissionState: Identifiable {
+    enum Availability: Equatable {
+        /// Live OS status: authorized.
+        case granted
+        /// Live OS status: not authorized — actionable (re-request via `requirement`).
+        case notGranted
+        /// iOS exposes no read for this (battery-saver exclusion / boot auto-start).
+        /// Shown as a neutral "Open Settings" chip, never as "On".
+        case openSettings
+    }
+
+    let id: String
+    let icon: String
+    let labelKey: String
+    let descriptionKey: String?
+    let availability: Availability
+    /// Requirement to (re)request when `notGranted`; nil for `openSettings` rows.
+    let requirement: PermissionRequirement?
+}
+
+enum BolajonPermissionChecklist {
+    /// Pure mapping from a status snapshot to checklist rows — deterministic and unit-testable.
+    static func states(from snapshot: PermissionStatusSnapshot) -> [BolajonPermissionState] {
+        let notifications = [.authorized, .provisional, .ephemeral].contains(snapshot.notificationAuthorizationStatus)
+        let location = [.authorizedAlways, .authorizedWhenInUse].contains(snapshot.locationAuthorizationStatus)
+        let backgroundLocation = snapshot.locationAuthorizationStatus == .authorizedAlways
+        let screenTime = snapshot.screenTimePermissionStatus == .granted
+        let microphone = snapshot.microphonePermission == .granted
+        let camera = snapshot.cameraAuthorizationStatus == .authorized
+
+        func live(_ granted: Bool) -> BolajonPermissionState.Availability { granted ? .granted : .notGranted }
+
+        return [
+            BolajonPermissionState(id: "notifications", icon: "bell.fill", labelKey: "perm2.item.notifications",
+                                   descriptionKey: "perm2.notifications.body", availability: live(notifications), requirement: .notifications),
+            BolajonPermissionState(id: "location", icon: "location.fill", labelKey: "perm2.item.location",
+                                   descriptionKey: "perm2.location.body", availability: live(location), requirement: .location),
+            BolajonPermissionState(id: "bglocation", icon: "location.circle.fill", labelKey: "perm2.item.bglocation",
+                                   descriptionKey: "perm2.bglocation.body", availability: live(backgroundLocation), requirement: .location),
+            BolajonPermissionState(id: "usage", icon: "chart.bar.fill", labelKey: "perm2.item.usage",
+                                   descriptionKey: "perm2.usage.body", availability: live(screenTime), requirement: .usageStats),
+            BolajonPermissionState(id: "screen", icon: "square.stack.3d.up.fill", labelKey: "perm2.item.screen",
+                                   descriptionKey: "perm2.limits.body", availability: live(screenTime), requirement: .usageStats),
+            BolajonPermissionState(id: "microphone", icon: "mic.fill", labelKey: "perm2.item.microphone",
+                                   descriptionKey: "perm2.microphone.body", availability: live(microphone), requirement: .microphone),
+            BolajonPermissionState(id: "camera", icon: "camera.fill", labelKey: "perm2.item.camera",
+                                   descriptionKey: "perm2.camera.body", availability: live(camera), requirement: .camera),
+            BolajonPermissionState(id: "battery", icon: "bolt.fill", labelKey: "perm2.item.battery",
+                                   descriptionKey: "perm2.battery.body", availability: .openSettings, requirement: nil),
+            BolajonPermissionState(id: "autostart", icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart",
+                                   descriptionKey: "perm2.autostart.body", availability: .openSettings, requirement: nil)
+        ]
+    }
+
+    @MainActor
+    static func states(from manager: LocationPermissionManager) -> [BolajonPermissionState] {
+        states(from: manager.statusSnapshot())
     }
 }

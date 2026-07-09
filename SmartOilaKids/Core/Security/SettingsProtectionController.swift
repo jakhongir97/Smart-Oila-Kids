@@ -157,6 +157,41 @@ final class SettingsProtectionController: ObservableObject {
         pinPromptContinuation = nil
     }
 
+    // MARK: - Direct gate (used by the Bolajon360 disconnect screen)
+    //
+    // The disconnect screen owns its own lavender PIN field, so it validates the entered
+    // PIN directly rather than through the `activePINPrompt` continuation UI. These are pure
+    // and synchronous (except the biometric wrapper) so they are unit-testable.
+
+    /// True when `pin` matches the stored custom PIN. False if no custom PIN is set or the
+    /// input is the wrong length. Never throws — safe to call on every keystroke.
+    func verifyCustomPIN(_ pin: String) -> Bool {
+        let normalized = normalizePIN(pin)
+        guard normalized.count == pinLength, let storedPINHash else { return false }
+        return storedPINHash == hashPIN(normalized)
+    }
+
+    /// Stores a new custom PIN (used by the disconnect create-flow when none exists yet).
+    /// Returns false when the input isn't exactly `pinLength` digits.
+    @discardableResult
+    func saveCustomPIN(_ pin: String) -> Bool {
+        let normalized = normalizePIN(pin)
+        guard normalized.count == pinLength else { return false }
+        userDefaults.set(hashPIN(normalized), forKey: protectionPINHashKey)
+        startUnlockSession()
+        refreshAvailability()
+        return true
+    }
+
+    /// Confirms the device owner via Face ID / Touch ID / passcode. Starts an unlock
+    /// session on success. Returns false when authentication is unavailable or cancelled.
+    func confirmDeviceOwner() async -> Bool {
+        guard isDeviceAuthenticationAvailable else { return false }
+        let success = await authenticateWithDeviceOwner()
+        if success { startUnlockSession() }
+        return success
+    }
+
     private let userDefaults: UserDefaults
     private var unlockSessionExpiration: Date?
     private var foregroundObserver: NSObjectProtocol?

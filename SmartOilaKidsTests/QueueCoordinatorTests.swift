@@ -747,8 +747,9 @@ final class DeviceRecordingUploadServiceTests: XCTestCase {
             requestIndex += 1
 
             XCTAssertEqual(request.httpMethod, "PUT")
-            XCTAssertEqual(request.url?.path, "/api/devices/recordings/recording-1/complete")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            // Migrated to oila360: PUT /api/v1/device/recordings/{id}/complete (device Bearer).
+            XCTAssertEqual(request.url?.path, "/api/v1/device/recordings/recording-1/complete")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer dev-bearer")
 
             let contentType = try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
             XCTAssertTrue(contentType.hasPrefix("multipart/form-data; boundary="))
@@ -761,22 +762,11 @@ final class DeviceRecordingUploadServiceTests: XCTestCase {
             XCTAssertTrue(bodyText.contains("Content-Type: \(fixture.mimeType)"))
             XCTAssertTrue(bodyText.contains("--Boundary-"))
 
-            let payload = #"""
-            {
-              "id": 5,
-              "device_id": 7,
-              "device_dsn": "child-1",
-              "type": "camera",
-              "status": "completed",
-              "url": "https://example.com/video.mp4",
-              "created_at": "2026-03-11T10:00:00Z"
-            }
-            """#.data(using: .utf8)!
-
+            let payload = #"{"success":true,"data":{"status":"completed","deviceDsn":"child-1","url":"https://example.com/video.mp4"}}"#.data(using: .utf8)!
             return (makeHTTPResponse(for: request.url!, statusCode: 200), payload)
         }
 
-        let service = DeviceRecordingUploadService(client: makeTestAPIClient(accessToken: "Bearer access"))
+        let service = DeviceRecordingUploadService(oila: Self.makeOilaClient())
 
         for fixture in fixtures {
             let fileURL = makeTemporaryRecordingFile(filename: fixture.filename)
@@ -792,23 +782,36 @@ final class DeviceRecordingUploadServiceTests: XCTestCase {
 
     func testCompleteRecordingRethrowsLastRemoteError() async {
         TestHTTPURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.path, "/api/devices/recordings/recording-fail/complete")
+            XCTAssertEqual(request.url?.path, "/api/v1/device/recordings/recording-fail/complete")
             return (makeHTTPResponse(for: request.url!, statusCode: 500), Data("upload failed".utf8))
         }
 
-        let service = DeviceRecordingUploadService(client: makeTestAPIClient(accessToken: "Bearer access"))
+        let service = DeviceRecordingUploadService(oila: Self.makeOilaClient())
         let fileURL = makeTemporaryRecordingFile(filename: "failed.mp4")
         defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
 
         do {
             _ = try await service.completeRecording(recordingID: "recording-fail", fileURL: fileURL)
             XCTFail("Expected upload to throw")
-        } catch let NetworkError.server(statusCode, body) {
-            XCTAssertEqual(statusCode, 500)
-            XCTAssertEqual(body, "upload failed")
+        } catch let error as OilaAPIError {
+            XCTAssertEqual(error.statusCode, 500)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    /// A recording-upload service backed by an oila360 client wired to the stubbed HTTP
+    /// protocol with a device Bearer token, so `completeRecording` exercises the real
+    /// multipart transport without touching the network.
+    private static func makeOilaClient() -> OilaDeviceClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestHTTPURLProtocol.self]
+        return OilaDeviceClient(
+            baseURL: URL(string: "https://api.oila360.uz/api/v1")!,
+            session: URLSession(configuration: configuration),
+            secureTokens: SecureTokenStoreStub(access: "dev-bearer"),
+            userDefaults: UserDefaults(suiteName: "RecordingUploadTests.\(UUID().uuidString)")!
+        )
     }
 
     func testDeleteRecordingUsesDeleteEndpointAndDecodesResponse() async throws {

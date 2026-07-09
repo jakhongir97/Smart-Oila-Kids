@@ -11,6 +11,7 @@
 		02A2F11140840028AD044865 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */; };
 		033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E35F67AF2A306DA50B1B2381 /* Assets.xcassets */; };
 		0471EB68BA714117949399DD /* GeoBackgroundService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF3557C69399FBBC4168B3DA /* GeoBackgroundService.swift */; };
+		069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717167572124BB3D730729A1 /* OilaTelemetryService.swift */; };
 		071EC0F04F004B7B1338FA2F /* TaskView+Content.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACE607570F6285D31C4A9EE0 /* TaskView+Content.swift */; };
 		07206B78F82B27491DF9EEFA /* GeoPendingPayloadQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = E926A9C994747E9685543BC6 /* GeoPendingPayloadQueue.swift */; };
 		0727DB91CE2F5EB00302D230 /* GeoBackgroundService+Lifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C704EF65EB811D1FACF8CF33 /* GeoBackgroundService+Lifecycle.swift */; };
@@ -27,11 +28,10 @@
 		156A236D65155CD1D4381BC4 /* AppHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2425C8628135185130E301B7 /* AppHaptics.swift */; };
 		1802E26A36C0451F1831F065 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C6C570B71E54A7F777CB04 /* AppColors.swift */; };
 		182DC08BA699BBA3BDADBF60 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DF6DBF6858AD49CC68DFE5A /* APIClient.swift */; };
-		22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */; };
-		069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717167572124BB3D730729A1 /* OilaTelemetryService.swift */; };
 		1882771C7296B1B31B33E5C0 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6EA548F1CF7F9E1A410269 /* AppRuntime.swift */; };
 		195A41C9FCBD32BC9BE57BC2 /* MainViewModel+Dashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717A1B6BF6594E39FE01F6E7 /* MainViewModel+Dashboard.swift */; };
 		197B01B32FCAE9C1BA90252C /* AuthService+Registration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4C63FA942CB83B88010923 /* AuthService+Registration.swift */; };
+		1A00661240F9B180A7A30B42 /* BolajonPermissionsFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 042E76FA3DD6014AFC4F2B4A /* BolajonPermissionsFlowView.swift */; };
 		1B6F7C60D4C4D1BC1EFA8072 /* DeviceLockCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D01FDFCD84E6D7555D3BFCA /* DeviceLockCoordinator.swift */; };
 		1BAA26AFBC94468B99A31FED /* ScreenTimeUsageSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C1A8005C2E6130F0254562 /* ScreenTimeUsageSharedModels.swift */; };
 		1BE6A92D92EBB16538A783D1 /* MainDeviceControlTimelineCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D217F060698F9EA65D0B61 /* MainDeviceControlTimelineCard.swift */; };
@@ -41,6 +41,7 @@
 		2144B6CB4608F4394AB7BA9D /* APIClientDebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20C46AB23B8E51CC39523FC /* APIClientDebugLogger.swift */; };
 		2163C0835C22902FC8C9E29D /* DeviceMediaStreamStatusWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76F3479B411B7BA408B5AE3 /* DeviceMediaStreamStatusWebSocketService.swift */; };
 		21CD5BDD52E44B109A0B7C87 /* DeviceControlEventSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CB267462E8296CE7B50CDD /* DeviceControlEventSharedStore.swift */; };
+		22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */; };
 		22CC414D100EEA012EDD666B /* MainWeeklyUsageChartCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D98A19F4BEE1E59E98C1BF66 /* MainWeeklyUsageChartCard.swift */; };
 		22E7F6EB6E023F4549FC91F0 /* PermissionRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 406257A2E792217E0DA9B72A /* PermissionRequirement.swift */; };
 		230FA0621C89ED8DCDA88581 /* SettingsViewModel+Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6628923F20C7A733A296A43E /* SettingsViewModel+Profile.swift */; };
@@ -86,7 +87,6 @@
 		547C9284661457BD92FD3966 /* PushDeepLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1E438381115ACFD35C54E19 /* PushDeepLinkStore.swift */; };
 		549053EC342E9E528DD2F8DC /* SettingsDiagnosticsValueMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38A09C3F9BEAB5F94EAA672B /* SettingsDiagnosticsValueMapper.swift */; };
 		5504157A28114BB4438D18D8 /* ChildChromeActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013D3C6FA475C294D974034B /* ChildChromeActions.swift */; };
-		D8B0CDCCA4DD43B16B6FF5D6 /* BolajonKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E627ECB6EBB0A790D11AF5 /* BolajonKit.swift */; };
 		566F808A04A24CF854027226 /* DeviceRecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F7E0AFB488C0F0AEBB51B30 /* DeviceRecordingCoordinator.swift */; };
 		583860E1ECDAD0BDB85E23C6 /* GeoWebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62718A5397CACC718C4A5423 /* GeoWebSocketClient.swift */; };
 		588D71E3F79950E6A3546C98 /* ScreenTimeUsageSharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4C1A8005C2E6130F0254562 /* ScreenTimeUsageSharedModels.swift */; };
@@ -109,6 +109,7 @@
 		6AC53CDFF6190F1C0DA07CDD /* SettingsView+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7E13D7F256C666114C6EE1 /* SettingsView+Actions.swift */; };
 		6B4971FF763DA73DA6DA8EF5 /* DeviceControlEventSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CB267462E8296CE7B50CDD /* DeviceControlEventSharedStore.swift */; };
 		6D15073AFFF953D7A6610440 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BF28BB4858699994D286CFC /* AuthViewModel.swift */; };
+		6E27C030E7CD94583976FDFB /* BolajonSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960DB08C9B3AA4CDF8B04423 /* BolajonSettingsView.swift */; };
 		6EED4A87E57CC0ECA98C857D /* PermissionDetailsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37097500BCB07A34F6477824 /* PermissionDetailsSheet.swift */; };
 		6FA076E9996B2797EF943B0A /* MainNotificationsInboxSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A43DE0E98794DCA579C9165 /* MainNotificationsInboxSurface.swift */; };
 		7035D0F4DFA51CF3C677B465 /* DeviceLockScheduleMonitorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D119B18D174C7731B54000FC /* DeviceLockScheduleMonitorController.swift */; };
@@ -124,7 +125,6 @@
 		7A9F971A9AA9F6143A6D4EAA /* AuthRegistrationParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E328FFEB6487D8C311643C4 /* AuthRegistrationParser.swift */; };
 		7C2FD6CC80D1FFA87AF9429C /* ChatOutboxCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF660B1FA8F225ADFB2A09E8 /* ChatOutboxCoordinator.swift */; };
 		7CCAC945DDF737C7B6B5253F /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94392F4357B26A080E1CF387 /* AuthView.swift */; };
-		FF806ACDBEC29C4B36E57780 /* BolajonSetupFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46F7A500D8401E5F9A6077D1 /* BolajonSetupFlowView.swift */; };
 		7D48CB8AAE557D95BD46BE0C /* SettingsMediaRecordingPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E1FF26DCABAEF8F174BA6B /* SettingsMediaRecordingPreview.swift */; };
 		7DC90862449C3EF32CF0F725 /* AppInviteAttribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB0F3F3272023EF43F5CF64 /* AppInviteAttribution.swift */; };
 		7F8623F248D1C390B4633107 /* TaskModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FBC40B6AFD8B53E2C220048 /* TaskModels.swift */; };
@@ -136,12 +136,12 @@
 		8C1B6ED634A4E71A01A4EC75 /* DeviceLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98D120F82B2D862255E144CE /* DeviceLockService.swift */; };
 		8CC7457FDF7DC95360235EF8 /* ChatTemplatesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13914EBD2EAB4651ABB316C3 /* ChatTemplatesSheet.swift */; };
 		8CCBDB15E0CA08F4FF89582E /* ChatBubbleComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 328D5C698B5C2245A858DBAA /* ChatBubbleComponents.swift */; };
+		8CE02FD96D67814C261FDBEE /* BolajonTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C678BBB83DEE8F99F76A03EE /* BolajonTasksView.swift */; };
 		8DC5DD9F9B27C70435CE538F /* MainViewModelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8A71CF2C8C18E56E736828 /* MainViewModelState.swift */; };
 		8ED64CCFFAE40B0BEE6B018C /* PushInboxStore+Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40AADA7374238CB71F090936 /* PushInboxStore+Storage.swift */; };
 		90F23E9F60D0D15B03ED630D /* TaskView+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F43BEA779555AAB119FB2F5 /* TaskView+Helpers.swift */; };
 		9299DB75CBBFFFB8A60E222C /* LocationPermissionManager+Evaluation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37CE1F79AD1D30E842792DAF /* LocationPermissionManager+Evaluation.swift */; };
 		92A9C05B4589B3A66241AD23 /* GeoPermissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A720C659E66315F9CDC39003 /* GeoPermissionView.swift */; };
-		1A00661240F9B180A7A30B42 /* BolajonPermissionsFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 042E76FA3DD6014AFC4F2B4A /* BolajonPermissionsFlowView.swift */; };
 		942E3A223251455EACACA6F1 /* ScreenTimeUsageAppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B23147D0A5327CED850D5FA /* ScreenTimeUsageAppGroup.swift */; };
 		9476E3BF849FC892540A8967 /* MediaTelemetryNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EF532791C5DAE3BB5FE6335 /* MediaTelemetryNotifier.swift */; };
 		947A21A81AAC58B698C583FB /* PushTokenSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBCDB90B08E14227EB77B782 /* PushTokenSyncCoordinator.swift */; };
@@ -172,7 +172,6 @@
 		A959624F88BAB31BA1CB3143 /* MainDashboardPayloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DC10C48D583773250791E6E /* MainDashboardPayloadModels.swift */; };
 		A981309D438B4CAA82487FF5 /* PushInboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9330607ECABFAFCD014BA56 /* PushInboxStore.swift */; };
 		AA95BAE093CDEDE1DFC86580 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0896EA30F859C46916368E4C /* MainView.swift */; };
-		C85F8BC5229FDB43AE443559 /* BolajonHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */; };
 		AB12EDC2467F4FE3AEBB40B0 /* ScreenTimeUsageSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */; };
 		AB4B4C32719A8D784F730D7D /* DeviceRecordingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F26C5C6B3DA01F74B933DD /* DeviceRecordingModels.swift */; };
 		ABDC972206A0DD1BA72347C4 /* DeviceAppLockSelectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000EB148968CDFEE38501FBC /* DeviceAppLockSelectionStore.swift */; };
@@ -205,6 +204,7 @@
 		C43198D13287C8227DA5E22E /* AuthQRCodePayloadFieldResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56CB1D7FA6E022DD8DE69006 /* AuthQRCodePayloadFieldResolver.swift */; };
 		C4FB972831CB769AD3BC0CB1 /* DisplayVideoRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E754CCA082B78AD3632D642D /* DisplayVideoRecorder.swift */; };
 		C5D8A7ABB5A6A757816C2634 /* AuthService+Transport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC6798212D06DA619119B78B /* AuthService+Transport.swift */; };
+		C85F8BC5229FDB43AE443559 /* BolajonHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */; };
 		C87DCAFC6940E7A76DC4D5DE /* MainHeaderSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBF33EC7F8E069755A0F41F /* MainHeaderSection.swift */; };
 		C8CDB1FBCBEC55C1E21D6A7C /* AuthQRCodePayloadDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4D1521F568DAB62D0FDE7B /* AuthQRCodePayloadDecoder.swift */; };
 		C8D354D73C5A4E42F2C055C1 /* SettingsViewModel+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AEF2BE58B8E10436583C24 /* SettingsViewModel+Helpers.swift */; };
@@ -219,6 +219,7 @@
 		D3FBF096A3ED2A682BA8DBE5 /* SettingsMainFormSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A3D09284B7AB175EE746298 /* SettingsMainFormSections.swift */; };
 		D5384AB5E64F484683E64EB8 /* MainSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE59A51C549A69DCE10EC73D /* MainSurfaceView.swift */; };
 		D725839CD0183AB79B948556 /* PushCommandPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 431DBC98997C4C755E64823D /* PushCommandPayload.swift */; };
+		D8B0CDCCA4DD43B16B6FF5D6 /* BolajonKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E627ECB6EBB0A790D11AF5 /* BolajonKit.swift */; };
 		D98A1EEBAAEB3B4BE96891A5 /* ChatMessageGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72514A5E6AF470DEDED4B68 /* ChatMessageGrouping.swift */; };
 		D9ABF3504A530FBFBA013D5C /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67CB8ABD9F08930576D52B8 /* PushNotifications.swift */; };
 		D9EBEA41D97DAC698E3D16A9 /* AuthBindingVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8DA249CA65262153F892E16 /* AuthBindingVerifier.swift */; };
@@ -245,7 +246,6 @@
 		E869FC25FABA547134DDBABE /* DeviceGlobalLockPayloadParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D7F84A76FF9C6414AEDBB7 /* DeviceGlobalLockPayloadParser.swift */; };
 		E9876CEB0B2EBE904C0F4393 /* DeviceVideoStreamWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35A318FD0F6C949358667939 /* DeviceVideoStreamWebSocketService.swift */; };
 		EAAD9AD6D7D8996CBAB7FD1C /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27E0B739E50A5C2647F8FFB0 /* SettingsView.swift */; };
-		6E27C030E7CD94583976FDFB /* BolajonSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960DB08C9B3AA4CDF8B04423 /* BolajonSettingsView.swift */; };
 		EB85C6EA7609448E81B7CCEE /* SmartOilaUsageReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6C933CA55D47C1BE4CB81B /* SmartOilaUsageReportView.swift */; };
 		ECC22AFC4531692F70339B49 /* ChildChromeSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40F3C7A1FA531F104D26A2AD /* ChildChromeSurface.swift */; };
 		EDB17EC67DF2C332EC48C674 /* APIRequestFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADADDABFA182EFC43B957994 /* APIRequestFactory.swift */; };
@@ -255,6 +255,9 @@
 		F1A0B1C2D3E4F50617283940 /* NetworkErrorRetryPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */; };
 		F1A0B1C2D3E4F50617283950 /* QueueCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */; };
 		F1A0B1C2D3E4F50617283952 /* SettingsAppLockPanelControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */; };
+		F1A0B1C2D3E4F506172839A0 /* SettingsProtectionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */; };
+		F1A0B1C2D3E4F506172839A2 /* BolajonHomeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */; };
+		F1A0B1C2D3E4F506172839A4 /* BolajonPermissionChecklistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */; };
 		F1A0B1C2D3E4F50617283960 /* AuthBindingVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283961 /* AuthBindingVerifierTests.swift */; };
 		F1A0B1C2D3E4F50617283962 /* AuthViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283963 /* AuthViewModelTests.swift */; };
 		F1A0B1C2D3E4F50617283964 /* DeviceLockCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */; };
@@ -277,10 +280,10 @@
 		FDAD45957BD0EBBC8CE14022 /* MainDashboardLocationLogParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF09B3D8D392F16E522B6C9 /* MainDashboardLocationLogParser.swift */; };
 		FDCA1F4979718562EF8D44AC /* ChatParentMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C46777C15391FBE39A62B6B /* ChatParentMetadata.swift */; };
 		FDCB94232A869F3069CD5674 /* TaskView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6F628905E6AE07236E256FA /* TaskView.swift */; };
-		8CE02FD96D67814C261FDBEE /* BolajonTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C678BBB83DEE8F99F76A03EE /* BolajonTasksView.swift */; };
 		FDFF7733C266BFADE0EB2D51 /* SettingsService+Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585C70FB672238EE163107D5 /* SettingsService+Profile.swift */; };
 		FE60833FB1DB5314E6E4EF80 /* APIResponseDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A2A9B66F50FB7AB78D6204 /* APIResponseDecoder.swift */; };
 		FEA4706D43796BAF3BF44289 /* DeviceApplicationLockPayloadParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9548B0248BF51FB0A4C40A /* DeviceApplicationLockPayloadParser.swift */; };
+		FF806ACDBEC29C4B36E57780 /* BolajonSetupFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46F7A500D8401E5F9A6077D1 /* BolajonSetupFlowView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -298,16 +301,15 @@
 		0113CDA2CA9A37AAA25876EF /* SOSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SOSService.swift; sourceTree = "<group>"; };
 		011FE7B8FC094845A531DC28 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		013D3C6FA475C294D974034B /* ChildChromeActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildChromeActions.swift; sourceTree = "<group>"; };
-		59E627ECB6EBB0A790D11AF5 /* BolajonKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonKit.swift; sourceTree = "<group>"; };
 		026525C0D6A9192005C42154 /* MainDashboardRemoteDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDashboardRemoteDataSource.swift; sourceTree = "<group>"; };
 		03BD43964D8A9A9D5FB86D54 /* ChatComposerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatComposerBar.swift; sourceTree = "<group>"; };
+		042E76FA3DD6014AFC4F2B4A /* BolajonPermissionsFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonPermissionsFlowView.swift; sourceTree = "<group>"; };
 		06DAEF47AD8DBAF461964045 /* LocationPermissionManager+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocationPermissionManager+Actions.swift"; sourceTree = "<group>"; };
 		0703E19DCEAC71C8B84892FD /* LiveVideoStreamCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVideoStreamCapture.swift; sourceTree = "<group>"; };
 		0727F71B8B56DA352DD6EE3B /* GeoServiceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoServiceState.swift; sourceTree = "<group>"; };
 		07FF2F04EB7460062D6EF53B /* PushCommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushCommandRouter.swift; sourceTree = "<group>"; };
 		083AE2B30276D09934C7C631 /* ScreenTimeAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAuthorizationManager.swift; sourceTree = "<group>"; };
 		0896EA30F859C46916368E4C /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
-		AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonHomeView.swift; sourceTree = "<group>"; };
 		0C39B2B99B81F60FCF4C0283 /* SmartOilaKids.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKids.entitlements; sourceTree = "<group>"; };
 		0F43BEA779555AAB119FB2F5 /* TaskView+Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskView+Helpers.swift"; sourceTree = "<group>"; };
 		101DEC919BD658045AE250D4 /* SettingsAvatarUploadPayloadBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAvatarUploadPayloadBuilder.swift; sourceTree = "<group>"; };
@@ -333,7 +335,6 @@
 		2567114AF6B224317CA7ACFF /* PushNotificationTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationTypes.swift; sourceTree = "<group>"; };
 		270CA6AA78831DD43F9B0E45 /* SettingsServiceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsServiceModels.swift; sourceTree = "<group>"; };
 		27E0B739E50A5C2647F8FFB0 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		960DB08C9B3AA4CDF8B04423 /* BolajonSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonSettingsView.swift; sourceTree = "<group>"; };
 		297586238AFBC241C5CE91C5 /* TaskService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskService.swift; sourceTree = "<group>"; };
 		2AC9CC208A8592E5CAE0921D /* DeviceLockShieldController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockShieldController.swift; sourceTree = "<group>"; };
 		2BF28BB4858699994D286CFC /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
@@ -366,6 +367,7 @@
 		431DBC98997C4C755E64823D /* PushCommandPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushCommandPayload.swift; sourceTree = "<group>"; };
 		453AC282C833588EED957F8C /* ChatTimestamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTimestamp.swift; sourceTree = "<group>"; };
 		45DE24B9FE014EC0BDABE585 /* TaskPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPersistence.swift; sourceTree = "<group>"; };
+		46F7A500D8401E5F9A6077D1 /* BolajonSetupFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonSetupFlowView.swift; sourceTree = "<group>"; };
 		47B02F00F1E7559236B24D9F /* SettingsService+Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsService+Helpers.swift"; sourceTree = "<group>"; };
 		488D9F572931817683B921E7 /* DeviceAppLimitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLimitService.swift; sourceTree = "<group>"; };
 		492B3E4DE9B3CC544DB4D520 /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
@@ -376,8 +378,6 @@
 		4C060C51BCD55512E04BA4B5 /* CameraVideoRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraVideoRecorder.swift; sourceTree = "<group>"; };
 		4D0BC0423D576553D183CB83 /* SmartOilaKids.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartOilaKids.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4DF6DBF6858AD49CC68DFE5A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
-		F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaDeviceAPI.swift; sourceTree = "<group>"; };
-		717167572124BB3D730729A1 /* OilaTelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaTelemetryService.swift; sourceTree = "<group>"; };
 		4F5920C0CE2BF9EF1B5DA724 /* EnvironmentAudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentAudioRecorder.swift; sourceTree = "<group>"; };
 		5067CE0B4251BE5369640F2A /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		50786F23B965A8D8ECF485A8 /* ScreenTimeUsageReportBridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageReportBridgeView.swift; sourceTree = "<group>"; };
@@ -387,6 +387,7 @@
 		56CB1D7FA6E022DD8DE69006 /* AuthQRCodePayloadFieldResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthQRCodePayloadFieldResolver.swift; sourceTree = "<group>"; };
 		584551A554CA3F37E3360B16 /* APIClientModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientModels.swift; sourceTree = "<group>"; };
 		585C70FB672238EE163107D5 /* SettingsService+Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsService+Profile.swift"; sourceTree = "<group>"; };
+		59E627ECB6EBB0A790D11AF5 /* BolajonKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonKit.swift; sourceTree = "<group>"; };
 		5A5637704061AB73F2D7E943 /* GeoPayloadEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoPayloadEncoder.swift; sourceTree = "<group>"; };
 		5B3FFE1159A9637FFBA1F1AE /* RootView+Lifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RootView+Lifecycle.swift"; sourceTree = "<group>"; };
 		5BF17CB2411F509C8E5EBE92 /* AuthComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthComponents.swift; sourceTree = "<group>"; };
@@ -413,6 +414,7 @@
 		6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		6F2B0DC3B30C434F83993B11 /* SmartOilaKidsUsageReportExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKidsUsageReportExtension.entitlements; sourceTree = "<group>"; };
 		6FBD506491C43954D10DF0D6 /* GrowthMetricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrowthMetricsStore.swift; sourceTree = "<group>"; };
+		717167572124BB3D730729A1 /* OilaTelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaTelemetryService.swift; sourceTree = "<group>"; };
 		717A1B6BF6594E39FE01F6E7 /* MainViewModel+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MainViewModel+Dashboard.swift"; sourceTree = "<group>"; };
 		78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageSharedStore.swift; sourceTree = "<group>"; };
 		79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = SmartOilaKidsUsageReportExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -441,9 +443,9 @@
 		91561FEA14C1BF3F1F367FF7 /* DeviceRecordingTransportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRecordingTransportCoordinator.swift; sourceTree = "<group>"; };
 		92868689073A7FB20751DE55 /* GeoBackgroundService+Setup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeoBackgroundService+Setup.swift"; sourceTree = "<group>"; };
 		94392F4357B26A080E1CF387 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
-		46F7A500D8401E5F9A6077D1 /* BolajonSetupFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonSetupFlowView.swift; sourceTree = "<group>"; };
 		95A091E783A9E295D35421E5 /* DeviceAudioStreamWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAudioStreamWebSocketService.swift; sourceTree = "<group>"; };
 		95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockScheduleSupport.swift; sourceTree = "<group>"; };
+		960DB08C9B3AA4CDF8B04423 /* BolajonSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonSettingsView.swift; sourceTree = "<group>"; };
 		9875708CE038752BC580714F /* PushCommandRouter+Parsing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushCommandRouter+Parsing.swift"; sourceTree = "<group>"; };
 		98D120F82B2D862255E144CE /* DeviceLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockService.swift; sourceTree = "<group>"; };
 		9B35C83F2A4F548512EB20FB /* ChildChromeBranding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildChromeBranding.swift; sourceTree = "<group>"; };
@@ -459,7 +461,6 @@
 		A5BA64796AAACBED381435DB /* ChatPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPersistence.swift; sourceTree = "<group>"; };
 		A707D3B8AC39D5ACFF823CDA /* SettingsCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCacheStore.swift; sourceTree = "<group>"; };
 		A720C659E66315F9CDC39003 /* GeoPermissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoPermissionView.swift; sourceTree = "<group>"; };
-		042E76FA3DD6014AFC4F2B4A /* BolajonPermissionsFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonPermissionsFlowView.swift; sourceTree = "<group>"; };
 		A72514A5E6AF470DEDED4B68 /* ChatMessageGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageGrouping.swift; sourceTree = "<group>"; };
 		A8CB88E59DE6518D215B75D0 /* RootView+PushHandling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RootView+PushHandling.swift"; sourceTree = "<group>"; };
 		A9330607ECABFAFCD014BA56 /* PushInboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushInboxStore.swift; sourceTree = "<group>"; };
@@ -470,6 +471,7 @@
 		AC6798212D06DA619119B78B /* AuthService+Transport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AuthService+Transport.swift"; sourceTree = "<group>"; };
 		ACE607570F6285D31C4A9EE0 /* TaskView+Content.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskView+Content.swift"; sourceTree = "<group>"; };
 		ADADDABFA182EFC43B957994 /* APIRequestFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIRequestFactory.swift; sourceTree = "<group>"; };
+		AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonHomeView.swift; sourceTree = "<group>"; };
 		AE714C77B342E6354D4794FA /* MainDashboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDashboardService.swift; sourceTree = "<group>"; };
 		AFF09B3D8D392F16E522B6C9 /* MainDashboardLocationLogParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDashboardLocationLogParser.swift; sourceTree = "<group>"; };
 		B156D03B8A8CFF9B5F3A42FE /* DeviceLockWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockWebSocketService.swift; sourceTree = "<group>"; };
@@ -483,7 +485,6 @@
 		B6686EB0A6F26CDBAD6ABC37 /* PermissionStatusSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionStatusSnapshot.swift; sourceTree = "<group>"; };
 		B6A2A9B66F50FB7AB78D6204 /* APIResponseDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIResponseDecoder.swift; sourceTree = "<group>"; };
 		B6F628905E6AE07236E256FA /* TaskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskView.swift; sourceTree = "<group>"; };
-		C678BBB83DEE8F99F76A03EE /* BolajonTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonTasksView.swift; sourceTree = "<group>"; };
 		B76F3479B411B7BA408B5AE3 /* DeviceMediaStreamStatusWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceMediaStreamStatusWebSocketService.swift; sourceTree = "<group>"; };
 		B796547BDF8843948DDF53CE /* MemberDevicesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberDevicesService.swift; sourceTree = "<group>"; };
 		B92ED84F6AAE977B6DC637C0 /* ChatTemplatesEditorSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTemplatesEditorSection.swift; sourceTree = "<group>"; };
@@ -500,6 +501,7 @@
 		C45ED121A102053D74358C91 /* DeviceApplicationStateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceApplicationStateService.swift; sourceTree = "<group>"; };
 		C4AEF2BE58B8E10436583C24 /* SettingsViewModel+Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsViewModel+Helpers.swift"; sourceTree = "<group>"; };
 		C4C1A8005C2E6130F0254562 /* ScreenTimeUsageSharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageSharedModels.swift; sourceTree = "<group>"; };
+		C678BBB83DEE8F99F76A03EE /* BolajonTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonTasksView.swift; sourceTree = "<group>"; };
 		C704EF65EB811D1FACF8CF33 /* GeoBackgroundService+Lifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeoBackgroundService+Lifecycle.swift"; sourceTree = "<group>"; };
 		C7FD5CB8B392A63AD968AF4A /* AuthPhoneStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthPhoneStageView.swift; sourceTree = "<group>"; };
 		C8DA249CA65262153F892E16 /* AuthBindingVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthBindingVerifier.swift; sourceTree = "<group>"; };
@@ -553,6 +555,9 @@
 		F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkErrorRetryPolicyTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueCoordinatorTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAppLockPanelControllerTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsProtectionControllerTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonHomeViewModelTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonPermissionChecklistTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283961 /* AuthBindingVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthBindingVerifierTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283963 /* AuthViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModelTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -568,6 +573,7 @@
 		F3A477DC58268B911BE8094F /* ActivityShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityShareSheet.swift; sourceTree = "<group>"; };
 		F3AE0F8316C44BC78E962C07 /* SmartOilaKidsUsageReportExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaKidsUsageReportExtension.swift; sourceTree = "<group>"; };
 		F3EC448F6E28C731606F52D2 /* DeviceApplicationRemovalAttemptCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceApplicationRemovalAttemptCoordinator.swift; sourceTree = "<group>"; };
+		F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaDeviceAPI.swift; sourceTree = "<group>"; };
 		F618A710844D894F94F49A14 /* ChatMessageSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageSender.swift; sourceTree = "<group>"; };
 		F6CD2713AEC170FF74B8C9A0 /* AuthDeviceNameSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthDeviceNameSync.swift; sourceTree = "<group>"; };
 		F81358274D490DBDA4E66794 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
@@ -1071,6 +1077,9 @@
 				F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */,
 				F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */,
 				F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */,
+				F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */,
+				F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */,
+				F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */,
 			);
 			path = SmartOilaKidsTests;
 			sourceTree = "<group>";
@@ -1602,6 +1611,9 @@
 				F1A0B1C2D3E4F50617283940 /* NetworkErrorRetryPolicyTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283950 /* QueueCoordinatorTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283952 /* SettingsAppLockPanelControllerTests.swift in Sources */,
+				F1A0B1C2D3E4F506172839A0 /* SettingsProtectionControllerTests.swift in Sources */,
+				F1A0B1C2D3E4F506172839A2 /* BolajonHomeViewModelTests.swift in Sources */,
+				F1A0B1C2D3E4F506172839A4 /* BolajonPermissionChecklistTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1648,7 +1660,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1703,7 +1715,7 @@
 				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1725,7 +1737,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1753,7 +1765,7 @@
 				DEVELOPMENT_TEAM = 7A9V4SQ8LR;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1864,7 +1876,7 @@
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1891,7 +1903,7 @@
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

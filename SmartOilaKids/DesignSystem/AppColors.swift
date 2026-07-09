@@ -72,3 +72,33 @@ enum AppColors {
     /// Neutral chip / inactive keypad key fill.
     static let chipNeutral = dynamic(rgb(240, 238, 249), rgb(46, 43, 58))
 }
+
+extension Color {
+    /// Parses a hex color string like "#F0605A", "F0605A", or "#AARRGGBB".
+    /// Returns nil for empty/malformed input so callers can fall back to a default.
+    init?(hex: String?) {
+        guard let raw = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        var value = raw.hasPrefix("#") ? String(raw.dropFirst()) : raw
+        if value.lowercased().hasPrefix("0x") { value = String(value.dropFirst(2)) }
+        guard value.count == 6 || value.count == 8 else { return nil }
+
+        var int: UInt64 = 0
+        guard Scanner(string: value).scanHexInt64(&int) else { return nil }
+
+        let r, g, b, a: Double
+        if value.count == 8 {
+            a = Double((int & 0xFF00_0000) >> 24) / 255
+            r = Double((int & 0x00FF_0000) >> 16) / 255
+            g = Double((int & 0x0000_FF00) >> 8) / 255
+            b = Double(int & 0x0000_00FF) / 255
+        } else {
+            a = 1
+            r = Double((int & 0xFF0000) >> 16) / 255
+            g = Double((int & 0x00FF00) >> 8) / 255
+            b = Double(int & 0x0000FF) / 255
+        }
+        self = Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
+}

@@ -4,59 +4,76 @@ import SwiftUI
 // tasks via fetchActiveTasks, SOS via sendSOS (now behind an explicit confirm — the legacy
 // MainViewModel fired SOS on a single tap with no confirmation).
 
+/// Drill-in destinations pushed onto the Home NavigationStack.
+enum HomeRoute: Hashable {
+    case tasks
+    case settings
+    case settingsPermissions
+    case settingsDisconnect
+}
+
+/// Single source of truth for Home-stack destinations, shared by the live Home stack and the
+/// standalone debug Settings entry so both push the same screens.
+@ViewBuilder
+func homeRouteDestination(_ route: HomeRoute, path: Binding<[HomeRoute]>) -> some View {
+    switch route {
+    case .tasks: BolajonTasksView()
+    case .settings: SettingsRootView(path: path)
+    case .settingsPermissions: SettingsPermissionsScreen()
+    case .settingsDisconnect: SettingsDisconnectScreen()
+    }
+}
+
 struct BolajonHomeView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var viewModel = BolajonHomeViewModel()
+    @State private var path: [HomeRoute] = []
     @State private var showSOSConfirm = false
-    @State private var showSettings = false
-    @State private var showTasks = false
 
     var body: some View {
-        ScreenScaffold(intent: .lavender) {
-            VStack(spacing: BolajonMetrics.stackSpacing) {
-                header
-                screenTimeCard
-                sosCard
-                tasksCard
+        NavigationStack(path: $path) {
+            ScreenScaffold(intent: .lavender) {
+                VStack(spacing: BolajonMetrics.stackSpacing) {
+                    header
+                    if viewModel.showsScreenTimeCard {
+                        screenTimeCard
+                    }
+                    sosCard
+                    tasksCard
+                }
             }
-        }
-        .task { await viewModel.load() }
-        .onAppear {
+            .appHiddenNavBar()
+            .navigationDestination(for: HomeRoute.self) { route in
+                homeRouteDestination(route, path: $path)
+            }
+            .task { await viewModel.load() }
+            .onAppear {
 #if DEBUG
-            if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SOS"] == "1" { showSOSConfirm = true }
+                if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SOS"] == "1" { showSOSConfirm = true }
 #endif
-        }
-        .overlay {
-            if showSOSConfirm {
+            }
+            .sheet(isPresented: $showSOSConfirm, onDismiss: { viewModel.resetSOS() }) {
                 SOSConfirmSheet(
                     isSending: viewModel.isSendingSOS,
                     sent: viewModel.sosSent,
                     onConfirm: { Task { await viewModel.sendSOS() } },
-                    onClose: {
-                        showSOSConfirm = false
-                        viewModel.resetSOS()
-                    }
+                    onClose: { showSOSConfirm = false }
                 )
-                .transition(.opacity)
-                .zIndex(10)
+                .compactSheetDetents()
+                .interactiveDismissDisabled(viewModel.isSendingSOS)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: showSOSConfirm)
-        .fullScreenCover(isPresented: $showSettings) {
-            BolajonSettingsView(
-                onBack: { showSettings = false },
-                onDisconnected: { showSettings = false }
-            )
-            .environmentObject(sessionStore)
-        }
-        .fullScreenCover(isPresented: $showTasks) {
-            BolajonTasksView(onBack: { showTasks = false })
-        }
+        .bolajonSwipeBack()
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            ConnectedAvatar(emoji: "🦁", diameter: 48, isConnected: true)
+            ConnectedAvatar(
+                emoji: sessionStore.childAvatarEmoji ?? "🦁",
+                diameter: 48,
+                isConnected: true,
+                tint: Color(hex: sessionStore.childProfileColor)
+            )
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(sessionStore.profileName)
@@ -74,7 +91,7 @@ struct BolajonHomeView: View {
                     .foregroundStyle(AppColors.inkTertiary)
             }
             Spacer()
-            Button(action: { showSettings = true }) {
+            Button(action: { path.append(.settings) }) {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 20))
                     .foregroundStyle(AppColors.inkSecondary)
@@ -86,34 +103,29 @@ struct BolajonHomeView: View {
         .padding(.top, 8)
     }
 
+    // Usage-only card: the device has no aggregate screen-time endpoint and no single daily
+    // limit, so we show the real tracked-app usage without a fabricated limit/progress bar.
     private var screenTimeCard: some View {
         InfoCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 46, height: 46)
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(AppColors.ctaPurple)
+                }
+                VStack(alignment: .leading, spacing: 3) {
                     Text(L10n.tr("home2.screentime.title"))
                         .font(AppTypography.bodyStrong(14))
                         .foregroundStyle(AppColors.inkPrimary)
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Text(viewModel.screenTimeText)
-                            .font(AppTypography.bodyStrong(15))
-                            .foregroundStyle(AppColors.ctaPurple)
-                        Text("/ \(viewModel.screenTimeLimitText)")
-                            .font(AppTypography.caption(12))
-                            .foregroundStyle(AppColors.inkTertiary)
-                    }
+                    Text(L10n.tr("home2.screentime.tracked_subtitle"))
+                        .font(AppTypography.caption(12))
+                        .foregroundStyle(AppColors.inkTertiary)
                 }
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(AppColors.chipNeutral).frame(height: 8)
-                        Capsule().fill(AppColors.ctaPurple)
-                            .frame(width: geo.size.width * viewModel.screenTimeFraction, height: 8)
-                    }
-                }
-                .frame(height: 8)
-                Text(viewModel.screenTimeRemainingText)
-                    .font(AppTypography.caption(12))
-                    .foregroundStyle(AppColors.inkTertiary)
+                Spacer()
+                Text(viewModel.screenTimeText)
+                    .font(AppTypography.heading(18))
+                    .foregroundStyle(AppColors.ctaPurple)
             }
         }
     }
@@ -148,42 +160,45 @@ struct BolajonHomeView: View {
         .buttonStyle(.plain)
     }
 
+    // Native drill-in to Tasks: push onto the Home NavigationStack path.
     private var tasksCard: some View {
-        Button(action: { showTasks = true }) {
-            InfoCard {
-                VStack(spacing: 14) {
-                    HStack {
-                        Text(L10n.tr("home2.tasks.title"))
-                            .font(AppTypography.heading(16))
+        Button { path.append(.tasks) } label: { tasksCardBody }
+            .buttonStyle(.plain)
+    }
+
+    private var tasksCardBody: some View {
+        InfoCard {
+            VStack(spacing: 14) {
+                HStack {
+                    Text(L10n.tr("home2.tasks.title"))
+                        .font(AppTypography.heading(16))
+                        .foregroundStyle(AppColors.inkPrimary)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(AppColors.glyphCoral)
+                        Text("\(viewModel.starTotal)")
+                            .font(AppTypography.bodyStrong(14))
                             .foregroundStyle(AppColors.inkPrimary)
-                        Spacer()
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(AppColors.glyphCoral)
-                            Text("\(viewModel.starTotal)")
-                                .font(AppTypography.bodyStrong(14))
-                                .foregroundStyle(AppColors.inkPrimary)
-                        }
                     }
-                    if viewModel.activeTasks.isEmpty {
-                        Text(L10n.tr("home2.tasks.empty"))
-                            .font(AppTypography.bodyText(13))
-                            .foregroundStyle(AppColors.inkTertiary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        VStack(spacing: 10) {
-                            ForEach(viewModel.activeTasks.prefix(3)) { task in
-                                HomeTaskRow(task: task) {
-                                    Task { await viewModel.complete(task) }
-                                }
+                }
+                if viewModel.activeTasks.isEmpty {
+                    Text(L10n.tr("home2.tasks.empty"))
+                        .font(AppTypography.bodyText(13))
+                        .foregroundStyle(AppColors.inkTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(viewModel.activeTasks.prefix(3)) { task in
+                            HomeTaskRow(task: task) {
+                                Task { await viewModel.complete(task) }
                             }
                         }
                     }
                 }
             }
         }
-        .buttonStyle(.plain)
     }
 }
 
@@ -223,7 +238,7 @@ private struct HomeTaskRow: View {
 
 // MARK: - C2 SOS confirm
 
-/// Bottom sheet over a dimmed Home (design C2), iOS 15-compatible (no presentationDetents).
+/// SOS confirm as native sheet content (presented via `.sheet` + detents from Home).
 private struct SOSConfirmSheet: View {
     let isSending: Bool
     let sent: Bool
@@ -231,11 +246,8 @@ private struct SOSConfirmSheet: View {
     let onClose: () -> Void
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Color.black.opacity(0.45)
-                .ignoresSafeArea()
-                .onTapGesture { if !isSending { onClose() } }
-
+        ZStack {
+            AppColors.cardWhite.ignoresSafeArea()
             VStack(spacing: 18) {
                 ZStack {
                     Circle().fill(AppColors.sosCoral.opacity(0.14)).frame(width: 84, height: 84)
@@ -243,7 +255,6 @@ private struct SOSConfirmSheet: View {
                         .font(.system(size: 30, weight: .bold))
                         .foregroundStyle(AppColors.sosCoral)
                 }
-                .padding(.top, 8)
 
                 Text(sent ? L10n.tr("sos2.sent") : L10n.tr("sos2.title"))
                     .font(AppTypography.title(22))
@@ -274,14 +285,7 @@ private struct SOSConfirmSheet: View {
                 }
             }
             .padding(24)
-            .padding(.bottom, 16)
             .frame(maxWidth: .infinity)
-            .background(
-                TopRoundedShape(radius: 28)
-                    .fill(AppColors.cardWhite)
-                    .ignoresSafeArea(edges: .bottom)
-            )
-            .transition(.move(edge: .bottom))
         }
     }
 }
@@ -295,16 +299,24 @@ final class BolajonHomeViewModel: ObservableObject {
     @Published var sosSent = false
     @Published var errorMessage: String?
 
-    // TODO(gap #4): the child device has no oila360 endpoint for its own aggregated
-    // screen-time. These are placeholders until a source (local Screen Time or a new
-    // device endpoint) is decided. Limit source is open decision #9.
-    private let todayMinutes = 135
-    private let limitMinutes = 180
+    /// Today's total usage of the parent-tracked apps (seconds), read from the local
+    /// DeviceActivity report. Nil when Screen Time isn't authorized/configured or no report
+    /// has been written yet — the Home card is hidden then. The device has no endpoint for
+    /// aggregate screen-time and no single daily limit, so the card shows usage only.
+    @Published private(set) var trackedUsageSeconds: Int?
 
     private let service: OilaDeviceServicing
+    private let telemetry: SOSTelemetryProviding
+    private let screenTimeUsage: ScreenTimeUsageProviding
 
-    init(service: OilaDeviceServicing = OilaDeviceClient.shared) {
+    init(
+        service: OilaDeviceServicing = OilaDeviceClient.shared,
+        telemetry: SOSTelemetryProviding = OilaTelemetryService.shared,
+        screenTimeUsage: ScreenTimeUsageProviding = LocalScreenTimeUsageProvider()
+    ) {
         self.service = service
+        self.telemetry = telemetry
+        self.screenTimeUsage = screenTimeUsage
     }
 
     // Collected stars = reward points from completed tasks.
@@ -312,22 +324,23 @@ final class BolajonHomeViewModel: ObservableObject {
     // Home lists the still-to-do tasks.
     var activeTasks: [OilaDeviceTask] { tasks.filter { !$0.isCompleted } }
 
-    var screenTimeText: String { hoursMinutes(todayMinutes) }
-    var screenTimeLimitText: String { hoursMinutes(limitMinutes) }
-    var screenTimeRemainingText: String {
-        L10n.tr("home2.screentime.remaining", max(0, limitMinutes - todayMinutes))
-    }
-    var screenTimeFraction: Double {
-        guard limitMinutes > 0 else { return 0 }
-        return min(1, Double(todayMinutes) / Double(limitMinutes))
-    }
+    /// The card renders only when real local usage exists.
+    var showsScreenTimeCard: Bool { trackedUsageSeconds != nil }
+    var trackedUsageMinutes: Int? { trackedUsageSeconds.map { $0 / 60 } }
+    var screenTimeText: String { hoursMinutes(trackedUsageMinutes ?? 0) }
 
     func load() async {
         do { tasks = try await service.fetchTasks() }
         catch { /* keep last tasks; Home stays usable offline */ }
+        refreshScreenTimeUsage()
 #if DEBUG
         if tasks.isEmpty && AppRuntime.hasDebugRoute { tasks = BolajonSampleData.tasks }
 #endif
+    }
+
+    /// Re-reads today's local screen-time usage (safe to call on appear / foreground).
+    func refreshScreenTimeUsage() {
+        trackedUsageSeconds = screenTimeUsage.todayTrackedUsageSeconds()
     }
 
     func complete(_ task: OilaDeviceTask) async {
@@ -343,8 +356,17 @@ final class BolajonHomeViewModel: ObservableObject {
         guard !isSendingSOS, !sosSent else { return }
         isSendingSOS = true
         defer { isSendingSOS = false }
+        // Attach the latest known location + battery so the parent sees where/how the child
+        // is. Any field may be nil (location unavailable / battery unknown) — the SOS still
+        // sends; the client omits missing fields.
+        let context = telemetry.currentSOSContext()
         do {
-            try await service.sendSOS(lat: nil, lng: nil, accuracy: nil, batteryLevel: nil)
+            try await service.sendSOS(
+                lat: context.lat,
+                lng: context.lng,
+                accuracy: context.accuracy,
+                batteryLevel: context.batteryPercent.map(Double.init)
+            )
             sosSent = true
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
@@ -362,6 +384,31 @@ final class BolajonHomeViewModel: ObservableObject {
         if h > 0 && m > 0 { return "\(h)\(hu) \(m)\(mu)" }
         if h > 0 { return "\(h)\(hu)" }
         return "\(m)\(mu)"
+    }
+}
+
+// MARK: - Screen-time usage source
+
+/// Supplies today's locally-collected screen-time usage (parent-tracked apps) for the Home
+/// card. Nil when unavailable, so the card can hide.
+/// The requirement (not the protocol) is `@MainActor` so a conformer's `init` stays
+/// nonisolated and usable as a default argument.
+protocol ScreenTimeUsageProviding {
+    /// Today's total tracked-app usage in seconds, or nil when no local data is available
+    /// (Screen Time not authorized, no apps configured, or no report written yet).
+    @MainActor
+    func todayTrackedUsageSeconds() -> Int?
+}
+
+/// Reads the DeviceActivity report snapshot the app already collects (see
+/// `ScreenTimeUsageCoordinator`), gated on Screen Time authorization + a current-day snapshot.
+struct LocalScreenTimeUsageProvider: ScreenTimeUsageProviding {
+    func todayTrackedUsageSeconds() -> Int? {
+        guard ScreenTimeAuthorizationManager.shared.status == .granted else { return nil }
+        let coordinator = ScreenTimeUsageCoordinator.shared
+        guard let snapshot = coordinator.latestSnapshot,
+              snapshot.dayKey == coordinator.currentDayKey else { return nil }
+        return snapshot.totalUsedTime
     }
 }
 
