@@ -7,8 +7,67 @@ extension PushCommandRouter {
             event: resolveEvent(from: userInfo),
             dsn: resolveDSN(from: userInfo),
             title: alert.0,
-            body: alert.1
+            body: alert.1,
+            recordingCommand: resolveRecordingCommand(from: userInfo)
         )
+    }
+}
+
+// MARK: - Recording trigger parsing
+
+private extension PushCommandRouter {
+    /// Extracts a TriggerRecordingDto-shaped recording command with tolerant key spellings.
+    /// Returns nil without a recording id — the id is required to upload the finished clip.
+    static func resolveRecordingCommand(from userInfo: [AnyHashable: Any]) -> PushRecordingCommand? {
+        let idKeys = ["recordingId", "recording_id", "recordingID", "recordingsId", "id"]
+        let typeKeys = ["recordingType", "recording_type", "mediaType", "media_type", "type"]
+        let durationKeys = ["durationSeconds", "duration_seconds", "durationSec", "duration"]
+        let cameraKeys = ["cameraType", "camera_type", "camera"]
+
+        guard let recordingID = resolveRecordingString(keys: idKeys, in: userInfo)?.trimmedNonEmpty else {
+            return nil
+        }
+
+        // `type` doubles as the event key ("recording_trigger"), so only accept values that
+        // actually parse as a media type; otherwise fall back to sniffing the raw payload.
+        let type = resolveRecordingString(keys: typeKeys, in: userInfo)
+            .flatMap { PushRecordingMediaType(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+            ?? inferredRecordingType(from: userInfo)
+
+        let duration = resolveRecordingString(keys: durationKeys, in: userInfo)
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+
+        let camera = resolveRecordingString(keys: cameraKeys, in: userInfo)
+            .flatMap { PushRecordingCameraType(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+
+        return PushRecordingCommand(
+            recordingID: recordingID,
+            type: type,
+            durationSeconds: PushRecordingCommand.clampedDuration(duration),
+            cameraType: camera
+        )
+    }
+
+    /// Checks the top-level userInfo first, then every nested payload candidate, key by key —
+    /// so `recordingId` anywhere wins over a stray top-level `id`.
+    static func resolveRecordingString(keys: [String], in userInfo: [AnyHashable: Any]) -> String? {
+        let candidates = extractPayloadCandidates(from: userInfo)
+        for key in keys {
+            if let value = stringValue(userInfo[key])?.trimmedNonEmpty {
+                return value
+            }
+            for candidate in candidates {
+                if let value = stringValue(candidate[key])?.trimmedNonEmpty {
+                    return value
+                }
+            }
+        }
+        return nil
+    }
+
+    static func inferredRecordingType(from userInfo: [AnyHashable: Any]) -> PushRecordingMediaType {
+        let event = resolveEvent(from: userInfo)
+        return event.contains("video") ? .video : .audio
     }
 }
 

@@ -77,6 +77,17 @@ enum AppRuntime {
 #endif
     }
 
+    /// DEBUG: simulate a parent-triggered recording once at startup (routed through
+    /// PushCommandRouter, i.e. the full production path). Format: "recordingID[:durationSeconds]",
+    /// e.g. SMARTOILA_DEBUG_TRIGGER_RECORDING=rec-123:15
+    static var debugTriggerRecording: String? {
+#if DEBUG
+        return trimmed("SMARTOILA_DEBUG_TRIGGER_RECORDING")
+#else
+        return nil
+#endif
+    }
+
 }
 
 enum DebugRoute: String {

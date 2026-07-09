@@ -149,11 +149,20 @@ extension RootView {
     }
 
     func handleLockRefreshNotification(_ notification: Notification) {
-        guard AppRuntime.screenTimeFeaturesEnabled else { return }
-        guard shouldRunLocalChildServices else { return }
-        guard shouldHandlePush(notification: notification, currentDSN: sessionStore.dsn) else { return }
-        Task {
-            await lockCoordinator.refreshNow()
+        let actions = LockPushRefreshPolicy.actions(
+            pushMatchesSession: shouldHandlePush(notification: notification, currentDSN: sessionStore.dsn),
+            screenTimeFeaturesEnabled: AppRuntime.screenTimeFeaturesEnabled,
+            shouldRunLocalChildServices: shouldRunLocalChildServices
+        )
+        if actions.refreshOilaLockState {
+            // Cuts up-to-30s poll latency to ~0 when the parent locks/unlocks via push.
+            // refreshLockNow() no-ops unless the telemetry service is running (i.e. paired).
+            oilaTelemetry.refreshLockNow()
+        }
+        if actions.refreshLegacyLockCoordinator {
+            Task {
+                await lockCoordinator.refreshNow()
+            }
         }
     }
 }
@@ -181,8 +190,17 @@ private extension RootView {
     }
 
     func syncMediaService(with dsn: String?) {
-        // The covert-recording trigger arrives via push + PUT /device/recordings/{id}/complete.
+        // Legacy recordings WebSocket backend is dead — keep the coordinator parked (nil → stop).
         DeviceRecordingCoordinator.shared.start(dsn: nil)
+        // The covert-recording trigger arrives via push (PushCommandRouter →
+        // .pushShouldStartRecording) and uploads via PUT /device/recordings/{id}/complete.
+        // Live only with an oila360 device session; onboardingCompleted keeps the mic
+        // permission prompt from firing mid-onboarding (mirrors the telemetry gate).
+        if let dsn, !dsn.isEmpty, sessionStore.onboardingCompleted, sessionStore.oilaPaired {
+            OilaRecordingTriggerService.shared.start(dsn: dsn)
+        } else {
+            OilaRecordingTriggerService.shared.stop()
+        }
     }
 
     func syncPushToken(with dsn: String?) async {
