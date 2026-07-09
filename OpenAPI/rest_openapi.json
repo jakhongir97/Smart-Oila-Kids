@@ -5,13 +5,93 @@
     "version": "2.0.0"
   },
   "paths": {
+    "/api/device/recordings/{id}/complete": {
+      "put": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Complete device recording (oila360)",
+        "description": "oila360 child device endpoint used by OilaDeviceClient.completeRecording. Path form matches the migrated Swift call `device/recordings/{id}/complete`; mirrors the legacy `/api/devices/recordings/{id}/complete`.",
+        "operationId": "device_complete_recording_api_device_recordings__id__complete_put",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "durationSeconds": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/api/device/apps/removal-attempt": {
+      "post": {
+        "tags": [
+          "Applications"
+        ],
+        "summary": "Report app removal attempt (oila360)",
+        "description": "oila360 child device endpoint used by OilaDeviceClient.reportRemovalAttempt. Path form matches the migrated Swift call `device/apps/removal-attempt`; mirrors the legacy `/api/devices/{dsn}/applications/removal-attempt`.",
+        "operationId": "device_removal_attempt_api_device_apps_removal_attempt_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "packageName": {
+                    "type": "string"
+                  },
+                  "applicationName": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/api/auth_v2": {
       "post": {
         "tags": [
           "Authentication"
         ],
-        "summary": "Ð ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°Ñ†Ð¸Ñ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ Ð¸ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ° ÐºÐ¾Ð´Ð°",
-        "description": "Ð ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°Ñ†Ð¸Ñ Ð½Ð¾Ð²Ð¾Ð³Ð¾ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ Ð¸ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ° SMS ÐºÐ¾Ð´Ð°\n\n- Ð¡Ð¾Ð·Ð´Ð°Ñ‘Ñ‚ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ, ÐµÑÐ»Ð¸ ÐµÐ³Ð¾ Ð½ÐµÑ‚\n- Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰ÐµÐ³Ð¾ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ, ÐµÑÐ»Ð¸ ÑƒÐ¶Ðµ Ð·Ð°Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½\n- ÐžÑ‚Ð¿Ñ€Ð°Ð²Ð»ÑÐµÑ‚ SMS ÐºÐ¾Ð´ Ð´Ð»Ñ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ñ (ÐºÑ€Ð¾Ð¼Ðµ ÑÐ¿ÐµÑ†Ð¸Ð°Ð»ÑŒÐ½Ñ‹Ñ… Ð°ÐºÐºÐ°ÑƒÐ½Ñ‚Ð¾Ð²)",
+        "summary": "\u00d0 \u00d0\u00b5\u00d0\u00b3\u00d0\u00b8\u00d1\u0081\u00d1\u201a\u00d1\u20ac\u00d0\u00b0\u00d1\u2020\u00d0\u00b8\u00d1\u008f \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u008f \u00d0\u00b8 \u00d0\u00be\u00d1\u201a\u00d0\u00bf\u00d1\u20ac\u00d0\u00b0\u00d0\u00b2\u00d0\u00ba\u00d0\u00b0 \u00d0\u00ba\u00d0\u00be\u00d0\u00b4\u00d0\u00b0",
+        "description": "\u00d0 \u00d0\u00b5\u00d0\u00b3\u00d0\u00b8\u00d1\u0081\u00d1\u201a\u00d1\u20ac\u00d0\u00b0\u00d1\u2020\u00d0\u00b8\u00d1\u008f \u00d0\u00bd\u00d0\u00be\u00d0\u00b2\u00d0\u00be\u00d0\u00b3\u00d0\u00be \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u008f \u00d0\u00b8 \u00d0\u00be\u00d1\u201a\u00d0\u00bf\u00d1\u20ac\u00d0\u00b0\u00d0\u00b2\u00d0\u00ba\u00d0\u00b0 SMS \u00d0\u00ba\u00d0\u00be\u00d0\u00b4\u00d0\u00b0\n\n- \u00d0\u00a1\u00d0\u00be\u00d0\u00b7\u00d0\u00b4\u00d0\u00b0\u00d1\u2018\u00d1\u201a \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u008f, \u00d0\u00b5\u00d1\u0081\u00d0\u00bb\u00d0\u00b8 \u00d0\u00b5\u00d0\u00b3\u00d0\u00be \u00d0\u00bd\u00d0\u00b5\u00d1\u201a\n- \u00d0\u2019\u00d0\u00be\u00d0\u00b7\u00d0\u00b2\u00d1\u20ac\u00d0\u00b0\u00d1\u2030\u00d0\u00b0\u00d0\u00b5\u00d1\u201a \u00d1\u0081\u00d1\u0192\u00d1\u2030\u00d0\u00b5\u00d1\u0081\u00d1\u201a\u00d0\u00b2\u00d1\u0192\u00d1\u017d\u00d1\u2030\u00d0\u00b5\u00d0\u00b3\u00d0\u00be \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u008f, \u00d0\u00b5\u00d1\u0081\u00d0\u00bb\u00d0\u00b8 \u00d1\u0192\u00d0\u00b6\u00d0\u00b5 \u00d0\u00b7\u00d0\u00b0\u00d1\u20ac\u00d0\u00b5\u00d0\u00b3\u00d0\u00b8\u00d1\u0081\u00d1\u201a\u00d1\u20ac\u00d0\u00b8\u00d1\u20ac\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d0\u00bd\n- \u00d0\u017e\u00d1\u201a\u00d0\u00bf\u00d1\u20ac\u00d0\u00b0\u00d0\u00b2\u00d0\u00bb\u00d1\u008f\u00d0\u00b5\u00d1\u201a SMS \u00d0\u00ba\u00d0\u00be\u00d0\u00b4 \u00d0\u00b4\u00d0\u00bb\u00d1\u008f \u00d0\u00bf\u00d0\u00be\u00d0\u00b4\u00d1\u201a\u00d0\u00b2\u00d0\u00b5\u00d1\u20ac\u00d0\u00b6\u00d0\u00b4\u00d0\u00b5\u00d0\u00bd\u00d0\u00b8\u00d1\u008f (\u00d0\u00ba\u00d1\u20ac\u00d0\u00be\u00d0\u00bc\u00d0\u00b5 \u00d1\u0081\u00d0\u00bf\u00d0\u00b5\u00d1\u2020\u00d0\u00b8\u00d0\u00b0\u00d0\u00bb\u00d1\u0152\u00d0\u00bd\u00d1\u2039\u00d1\u2026 \u00d0\u00b0\u00d0\u00ba\u00d0\u00ba\u00d0\u00b0\u00d1\u0192\u00d0\u00bd\u00d1\u201a\u00d0\u00be\u00d0\u00b2)",
         "operationId": "register_and_send_code_api_auth_v2_post",
         "requestBody": {
           "content": {
@@ -52,8 +132,8 @@
         "tags": [
           "Authentication"
         ],
-        "summary": "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ Ð¸ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ° ÐºÐ¾Ð´Ð°",
-        "description": "ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° ÑÑƒÑ‰ÐµÑÑ‚Ð²Ð¾Ð²Ð°Ð½Ð¸Ñ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ Ð¸ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ° SMS ÐºÐ¾Ð´Ð°\n\n- ÐŸÑ€Ð¾Ð²ÐµÑ€ÑÐµÑ‚, Ð·Ð°Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½ Ð»Ð¸ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ\n- Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ Ð¸Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†Ð¸ÑŽ Ð¾ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ðµ\n- ÐžÑ‚Ð¿Ñ€Ð°Ð²Ð»ÑÐµÑ‚ SMS ÐºÐ¾Ð´",
+        "summary": "\u00d0\u0178\u00d1\u20ac\u00d0\u00be\u00d0\u00b2\u00d0\u00b5\u00d1\u20ac\u00d0\u00ba\u00d0\u00b0 \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u008f \u00d0\u00b8 \u00d0\u00be\u00d1\u201a\u00d0\u00bf\u00d1\u20ac\u00d0\u00b0\u00d0\u00b2\u00d0\u00ba\u00d0\u00b0 \u00d0\u00ba\u00d0\u00be\u00d0\u00b4\u00d0\u00b0",
+        "description": "\u00d0\u0178\u00d1\u20ac\u00d0\u00be\u00d0\u00b2\u00d0\u00b5\u00d1\u20ac\u00d0\u00ba\u00d0\u00b0 \u00d1\u0081\u00d1\u0192\u00d1\u2030\u00d0\u00b5\u00d1\u0081\u00d1\u201a\u00d0\u00b2\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d0\u00bd\u00d0\u00b8\u00d1\u008f \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u008f \u00d0\u00b8 \u00d0\u00be\u00d1\u201a\u00d0\u00bf\u00d1\u20ac\u00d0\u00b0\u00d0\u00b2\u00d0\u00ba\u00d0\u00b0 SMS \u00d0\u00ba\u00d0\u00be\u00d0\u00b4\u00d0\u00b0\n\n- \u00d0\u0178\u00d1\u20ac\u00d0\u00be\u00d0\u00b2\u00d0\u00b5\u00d1\u20ac\u00d1\u008f\u00d0\u00b5\u00d1\u201a, \u00d0\u00b7\u00d0\u00b0\u00d1\u20ac\u00d0\u00b5\u00d0\u00b3\u00d0\u00b8\u00d1\u0081\u00d1\u201a\u00d1\u20ac\u00d0\u00b8\u00d1\u20ac\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d0\u00bd \u00d0\u00bb\u00d0\u00b8 \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u0152\n- \u00d0\u2019\u00d0\u00be\u00d0\u00b7\u00d0\u00b2\u00d1\u20ac\u00d0\u00b0\u00d1\u2030\u00d0\u00b0\u00d0\u00b5\u00d1\u201a \u00d0\u00b8\u00d0\u00bd\u00d1\u201e\u00d0\u00be\u00d1\u20ac\u00d0\u00bc\u00d0\u00b0\u00d1\u2020\u00d0\u00b8\u00d1\u017d \u00d0\u00be \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d0\u00b5\n- \u00d0\u017e\u00d1\u201a\u00d0\u00bf\u00d1\u20ac\u00d0\u00b0\u00d0\u00b2\u00d0\u00bb\u00d1\u008f\u00d0\u00b5\u00d1\u201a SMS \u00d0\u00ba\u00d0\u00be\u00d0\u00b4",
         "operationId": "login_with_user_check_api_v2_login_post",
         "requestBody": {
           "content": {
@@ -94,8 +174,8 @@
         "tags": [
           "Authentication"
         ],
-        "summary": "ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ Ð²Ñ…Ð¾Ð´Ð° Ð¿Ð¾ SMS ÐºÐ¾Ð´Ñƒ",
-        "description": "ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ Ð²Ñ…Ð¾Ð´Ð° Ð¿Ð¾ SMS ÐºÐ¾Ð´Ñƒ\n\n- ÐŸÑ€Ð¾Ð²ÐµÑ€ÑÐµÑ‚ SMS ÐºÐ¾Ð´\n- ÐÐºÑ‚Ð¸Ð²Ð¸Ñ€ÑƒÐµÑ‚ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ\n- Ð¡Ð¾Ð·Ð´Ð°Ñ‘Ñ‚ Ð´ÐµÐ¼Ð¾-Ð°ÐºÐºÐ°ÑƒÐ½Ñ‚ Ð´Ð»Ñ Ð½Ð¾Ð²Ñ‹Ñ… Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÐµÐ¹\n- Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ access Ð¸ refresh Ñ‚Ð¾ÐºÐµÐ½Ñ‹",
+        "summary": "\u00d0\u0178\u00d0\u00be\u00d0\u00b4\u00d1\u201a\u00d0\u00b2\u00d0\u00b5\u00d1\u20ac\u00d0\u00b6\u00d0\u00b4\u00d0\u00b5\u00d0\u00bd\u00d0\u00b8\u00d0\u00b5 \u00d0\u00b2\u00d1\u2026\u00d0\u00be\u00d0\u00b4\u00d0\u00b0 \u00d0\u00bf\u00d0\u00be SMS \u00d0\u00ba\u00d0\u00be\u00d0\u00b4\u00d1\u0192",
+        "description": "\u00d0\u0178\u00d0\u00be\u00d0\u00b4\u00d1\u201a\u00d0\u00b2\u00d0\u00b5\u00d1\u20ac\u00d0\u00b6\u00d0\u00b4\u00d0\u00b5\u00d0\u00bd\u00d0\u00b8\u00d0\u00b5 \u00d0\u00b2\u00d1\u2026\u00d0\u00be\u00d0\u00b4\u00d0\u00b0 \u00d0\u00bf\u00d0\u00be SMS \u00d0\u00ba\u00d0\u00be\u00d0\u00b4\u00d1\u0192\n\n- \u00d0\u0178\u00d1\u20ac\u00d0\u00be\u00d0\u00b2\u00d0\u00b5\u00d1\u20ac\u00d1\u008f\u00d0\u00b5\u00d1\u201a SMS \u00d0\u00ba\u00d0\u00be\u00d0\u00b4\n- \u00d0\u0090\u00d0\u00ba\u00d1\u201a\u00d0\u00b8\u00d0\u00b2\u00d0\u00b8\u00d1\u20ac\u00d1\u0192\u00d0\u00b5\u00d1\u201a \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d1\u008f\n- \u00d0\u00a1\u00d0\u00be\u00d0\u00b7\u00d0\u00b4\u00d0\u00b0\u00d1\u2018\u00d1\u201a \u00d0\u00b4\u00d0\u00b5\u00d0\u00bc\u00d0\u00be-\u00d0\u00b0\u00d0\u00ba\u00d0\u00ba\u00d0\u00b0\u00d1\u0192\u00d0\u00bd\u00d1\u201a \u00d0\u00b4\u00d0\u00bb\u00d1\u008f \u00d0\u00bd\u00d0\u00be\u00d0\u00b2\u00d1\u2039\u00d1\u2026 \u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d1\u201a\u00d0\u00b5\u00d0\u00bb\u00d0\u00b5\u00d0\u00b9\n- \u00d0\u2019\u00d0\u00be\u00d0\u00b7\u00d0\u00b2\u00d1\u20ac\u00d0\u00b0\u00d1\u2030\u00d0\u00b0\u00d0\u00b5\u00d1\u201a access \u00d0\u00b8 refresh \u00d1\u201a\u00d0\u00be\u00d0\u00ba\u00d0\u00b5\u00d0\u00bd\u00d1\u2039",
         "operationId": "authenticate_v2_api_auth_v2_confirm_post",
         "requestBody": {
           "content": {
@@ -136,8 +216,8 @@
         "tags": [
           "Authentication"
         ],
-        "summary": "ÐžÐ±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ access Ñ‚Ð¾ÐºÐµÐ½Ð°",
-        "description": "ÐžÐ±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ access Ñ‚Ð¾ÐºÐµÐ½Ð° Ñ Ð¿Ð¾Ð¼Ð¾Ñ‰ÑŒÑŽ refresh Ñ‚Ð¾ÐºÐµÐ½Ð°\n\n- Ð’Ð°Ð»Ð¸Ð´Ð¸Ñ€ÑƒÐµÑ‚ refresh Ñ‚Ð¾ÐºÐµÐ½\n- Ð“ÐµÐ½ÐµÑ€Ð¸Ñ€ÑƒÐµÑ‚ Ð½Ð¾Ð²ÑƒÑŽ Ð¿Ð°Ñ€Ñƒ Ñ‚Ð¾ÐºÐµÐ½Ð¾Ð²",
+        "summary": "\u00d0\u017e\u00d0\u00b1\u00d0\u00bd\u00d0\u00be\u00d0\u00b2\u00d0\u00bb\u00d0\u00b5\u00d0\u00bd\u00d0\u00b8\u00d0\u00b5 access \u00d1\u201a\u00d0\u00be\u00d0\u00ba\u00d0\u00b5\u00d0\u00bd\u00d0\u00b0",
+        "description": "\u00d0\u017e\u00d0\u00b1\u00d0\u00bd\u00d0\u00be\u00d0\u00b2\u00d0\u00bb\u00d0\u00b5\u00d0\u00bd\u00d0\u00b8\u00d0\u00b5 access \u00d1\u201a\u00d0\u00be\u00d0\u00ba\u00d0\u00b5\u00d0\u00bd\u00d0\u00b0 \u00d1\u0081 \u00d0\u00bf\u00d0\u00be\u00d0\u00bc\u00d0\u00be\u00d1\u2030\u00d1\u0152\u00d1\u017d refresh \u00d1\u201a\u00d0\u00be\u00d0\u00ba\u00d0\u00b5\u00d0\u00bd\u00d0\u00b0\n\n- \u00d0\u2019\u00d0\u00b0\u00d0\u00bb\u00d0\u00b8\u00d0\u00b4\u00d0\u00b8\u00d1\u20ac\u00d1\u0192\u00d0\u00b5\u00d1\u201a refresh \u00d1\u201a\u00d0\u00be\u00d0\u00ba\u00d0\u00b5\u00d0\u00bd\n- \u00d0\u201c\u00d0\u00b5\u00d0\u00bd\u00d0\u00b5\u00d1\u20ac\u00d0\u00b8\u00d1\u20ac\u00d1\u0192\u00d0\u00b5\u00d1\u201a \u00d0\u00bd\u00d0\u00be\u00d0\u00b2\u00d1\u0192\u00d1\u017d \u00d0\u00bf\u00d0\u00b0\u00d1\u20ac\u00d1\u0192 \u00d1\u201a\u00d0\u00be\u00d0\u00ba\u00d0\u00b5\u00d0\u00bd\u00d0\u00be\u00d0\u00b2",
         "operationId": "refresh_access_token_api_auth_refresh_token_post",
         "requestBody": {
           "content": {
@@ -4800,6 +4880,42 @@
           }
         }
       }
+    },
+    "/api/device/files": {
+      "post": {
+        "summary": "Upload a device file (multipart) \u2014 oila360 v1 device storage",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "get": {
+        "summary": "List device files (paginated) \u2014 oila360 v1 device storage",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/device/files/{id}": {
+      "get": {
+        "summary": "Get device file metadata + download URL \u2014 oila360 v1",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a device file \u2014 oila360 v1",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6090,7 +6206,7 @@
           "today_exp": {
             "type": "integer",
             "title": "Today Exp",
-            "description": "ÐžÑÑ‚Ð°Ð»Ð¾ÑÑŒ Ð² Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸Ð¸ Ð½Ð° ÑÐµÐ³Ð¾Ð´Ð½Ñ"
+            "description": "\u00d0\u017e\u00d1\u0081\u00d1\u201a\u00d0\u00b0\u00d0\u00bb\u00d0\u00be\u00d1\u0081\u00d1\u0152 \u00d0\u00b2 \u00d0\u00b8\u00d1\u0081\u00d0\u00bf\u00d0\u00be\u00d0\u00bb\u00d1\u0152\u00d0\u00b7\u00d0\u00be\u00d0\u00b2\u00d0\u00b0\u00d0\u00bd\u00d0\u00b8\u00d0\u00b8 \u00d0\u00bd\u00d0\u00b0 \u00d1\u0081\u00d0\u00b5\u00d0\u00b3\u00d0\u00be\u00d0\u00b4\u00d0\u00bd\u00d1\u008f"
           }
         },
         "type": "object",

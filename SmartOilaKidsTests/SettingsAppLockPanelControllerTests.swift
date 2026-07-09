@@ -1334,6 +1334,201 @@ final class PushCommandRouterTests: XCTestCase {
     }
 }
 
+// MARK: - Recording trigger (push parsing + routing + lock policy)
+
+final class PushRecordingCommandParsingTests: XCTestCase {
+    func testParsesTriggerRecordingDtoFromNestedDataWithTolerantKeys() {
+        let payload = PushCommandRouter.parsePayload(from: [
+            "event": " trigger_recording ",
+            "data": [
+                "recordingId": " rec-42 ",
+                "type": "Video",
+                "durationSeconds": "45",
+                "cameraType": "Front"
+            ]
+        ])
+
+        let command = payload.recordingCommand
+        XCTAssertEqual(command?.recordingID, "rec-42")
+        XCTAssertEqual(command?.type, .video)
+        XCTAssertEqual(command?.durationSeconds, 45)
+        XCTAssertEqual(command?.cameraType, .front)
+    }
+
+    func testClampsOutOfRangeDurationAndDefaultsToAudioWhenTypeMissing() {
+        let payload = PushCommandRouter.parsePayload(from: [
+            "event": "record_audio",
+            "recording_id": "rec-9",
+            "duration": 9000
+        ])
+
+        let command = payload.recordingCommand
+        XCTAssertEqual(command?.recordingID, "rec-9")
+        XCTAssertEqual(command?.type, .audio)
+        XCTAssertEqual(command?.durationSeconds, 300)
+        XCTAssertNil(command?.cameraType)
+    }
+
+    func testInfersVideoTypeFromEventWhenTypeUnparseable() {
+        let payload = PushCommandRouter.parsePayload(from: [
+            "event": "record_video",
+            "recordingId": "rec-v"
+        ])
+
+        XCTAssertEqual(payload.recordingCommand?.type, .video)
+        XCTAssertEqual(payload.recordingCommand?.durationSeconds, PushRecordingCommand.defaultDurationSeconds)
+    }
+
+    func testReturnsNilWithoutRecordingIdEvenForRecordingEvent() {
+        let payload = PushCommandRouter.parsePayload(from: [
+            "event": "trigger_recording",
+            "durationSeconds": 20
+        ])
+
+        XCTAssertNil(payload.recordingCommand)
+    }
+}
+
+final class PushRecordingRoutingTests: XCTestCase {
+    func testRecordingPushPostsStartRecordingWithParsedCommand() async {
+        let expectation = expectation(description: "start recording posted")
+        var receivedCommand: PushRecordingCommand?
+        var receivedDSN: String?
+        let token = NotificationCenter.default.addObserver(
+            forName: .pushShouldStartRecording,
+            object: nil,
+            queue: nil
+        ) { notification in
+            receivedCommand = notification.userInfo?[PushUserInfoKeys.recordingCommand] as? PushRecordingCommand
+            receivedDSN = notification.userInfo?[PushUserInfoKeys.dsn] as? String
+            expectation.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        PushCommandRouter.handle(
+            userInfo: [
+                "event": " trigger_recording ",
+                "dsn": " child-9 ",
+                "recordingId": " rec-77 ",
+                "type": "Audio",
+                "durationSeconds": "30"
+            ],
+            deliveryContext: .backgroundFetch
+        )
+
+        await fulfillment(of: [expectation], timeout: 2)
+        XCTAssertEqual(receivedCommand?.recordingID, "rec-77")
+        XCTAssertEqual(receivedCommand?.type, .audio)
+        XCTAssertEqual(receivedCommand?.durationSeconds, 30)
+        XCTAssertEqual(receivedDSN, "child-9")
+    }
+}
+
+final class LockPushRefreshPolicyTests: XCTestCase {
+    func testAlwaysRefreshesOilaLockStateWhenPushMatchesEvenWithScreenTimeDisabled() {
+        let actions = LockPushRefreshPolicy.actions(
+            pushMatchesSession: true,
+            screenTimeFeaturesEnabled: false,
+            shouldRunLocalChildServices: false
+        )
+        XCTAssertTrue(actions.refreshOilaLockState)
+        XCTAssertFalse(actions.refreshLegacyLockCoordinator)
+    }
+
+    func testRefreshesLegacyCoordinatorOnlyWhenScreenTimeEnabledAndServicesRunning() {
+        let actions = LockPushRefreshPolicy.actions(
+            pushMatchesSession: true,
+            screenTimeFeaturesEnabled: true,
+            shouldRunLocalChildServices: true
+        )
+        XCTAssertTrue(actions.refreshOilaLockState)
+        XCTAssertTrue(actions.refreshLegacyLockCoordinator)
+    }
+
+    func testNoRefreshWhenPushDoesNotMatchSession() {
+        let actions = LockPushRefreshPolicy.actions(
+            pushMatchesSession: false,
+            screenTimeFeaturesEnabled: true,
+            shouldRunLocalChildServices: true
+        )
+        XCTAssertFalse(actions.refreshOilaLockState)
+        XCTAssertFalse(actions.refreshLegacyLockCoordinator)
+    }
+}
+
+@MainActor
+final class OilaRecordingTriggerServiceTests: XCTestCase {
+    func testAudioCommandRecordsThenUploadsWithClampedDuration() async {
+        var recordedArgs: (String, TimeInterval)?
+        var uploadedArgs: (String, URL, Int)?
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).m4a")
+        try? Data("audio".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let service = OilaRecordingTriggerService(
+            recordAudioAction: { id, duration in
+                recordedArgs = (id, duration)
+                return fileURL
+            },
+            uploadAction: { id, url, duration in
+                uploadedArgs = (id, url, duration)
+            }
+        )
+        service.start(dsn: "child-1")
+
+        await service.handleCommand(
+            PushRecordingCommand(
+                recordingID: "rec-1",
+                type: .audio,
+                durationSeconds: 20,
+                cameraType: nil
+            )
+        )
+
+        XCTAssertEqual(recordedArgs?.0, "rec-1")
+        XCTAssertEqual(recordedArgs?.1, 20)
+        XCTAssertEqual(uploadedArgs?.0, "rec-1")
+        XCTAssertEqual(uploadedArgs?.2, 20)
+        XCTAssertNil(service.activeRecordingID)
+    }
+
+    func testVideoCommandIsSkippedInAudioOnlyV1() async {
+        var recordCalled = false
+        let service = OilaRecordingTriggerService(
+            recordAudioAction: { _, _ in
+                recordCalled = true
+                return FileManager.default.temporaryDirectory.appendingPathComponent("x.m4a")
+            },
+            uploadAction: { _, _, _ in }
+        )
+        service.start(dsn: "child-1")
+
+        await service.handleCommand(
+            PushRecordingCommand(recordingID: "rec-v", type: .video, durationSeconds: 10, cameraType: .back)
+        )
+
+        XCTAssertFalse(recordCalled)
+    }
+
+    func testCommandIgnoredWhenNotStarted() async {
+        var recordCalled = false
+        let service = OilaRecordingTriggerService(
+            recordAudioAction: { _, _ in
+                recordCalled = true
+                return FileManager.default.temporaryDirectory.appendingPathComponent("x.m4a")
+            },
+            uploadAction: { _, _, _ in }
+        )
+
+        await service.handleCommand(
+            PushRecordingCommand(recordingID: "rec-1", type: .audio, durationSeconds: 10, cameraType: nil)
+        )
+
+        XCTAssertFalse(recordCalled)
+    }
+}
+
 final class DeviceControlEventSharedStoreTests: XCTestCase {
     func testAppendNormalizesIdentifiersDeduplicatesRecentEventsAndRemovesSpecificIDs() throws {
         let suiteName = "DeviceControlEventSharedStoreDedupTests.\(UUID().uuidString)"

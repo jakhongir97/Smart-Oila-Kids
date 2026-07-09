@@ -142,6 +142,30 @@ enum OilaTelegramStatus {
     case expired
 }
 
+// MARK: - Device files
+
+/// Visibility for a device-storage file (`POST /device/files` `visibility`, `GET` list filter).
+enum OilaFileVisibility: String {
+    case privateVisibility = "Private"
+    case publicVisibility = "Public"
+}
+
+/// Metadata for a file in the device storage backend (`GET /device/files`,
+/// `GET /device/files/{id}`). Parsed tolerantly — the file schema is only loosely
+/// documented, so unknown keys are preserved in `raw`.
+struct OilaDeviceFile {
+    let id: String
+    let name: String?
+    let visibility: String?
+    let sizeBytes: Int?
+    let mimeType: String?
+    /// A freshly-signed download URL (present on the single-file GET; may be nil in list rows).
+    let downloadURL: String?
+    let createdAt: Date?
+    /// The full tolerant object, for callers needing keys not surfaced above.
+    let raw: [String: Any]
+}
+
 // MARK: - Service protocol
 
 protocol OilaDeviceServicing {
@@ -205,9 +229,12 @@ final class OilaDeviceClient: OilaDeviceServicing {
             "appVersion": OilaDeviceIdentity.appVersion,
             "timezone": OilaDeviceIdentity.timezone
         ]
-        // Send whatever push token the app currently holds. NOTE: this is the APNs token
-        // captured by PushTokenSyncCoordinator (UserDefaults key "PUSH_NOTIFICATION_TOKEN").
-        // oila360's fcmToken expects FCM, so this is best-effort until Firebase is wired (gap #3).
+        // TODO(firebase): this is an APNs device token standing in for an FCM token. The
+        // Firebase SDK is not yet integrated (blocked on team config `uz.oila360.child`), so we
+        // forward whatever push token PushTokenSyncCoordinator captured (UserDefaults key
+        // "PUSH_NOTIFICATION_TOKEN") in the `fcmToken` field. Best-effort: if no token is held
+        // yet, the key is simply omitted and pairing still succeeds. Swap for the real FCM
+        // registration token once the Firebase SDK lands.
         if let pushToken = userDefaults.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty {
             body["fcmToken"] = pushToken
         }
@@ -321,13 +348,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
     }
 
     func fetchActiveTasks() async throws -> [OilaDeviceTask] {
-        let data = try await requestJSON(
-            path: "device/tasks",
-            method: .get,
-            query: [URLQueryItem(name: "status", value: "Active")],
-            authorized: true
-        )
-        return Self.parseTasks(from: data)
+        try await fetchStatus("Active")
     }
 
     func fetchTasks() async throws -> [OilaDeviceTask] {
@@ -338,14 +359,32 @@ final class OilaDeviceClient: OilaDeviceServicing {
         return (try await active) + (try await completed)
     }
 
+    /// `GET /device/tasks` pagination: the spec marks `page`/`limit`/`sortOrder` as REQUIRED
+    /// (limit max 100), so every request sends them. Pages are walked until a short page
+    /// signals the end, hard-capped so a misbehaving backend can't loop us forever.
+    static let tasksPageLimit = 100
+    static let tasksMaxPages = 10
+
     private func fetchStatus(_ status: String) async throws -> [OilaDeviceTask] {
-        let data = try await requestJSON(
-            path: "device/tasks",
-            method: .get,
-            query: [URLQueryItem(name: "status", value: status)],
-            authorized: true
-        )
-        return Self.parseTasks(from: data)
+        var tasks: [OilaDeviceTask] = []
+        for page in 1 ... Self.tasksMaxPages {
+            let data = try await requestJSON(
+                path: "device/tasks",
+                method: .get,
+                query: [
+                    URLQueryItem(name: "page", value: "\(page)"),
+                    URLQueryItem(name: "limit", value: "\(Self.tasksPageLimit)"),
+                    URLQueryItem(name: "sortOrder", value: "desc"),
+                    URLQueryItem(name: "status", value: status)
+                ],
+                authorized: true
+            )
+            let pageTasks = Self.parseTasks(from: data)
+            tasks += pageTasks
+            // A short (or empty) page means we've drained the collection.
+            if pageTasks.count < Self.tasksPageLimit { break }
+        }
+        return tasks
     }
 
     func completeTask(id: String) async throws {
@@ -354,6 +393,10 @@ final class OilaDeviceClient: OilaDeviceServicing {
 
     func updateFCMToken(_ token: String) async throws {
         userDefaults.set(token, forKey: "OILA_FCM_TOKEN")
+        // TODO(firebase): `token` here is an APNs device token (hex), not a Firebase FCM
+        // registration token — the Firebase SDK is not yet integrated (blocked on team config
+        // `uz.oila360.child`). We send it in `fcmToken` so the backend has *some* push address
+        // to reach this device; replace with the real FCM token once Firebase is wired.
         _ = try await requestJSON(
             path: "device/fcm-token",
             method: .patch,
@@ -460,6 +503,105 @@ final class OilaDeviceClient: OilaDeviceServicing {
         default:
             return "application/octet-stream"
         }
+    }
+
+    // MARK: Device files (storage backend for device-uploaded media)
+
+    /// Upload a file to the device storage backend (`POST /device/files`, multipart).
+    /// `file` is the binary part; `visibility` (Private|Public) is an optional text field.
+    /// Returns the tolerant unwrapped `data` object (the created file's metadata).
+    @discardableResult
+    func uploadFile(fileURL: URL, visibility: OilaFileVisibility? = nil) async throws -> [String: Any] {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var textFields: [(name: String, value: String)] = []
+        if let visibility {
+            textFields.append((name: "visibility", value: visibility.rawValue))
+        }
+        let bodyData = try Self.multipartFileBody(
+            fileURL: fileURL,
+            textFields: textFields,
+            boundary: boundary
+        )
+        let data = try await send(
+            path: "device/files",
+            method: .post,
+            bodyData: bodyData,
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            authorized: true
+        )
+        return (data as? [String: Any]) ?? [:]
+    }
+
+    /// List device files (`GET /device/files`). `page`, `limit`, `sortOrder` are REQUIRED by the
+    /// spec (limit max 100); `visibility`/`sortBy` are optional filters.
+    func fetchFiles(
+        visibility: OilaFileVisibility? = nil,
+        page: Int = 1,
+        limit: Int = 50,
+        sortBy: String? = nil,
+        sortOrder: String = "desc"
+    ) async throws -> [OilaDeviceFile] {
+        var query = [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "sortOrder", value: sortOrder)
+        ]
+        if let visibility {
+            query.append(URLQueryItem(name: "visibility", value: visibility.rawValue))
+        }
+        if let sortBy {
+            query.append(URLQueryItem(name: "sortBy", value: sortBy))
+        }
+        let data = try await requestJSON(path: "device/files", method: .get, query: query, authorized: true)
+        return Self.parseFiles(from: data)
+    }
+
+    /// Fetch one file's metadata + a fresh signed download URL (`GET /device/files/{id}`).
+    func fetchFile(id: String) async throws -> OilaDeviceFile {
+        let encodedID = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let data = try await requestJSON(path: "device/files/\(encodedID)", method: .get, authorized: true)
+        let object = (data as? [String: Any]) ?? [:]
+        return Self.parseFile(object)
+            ?? OilaDeviceFile(
+                id: id, name: nil, visibility: nil, sizeBytes: nil,
+                mimeType: nil, downloadURL: nil, createdAt: nil, raw: object
+            )
+    }
+
+    /// Delete a file (`DELETE /device/files/{id}`).
+    func deleteFile(id: String) async throws {
+        let encodedID = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        _ = try await requestJSON(path: "device/files/\(encodedID)", method: .delete, authorized: true)
+    }
+
+    /// Multipart builder for `POST /device/files`: one binary `file` part plus arbitrary text
+    /// fields (e.g. `visibility`). Generalizes `multipartBody` over its text fields.
+    private static func multipartFileBody(
+        fileURL: URL,
+        textFields: [(name: String, value: String)],
+        boundary: String
+    ) throws -> Data {
+        let fileData = try Data(contentsOf: fileURL)
+        let lineBreak = "\r\n"
+        var body = Data()
+
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\(lineBreak)"
+                .data(using: .utf8)!
+        )
+        body.append("Content-Type: \(mimeType(for: fileURL))\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append(fileData)
+        body.append(lineBreak.data(using: .utf8)!)
+
+        for field in textFields {
+            body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(field.name)\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+            body.append("\(field.value)\(lineBreak)".data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
+        return body
     }
 
     // MARK: - Core request
@@ -643,6 +785,36 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 completedAt: date(item, ["completedAt", "completed_at", "finishedAt"])
             )
         }
+    }
+
+    static func parseFiles(from data: Any) -> [OilaDeviceFile] {
+        let rawItems: [[String: Any]]
+        if let array = data as? [[String: Any]] {
+            rawItems = array
+        } else if let object = data as? [String: Any] {
+            rawItems = (object["items"] as? [[String: Any]])
+                ?? (object["files"] as? [[String: Any]])
+                ?? (object["results"] as? [[String: Any]])
+                ?? (object["data"] as? [[String: Any]])
+                ?? []
+        } else {
+            rawItems = []
+        }
+        return rawItems.compactMap { parseFile($0) }
+    }
+
+    static func parseFile(_ item: [String: Any]) -> OilaDeviceFile? {
+        guard let id = firstString(item, ["id", "fileId", "_id"]) else { return nil }
+        return OilaDeviceFile(
+            id: id,
+            name: firstString(item, ["name", "fileName", "filename", "originalName", "title"]),
+            visibility: firstString(item, ["visibility", "access"]),
+            sizeBytes: intValue(item, ["size", "sizeBytes", "bytes", "fileSize"]),
+            mimeType: firstString(item, ["mimeType", "mime", "contentType", "type"]),
+            downloadURL: firstString(item, ["downloadUrl", "downloadURL", "url", "signedUrl", "link"]),
+            createdAt: date(item, ["createdAt", "created_at", "uploadedAt"]),
+            raw: item
+        )
     }
 
     private static func intValue(_ dict: [String: Any], _ keys: [String]) -> Int? {

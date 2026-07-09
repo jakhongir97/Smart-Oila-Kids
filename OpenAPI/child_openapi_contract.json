@@ -1,19 +1,47 @@
 {
   "rest": [
     {
-      "method": "DELETE",
-      "path": "/api/devices/recordings/{}"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/devices/{}"
+      "method": "POST",
+      "path": "/api/auth/refresh_token"
     },
     {
       "method": "GET",
       "path": "/api/awards/devices/{}"
     },
     {
+      "method": "POST",
+      "path": "/api/awards/tasks/change-status/{}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/device/apps/removal-attempt"
+    },
+    {
       "method": "GET",
+      "path": "/api/device/files"
+    },
+    {
+      "method": "POST",
+      "path": "/api/device/files"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/device/files/{}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/device/files/{}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/device/recordings/{}/complete"
+    },
+    {
+      "method": "GET",
+      "path": "/api/devices/dsn/{}/firebase_notification_token"
+    },
+    {
+      "method": "POST",
       "path": "/api/devices/dsn/{}/firebase_notification_token"
     },
     {
@@ -25,12 +53,36 @@
       "path": "/api/devices/dsn/{}/global_application_lock"
     },
     {
+      "method": "POST",
+      "path": "/api/devices/notify/member"
+    },
+    {
       "method": "GET",
       "path": "/api/devices/recordings"
     },
     {
+      "method": "DELETE",
+      "path": "/api/devices/recordings/{}"
+    },
+    {
       "method": "GET",
       "path": "/api/devices/v2/{}/logs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/devices/{}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/devices/{}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/devices/{}/applications/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/devices/{}/applications/usage"
     },
     {
       "method": "GET",
@@ -45,11 +97,19 @@
       "path": "/api/devices/{}/system_info"
     },
     {
+      "method": "POST",
+      "path": "/api/devices/{}/upload-avatar"
+    },
+    {
       "method": "GET",
       "path": "/api/members/device/v2/{}/applications"
     },
     {
       "method": "GET",
+      "path": "/api/members/me"
+    },
+    {
+      "method": "PUT",
       "path": "/api/members/me"
     },
     {
@@ -61,56 +121,12 @@
       "path": "/api/members/me/firebase_notification_token"
     },
     {
-      "method": "GET",
-      "path": "/api/messages/{}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/refresh_token"
-    },
-    {
-      "method": "POST",
-      "path": "/api/awards/tasks/change-status/{}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/devices/dsn/{}/firebase_notification_token"
-    },
-    {
-      "method": "POST",
-      "path": "/api/devices/notify/member"
-    },
-    {
-      "method": "POST",
-      "path": "/api/devices/{}/applications/removal-attempt"
-    },
-    {
-      "method": "POST",
-      "path": "/api/devices/{}/applications/usage"
-    },
-    {
-      "method": "POST",
-      "path": "/api/devices/{}/upload-avatar"
-    },
-    {
       "method": "POST",
       "path": "/api/messages"
     },
     {
-      "method": "PUT",
-      "path": "/api/devices/recordings/{}/complete"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/devices/{}"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/devices/{}/applications/sync"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/members/me"
+      "method": "GET",
+      "path": "/api/messages/{}"
     }
   ],
   "websocket": [

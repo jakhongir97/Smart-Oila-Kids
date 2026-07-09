@@ -49,6 +49,7 @@
 		2927BD30F7B6F62113D99BC2 /* TaskViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 829055C541819D8137ACE39B /* TaskViewModel.swift */; };
 		292E9A051B52B506FC115488 /* GeoServiceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49EAE443DDF73B71557D58DE /* GeoServiceConfiguration.swift */; };
 		2BAFB457C4FEEE15AA431316 /* DeviceRecordingUploadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B1803702529D0BD80C316FE /* DeviceRecordingUploadService.swift */; };
+		A1C4E9F2B7D8035A6E19C241 /* OilaRecordingTriggerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C4E9F2B7D8035A6E19C240 /* OilaRecordingTriggerService.swift */; };
 		2D1EC014D6C80FA52378D8C8 /* TaskActionQueueCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B210252DEC3D072E87389E6E /* TaskActionQueueCoordinator.swift */; };
 		2E04D3AFD326BD044711283F /* MediaTelemetryInboxBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D93EAF119CFDF75CC238C6E3 /* MediaTelemetryInboxBridge.swift */; };
 		2FD8CC7B57FC0862346E565D /* SettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6882ACAFC1F3A67B34CF6668 /* SettingsComponents.swift */; };
@@ -379,6 +380,7 @@
 		4D0BC0423D576553D183CB83 /* SmartOilaKids.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartOilaKids.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4DF6DBF6858AD49CC68DFE5A /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		4F5920C0CE2BF9EF1B5DA724 /* EnvironmentAudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentAudioRecorder.swift; sourceTree = "<group>"; };
+		A1C4E9F2B7D8035A6E19C240 /* OilaRecordingTriggerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaRecordingTriggerService.swift; sourceTree = "<group>"; };
 		5067CE0B4251BE5369640F2A /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		50786F23B965A8D8ECF485A8 /* ScreenTimeUsageReportBridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageReportBridgeView.swift; sourceTree = "<group>"; };
 		50A4FBD238DCB41884D85305 /* MainDashboardWeekRange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDashboardWeekRange.swift; sourceTree = "<group>"; };
@@ -881,6 +883,7 @@
 				132F1A1918CA176BCEABE6A5 /* LiveAudioStreamCapture.swift */,
 				0703E19DCEAC71C8B84892FD /* LiveVideoStreamCapture.swift */,
 				9EF532791C5DAE3BB5FE6335 /* MediaTelemetryNotifier.swift */,
+				A1C4E9F2B7D8035A6E19C240 /* OilaRecordingTriggerService.swift */,
 			);
 			path = Media;
 			sourceTree = "<group>";
@@ -1350,6 +1353,7 @@
 				182DC08BA699BBA3BDADBF60 /* APIClient.swift in Sources */,
 				22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */,
 				069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */,
+				A1C4E9F2B7D8035A6E19C241 /* OilaRecordingTriggerService.swift in Sources */,
 				2144B6CB4608F4394AB7BA9D /* APIClientDebugLogger.swift in Sources */,
 				BCC2CC83B4505EE788B2A6CF /* APIClientModels.swift in Sources */,
 				EDB17EC67DF2C332EC48C674 /* APIRequestFactory.swift in Sources */,

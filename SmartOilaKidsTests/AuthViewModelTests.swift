@@ -1297,4 +1297,263 @@ final class OilaDeviceAppsTests: XCTestCase {
         XCTAssertEqual(bodyString?.contains("12"), true)
         XCTAssertEqual(data["status"] as? String, "completed")
     }
+
+    // MARK: Device files CRUD (task 3 — POST/GET/GET{id}/DELETE /device/files)
+
+    private func makeOilaFilesClient(access: String = "dev-bearer") -> OilaDeviceClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestHTTPURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let tokens = OilaRecordingTokenStore()
+        tokens.access = access
+        let defaults = UserDefaults(suiteName: "OilaFiles.\(UUID().uuidString)")!
+        return OilaDeviceClient(
+            baseURL: URL(string: "https://api.oila360.uz/api/v1")!,
+            session: session,
+            secureTokens: tokens,
+            userDefaults: defaults
+        )
+    }
+
+    func testUploadFilePostsMultipartFileAndVisibilityWithBearer() async throws {
+        var path: String?
+        var method: String?
+        var contentType: String?
+        var authHeader: String?
+        var bodyString: String?
+        TestHTTPURLProtocol.requestHandler = { request in
+            path = request.url?.path
+            method = request.httpMethod
+            contentType = request.value(forHTTPHeaderField: "Content-Type")
+            authHeader = request.value(forHTTPHeaderField: "Authorization")
+            if let body = TestHTTPURLProtocol.bodyData(for: request) {
+                bodyString = String(decoding: body, as: UTF8.self)
+            }
+            let payload = #"{"success":true,"data":{"id":"file-1","visibility":"Public"}}"#
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(payload.utf8))
+        }
+
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a")
+        try Data("clip-bytes".utf8).write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let client = makeOilaFilesClient()
+        let data = try await client.uploadFile(fileURL: tmp, visibility: .publicVisibility)
+
+        XCTAssertEqual(path, "/api/v1/device/files")
+        XCTAssertEqual(method, "POST")
+        XCTAssertEqual(authHeader, "Bearer dev-bearer")
+        XCTAssertEqual(contentType?.hasPrefix("multipart/form-data; boundary="), true)
+        XCTAssertEqual(bodyString?.contains("name=\"file\""), true)
+        XCTAssertEqual(bodyString?.contains("name=\"visibility\""), true)
+        XCTAssertEqual(bodyString?.contains("Public"), true)
+        XCTAssertEqual(data["id"] as? String, "file-1")
+    }
+
+    func testFetchFilesSendsRequiredPaginationAndVisibilityQuery() async throws {
+        var items: [URLQueryItem]?
+        var method: String?
+        TestHTTPURLProtocol.requestHandler = { request in
+            method = request.httpMethod
+            items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            let payload = #"{"success":true,"data":{"items":[{"id":"f1","name":"a.m4a"},{"id":"f2"}]}}"#
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(payload.utf8))
+        }
+
+        let client = makeOilaFilesClient()
+        let files = try await client.fetchFiles(visibility: .privateVisibility, page: 2, limit: 25, sortOrder: "asc")
+
+        XCTAssertEqual(method, "GET")
+        var query: [String: String] = [:]
+        for item in items ?? [] where item.value != nil {
+            query[item.name] = item.value
+        }
+        XCTAssertEqual(query["page"], "2")
+        XCTAssertEqual(query["limit"], "25")
+        XCTAssertEqual(query["sortOrder"], "asc")
+        XCTAssertEqual(query["visibility"], "Private")
+        XCTAssertEqual(files.count, 2)
+        XCTAssertEqual(files.first?.id, "f1")
+        XCTAssertEqual(files.first?.name, "a.m4a")
+    }
+
+    func testFetchFileGetsByIDAndParsesDownloadURL() async throws {
+        var path: String?
+        var method: String?
+        TestHTTPURLProtocol.requestHandler = { request in
+            path = request.url?.path
+            method = request.httpMethod
+            let payload = #"{"success":true,"data":{"id":"file-7","downloadUrl":"https://cdn/x.m4a","size":2048}}"#
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(payload.utf8))
+        }
+
+        let client = makeOilaFilesClient()
+        let file = try await client.fetchFile(id: "file-7")
+
+        XCTAssertEqual(path, "/api/v1/device/files/file-7")
+        XCTAssertEqual(method, "GET")
+        XCTAssertEqual(file.id, "file-7")
+        XCTAssertEqual(file.downloadURL, "https://cdn/x.m4a")
+        XCTAssertEqual(file.sizeBytes, 2048)
+    }
+
+    func testDeleteFileUsesDeleteVerbAndPath() async throws {
+        var path: String?
+        var method: String?
+        var authHeader: String?
+        TestHTTPURLProtocol.requestHandler = { request in
+            path = request.url?.path
+            method = request.httpMethod
+            authHeader = request.value(forHTTPHeaderField: "Authorization")
+            return (makeHTTPResponse(for: request.url!, statusCode: 200), Data(#"{"success":true}"#.utf8))
+        }
+
+        let client = makeOilaFilesClient()
+        try await client.deleteFile(id: "file-9")
+
+        XCTAssertEqual(path, "/api/v1/device/files/file-9")
+        XCTAssertEqual(method, "DELETE")
+        XCTAssertEqual(authHeader, "Bearer dev-bearer")
+    }
+}
+
+// MARK: - oila360 device tasks (GET /device/tasks pagination contract)
+
+/// Locks in the live spec's REQUIRED query params (`page`, `limit`, `sortOrder`, limit max 100)
+/// plus the client-side pagination loop that drains multi-page task lists.
+final class OilaDeviceTasksClientTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        TestHTTPURLProtocol.reset()
+    }
+
+    override func tearDown() {
+        TestHTTPURLProtocol.reset()
+        super.tearDown()
+    }
+
+    private func makeClient() -> OilaDeviceClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestHTTPURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let tokens = OilaRecordingTokenStore()
+        tokens.access = "dev-bearer"
+        let defaults = UserDefaults(suiteName: "OilaDeviceTasksClientTests.\(UUID().uuidString)")!
+        return OilaDeviceClient(
+            baseURL: URL(string: "https://api.oila360.uz/api/v1")!,
+            session: session,
+            secureTokens: tokens,
+            userDefaults: defaults
+        )
+    }
+
+    func testFetchActiveTasksSendsRequiredPaginationParams() async throws {
+        TestHTTPURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/device/tasks")
+            return (
+                makeHTTPResponse(for: request.url!, statusCode: 200),
+                Self.tasksPage(count: 2, prefix: "act")
+            )
+        }
+
+        let tasks = try await makeClient().fetchActiveTasks()
+
+        XCTAssertEqual(tasks.map(\.id), ["act-0", "act-1"])
+        let requests = TestHTTPURLProtocol.recordedRequests
+        XCTAssertEqual(requests.count, 1)
+        let query = Self.queryItems(of: requests[0])
+        XCTAssertEqual(query["page"], "1")
+        XCTAssertEqual(query["limit"], "100")
+        XCTAssertEqual(query["sortOrder"], "desc")
+        XCTAssertEqual(query["status"], "Active")
+    }
+
+    func testFetchActiveTasksPaginatesUntilShortPage() async throws {
+        TestHTTPURLProtocol.requestHandler = { request in
+            let page = Self.queryItems(of: request)["page"] ?? "?"
+            let count = page == "1" ? OilaDeviceClient.tasksPageLimit : 5
+            return (
+                makeHTTPResponse(for: request.url!, statusCode: 200),
+                Self.tasksPage(count: count, prefix: "p\(page)")
+            )
+        }
+
+        let tasks = try await makeClient().fetchActiveTasks()
+
+        XCTAssertEqual(tasks.count, OilaDeviceClient.tasksPageLimit + 5)
+        let pages = TestHTTPURLProtocol.recordedRequests.map { Self.queryItems(of: $0)["page"] }
+        XCTAssertEqual(pages, ["1", "2"])
+        // Every page request re-sends the full required param set.
+        for request in TestHTTPURLProtocol.recordedRequests {
+            let query = Self.queryItems(of: request)
+            XCTAssertEqual(query["limit"], "100")
+            XCTAssertEqual(query["sortOrder"], "desc")
+            XCTAssertEqual(query["status"], "Active")
+        }
+    }
+
+    func testFetchActiveTasksStopsAtHardPageCap() async throws {
+        // A backend that always returns full pages must not loop us forever.
+        TestHTTPURLProtocol.requestHandler = { request in
+            let page = Self.queryItems(of: request)["page"] ?? "?"
+            return (
+                makeHTTPResponse(for: request.url!, statusCode: 200),
+                Self.tasksPage(count: OilaDeviceClient.tasksPageLimit, prefix: "p\(page)")
+            )
+        }
+
+        let tasks = try await makeClient().fetchActiveTasks()
+
+        XCTAssertEqual(tasks.count, OilaDeviceClient.tasksPageLimit * OilaDeviceClient.tasksMaxPages)
+        let pages = TestHTTPURLProtocol.recordedRequests.compactMap { Self.queryItems(of: $0)["page"] }
+        XCTAssertEqual(pages, (1 ... OilaDeviceClient.tasksMaxPages).map(String.init))
+    }
+
+    func testFetchTasksRequestsActiveAndCompletedWithRequiredParams() async throws {
+        TestHTTPURLProtocol.requestHandler = { request in
+            let status = Self.queryItems(of: request)["status"] ?? "?"
+            let prefix = status == "Active" ? "act" : "done"
+            return (
+                makeHTTPResponse(for: request.url!, statusCode: 200),
+                Self.tasksPage(count: 1, prefix: prefix, status: status)
+            )
+        }
+
+        let tasks = try await makeClient().fetchTasks()
+
+        // Call-site semantics preserved: active + completed in one list.
+        XCTAssertEqual(Set(tasks.map(\.id)), ["act-0", "done-0"])
+        XCTAssertEqual(tasks.filter(\.isCompleted).map(\.id), ["done-0"])
+
+        let requests = TestHTTPURLProtocol.recordedRequests
+        XCTAssertEqual(requests.count, 2)
+        let statuses = Set(requests.compactMap { Self.queryItems(of: $0)["status"] })
+        XCTAssertEqual(statuses, ["Active", "Completed"])
+        for request in requests {
+            let query = Self.queryItems(of: request)
+            XCTAssertEqual(query["page"], "1")
+            XCTAssertEqual(query["limit"], "100")
+            XCTAssertEqual(query["sortOrder"], "desc")
+        }
+    }
+
+    private static func tasksPage(count: Int, prefix: String, status: String = "Active") -> Data {
+        let items = (0 ..< count)
+            .map { #"{"id":"\#(prefix)-\#($0)","title":"Task","status":"\#(status)","rewardPoints":1}"# }
+            .joined(separator: ",")
+        return Data(#"{"success":true,"data":{"items":[\#(items)]}}"#.utf8)
+    }
+
+    private static func queryItems(of request: URLRequest) -> [String: String] {
+        guard let url = request.url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return [:]
+        }
+        var result: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            result[item.name] = item.value
+        }
+        return result
+    }
 }
