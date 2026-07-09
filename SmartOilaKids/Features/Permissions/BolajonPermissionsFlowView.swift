@@ -204,9 +204,9 @@ private struct PermissionStepView: View {
             progress: progress
         ) {
             if isIntro {
-                BolajonBrandBadge(diameter: 132)
+                BolajonBrandBadge(diameter: 164)
             } else {
-                IconBadge(systemName: step.icon, intent: step.intent, diameter: 130)
+                IconBadge(systemName: step.icon, intent: step.intent, diameter: 156)
             }
         } sheet: {
             VStack(spacing: 14) {
@@ -222,15 +222,16 @@ private struct PermissionStepView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Spacer(minLength: 18)
-
                 // On the optional steps the outline decline sits ABOVE the purple primary.
+                // Fixed spacing (not a Spacer): the sheet hugs its content so the CTAs sit
+                // right below the copy — the hero absorbs the leftover height, per the board.
                 VStack(spacing: 10) {
                     if step.showsDecline {
                         OutlineButton(title: L10n.tr(step.declineKey), action: onDecline)
                     }
                     BolajonPrimaryButton(title: L10n.tr(step.primaryKey), action: onPrimary)
                 }
+                .padding(.top, 12)
                 .padding(.bottom, 6)
             }
         }
@@ -301,6 +302,8 @@ private struct PermissionSummaryView: View {
                                 .font(AppTypography.bodyStrong(15))
                                 .foregroundStyle(AppColors.inkPrimary)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.78) // long uz labels shrink, never truncate
+                                .layoutPriority(1)
                             Spacer(minLength: 8)
                             summaryPill(for: state.availability)
                         }

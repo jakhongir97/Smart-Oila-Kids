@@ -114,7 +114,7 @@ private struct LanguageStepView: View {
     var body: some View {
         // A1 is the stack root: no back exists, and the native bar stays empty (no title).
         BolajonHeroSheet(intent: .lavender) {
-            BolajonBrandBadge(diameter: 132)
+            BolajonBrandBadge(diameter: 164)
         } sheet: {
             VStack(spacing: 20) {
                 Text(L10n.tr("setup.language.title"))
@@ -129,9 +129,8 @@ private struct LanguageStepView: View {
                     }
                 }
 
-                Spacer(minLength: 8)
-
                 BolajonPrimaryButton(title: L10n.tr("setup.continue"), action: onContinue)
+                    .padding(.top, 4)
                     .padding(.bottom, 6)
             }
         }
@@ -192,7 +191,7 @@ private struct WelcomeStepView: View {
 
     var body: some View {
         BolajonHeroSheet(intent: .lavender) {
-            BolajonBrandBadge(diameter: 132)
+            BolajonBrandBadge(diameter: 164)
         } sheet: {
             VStack(spacing: 18) {
                 VStack(spacing: 10) {
@@ -223,9 +222,8 @@ private struct WelcomeStepView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 8)
 
-                Spacer(minLength: 8)
-
                 BolajonPrimaryButton(title: L10n.tr("setup.welcome.start"), action: onStart)
+                    .padding(.top, 6)
                     .padding(.bottom, 6)
             }
         }
@@ -255,7 +253,7 @@ private struct ConnectStepView: View {
 
     var body: some View {
         BolajonHeroSheet(intent: .lavender) {
-            IconBadge(systemName: "person.2.fill", intent: .lavender, diameter: 108)
+            IconBadge(systemName: "person.2.fill", intent: .lavender, diameter: 124)
         } sheet: {
             VStack(spacing: 18) {
                 Text(L10n.tr("setup.connect.title"))
@@ -298,8 +296,6 @@ private struct ConnectStepView: View {
                             .foregroundStyle(AppColors.inkSecondary)
                     }
                 }
-
-                Spacer(minLength: 4)
             }
         }
     }
@@ -348,7 +344,7 @@ private struct SuccessStepView: View {
         // block the back button here (the native way to make a step terminal).
         BolajonHeroSheet(intent: .lavender, blocksBack: true) {
             VStack(spacing: 16) {
-                ConnectedAvatar(emoji: childEmoji ?? "🦁", diameter: 132, isConnected: true,
+                ConnectedAvatar(emoji: childEmoji ?? "🦁", diameter: 148, isConnected: true,
                                 filled: true, showRing: true, showCheck: true,
                                 fallbackText: childName.isEmpty ? L10n.tr("common.user_default") : childName)
                 Text(childName.isEmpty ? L10n.tr("common.user_default") : childName)
@@ -377,9 +373,8 @@ private struct SuccessStepView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Spacer(minLength: 12)
-
                 BolajonPrimaryButton(title: L10n.tr("setup.success.start"), action: onStart)
+                    .padding(.top, 10)
                     .padding(.bottom, 6)
             }
         }

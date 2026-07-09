@@ -282,7 +282,12 @@ struct BolajonBrandLogo: View {
 
     var body: some View {
         ZStack {
-            // Shoulders (behind heads), clipped to the shield.
+            // Orange right shoulder — visible as a crescent between the navy wave and the
+            // orange head (the board's mark shows it on the right side only).
+            OrangeShoulder()
+                .fill(orange)
+                .clipShape(ShieldOutline())
+            // Navy wave mass over it (leaves the orange crescent showing on the right).
             ShieldShoulders()
                 .fill(indigo)
                 .clipShape(ShieldOutline())
@@ -290,58 +295,76 @@ struct BolajonBrandLogo: View {
             GeometryReader { geo in
                 let w = geo.size.width, h = geo.size.height
                 Circle().fill(indigo)
-                    .frame(width: w * 0.27, height: w * 0.27)
-                    .position(x: w * 0.375, y: h * 0.37)
+                    .frame(width: w * 0.31, height: w * 0.31)
+                    .position(x: w * 0.365, y: h * 0.33)
                 Circle().fill(orange)
                     .frame(width: w * 0.25, height: w * 0.25)
-                    .position(x: w * 0.625, y: h * 0.40)
+                    .position(x: w * 0.66, y: h * 0.37)
             }
             .clipShape(ShieldOutline())
             // Shield outline stroke on top.
             ShieldOutline()
-                .stroke(indigo, style: StrokeStyle(lineWidth: size * 0.055, lineJoin: .round))
+                .stroke(indigo, style: StrokeStyle(lineWidth: size * 0.065, lineJoin: .round))
         }
-        .frame(width: size, height: size * 1.08)
+        .frame(width: size, height: size * 1.06)
         .accessibilityHidden(true)
     }
 }
 
-/// Heraldic shield silhouette (rounded top corners, tapering to a rounded bottom point).
+/// Heraldic shield silhouette matching the board mark: near-straight top with small rounded
+/// corners, straight upper sides, tapering to a rounded bottom point.
 struct ShieldOutline: Shape {
     func path(in rect: CGRect) -> Path {
         let w = rect.width, h = rect.height
         func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + w * x, y: rect.minY + h * y) }
         var p = Path()
-        p.move(to: pt(0.15, 0.20))
-        // Rounded top-left corner.
-        p.addQuadCurve(to: pt(0.28, 0.10), control: pt(0.15, 0.10))
-        // Top edge (very gentle dome) to top-right.
-        p.addLine(to: pt(0.72, 0.10))
-        // Rounded top-right corner.
-        p.addQuadCurve(to: pt(0.85, 0.20), control: pt(0.85, 0.10))
-        // Right side down.
-        p.addLine(to: pt(0.85, 0.52))
+        p.move(to: pt(0.06, 0.155))
+        // Small rounded top-left corner, then a flat top edge.
+        p.addQuadCurve(to: pt(0.135, 0.075), control: pt(0.06, 0.075))
+        p.addLine(to: pt(0.865, 0.075))
+        p.addQuadCurve(to: pt(0.94, 0.155), control: pt(0.94, 0.075))
+        // Straight right side down to the taper.
+        p.addLine(to: pt(0.94, 0.48))
         // Sweep to the rounded bottom point.
-        p.addQuadCurve(to: pt(0.50, 0.94), control: pt(0.84, 0.82))
-        p.addQuadCurve(to: pt(0.15, 0.52), control: pt(0.16, 0.82))
+        p.addCurve(to: pt(0.55, 0.945), control1: pt(0.94, 0.70), control2: pt(0.72, 0.875))
+        p.addQuadCurve(to: pt(0.45, 0.945), control: pt(0.50, 0.97))
+        p.addCurve(to: pt(0.06, 0.48), control1: pt(0.28, 0.875), control2: pt(0.06, 0.70))
         p.closeSubpath()
         return p
     }
 }
 
-/// The merged "two figures" shoulders shape that fills the lower part of the shield.
+/// The merged "two figures" navy wave that fills the lower part of the shield. Its top edge
+/// rides high over the left figure's shoulder, dips between the heads, and runs LOWER on the
+/// right so the orange shoulder crescent stays visible beneath the orange head.
 private struct ShieldShoulders: Shape {
     func path(in rect: CGRect) -> Path {
         let w = rect.width, h = rect.height
         func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + w * x, y: rect.minY + h * y) }
         var p = Path()
-        p.move(to: pt(0.16, 0.66))
-        p.addQuadCurve(to: pt(0.375, 0.46), control: pt(0.17, 0.46))   // rise over left head
-        p.addQuadCurve(to: pt(0.52, 0.50), control: pt(0.46, 0.60))    // shallow dip between heads
-        p.addQuadCurve(to: pt(0.70, 0.47), control: pt(0.60, 0.46))    // rise over right head
-        p.addQuadCurve(to: pt(0.84, 0.66), control: pt(0.84, 0.49))    // down right shoulder
-        p.addQuadCurve(to: pt(0.50, 0.90), control: pt(0.82, 0.83))    // fill down to the point
-        p.addQuadCurve(to: pt(0.16, 0.66), control: pt(0.18, 0.83))
+        p.move(to: pt(0.06, 0.56))
+        p.addQuadCurve(to: pt(0.365, 0.455), control: pt(0.10, 0.455)) // rise over left shoulder
+        p.addQuadCurve(to: pt(0.56, 0.585), control: pt(0.48, 0.48))   // dip between heads
+        p.addQuadCurve(to: pt(0.94, 0.63), control: pt(0.76, 0.66))    // low run under the right side
+        // Fill everything below, following the shield's own taper (overdrawn + clipped).
+        p.addLine(to: pt(0.94, 1.0))
+        p.addLine(to: pt(0.06, 1.0))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// The orange right-shoulder hump, drawn beneath the navy wave.
+private struct OrangeShoulder: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + w * x, y: rect.minY + h * y) }
+        var p = Path()
+        p.move(to: pt(0.50, 0.64))
+        p.addQuadCurve(to: pt(0.66, 0.475), control: pt(0.52, 0.475)) // rise over the orange head's shoulders
+        p.addQuadCurve(to: pt(0.94, 0.60), control: pt(0.84, 0.475))  // down to the right side
+        p.addLine(to: pt(0.94, 0.85))
+        p.addLine(to: pt(0.50, 0.85))
         p.closeSubpath()
         return p
     }
@@ -356,7 +379,7 @@ struct BolajonBrandBadge: View {
             Circle()
                 .fill(AppColors.cardWhite)
                 .shadow(color: BolajonMetrics.cardShadow, radius: 22, x: 0, y: 12)
-            BolajonBrandLogo(size: diameter * 0.44)
+            BolajonBrandLogo(size: diameter * 0.52)
         }
         .frame(width: diameter, height: diameter)
         .accessibilityHidden(true)
