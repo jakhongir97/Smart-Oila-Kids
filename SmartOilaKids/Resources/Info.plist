@@ -44,12 +44,6 @@
 	<string>Photo library access lets the child send chat attachments.</string>
 	<key>SMARTOILA_SCREEN_TIME_FEATURES_ENABLED</key>
 	<false/>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Unbounded-Variable.ttf</string>
-		<string>Sora-Variable.ttf</string>
-		<string>Roboto-Variable.ttf</string>
-	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

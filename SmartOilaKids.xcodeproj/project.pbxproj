@@ -118,7 +118,6 @@
 		72426A5FB51A7A81426B4C39 /* GeoBackgroundService+Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E1D7F073A4CBE8BE3D874E /* GeoBackgroundService+Connection.swift */; };
 		72F6D3C5E18214B1604AD294 /* LocationPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1242F15864F04C95AF65E92C /* LocationPermissionManager.swift */; };
 		74286C1A911610A25AC7750E /* GeoPayloadEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5637704061AB73F2D7E943 /* GeoPayloadEncoder.swift */; };
-		744F9E5B5EFBC07D9F74D386 /* Roboto-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D5BD22BF8B3DC422FFFF5143 /* Roboto-Variable.ttf */; };
 		754174CD1B095C5878B7A610 /* ScreenTimeUsageCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8AAD14D93BEA1AEC4822E4 /* ScreenTimeUsageCoordinator.swift */; };
 		754174CE1B095C5878B7A610 /* DeviceApplicationUsageReportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8AAD15D93BEA1AEC4822E4 /* DeviceApplicationUsageReportCoordinator.swift */; };
 		76557AB4631D4975C84F87FD /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E96C422156F442BBD1CF98A3 /* ChatViewModel.swift */; };
@@ -209,7 +208,6 @@
 		C87DCAFC6940E7A76DC4D5DE /* MainHeaderSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBF33EC7F8E069755A0F41F /* MainHeaderSection.swift */; };
 		C8CDB1FBCBEC55C1E21D6A7C /* AuthQRCodePayloadDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC4D1521F568DAB62D0FDE7B /* AuthQRCodePayloadDecoder.swift */; };
 		C8D354D73C5A4E42F2C055C1 /* SettingsViewModel+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AEF2BE58B8E10436583C24 /* SettingsViewModel+Helpers.swift */; };
-		C9FAF7708A0415756DB7EB8E /* Unbounded-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 7CAE5B6E8D249B8A4954F61B /* Unbounded-Variable.ttf */; };
 		CC348938183B1489CC4115EA /* AuthDeviceNameSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6CD2713AEC170FF74B8C9A0 /* AuthDeviceNameSync.swift */; };
 		CC3DCFC38FAF38F886C60468 /* AppTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 902BD06432A3F2707A5BF113 /* AppTypography.swift */; };
 		CD5FE274BEF2445D4D9857CA /* SettingsBannerCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0AE799676C73350959F5938 /* SettingsBannerCenter.swift */; };
@@ -224,7 +222,6 @@
 		D98A1EEBAAEB3B4BE96891A5 /* ChatMessageGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72514A5E6AF470DEDED4B68 /* ChatMessageGrouping.swift */; };
 		D9ABF3504A530FBFBA013D5C /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67CB8ABD9F08930576D52B8 /* PushNotifications.swift */; };
 		D9EBEA41D97DAC698E3D16A9 /* AuthBindingVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8DA249CA65262153F892E16 /* AuthBindingVerifier.swift */; };
-		DA5A04AB90266C29EF7FB093 /* Sora-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 605C25AE3AB1089D78B38623 /* Sora-Variable.ttf */; };
 		DB11595D1487B05DF37712B0 /* EnvironmentAudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5920C0CE2BF9EF1B5DA724 /* EnvironmentAudioRecorder.swift */; };
 		DB411326219C0DA53FE76960 /* AuthQRCodePayloadParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB9359FC85FB4FA56B0A498 /* AuthQRCodePayloadParser.swift */; };
 		DBBF3BA85E7302ED981280FC /* ChatParentListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392F688F60B34AFC7C8651FE /* ChatParentListView.swift */; };
@@ -396,7 +393,6 @@
 		5E328FFEB6487D8C311643C4 /* AuthRegistrationParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthRegistrationParser.swift; sourceTree = "<group>"; };
 		5E74C85E132D9296324D21B2 /* MediaIntegrityNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaIntegrityNotifier.swift; sourceTree = "<group>"; };
 		5F265F08DFBB096BFD250994 /* ChatParentRowsBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatParentRowsBuilder.swift; sourceTree = "<group>"; };
-		605C25AE3AB1089D78B38623 /* Sora-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Sora-Variable.ttf"; sourceTree = "<group>"; };
 		606CE5F9A5B49E4E586E2DDA /* DeviceLockOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockOverlay.swift; sourceTree = "<group>"; };
 		611DF2DB1B84CE6845E61F65 /* DeviceAppLimitMonitorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLimitMonitorController.swift; sourceTree = "<group>"; };
 		61E1FF26DCABAEF8F174BA6B /* SettingsMediaRecordingPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsMediaRecordingPreview.swift; sourceTree = "<group>"; };
@@ -421,7 +417,6 @@
 		78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageSharedStore.swift; sourceTree = "<group>"; };
 		79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = SmartOilaKidsUsageReportExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A3D09284B7AB175EE746298 /* SettingsMainFormSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsMainFormSections.swift; sourceTree = "<group>"; };
-		7CAE5B6E8D249B8A4954F61B /* Unbounded-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Unbounded-Variable.ttf"; sourceTree = "<group>"; };
 		7D6EA548F1CF7F9E1A410269 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
 		7DC10C48D583773250791E6E /* MainDashboardPayloadModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainDashboardPayloadModels.swift; sourceTree = "<group>"; };
 		7F7E0AFB488C0F0AEBB51B30 /* DeviceRecordingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRecordingCoordinator.swift; sourceTree = "<group>"; };
@@ -519,7 +514,6 @@
 		D4C37FFA02757A5052BB236B /* MainViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewModel.swift; sourceTree = "<group>"; };
 		D5602C098BBE7616524A4DA1 /* ChatThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatThreadView.swift; sourceTree = "<group>"; };
 		D596D524F29FB461CB2E47DE /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
-		D5BD22BF8B3DC422FFFF5143 /* Roboto-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Roboto-Variable.ttf"; sourceTree = "<group>"; };
 		D5D0CBA34FC6C4B61F604496 /* ChatViewModel+Sending.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatViewModel+Sending.swift"; sourceTree = "<group>"; };
 		D5F955AA292C0FBE9226B2C2 /* SettingsMediaHistoryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsMediaHistoryPanelView.swift; sourceTree = "<group>"; };
 		D616AA2DBAE5C7A3E9BBC183 /* LoadPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadPhase.swift; sourceTree = "<group>"; };
@@ -696,9 +690,6 @@
 		41CDAF7955224D3F1FA70A80 /* Fonts */ = {
 			isa = PBXGroup;
 			children = (
-				D5BD22BF8B3DC422FFFF5143 /* Roboto-Variable.ttf */,
-				605C25AE3AB1089D78B38623 /* Sora-Variable.ttf */,
-				7CAE5B6E8D249B8A4954F61B /* Unbounded-Variable.ttf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -1298,9 +1289,6 @@
 				033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */,
 				A40E9E9756993DEA0DB04A4D /* InfoPlist.strings in Resources */,
 				1369F7E2A3CC99F3D2B4F0BF /* Localizable.strings in Resources */,
-				744F9E5B5EFBC07D9F74D386 /* Roboto-Variable.ttf in Resources */,
-				DA5A04AB90266C29EF7FB093 /* Sora-Variable.ttf in Resources */,
-				C9FAF7708A0415756DB7EB8E /* Unbounded-Variable.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
