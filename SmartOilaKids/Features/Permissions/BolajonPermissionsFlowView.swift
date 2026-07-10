@@ -66,9 +66,12 @@ struct BolajonPermissionStep: Identifiable {
 
 struct BolajonPermissionsFlowView: View {
     /// Called when B11 "Yakunlash" is tapped — onboarding is complete.
+    ///
+    /// Keep this the ONLY closure parameter. A second trailing-closure parameter used to
+    /// exist (an unused `onExit`), and Swift's backward-scan rule silently bound callers'
+    /// unlabeled trailing closures to it — leaving `onFinished` as the default no-op and
+    /// making "Yakunlash" dead. One closure ⇒ that mistake is unrepresentable.
     var onFinished: () -> Void = {}
-    /// Called when Back is pressed on the first step.
-    var onExit: () -> Void = {}
 
     @StateObject private var manager = LocationPermissionManager()
     @State private var path: [PermRoute]
@@ -82,9 +85,8 @@ struct BolajonPermissionsFlowView: View {
 
     enum PermRoute: Hashable { case step(Int), summary }
 
-    init(onFinished: @escaping () -> Void = {}, onExit: @escaping () -> Void = {}) {
+    init(onFinished: @escaping () -> Void = {}) {
         self.onFinished = onFinished
-        self.onExit = onExit
         _path = State(initialValue: Self.initialPath())
     }
 
