@@ -206,3 +206,49 @@ final class UzbekCyrillicTransliterationTests: XCTestCase {
         XCTAssertNotEqual(first, input)
     }
 }
+
+/// The push-recording pipeline must never orphan the child's plaintext environment audio in tmp/:
+/// the temp file is deleted whether the upload succeeds, fails, or throws.
+@MainActor
+final class OilaRecordingTriggerServiceTempCleanupTests: XCTestCase {
+    private struct UploadFailed: Error {}
+
+    private func makeTempAudioFile() -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test-audio-\(UUID().uuidString).m4a")
+        FileManager.default.createFile(atPath: url.path, contents: Data("audio".utf8))
+        return url
+    }
+
+    private func command(_ id: String) -> PushRecordingCommand {
+        PushRecordingCommand(recordingID: id, type: .audio, durationSeconds: 1, cameraType: nil)
+    }
+
+    func testTempAudioIsDeletedWhenUploadFails() async {
+        let tmp = makeTempAudioFile()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.path))
+
+        let service = OilaRecordingTriggerService(
+            recordAudioAction: { _, _ in tmp },
+            uploadAction: { _, _, _ in throw UploadFailed() }
+        )
+        service.start(dsn: "child-1")
+
+        await service.handleCommand(command("r1"))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.path))
+    }
+
+    func testTempAudioIsDeletedAfterSuccessfulUpload() async {
+        let tmp = makeTempAudioFile()
+        let service = OilaRecordingTriggerService(
+            recordAudioAction: { _, _ in tmp },
+            uploadAction: { _, _, _ in }
+        )
+        service.start(dsn: "child-1")
+
+        await service.handleCommand(command("r2"))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.path))
+    }
+}
