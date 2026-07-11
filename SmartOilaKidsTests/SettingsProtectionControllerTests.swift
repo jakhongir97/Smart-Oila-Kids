@@ -9,7 +9,12 @@ final class SettingsProtectionControllerTests: XCTestCase {
     private func makeController() -> (SettingsProtectionController, UserDefaults, String) {
         let suiteName = "SettingsProtectionControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        return (SettingsProtectionController(userDefaults: defaults), defaults, suiteName)
+        // In-memory PIN store: the Keychain is device-global and not isolable per test.
+        return (
+            SettingsProtectionController(userDefaults: defaults, pinStore: InMemoryPINCredentialStore()),
+            defaults,
+            suiteName
+        )
     }
 
     func testVerifyCustomPINRejectsWhenNoPINStored() {
@@ -73,11 +78,34 @@ final class SettingsProtectionControllerTests: XCTestCase {
         XCTAssertNotNil(controller.pinLockRemaining)
 
         // A relaunch (new controller, same storage) cannot reset the lockout.
-        let relaunched = SettingsProtectionController(userDefaults: defaults)
+        let relaunched = SettingsProtectionController(userDefaults: defaults, pinStore: InMemoryPINCredentialStore())
         XCTAssertNotNil(relaunched.pinLockRemaining)
 
         // A correct attempt clears the lockout + failure counter.
         relaunched.recordPINAttempt(success: true)
         XCTAssertNil(relaunched.pinLockRemaining)
+    }
+
+    /// The PIN verifier must be a salted slow-KDF record (16-byte salt + 32-byte key), stored in the
+    /// injected credential store — not a raw hash of the 4-digit code — so two installs with the
+    /// same PIN produce different records and the small keyspace can't be precomputed.
+    func testStoredPINRecordIsSaltedNotRawHash() {
+        let suite = "SettingsProtectionSalt.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let storeA = InMemoryPINCredentialStore()
+        let controllerA = SettingsProtectionController(userDefaults: defaults, pinStore: storeA)
+        XCTAssertTrue(controllerA.saveCustomPIN("1234"))
+        let recordA = storeA.load()
+        XCTAssertEqual(recordA?.count, 48)
+        XCTAssertTrue(controllerA.verifyCustomPIN("1234"))
+        XCTAssertFalse(controllerA.verifyCustomPIN("0000"))
+
+        // Same PIN on a second install → a different salted record (no shared precomputation).
+        let storeB = InMemoryPINCredentialStore()
+        let controllerB = SettingsProtectionController(userDefaults: defaults, pinStore: storeB)
+        XCTAssertTrue(controllerB.saveCustomPIN("1234"))
+        XCTAssertNotEqual(storeA.load(), storeB.load())
     }
 }

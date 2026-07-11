@@ -64,13 +64,11 @@ struct BolajonSetupFlowView: View {
     }
 
     private func handlePaired(_ result: OilaPairResult) {
-        // Persist the session so RootView can route into the app.
-        sessionStore.setAPIAccessToken(result.tokens.accessToken)
-        // Only overwrite the refresh token when the response actually carried one —
-        // an access-only response must not wipe a still-valid stored refresh token.
-        if let refresh = result.tokens.refreshToken {
-            sessionStore.setAPIRefreshToken(refresh)
-        }
+        // The device token is the single source of truth in SecureTokenStore.oila — OilaDeviceClient
+        // already persisted it during pair(). Do NOT also copy it into SessionStore's legacy
+        // keychain slot (SecureTokenStore.shared): that duplicate has no production reader and would
+        // silently go stale after a token change. Routing is gated on oilaPaired/DSN below, not on
+        // the legacy token.
         if let name = result.child?.name?.trimmedNonEmpty {
             sessionStore.setProfileName(name)
             childName = name

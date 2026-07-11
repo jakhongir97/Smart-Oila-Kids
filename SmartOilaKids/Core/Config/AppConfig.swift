@@ -120,10 +120,13 @@ private extension AppConfig {
     }
 
     static func configuredWebSocketTokenPath() -> String {
-        let defaultSecret = "s7n8hPkmJtdY6CfMWGQKpF2uZHVcw5gX"
+        // The legacy WebSocket backend is decommissioned (dead host) and only the parked WS
+        // services consume this path. No secret ships in the binary — it must be injected at
+        // runtime; without it the path is deliberately non-functional. (The previously-committed
+        // literal has been removed and should be rotated server-side.)
         let rawSecret = ProcessInfo.processInfo.environment["SMARTOILA_WEBSOCKET_SECRETKEY"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let secret = (rawSecret?.isEmpty == false ? rawSecret : nil) ?? defaultSecret
+        let secret = (rawSecret?.isEmpty == false ? rawSecret : nil) ?? ""
         return "/ws/\(secret)"
     }
 

@@ -1,6 +1,7 @@
-import CryptoKit
+import CommonCrypto
 import Foundation
 import LocalAuthentication
+import Security
 import UIKit
 
 enum SettingsProtectionPINPrompt: String, Identifiable {
@@ -27,8 +28,18 @@ final class SettingsProtectionController: ObservableObject {
         isDeviceAuthenticationAvailable || hasCustomPIN
     }
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        pinStore: PINCredentialStoring = KeychainPINCredentialStore()
+    ) {
         self.userDefaults = userDefaults
+        self.pinStore = pinStore
+
+        // One-time migration off the old unsalted-SHA-256-in-UserDefaults scheme. The old hash
+        // can't be reversed into the new salted-KDF verifier, so we simply drop it; a parent
+        // re-sets the PIN under the hardened scheme. (Pre-release, so no live PINs are lost.)
+        userDefaults.removeObject(forKey: legacyPINHashKey)
+
         if userDefaults.object(forKey: protectionEnabledKey) == nil {
             self.isEnabled = true
         } else {
@@ -65,7 +76,7 @@ final class SettingsProtectionController: ObservableObject {
         var error: NSError?
         let canAuthenticate = context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
         isDeviceAuthenticationAvailable = canAuthenticate
-        hasCustomPIN = storedPINHash != nil
+        hasCustomPIN = pinStore.load() != nil
 
         guard isProtectionAvailable else {
             if isEnabled {
@@ -97,7 +108,7 @@ final class SettingsProtectionController: ObservableObject {
 
     func removeCustomPIN() {
         guard hasCustomPIN else { return }
-        userDefaults.removeObject(forKey: protectionPINHashKey)
+        pinStore.delete()
         refreshAvailability()
     }
 
@@ -136,7 +147,7 @@ final class SettingsProtectionController: ObservableObject {
 
         switch activePINPrompt {
         case .unlock:
-            guard storedPINHash == hashPIN(normalizedPIN) else {
+            guard verify(normalizedPIN) else {
                 return L10n.tr("settings.control_protection_pin_incorrect")
             }
             startUnlockSession()
@@ -150,7 +161,7 @@ final class SettingsProtectionController: ObservableObject {
             guard normalizedPIN == normalizedConfirmation else {
                 return L10n.tr("settings.control_protection_pin_mismatch")
             }
-            userDefaults.set(hashPIN(normalizedPIN), forKey: protectionPINHashKey)
+            pinStore.save(makeRecord(for: normalizedPIN))
             startUnlockSession()
             refreshAvailability()
             completePINPrompt(result: true)
@@ -175,8 +186,8 @@ final class SettingsProtectionController: ObservableObject {
     /// input is the wrong length. Never throws — safe to call on every keystroke.
     func verifyCustomPIN(_ pin: String) -> Bool {
         let normalized = normalizePIN(pin)
-        guard normalized.count == pinLength, let storedPINHash else { return false }
-        return storedPINHash == hashPIN(normalized)
+        guard normalized.count == pinLength else { return false }
+        return verify(normalized)
     }
 
     /// Stores a new custom PIN (used by the disconnect create-flow when none exists yet).
@@ -185,7 +196,7 @@ final class SettingsProtectionController: ObservableObject {
     func saveCustomPIN(_ pin: String) -> Bool {
         let normalized = normalizePIN(pin)
         guard normalized.count == pinLength else { return false }
-        userDefaults.set(hashPIN(normalized), forKey: protectionPINHashKey)
+        pinStore.save(makeRecord(for: normalized))
         startUnlockSession()
         refreshAvailability()
         return true
@@ -236,25 +247,37 @@ final class SettingsProtectionController: ObservableObject {
     }
 
     private let userDefaults: UserDefaults
+    private let pinStore: PINCredentialStoring
     private var unlockSessionExpiration: Date?
     private var foregroundObserver: NSObjectProtocol?
     private var pinPromptContinuation: CheckedContinuation<Bool, Never>?
     private let unlockGracePeriod: TimeInterval = 120
     private let pinLength = 4
     private let protectionEnabledKey = "SETTINGS_PROTECTION_ENABLED"
-    private let protectionPINHashKey = "SETTINGS_PROTECTION_PIN_HASH"
+    private let legacyPINHashKey = "SETTINGS_PROTECTION_PIN_HASH"
     private let pinFailCountKey = "SETTINGS_PROTECTION_PIN_FAILS"
     private let pinLockUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UNTIL"
     private let maxPINAttempts = 5
     private let pinLockoutDuration: TimeInterval = 300
 
-    private var storedPINHash: String? {
-        guard let value = userDefaults.string(forKey: protectionPINHashKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else {
-            return nil
+    // MARK: - PIN verifier (salted, slow KDF)
+
+    /// Builds a `salt || verifier` record for a fresh PIN.
+    private func makeRecord(for pin: String) -> Data {
+        let salt = PINKeyDerivation.randomSalt()
+        return salt + PINKeyDerivation.derive(pin: pin, salt: salt)
+    }
+
+    /// Constant-time verify of `pin` against the stored `salt || verifier` record.
+    private func verify(_ pin: String) -> Bool {
+        guard let record = pinStore.load(),
+              record.count == PINKeyDerivation.saltLength + PINKeyDerivation.keyLength else {
+            return false
         }
-        return value
+        let salt = record.prefix(PINKeyDerivation.saltLength)
+        let stored = record.suffix(PINKeyDerivation.keyLength)
+        let candidate = PINKeyDerivation.derive(pin: pin, salt: Data(salt))
+        return PINKeyDerivation.constantTimeEquals(Data(stored), candidate)
     }
 
     private func presentPINPrompt(_ prompt: SettingsProtectionPINPrompt) async -> Bool {
@@ -308,9 +331,114 @@ final class SettingsProtectionController: ObservableObject {
     private func normalizePIN(_ value: String) -> String {
         String(value.filter(\.isNumber).prefix(pinLength))
     }
+}
 
-    private func hashPIN(_ pin: String) -> String {
-        let digest = SHA256.hash(data: Data(pin.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+// MARK: - PIN credential storage
+
+/// Persists the disconnect-PIN verifier record (`salt || KDF(pin, salt)`). Abstracted so tests can
+/// use an in-memory store instead of the shared system Keychain.
+protocol PINCredentialStoring {
+    func load() -> Data?
+    func save(_ data: Data)
+    func delete()
+}
+
+/// Keychain-backed store (`kSecClassGenericPassword`, AfterFirstUnlockThisDeviceOnly). The verifier
+/// lives in the Keychain — not UserDefaults — so a device backup or plist dump can neither lift the
+/// verifier for offline brute-forcing nor simply delete the PIN to bypass the gate.
+final class KeychainPINCredentialStore: PINCredentialStoring {
+    private let service: String
+    private let account: String
+
+    init(
+        service: String = (Bundle.main.bundleIdentifier ?? "SmartOilaKids"),
+        account: String = "settings_protection_pin_v2"
+    ) {
+        self.service = service
+        self.account = account
+    }
+
+    private var baseQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+    }
+
+    func load() -> Data? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
+    }
+
+    func save(_ data: Data) {
+        let query = baseQuery
+        if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
+            SecItemUpdate(query as CFDictionary, [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ] as CFDictionary)
+        } else {
+            var insert = query
+            insert[kSecValueData as String] = data
+            insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            SecItemAdd(insert as CFDictionary, nil)
+        }
+    }
+
+    func delete() {
+        SecItemDelete(baseQuery as CFDictionary)
+    }
+}
+
+/// In-memory store for tests (the Keychain is process/device-global and not test-isolable).
+final class InMemoryPINCredentialStore: PINCredentialStoring {
+    private var data: Data?
+    init(data: Data? = nil) { self.data = data }
+    func load() -> Data? { data }
+    func save(_ data: Data) { self.data = data }
+    func delete() { data = nil }
+}
+
+/// PBKDF2-HMAC-SHA256 password stretching for the (short, 4-digit) disconnect PIN. A slow KDF plus
+/// a random per-install salt means the small keyspace can't be precomputed or brute-forced offline
+/// as cheaply as a raw SHA-256 hash; the on-device attempt lockout guards online guessing.
+enum PINKeyDerivation {
+    static let saltLength = 16
+    static let keyLength = 32
+    static let rounds: UInt32 = 150_000
+
+    static func randomSalt() -> Data {
+        var bytes = [UInt8](repeating: 0, count: saltLength)
+        _ = SecRandomCopyBytes(kSecRandomDefault, saltLength, &bytes)
+        return Data(bytes)
+    }
+
+    static func derive(pin: String, salt: Data) -> Data {
+        let pinBytes = Array(pin.utf8)
+        var derived = [UInt8](repeating: 0, count: keyLength)
+        salt.withUnsafeBytes { saltBuffer in
+            _ = CCKeyDerivationPBKDF(
+                CCPBKDFAlgorithm(kCCPBKDF2),
+                pin, pinBytes.count,
+                saltBuffer.bindMemory(to: UInt8.self).baseAddress, salt.count,
+                CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                rounds,
+                &derived, keyLength
+            )
+        }
+        return Data(derived)
+    }
+
+    /// Length-safe constant-time comparison so verification time can't leak how many bytes matched.
+    static func constantTimeEquals(_ lhs: Data, _ rhs: Data) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        var diff: UInt8 = 0
+        for (a, b) in zip(lhs, rhs) { diff |= a ^ b }
+        return diff == 0
     }
 }

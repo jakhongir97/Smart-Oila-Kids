@@ -98,15 +98,16 @@ private extension PushCommandRouter {
             }
         }
 
-        if containsAny(in: haystack, tokens: RoutingTokens.recording) {
-            if let command = payload.recordingCommand {
-                postRecordingCommand(command, dsn: payload.dsn)
-                routeActions.append("recording_trigger")
-            } else {
-                // A recording-flavored push without a recording id cannot be uploaded —
-                // surface it in diagnostics instead of starting an orphan capture.
-                routeActions.append("recording_trigger_missing_id")
-            }
+        if let command = payload.recordingCommand {
+            // Dispatch on the PARSED command regardless of the alert-text keyword haystack — a
+            // valid recording command must never be dropped just because the (often empty) alert
+            // body didn't happen to contain a recording keyword.
+            postRecordingCommand(command, dsn: payload.dsn)
+            routeActions.append("recording_trigger")
+        } else if containsAny(in: haystack, tokens: RoutingTokens.recording) {
+            // A recording-flavored push without a recording id cannot be uploaded — surface it in
+            // diagnostics instead of starting an orphan capture.
+            routeActions.append("recording_trigger_missing_id")
         }
 
         if let deepLinkDestination {

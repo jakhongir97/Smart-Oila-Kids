@@ -49,7 +49,9 @@ final class EnvironmentAudioRecorder: NSObject, @preconcurrency AVAudioRecorderD
 
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .mixWithOthers])
+            // `.record` (not `.playAndRecord`): this recorder never plays audio back, so the
+            // record-only category avoids needlessly changing the output route / ducking others.
+            try session.setCategory(.record, mode: .default, options: [.allowBluetoothHFP, .mixWithOthers])
             try session.setPreferredSampleRate(44_100)
             try session.setActive(true)
         } catch {

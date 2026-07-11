@@ -171,7 +171,9 @@ final class BolajonTasksViewModel: ObservableObject {
     var starTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
 
     struct Group: Identifiable {
-        let id = UUID()
+        // Stable identity across recomputes — titleKey is unique per group (today/yesterday/
+        // earlier/all), so ForEach preserves rows instead of rebuilding the whole list each time.
+        var id: String { titleKey }
         let titleKey: String
         let tasks: [OilaDeviceTask]
     }

@@ -49,6 +49,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// Post-once guard so a burst of simultaneous 401s (location + status + lock) raises a single
     /// session-invalidation signal per run.
     private var didSignalInvalidation = false
+    /// Monotonic tag for lock-state reads so a slow poll can't overwrite a newer push refresh.
+    private var lockRefreshSequence = 0
 
     private let flushInterval: TimeInterval = 60
     private let statusInterval: TimeInterval = 300
@@ -208,8 +210,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     private func refreshLock() async {
         guard isRunning else { return }
+        // The 30s poll and push-driven refreshLockNow() can overlap; without ordering a slow poll's
+        // stale response could clobber a fresh push result. Tag each request and apply only the
+        // latest-issued one (@MainActor serializes the counter, so this is race-free).
+        lockRefreshSequence &+= 1
+        let sequence = lockRefreshSequence
         do {
             let state = try await service.fetchLockState()
+            guard isRunning, sequence == lockRefreshSequence else { return }
             if state.isLocked != isLocked { isLocked = state.isLocked }
         } catch let error as OilaAPIError where error.requiresRePair {
             handleAuthorizationLoss()

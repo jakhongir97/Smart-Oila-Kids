@@ -112,18 +112,27 @@ final class OilaRecordingTriggerService {
             lastError: "-"
         )
 
+        // Always clean up the plaintext audio: the child's environment recording must never be
+        // left orphaned in tmp/, whether the upload succeeds, fails, or throws mid-flight.
+        var capturedFileURL: URL?
+        defer {
+            if let url = capturedFileURL {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+
         do {
             let fileURL = try await recordAudioAction(
                 command.recordingID,
                 TimeInterval(command.durationSeconds)
             )
+            capturedFileURL = fileURL
             updateDiagnostics(
                 status: "uploading",
                 lastEvent: "push_recording:\(command.recordingID):uploading",
                 lastRecordingID: command.recordingID
             )
             try await uploadAction(command.recordingID, fileURL, command.durationSeconds)
-            try? FileManager.default.removeItem(at: fileURL)
             updateDiagnostics(
                 status: "completed",
                 lastEvent: "push_recording:\(command.recordingID):completed",
