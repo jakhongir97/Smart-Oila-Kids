@@ -7,6 +7,22 @@ Place backend specs here:
 
 Current workspace already contains both files and they can be used directly.
 
+## ⚠️ Legacy vs. live contract (read before trusting the coverage gate)
+
+`rest_openapi.json` / `ws_openapi.json` describe the **legacy** `backend.smart-oila.uz`
+backend, which is **dead** (DNS resolves, connection times out). The redesigned Bolajon360
+child flow (`OilaDeviceClient` in `Core/Networking/OilaDeviceAPI.swift`) targets the **live**
+`https://api.oila360.uz/api/v1` backend, whose contract is captured in:
+
+- `OpenAPI/oila360_live_openapi.json` — fetched from `https://api.oila360.uz/api/docs-json`
+  (Oila 360 API 1.0). All 12 `/api/v1/device/*` calls the app makes exist here with matching
+  methods and request shapes (verified 2026-07-12).
+
+**Consequence:** the `check_child_openapi_baseline.py` gate below validates against the *legacy*
+spec, so it does **not** prove conformance to the live server. Do **not** "correct" the live
+`device/*` paths toward the legacy `awards/…` / `devices/dsn/…` forms — that would point working
+code at the dead host. Repointing the gate at `oila360_live_openapi.json` is tracked as follow-up.
+
 Then run:
 
 ```bash
