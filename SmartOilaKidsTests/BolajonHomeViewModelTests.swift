@@ -103,6 +103,11 @@ private final class SOSServiceSpy: OilaDeviceServicing {
 
     private(set) var sosCalls: [(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?)] = []
     var sendSOSError: Error?
+    var fetchTasksError: Error?
+    var fetchTasksResult: [OilaDeviceTask] = []
+    private(set) var fetchTasksCallCount = 0
+    var completeTaskError: Error?
+    private(set) var completeTaskCalls: [String] = []
 
     func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws {
         sosCalls.append((lat, lng, accuracy, batteryLevel))
@@ -117,12 +122,68 @@ private final class SOSServiceSpy: OilaDeviceServicing {
     func telegramInit() async throws -> OilaTelegramSession { throw Unimplemented() }
     func telegramStatus(sessionId: String) async throws -> OilaTelegramStatus { throw Unimplemented() }
     func fetchActiveTasks() async throws -> [OilaDeviceTask] { [] }
-    func fetchTasks() async throws -> [OilaDeviceTask] { [] }
-    func completeTask(id: String) async throws {}
+    func fetchTasks() async throws -> [OilaDeviceTask] {
+        fetchTasksCallCount += 1
+        if let fetchTasksError { throw fetchTasksError }
+        return fetchTasksResult
+    }
+    func completeTask(id: String) async throws {
+        completeTaskCalls.append(id)
+        if let completeTaskError { throw completeTaskError }
+    }
     func updateFCMToken(_ token: String) async throws {}
     func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {}
     func postDeviceStatus(_ status: OilaDeviceStatus) async throws {}
     func fetchLockState() async throws -> OilaLockState { throw Unimplemented() }
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws {}
     func completeRecording(recordingID: String, fileURL: URL, durationSeconds: Int?) async throws -> [String: Any] { [:] }
+}
+
+/// Covers the Bolajon360 Tasks surface (`BolajonTasksViewModel`): a failed load/complete must
+/// surface an error (never masquerade as an empty list or fail silently), and a successful reload
+/// must clear a stale error.
+@MainActor
+final class BolajonTasksViewModelTests: XCTestCase {
+    private func sampleTask(id: String = "t1") -> OilaDeviceTask {
+        OilaDeviceTask(id: id, title: "Test", status: "Active", rewardPoints: 5,
+                       emoji: nil, dueAt: nil, completedAt: nil)
+    }
+
+    func testLoadFailureSetsErrorAndKeepsListEmpty() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksError = NetworkError.invalidURL
+        let viewModel = BolajonTasksViewModel(service: service)
+
+        await viewModel.load()
+
+        XCTAssertTrue(viewModel.tasks.isEmpty)
+        XCTAssertNotNil(viewModel.errorMessage)
+    }
+
+    func testSuccessfulReloadClearsStaleError() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksError = NetworkError.invalidURL
+        let viewModel = BolajonTasksViewModel(service: service)
+        await viewModel.load()
+        XCTAssertNotNil(viewModel.errorMessage)
+
+        // A later successful fetch must clear the stale error, not leave it stuck on screen.
+        service.fetchTasksError = nil
+        service.fetchTasksResult = [sampleTask()]
+        await viewModel.load()
+
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.tasks.count, 1)
+    }
+
+    func testCompleteFailureSurfacesError() async {
+        let service = SOSServiceSpy()
+        service.completeTaskError = NetworkError.invalidURL
+        let viewModel = BolajonTasksViewModel(service: service)
+
+        await viewModel.complete(sampleTask())
+
+        XCTAssertEqual(service.completeTaskCalls, ["t1"])
+        XCTAssertNotNil(viewModel.errorMessage)
+    }
 }

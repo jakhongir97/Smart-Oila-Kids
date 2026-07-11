@@ -13,11 +13,19 @@ struct BolajonTasksView: View {
             VStack(spacing: 18) {
                 starHeader
 
+                if let error = viewModel.errorMessage {
+                    TaskErrorBanner(message: error) { Task { await viewModel.load() } }
+                }
+
                 if viewModel.tasks.isEmpty {
-                    Text(L10n.tr("tasks2.empty"))
-                        .font(AppTypography.bodyText(14))
-                        .foregroundStyle(AppColors.inkTertiary)
-                        .padding(.top, 40)
+                    // Only show the "no tasks" empty state when the load actually succeeded —
+                    // a failed load surfaces the error banner above instead of masquerading as empty.
+                    if viewModel.errorMessage == nil {
+                        Text(L10n.tr("tasks2.empty"))
+                            .font(AppTypography.bodyText(14))
+                            .foregroundStyle(AppColors.inkTertiary)
+                            .padding(.top, 40)
+                    }
                 } else {
                     ForEach(viewModel.groups) { group in
                         VStack(alignment: .leading, spacing: 12) {
@@ -196,8 +204,12 @@ final class BolajonTasksViewModel: ObservableObject {
     }
 
     func load() async {
-        do { tasks = try await service.fetchTasks() }
-        catch { errorMessage = NetworkError.userMessage(for: error) }
+        do {
+            tasks = try await service.fetchTasks()
+            errorMessage = nil
+        } catch {
+            errorMessage = NetworkError.userMessage(for: error)
+        }
 #if DEBUG
         if tasks.isEmpty && AppRuntime.hasDebugRoute { tasks = BolajonSampleData.tasks; errorMessage = nil }
 #endif
@@ -207,8 +219,41 @@ final class BolajonTasksViewModel: ObservableObject {
         do {
             try await service.completeTask(id: task.id)
             tasks = try await service.fetchTasks()
+            errorMessage = nil
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
+        }
+    }
+}
+
+/// Coral error banner shown above the task list when a load/complete fails, with a Try Again
+/// action — so a failed fetch never masquerades as an empty task list and a failed completion is
+/// never silent.
+private struct TaskErrorBanner: View {
+    let message: String
+    let onRetry: () -> Void
+
+    var body: some View {
+        InfoCard(padding: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(AppColors.sosCoral)
+                Text(message)
+                    .font(AppTypography.bodyText(14))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(action: onRetry) {
+                    Text(L10n.tr("common.retry"))
+                        .font(AppTypography.bodyStrong(14))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(AppColors.ctaPurple))
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }

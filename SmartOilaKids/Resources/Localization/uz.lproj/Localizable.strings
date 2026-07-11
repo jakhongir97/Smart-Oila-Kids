@@ -15,6 +15,20 @@
 "error.server_unavailable" = "Server vaqtincha mavjud emas.";
 "error.invalid_response" = "Serverdan kutilmagan javob keldi.";
 "error.request_failed" = "So'rovni bajarib bo'lmadi. Qayta urinib ko'ring.";
+"error.media_audio_busy" = "Audio yozib olish band. Birozdan so'ng urinib ko'ring.";
+"error.media_audio_cancelled" = "Audio yozib olish bekor qilindi.";
+"error.media_audio_failed" = "Audioni yozib bo'lmadi. Qayta urinib ko'ring.";
+"error.media_camera_busy" = "Kamera band. Birozdan so'ng urinib ko'ring.";
+"error.media_camera_cancelled" = "Kameradan yozib olish bekor qilindi.";
+"error.media_camera_failed" = "Videoni yozib bo'lmadi. Qayta urinib ko'ring.";
+"error.media_camera_permission" = "Kameraga ruxsat kerak. Sozlamalardan yoqing.";
+"error.media_camera_unavailable" = "Bu qurilmada kamera mavjud emas.";
+"error.media_keep_app_open" = "Yozuvni tugatish uchun ilovani ochiq qoldiring.";
+"error.media_keep_app_open_screen" = "Ekran yozuvini tugatish uchun ilovani ochiq qoldiring.";
+"error.media_microphone_permission" = "Mikrofonga ruxsat kerak. Sozlamalardan yoqing.";
+"error.media_screen_busy" = "Ekran yozuvi band. Birozdan so'ng urinib ko'ring.";
+"error.media_screen_cancelled" = "Ekran yozuvi bekor qilindi.";
+"error.media_screen_failed" = "Ekranni yozib bo'lmadi. Qayta urinib ko'ring.";
 
 "auth.welcome" = "Xush kelibsiz!";
 "auth.company_mission" = "Bizning maqsadimiz - bolalar xavfsizligini ta'minlash va ota-onalarga bolalarini kuzatishda yordam berish.";
@@ -656,6 +670,10 @@
 "setup.success.start" = "Sozlashni boshlash";
 
 "common.user_default" = "Foydalanuvchi";
+"common.app_default" = "Bolajon360";
+"common.connected_device_default" = "Bola qurilmasi";
+"common.local_device_default" = "Bu qurilma";
+"settings.current_device" = "Bu qurilma";
 
 /* MARK: - Bolajon360 permissions onboarding (B1-B11) */
 "perm2.decline" = "Yo'q, kerak emas";

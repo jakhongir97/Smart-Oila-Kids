@@ -15,6 +15,20 @@
 "error.server_unavailable" = "Сервер временно недоступен.";
 "error.invalid_response" = "Некорректный ответ сервера.";
 "error.request_failed" = "Не удалось выполнить запрос. Попробуйте снова.";
+"error.media_audio_busy" = "Запись аудио занята. Повторите чуть позже.";
+"error.media_audio_cancelled" = "Запись аудио отменена.";
+"error.media_audio_failed" = "Не удалось записать аудио. Попробуйте снова.";
+"error.media_camera_busy" = "Камера занята. Повторите чуть позже.";
+"error.media_camera_cancelled" = "Запись с камеры отменена.";
+"error.media_camera_failed" = "Не удалось записать видео. Попробуйте снова.";
+"error.media_camera_permission" = "Требуется доступ к камере. Включите его в настройках.";
+"error.media_camera_unavailable" = "Камера недоступна на этом устройстве.";
+"error.media_keep_app_open" = "Не закрывайте приложение, чтобы завершить запись.";
+"error.media_keep_app_open_screen" = "Не закрывайте приложение, чтобы завершить запись экрана.";
+"error.media_microphone_permission" = "Требуется доступ к микрофону. Включите его в настройках.";
+"error.media_screen_busy" = "Запись экрана занята. Повторите чуть позже.";
+"error.media_screen_cancelled" = "Запись экрана отменена.";
+"error.media_screen_failed" = "Не удалось записать экран. Попробуйте снова.";
 
 "auth.welcome" = "Добро пожаловать!";
 "auth.company_mission" = "Задача нашей компании - обеспечить безопасность детям, позволив их родителям наблюдать за своими детьми!";
@@ -656,6 +670,10 @@
 "setup.success.start" = "Начать настройку";
 
 "common.user_default" = "Пользователь";
+"common.app_default" = "Bolajon360";
+"common.connected_device_default" = "Устройство ребёнка";
+"common.local_device_default" = "Это устройство";
+"settings.current_device" = "Это устройство";
 
 /* MARK: - Bolajon360 permissions onboarding (B1-B11) */
 "perm2.decline" = "Нет, не нужно";

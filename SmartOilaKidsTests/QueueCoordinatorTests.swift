@@ -2472,12 +2472,14 @@ final class DeviceApplicationStateServiceTests: XCTestCase {
             ]
         )
 
+        // Sorted by appName: the fallback name is now "Bolajon360" (was the raw key
+        // "common.app_default" before that key was defined), so it sorts before "Chat App".
         XCTAssertEqual(result.remoteLockedApplications, [
-            DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App"),
             DeviceAppSelectionApplication(
                 packageName: "com.example.fallback",
                 appName: ProductFallbackText.appName()
-            )
+            ),
+            DeviceAppSelectionApplication(packageName: "com.example.chat", appName: "Chat App")
         ])
         XCTAssertEqual(result.payloadSummary, "4 apps, 2 locked")
     }

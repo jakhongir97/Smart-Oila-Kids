@@ -15,6 +15,20 @@
 "error.server_unavailable" = "Server is temporarily unavailable.";
 "error.invalid_response" = "Unexpected server response.";
 "error.request_failed" = "Request failed. Please try again.";
+"error.media_audio_busy" = "Audio recording is busy. Please try again shortly.";
+"error.media_audio_cancelled" = "Audio recording was cancelled.";
+"error.media_audio_failed" = "Couldn't record audio. Please try again.";
+"error.media_camera_busy" = "The camera is busy. Please try again shortly.";
+"error.media_camera_cancelled" = "Camera recording was cancelled.";
+"error.media_camera_failed" = "Couldn't record video. Please try again.";
+"error.media_camera_permission" = "Camera access is needed. Enable it in Settings.";
+"error.media_camera_unavailable" = "The camera isn't available on this device.";
+"error.media_keep_app_open" = "Keep the app open to finish recording.";
+"error.media_keep_app_open_screen" = "Keep the app open to finish the screen recording.";
+"error.media_microphone_permission" = "Microphone access is needed. Enable it in Settings.";
+"error.media_screen_busy" = "Screen recording is busy. Please try again shortly.";
+"error.media_screen_cancelled" = "Screen recording was cancelled.";
+"error.media_screen_failed" = "Couldn't record the screen. Please try again.";
 
 "auth.welcome" = "Welcome!";
 "auth.company_mission" = "Our mission is to keep children safe by helping parents stay connected with them.";
@@ -656,6 +670,10 @@
 "setup.success.start" = "Start setup";
 
 "common.user_default" = "User";
+"common.app_default" = "Bolajon360";
+"common.connected_device_default" = "Child device";
+"common.local_device_default" = "This device";
+"settings.current_device" = "This device";
 
 /* MARK: - Bolajon360 permissions onboarding (B1-B11) */
 "perm2.decline" = "No, not needed";
