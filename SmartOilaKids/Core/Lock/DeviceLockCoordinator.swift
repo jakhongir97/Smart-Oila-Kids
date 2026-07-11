@@ -77,21 +77,20 @@ final class DeviceLockCoordinator: ObservableObject {
         self.service = service
         self.applicationStateService = applicationStateService
         self.appLockStore = resolvedAppLockStore
-        self.connectGlobalLockWebSocket = connectGlobalLockWebSocket ?? { [webSocketService] in
-            webSocketService.connect(dsn: $0)
-        }
+        // The legacy real-time WebSocket backend is decommissioned (dead host). Lock state is now
+        // driven entirely by the REST poll + push refresh, so the DEFAULT connect actions are
+        // no-ops: this removes the dead-host infinite-reconnect landmine that would otherwise fire
+        // the instant Screen Time features are enabled. (Disconnect stays wired — harmless on an
+        // unconnected socket — and tests still inject live connect/disconnect mocks.)
+        self.connectGlobalLockWebSocket = connectGlobalLockWebSocket ?? { _ in }
         self.disconnectGlobalLockWebSocket = disconnectGlobalLockWebSocket ?? { [webSocketService] in
             webSocketService.disconnect()
         }
-        self.connectAppLockWebSocket = connectAppLockWebSocket ?? { [appLockWebSocketService] in
-            appLockWebSocketService.connect(dsn: $0)
-        }
+        self.connectAppLockWebSocket = connectAppLockWebSocket ?? { _ in }
         self.disconnectAppLockWebSocket = disconnectAppLockWebSocket ?? { [appLockWebSocketService] in
             appLockWebSocketService.disconnect()
         }
-        self.connectApplicationsSyncWebSocket = connectApplicationsSyncWebSocket ?? { [applicationsSyncWebSocketService] in
-            applicationsSyncWebSocketService.connect(dsn: $0)
-        }
+        self.connectApplicationsSyncWebSocket = connectApplicationsSyncWebSocket ?? { _ in }
         self.disconnectApplicationsSyncWebSocket = disconnectApplicationsSyncWebSocket ?? { [applicationsSyncWebSocketService] in
             applicationsSyncWebSocketService.disconnect()
         }
