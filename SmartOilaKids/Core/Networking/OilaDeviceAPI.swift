@@ -42,6 +42,14 @@ enum OilaDeviceIdentity {
         return generated
     }
 
+    /// Clears the persisted device DSN so the next `deviceDSN(...)` call mints a fresh one.
+    /// Called on disconnect: because every DSN-scoped local store keys off this value, minting a
+    /// new DSN means re-pairing the device to a DIFFERENT child starts from an empty scope and
+    /// cannot inherit the previous child's cached location/tasks/etc.
+    static func resetDSN(userDefaults: UserDefaults = .standard) {
+        userDefaults.removeObject(forKey: dsnKey)
+    }
+
     static var platform: String { "Ios" }
 
     static var deviceModel: String {

@@ -2892,6 +2892,45 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.hasAuthenticatedSession)
     }
 
+    func testClearSessionRegeneratesDeviceDSNAndClearsGlobalCache() {
+        let suiteName = "SessionStorePurgeTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let store = SessionStore(userDefaults: userDefaults, secureTokens: MutableSecureTokenStoreSpy())
+
+        // Simulate a paired child: a generate-once device DSN + a globally-cached device list.
+        let dsnBefore = OilaDeviceIdentity.deviceDSN(userDefaults: userDefaults)
+        userDefaults.set(Data("x".utf8), forKey: "SETTINGS_CACHE_CONNECTED_DEVICES")
+        userDefaults.set("Aziz", forKey: "SETTINGS_CACHE_PROFILE_NAME")
+
+        store.clearSession()
+
+        // A different child re-pairing on this device must get a FRESH DSN scope...
+        let dsnAfter = OilaDeviceIdentity.deviceDSN(userDefaults: userDefaults)
+        XCTAssertNotEqual(dsnBefore, dsnAfter)
+        // ...and the previous child's globally-cached data must be gone.
+        XCTAssertNil(userDefaults.data(forKey: "SETTINGS_CACHE_CONNECTED_DEVICES"))
+        XCTAssertNil(userDefaults.string(forKey: "SETTINGS_CACHE_PROFILE_NAME"))
+    }
+
+    func testRoutingMigrationSendsLegacyLinkedUserThroughFullOnboarding() {
+        let suiteName = "SessionStoreMigrationTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        // A legacy-linked user (has a DSN) who has never run the new routing migration.
+        userDefaults.set("legacy-dsn", forKey: "DSN")
+
+        let store = SessionStore(userDefaults: userDefaults, secureTokens: MutableSecureTokenStoreSpy())
+
+        // They must re-pair AND re-run the B1–B11 permission flow (not skip it): the new flow's
+        // permissions (Always-location, Screen Time authorization) may never have been granted.
+        XCTAssertFalse(store.setupCompleted)
+        XCTAssertFalse(store.onboardingCompleted)
+        XCTAssertFalse(store.oilaPaired)
+    }
+
     func testHasAuthenticatedSessionUsesRefreshTokenWhenAccessTokenIsMissing() {
         let suiteName = "SessionStoreRefreshOnlyTests.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

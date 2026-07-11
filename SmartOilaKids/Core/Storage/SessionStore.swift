@@ -59,15 +59,15 @@ final class SessionStore: ObservableObject {
         appTheme = AppTheme(rawValue: userDefaults.string(forKey: Keys.appTheme) ?? "") ?? .system
         appLanguage = resolvedLanguage
 
-        // Bolajon360 routing migration (one-time). The oila360 backend replaced the legacy
-        // one, so a legacy DSN carries NO oila360 credentials: existing linked users must
-        // re-pair once (setupCompleted stays false → A1–A3), but they skip the permissions
-        // onboarding they already granted (onboardingCompleted = true). Marking them
-        // "paired" without tokens would leave telemetry silently 401-looping forever.
+        // Bolajon360 routing migration (one-time). The oila360 backend replaced the legacy one,
+        // so a legacy DSN carries NO oila360 credentials AND no guarantee the new flow's
+        // permissions (Always-location, Screen Time authorization) were ever granted. Send every
+        // migrated user through the full setup + B1–B11 permission flow once (all flags false):
+        // skipping onboarding for "already linked" users is what left telemetry silently
+        // un-permissioned. Marking them "paired" without tokens would 401-loop telemetry forever.
         if !userDefaults.bool(forKey: Keys.routingMigrated) {
-            let linked = dsn?.trimmedNonEmpty != nil
             userDefaults.set(false, forKey: Keys.setupCompleted)
-            userDefaults.set(linked, forKey: Keys.onboardingCompleted)
+            userDefaults.set(false, forKey: Keys.onboardingCompleted)
             userDefaults.set(false, forKey: Keys.oilaPaired)
             userDefaults.set(true, forKey: Keys.routingMigrated)
         }
@@ -186,6 +186,22 @@ final class SessionStore: ObservableObject {
         setSetupCompleted(false)
         setOnboardingCompleted(false)
         setOilaPaired(false)
+        purgeChildScopedData()
+    }
+
+    /// Wipes every per-child artifact on disconnect so re-pairing this device to a DIFFERENT child
+    /// cannot surface the previous child's data. DSN-scoped stores (tasks, chat, dashboard cache,
+    /// geo queue, app-lock selection) are isolated by regenerating the device DSN — the next pair
+    /// mints a fresh scope — while the few globally-keyed caches are cleared here directly.
+    private func purgeChildScopedData() {
+        // 1. Regenerate the generate-once device DSN → all DSN-scoped stores start empty on re-pair.
+        OilaDeviceIdentity.resetDSN(userDefaults: userDefaults)
+        // 2. Clear the globally-keyed SettingsCacheStore (not DSN-scoped), so the previous child's
+        //    cached connected-device list can't surface before a refresh. (profileName is left as
+        //    is — it is not shown while unpaired and is overwritten by the next pair.)
+        for key in ["SETTINGS_CACHE_PROFILE_NAME", "SETTINGS_CACHE_CONNECTED_DEVICES"] {
+            userDefaults.removeObject(forKey: key)
+        }
     }
 
     private static func defaultLanguage(userDefaults: UserDefaults) -> AppLanguage {

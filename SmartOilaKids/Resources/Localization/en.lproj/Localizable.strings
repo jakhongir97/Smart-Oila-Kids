@@ -705,6 +705,8 @@
 "sos2.confirm" = "Yes, call for help";
 "sos2.cancel" = "Cancel";
 "sos2.sent" = "Alert sent";
+"sos2.failed" = "Couldn't send. Check your connection and try again.";
+"sos2.retry" = "Try again";
 "tasks2.title" = "Tasks";
 "tasks2.stars_collected" = "Stars collected";
 "tasks2.today" = "Today";
@@ -730,6 +732,8 @@
 "settings2.enable" = "Enable";
 "disconnect2.title" = "Disconnect";
 "disconnect2.body" = "This will unlink the device from your family. Enter the parent PIN to continue.";
+"disconnect2.parent_managed_body" = "Only a parent can disconnect this device. Ask your parent to remove it in the Oila360 app.";
+"disconnect2.locked_out" = "Too many attempts. Try again in %d min.";
 "disconnect2.confirm" = "Disconnect";
 "disconnect2.cancel" = "Cancel";
 "disconnect2.pin_incorrect" = "Incorrect PIN. Try again.";

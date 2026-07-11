@@ -65,6 +65,7 @@ struct BolajonHomeView: View {
                 SOSConfirmTakeover(
                     isSending: viewModel.isSendingSOS,
                     sent: viewModel.sosSent,
+                    failed: viewModel.sosFailed,
                     onConfirm: { Task { await viewModel.sendSOS() } },
                     onClose: { showSOSConfirm = false }
                 )
@@ -278,6 +279,7 @@ private struct HomeTaskRow: View {
 private struct SOSConfirmTakeover: View {
     let isSending: Bool
     let sent: Bool
+    let failed: Bool
     let onConfirm: () -> Void
     let onClose: () -> Void
 
@@ -322,13 +324,22 @@ private struct SOSConfirmTakeover: View {
                         .padding(.horizontal, 4)
                 }
 
+                if !sent, failed, !isSending {
+                    Text(L10n.tr("sos2.failed"))
+                        .font(AppTypography.caption(13))
+                        .foregroundStyle(AppColors.sosCoral)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                }
+
                 if sent {
                     BolajonPrimaryButton(title: L10n.tr("common.done"), action: onClose)
                         .padding(.top, 6)
                 } else {
                     VStack(spacing: 4) {
                         BolajonPrimaryButton(
-                            title: L10n.tr("sos2.confirm"),
+                            title: L10n.tr(failed ? "sos2.retry" : "sos2.confirm"),
                             fill: AppColors.sosCoral,
                             isLoading: isSending,
                             action: onConfirm
@@ -360,6 +371,8 @@ final class BolajonHomeViewModel: ObservableObject {
     @Published var tasks: [OilaDeviceTask] = []
     @Published var isSendingSOS = false
     @Published var sosSent = false
+    /// True when the SOS send failed after all retries — drives the takeover's error + retry state.
+    @Published var sosFailed = false
     @Published var errorMessage: String?
 
     /// Today's total usage of the parent-tracked apps (seconds), read from the local
@@ -430,26 +443,42 @@ final class BolajonHomeViewModel: ObservableObject {
     func sendSOS() async {
         guard !isSendingSOS, !sosSent else { return }
         isSendingSOS = true
+        sosFailed = false
         defer { isSendingSOS = false }
         // Attach the latest known location + battery so the parent sees where/how the child
         // is. Any field may be nil (location unavailable / battery unknown) — the SOS still
         // sends; the client omits missing fields.
         let context = telemetry.currentSOSContext()
-        do {
-            try await service.sendSOS(
-                lat: context.lat,
-                lng: context.lng,
-                accuracy: context.accuracy,
-                batteryLevel: context.batteryPercent.map(Double.init)
-            )
-            sosSent = true
-        } catch {
-            errorMessage = NetworkError.userMessage(for: error)
+        // A panic button must be resilient: retry transient failures a few times before giving
+        // up, and always surface a clear failure state (never fail silently) so the child knows
+        // to retry rather than assuming help is on the way.
+        let maxAttempts = 3
+        for attempt in 1 ... maxAttempts {
+            do {
+                try await service.sendSOS(
+                    lat: context.lat,
+                    lng: context.lng,
+                    accuracy: context.accuracy,
+                    batteryLevel: context.batteryPercent.map(Double.init)
+                )
+                sosSent = true
+                sosFailed = false
+                errorMessage = nil
+                return
+            } catch {
+                if attempt == maxAttempts {
+                    sosFailed = true
+                    errorMessage = NetworkError.userMessage(for: error)
+                } else {
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 800_000_000)
+                }
+            }
         }
     }
 
     func resetSOS() {
         sosSent = false
+        sosFailed = false
         errorMessage = nil
     }
 

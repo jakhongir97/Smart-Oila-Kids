@@ -705,6 +705,8 @@
 "sos2.confirm" = "Ha, yordam chaqir";
 "sos2.cancel" = "Bekor qilish";
 "sos2.sent" = "Xabar yuborildi";
+"sos2.failed" = "Yuborilmadi. Ulanishni tekshirib, qayta urinib ko'ring.";
+"sos2.retry" = "Qayta urinish";
 "tasks2.title" = "Topshiriqlar";
 "tasks2.stars_collected" = "Yig'ilgan yulduzlar";
 "tasks2.today" = "Bugun";
@@ -730,6 +732,8 @@
 "settings2.enable" = "Yoqish";
 "disconnect2.title" = "Aloqani uzish";
 "disconnect2.body" = "Bu qurilmani oilangizdan ajratadi. Davom etish uchun ota-ona PIN kodini kiriting.";
+"disconnect2.parent_managed_body" = "Bu qurilmani faqat ota-ona uzishi mumkin. Ota-onangizdan uni Oila360 ilovasidan o'chirishni so'rang.";
+"disconnect2.locked_out" = "Juda ko'p urinish. %d daqiqadan so'ng qayta urinib ko'ring.";
 "disconnect2.confirm" = "Uzish";
 "disconnect2.cancel" = "Bekor qilish";
 "disconnect2.pin_incorrect" = "PIN kod noto'g'ri. Qayta urinib ko'ring.";

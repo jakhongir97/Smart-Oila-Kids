@@ -19,6 +19,9 @@ final class SettingsProtectionController: ObservableObject {
     @Published private(set) var hasCustomPIN = false
     @Published private(set) var hasActiveUnlockSession = false
     @Published private(set) var activePINPrompt: SettingsProtectionPINPrompt?
+    /// End of the current disconnect-PIN lockout, or nil when not locked out. Persisted so a
+    /// relaunch cannot reset a brute-force lockout.
+    @Published private(set) var pinLockedUntil: Date?
 
     var isProtectionAvailable: Bool {
         isDeviceAuthenticationAvailable || hasCustomPIN
@@ -30,6 +33,11 @@ final class SettingsProtectionController: ObservableObject {
             self.isEnabled = true
         } else {
             self.isEnabled = userDefaults.bool(forKey: protectionEnabledKey)
+        }
+
+        let persistedLock = userDefaults.double(forKey: pinLockUntilKey)
+        if persistedLock > Date().timeIntervalSince1970 {
+            self.pinLockedUntil = Date(timeIntervalSince1970: persistedLock)
         }
 
         foregroundObserver = NotificationCenter.default.addObserver(
@@ -192,6 +200,41 @@ final class SettingsProtectionController: ObservableObject {
         return success
     }
 
+    // MARK: - Disconnect-PIN brute-force lockout
+    //
+    // The disconnect gate is the one control keeping a monitored child linked, so guessing the
+    // parent PIN must be rate-limited. Attempts and the lockout deadline are persisted, so a
+    // relaunch (or a reinstall that preserves UserDefaults via a backup) cannot reset them.
+
+    /// Seconds remaining on the disconnect-PIN lockout, or nil when entry is currently allowed.
+    var pinLockRemaining: TimeInterval? {
+        guard let pinLockedUntil, pinLockedUntil > Date() else { return nil }
+        return pinLockedUntil.timeIntervalSinceNow
+    }
+
+    /// Records the outcome of a disconnect-PIN attempt. Success clears the failure counter and any
+    /// lockout; failure increments the counter and, at `maxPINAttempts`, starts a persistent
+    /// lockout. Returns the lockout end date when this attempt triggered a lockout, else nil.
+    @discardableResult
+    func recordPINAttempt(success: Bool) -> Date? {
+        if success {
+            userDefaults.removeObject(forKey: pinFailCountKey)
+            userDefaults.removeObject(forKey: pinLockUntilKey)
+            pinLockedUntil = nil
+            return nil
+        }
+        let fails = userDefaults.integer(forKey: pinFailCountKey) + 1
+        if fails >= maxPINAttempts {
+            let until = Date().addingTimeInterval(pinLockoutDuration)
+            userDefaults.set(until.timeIntervalSince1970, forKey: pinLockUntilKey)
+            userDefaults.set(0, forKey: pinFailCountKey)
+            pinLockedUntil = until
+            return until
+        }
+        userDefaults.set(fails, forKey: pinFailCountKey)
+        return nil
+    }
+
     private let userDefaults: UserDefaults
     private var unlockSessionExpiration: Date?
     private var foregroundObserver: NSObjectProtocol?
@@ -200,6 +243,10 @@ final class SettingsProtectionController: ObservableObject {
     private let pinLength = 4
     private let protectionEnabledKey = "SETTINGS_PROTECTION_ENABLED"
     private let protectionPINHashKey = "SETTINGS_PROTECTION_PIN_HASH"
+    private let pinFailCountKey = "SETTINGS_PROTECTION_PIN_FAILS"
+    private let pinLockUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UNTIL"
+    private let maxPINAttempts = 5
+    private let pinLockoutDuration: TimeInterval = 300
 
     private var storedPINHash: String? {
         guard let value = userDefaults.string(forKey: protectionPINHashKey)?

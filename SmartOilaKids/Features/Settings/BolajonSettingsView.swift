@@ -344,31 +344,27 @@ struct SettingsDisconnectScreen: View {
     @ObservedObject private var protection = SettingsProtectionController.shared
     @Environment(\.dismiss) private var dismiss
 
-    // Gate order: a parent-set PIN is the real secret the child doesn't know, so it wins over
-    // biometrics (which is the child's own face on their device). Biometric is the fallback
-    // when no PIN is set; a create/confirm flow establishes one when neither exists.
-    private enum Mode { case verifyPIN, biometric, createPIN }
-    private enum CreateStage { case enter, confirm }
+    // Disconnect is a PARENT action. A monitored child must not be able to unpair the device, so
+    // we accept ONLY a parent-provisioned PIN — never the child's own biometric, and never a PIN
+    // created on the spot. When no parent PIN is set, on-device disconnect is unavailable and the
+    // screen points to the Oila360 parent app, whose server-side unpair (POST /parent/children/
+    // {id}/unpair) invalidates this device's token and returns it to pairing.
+    private enum Mode { case verifyPIN, parentManaged }
 
-    @State private var mode: Mode = .verifyPIN
-    @State private var createStage: CreateStage = .enter
+    @State private var mode: Mode = .parentManaged
     @State private var pin = ""
-    @State private var firstPIN = ""
     @State private var errorText: String?
-    @State private var isAuthenticating = false
     @State private var isDisconnecting = false
 
     private let pinLength = 4
 
-    private var showsPINField: Bool { mode == .verifyPIN || mode == .createPIN }
-    private var busy: Bool { isDisconnecting || isAuthenticating }
+    private var showsPINField: Bool { mode == .verifyPIN }
+    private var busy: Bool { isDisconnecting }
 
     private var bodyText: String {
         switch mode {
-        case .biometric: return L10n.tr("disconnect2.biometric_hint")
         case .verifyPIN: return L10n.tr("disconnect2.body")
-        case .createPIN:
-            return L10n.tr(createStage == .enter ? "disconnect2.create_hint" : "disconnect2.confirm_hint")
+        case .parentManaged: return L10n.tr("disconnect2.parent_managed_body")
         }
     }
 
@@ -408,9 +404,8 @@ struct SettingsDisconnectScreen: View {
                     NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendPIN, onBackspace: removePIN)
                         .disabled(busy)
                         .padding(.bottom, 12)
+                    uzishButton
                 }
-
-                uzishButton
                 GhostButton(title: L10n.tr("disconnect2.cancel"), action: { dismiss() })
             }
             .padding(.horizontal, BolajonMetrics.screenPadding)
@@ -479,84 +474,49 @@ struct SettingsDisconnectScreen: View {
     private func resolveMode() {
         protection.refreshAvailability()
 #if DEBUG
-        // Screenshot hook: force the PIN-entry variant (keypad + dots) regardless of the
-        // device's biometric availability. Verification only — never validates/disconnects.
+        // Screenshot hook: force the PIN-entry variant (keypad + dots). Verification only.
         if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_DISCONNECT_MODE"] == "pin" {
             mode = .verifyPIN
-            createStage = .enter
             pin = ""
-            firstPIN = ""
             errorText = nil
             return
         }
 #endif
-        if protection.hasCustomPIN {
-            mode = .verifyPIN
-        } else if protection.isDeviceAuthenticationAvailable {
-            mode = .biometric
-        } else {
-            mode = .createPIN
-        }
-        createStage = .enter
+        // Only a parent-provisioned PIN authorizes on-device disconnect. No PIN → parent-managed.
+        mode = protection.hasCustomPIN ? .verifyPIN : .parentManaged
         pin = ""
-        firstPIN = ""
         errorText = nil
     }
 
     private func handlePrimary() {
-        guard !busy else { return }
-        switch mode {
-        case .biometric: authenticateBiometric()
-        case .verifyPIN: validateEnteredPIN()
-        case .createPIN: advanceCreateFlow()
-        }
+        guard !busy, mode == .verifyPIN else { return }
+        validateEnteredPIN()
     }
 
     private func validateEnteredPIN() {
+        if let remaining = protection.pinLockRemaining {
+            errorText = lockoutMessage(remaining)
+            pin = ""
+            return
+        }
         if protection.verifyCustomPIN(pin) {
+            protection.recordPINAttempt(success: true)
             errorText = nil
             performDisconnect()
         } else {
-            errorText = L10n.tr("disconnect2.pin_incorrect")
+            let lockedUntil = protection.recordPINAttempt(success: false)
             pin = ""
-        }
-    }
-
-    private func advanceCreateFlow() {
-        switch createStage {
-        case .enter:
-            firstPIN = pin
-            pin = ""
-            errorText = nil
-            createStage = .confirm
-        case .confirm:
-            if pin == firstPIN {
-                protection.saveCustomPIN(pin)
-                errorText = nil
-                performDisconnect()
+            if let lockedUntil {
+                errorText = lockoutMessage(lockedUntil.timeIntervalSinceNow)
             } else {
-                errorText = L10n.tr("disconnect2.mismatch")
-                pin = ""
-                firstPIN = ""
-                createStage = .enter
+                errorText = L10n.tr("disconnect2.pin_incorrect")
             }
         }
     }
 
-    private func authenticateBiometric() {
-        isAuthenticating = true
-        errorText = nil
-        Task {
-            let success = await protection.confirmDeviceOwner()
-            await MainActor.run {
-                isAuthenticating = false
-                if success {
-                    performDisconnect()
-                } else {
-                    errorText = L10n.tr("disconnect2.biometric_failed")
-                }
-            }
-        }
+    private func lockoutMessage(_ remaining: TimeInterval) -> String {
+        let minutes = max(1, Int((remaining / 60).rounded(.up)))
+        return String(format: L10n.tr("disconnect2.locked_out"), minutes)
     }
 
     /// Runs only after the parent PIN (or biometric) has been validated. Clearing the session

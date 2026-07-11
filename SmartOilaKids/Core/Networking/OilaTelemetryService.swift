@@ -10,6 +10,14 @@ import UIKit
 // It never *requests* permissions — the B1–B11 onboarding owns that. It simply uses
 // whatever authorization the child granted, so it is safe to start right after onboarding.
 
+extension Notification.Name {
+    /// Posted when an authorized `/device/*` call reports the device credential is no longer valid
+    /// (revoked, expired, or the parent unpaired this device server-side via
+    /// `POST /parent/children/{id}/unpair`). The app clears the session and routes back to pairing
+    /// instead of silently 401-looping with dead telemetry.
+    static let oilaSessionInvalidated = Notification.Name("OilaSessionInvalidated")
+}
+
 @MainActor
 final class OilaTelemetryService: NSObject, ObservableObject {
     static let shared = OilaTelemetryService()
@@ -17,7 +25,17 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var lastUploadAt: Date?
     /// Global device lock resolved from GET /device/lock/state (drives the lock overlay).
-    @Published private(set) var isLocked = false
+    /// Persisted on every change so the lock is FAIL-CLOSED: a force-quit + offline relaunch
+    /// restores the last-known lock (see init) instead of silently defaulting to unlocked.
+    @Published private(set) var isLocked = false {
+        didSet {
+            guard oldValue != isLocked else { return }
+            UserDefaults.standard.set(isLocked, forKey: Self.lockStateKey)
+        }
+    }
+
+    /// UserDefaults key for the persisted fail-closed lock state.
+    private static let lockStateKey = "OILA_LAST_LOCK_STATE"
 
     private let service: OilaDeviceServicing
     private let locationManager = CLLocationManager()
@@ -28,6 +46,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var statusTimer: Timer?
     private var lockTimer: Timer?
     private var networkType: String?
+    /// Post-once guard so a burst of simultaneous 401s (location + status + lock) raises a single
+    /// session-invalidation signal per run.
+    private var didSignalInvalidation = false
 
     private let flushInterval: TimeInterval = 60
     private let statusInterval: TimeInterval = 300
@@ -41,11 +62,17 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         locationManager.distanceFilter = 25
         locationManager.pausesLocationUpdatesAutomatically = true
+        // Fail-closed: restore the last-known lock so a force-quit + offline relaunch cannot
+        // silently unlock a locked child. refreshLock() corrects it once the server is reachable;
+        // stop() clears it on unpair. (Property observers don't fire during init, so this doesn't
+        // re-persist.)
+        isLocked = UserDefaults.standard.bool(forKey: Self.lockStateKey)
     }
 
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        didSignalInvalidation = false
         // A new session must never inherit fixes queued under a previous pairing.
         pendingFixes.removeAll()
 
@@ -138,6 +165,15 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
     }
 
+    /// Signals — once per run — that the device credential is no longer valid so the app can clear
+    /// the session and prompt re-pairing, then tears telemetry down.
+    private func handleAuthorizationLoss() {
+        guard !didSignalInvalidation else { return }
+        didSignalInvalidation = true
+        NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
+        stop()
+    }
+
     private func flushLocations() async {
         guard isRunning, !pendingFixes.isEmpty else { return }
         let batch = pendingFixes
@@ -146,8 +182,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             try await service.uploadLocationBatch(batch)
             lastUploadAt = Date()
         } catch let error as OilaAPIError where error.requiresRePair {
-            // Credentials are gone (revoked/unpaired) — stop instead of 401-looping forever.
-            stop()
+            // Credentials are gone (revoked/unpaired) — signal re-pair instead of 401-looping.
+            handleAuthorizationLoss()
         } catch {
             // Re-queue on failure (bounded) so fixes survive transient offline periods —
             // but never resurrect a queue the session already tore down.
@@ -161,7 +197,13 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         let level = UIDevice.current.batteryLevel
         let battery: Int? = level >= 0 ? Int((level * 100).rounded()) : nil
         let status = OilaDeviceStatus(battery: battery, networkType: networkType, soundMode: nil)
-        try? await service.postDeviceStatus(status)
+        do {
+            try await service.postDeviceStatus(status)
+        } catch let error as OilaAPIError where error.requiresRePair {
+            handleAuthorizationLoss()
+        } catch {
+            // Ignore transient status-post failures.
+        }
     }
 
     private func refreshLock() async {
@@ -169,6 +211,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         do {
             let state = try await service.fetchLockState()
             if state.isLocked != isLocked { isLocked = state.isLocked }
+        } catch let error as OilaAPIError where error.requiresRePair {
+            handleAuthorizationLoss()
         } catch {
             // Keep the last known lock state on a transient failure.
         }

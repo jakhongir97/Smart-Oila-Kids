@@ -51,8 +51,11 @@ final class BolajonHomeViewModelTests: XCTestCase {
 
         await viewModel.sendSOS()
 
-        XCTAssertEqual(service.sosCalls.count, 1)
+        // A panic button retries transient failures before giving up (3 attempts), then surfaces
+        // an explicit failure state — it must never fail silently.
+        XCTAssertEqual(service.sosCalls.count, 3)
         XCTAssertFalse(viewModel.sosSent)
+        XCTAssertTrue(viewModel.sosFailed)
         XCTAssertNotNil(viewModel.errorMessage)
     }
 

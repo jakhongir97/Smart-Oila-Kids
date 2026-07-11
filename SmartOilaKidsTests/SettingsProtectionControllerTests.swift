@@ -52,4 +52,32 @@ final class SettingsProtectionControllerTests: XCTestCase {
         XCTAssertFalse(controller.verifyCustomPIN(""))
         XCTAssertTrue(controller.verifyCustomPIN("4321"))
     }
+
+    /// Repeated wrong guesses must trip a lockout that survives a relaunch — otherwise the
+    /// disconnect gate (the one control keeping a monitored child linked) is brute-forceable on
+    /// device.
+    func testDisconnectPINLocksOutAfterRepeatedFailuresAndSurvivesRelaunch() {
+        let (controller, defaults, suite) = makeController()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertTrue(controller.saveCustomPIN("1234"))
+
+        // Four wrong guesses stay below the threshold.
+        for _ in 0 ..< 4 {
+            XCTAssertNil(controller.recordPINAttempt(success: false))
+        }
+        XCTAssertNil(controller.pinLockRemaining)
+
+        // The fifth trips a persistent lockout.
+        XCTAssertNotNil(controller.recordPINAttempt(success: false))
+        XCTAssertNotNil(controller.pinLockRemaining)
+
+        // A relaunch (new controller, same storage) cannot reset the lockout.
+        let relaunched = SettingsProtectionController(userDefaults: defaults)
+        XCTAssertNotNil(relaunched.pinLockRemaining)
+
+        // A correct attempt clears the lockout + failure counter.
+        relaunched.recordPINAttempt(success: true)
+        XCTAssertNil(relaunched.pinLockRemaining)
+    }
 }

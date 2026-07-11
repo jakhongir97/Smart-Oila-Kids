@@ -35,6 +35,13 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshLockState)) { notification in
             handleLockRefreshNotification(notification)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .oilaSessionInvalidated)) { _ in
+            // The device credential was revoked or the parent unpaired this device server-side.
+            // Drop the session so the root routes back to pairing (setupCompleted + oilaPaired go
+            // false) instead of stranding the child on Home with silently-dead telemetry.
+            guard sessionStore.oilaPaired || sessionStore.setupCompleted else { return }
+            sessionStore.clearSession()
+        }
         // Device-lock takeover as a NATIVE full-screen presentation. The binding ignores
         // dismissal attempts, so presentation is driven solely by the polled lock state:
         // it re-presents while locked and cannot be swiped away (full-screen covers have
@@ -61,7 +68,9 @@ private extension RootView {
     /// a no-op: only the lock state may hide the cover.
     var deviceLockCoverPresented: Binding<Bool> {
         Binding(
-            get: { oilaTelemetry.isLocked },
+            // The lock only applies to a paired child on Home — never let a restored fail-closed
+            // lock cover the pairing or B1–B11 onboarding screens.
+            get: { oilaTelemetry.isLocked && sessionStore.oilaPaired && sessionStore.onboardingCompleted },
             set: { _ in }
         )
     }
