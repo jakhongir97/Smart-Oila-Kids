@@ -57,6 +57,19 @@ struct BolajonHomeView: View {
 #if DEBUG
                 if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SOS"] == "1" { showSOSConfirm = true }
 #endif
+                // App launched/opened from a task push — consume the pending deep-link and drill in.
+                let dsn = sessionStore.dsn
+                Task { @MainActor in
+                    if await PushDeepLinkStore.shared.consume(matching: dsn) == .tasks {
+                        navigateToTasks()
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { _ in
+                Task { await viewModel.load() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenTasks)) { _ in
+                navigateToTasks()
             }
             .onChange(of: lockState.isLocked) { locked in
                 if locked { showSOSConfirm = false }
@@ -72,6 +85,11 @@ struct BolajonHomeView: View {
             }
         }
         .bolajonNavigationTint()
+    }
+
+    /// Drill in to Tasks from a push, avoiding a duplicate push if already there.
+    private func navigateToTasks() {
+        if path.last != .tasks { path.append(.tasks) }
     }
 
     private var header: some View {

@@ -49,6 +49,9 @@ struct BolajonTasksView: View {
             }
         }
         .task { await viewModel.load() }
+        .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { _ in
+            Task { await viewModel.load() }
+        }
     }
 
     // Design C3: a purple-gradient card with a gold star and white text.
