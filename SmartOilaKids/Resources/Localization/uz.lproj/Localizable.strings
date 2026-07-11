@@ -4,6 +4,11 @@
 "common.home" = "Bosh sahifa";
 "common.save" = "Saqlash";
 "common.cancel" = "Bekor qilish";
+"a11y.pin_entry" = "PIN kod kiritish";
+"a11y.code_entry" = "Ulanish kodini kiritish";
+"a11y.digits_entered" = "%d / %d ta raqam kiritildi";
+"a11y.delete" = "O'chirish";
+"a11y.settings" = "Sozlamalar";
 "common.back" = "Orqaga";
 "common.done" = "Tayyor";
 "common.close" = "Yopish";

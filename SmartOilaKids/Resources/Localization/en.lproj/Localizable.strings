@@ -4,6 +4,11 @@
 "common.home" = "Home";
 "common.save" = "Save";
 "common.cancel" = "Cancel";
+"a11y.pin_entry" = "PIN entry";
+"a11y.code_entry" = "Pairing code entry";
+"a11y.digits_entered" = "%d of %d digits entered";
+"a11y.delete" = "Delete";
+"a11y.settings" = "Settings";
 "common.back" = "Back";
 "common.done" = "Done";
 "common.close" = "Close";

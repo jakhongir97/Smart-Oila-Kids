@@ -754,6 +754,9 @@ struct CodeEntryField: View {
             }
         }
         .frame(height: 40)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(L10n.tr("a11y.pin_entry")))
+        .accessibilityValue(Text(L10n.tr("a11y.digits_entered", code.count, length)))
     }
 
     private var boxes: some View {
@@ -773,6 +776,9 @@ struct CodeEntryField: View {
                     .frame(height: 58)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(L10n.tr("a11y.code_entry")))
+        .accessibilityValue(Text(L10n.tr("a11y.digits_entered", code.count, length)))
     }
 
     @ViewBuilder
@@ -830,6 +836,7 @@ struct NumericKeypad: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.tr("a11y.delete")))
         }
     }
 

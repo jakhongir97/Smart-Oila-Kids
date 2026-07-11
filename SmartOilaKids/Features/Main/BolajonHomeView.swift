@@ -113,6 +113,7 @@ struct BolajonHomeView: View {
                     .shadow(color: BolajonMetrics.cardShadow, radius: 8, x: 0, y: 4)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.tr("a11y.settings")))
         }
         .padding(.top, 8)
     }

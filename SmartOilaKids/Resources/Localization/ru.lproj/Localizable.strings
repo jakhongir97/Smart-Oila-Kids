@@ -4,6 +4,11 @@
 "common.home" = "На главную";
 "common.save" = "Сохранить";
 "common.cancel" = "Отмена";
+"a11y.pin_entry" = "Ввод PIN-кода";
+"a11y.code_entry" = "Ввод кода привязки";
+"a11y.digits_entered" = "Введено %d из %d цифр";
+"a11y.delete" = "Удалить";
+"a11y.settings" = "Настройки";
 "common.back" = "Назад";
 "common.done" = "Готово";
 "common.close" = "Закрыть";
