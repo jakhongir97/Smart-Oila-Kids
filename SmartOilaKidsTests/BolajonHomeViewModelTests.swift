@@ -187,3 +187,22 @@ final class BolajonTasksViewModelTests: XCTestCase {
         XCTAssertNotNil(viewModel.errorMessage)
     }
 }
+
+/// Uzbek Latin → Cyrillic transliteration (used for the `uz-cyrl` language). The result is
+/// memoized, so this also guards that caching stays correct and deterministic.
+final class UzbekCyrillicTransliterationTests: XCTestCase {
+    func testTransliteratesLatinToCyrillic() {
+        XCTAssertEqual(UzbekCyrillic.transliterate("salom"), "салом")
+        // Digraphs and the o'/g' pairs resolve before single letters.
+        XCTAssertEqual(UzbekCyrillic.transliterate("O'zbekcha"), "Ўзбекча")
+        XCTAssertEqual(UzbekCyrillic.transliterate("shakar"), "шакар")
+    }
+
+    func testRepeatedCallsAreDeterministic() {
+        let input = "Bolajon o'yini"
+        let first = UzbekCyrillic.transliterate(input)
+        let second = UzbekCyrillic.transliterate(input)
+        XCTAssertEqual(first, second)
+        XCTAssertNotEqual(first, input)
+    }
+}

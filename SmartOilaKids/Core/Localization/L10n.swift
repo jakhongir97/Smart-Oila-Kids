@@ -41,11 +41,30 @@ enum L10n {
 /// combinations are handled before single letters (order matters). Digits, punctuation,
 /// and format placeholders pass through untouched.
 enum UzbekCyrillic {
+    private static let cacheLock = NSLock()
+    private static var cache: [String: String] = [:]
+    private static let cacheLimit = 2000
+
     static func transliterate(_ input: String) -> String {
+        // Transliteration is a pure function of the input but costs ~90 full-string passes, and
+        // L10n.tr calls it on every localized string while in Cyrillic mode. Memoize the result
+        // (the UI reuses a bounded set of labels) so repeat renders are a dictionary lookup.
+        cacheLock.lock()
+        if let cached = cache[input] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
         var s = input
         for (from, to) in map {
             s = s.replacingOccurrences(of: from, with: to)
         }
+
+        cacheLock.lock()
+        if cache.count >= cacheLimit { cache.removeAll(keepingCapacity: true) }
+        cache[input] = s
+        cacheLock.unlock()
         return s
     }
 
