@@ -51,6 +51,7 @@ struct SettingsRootView: View {
     @Binding var path: [HomeRoute]
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var permissionManager = LocationPermissionManager()
+    @Environment(\.openURL) private var openURL
 
     /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). The
     /// battery/auto-start rows are unreadable on iOS, so they never count as "off".
@@ -105,6 +106,9 @@ struct SettingsRootView: View {
                 section(title: "settings2.section_other") {
                     row(glyph: .symbol("info.circle.fill"), tint: AppColors.glyphPurple,
                         title: "settings2.about", subtitleLiteral: appVersionText, action: nil)
+                    row(glyph: .symbol("hand.raised.fill"), tint: AppColors.glyphPurple,
+                        title: "settings2.privacy_policy", subtitle: "settings2.privacy_policy_sub",
+                        action: { openURL(AppConfig.privacyPolicyURL) })
                     row(glyph: .brokenLink, tint: AppColors.sosCoral,
                         title: "settings2.disconnect", subtitle: "settings2.disconnect_sub",
                         titleColor: AppColors.sosCoral, action: { path.append(.settingsDisconnect) })

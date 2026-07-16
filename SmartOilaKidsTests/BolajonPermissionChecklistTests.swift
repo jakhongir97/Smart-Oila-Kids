@@ -48,7 +48,6 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(availability(states, "usage"), .granted)
         XCTAssertEqual(availability(states, "screen"), .granted)
         XCTAssertEqual(availability(states, "microphone"), .granted)
-        XCTAssertEqual(availability(states, "camera"), .granted)
         // iOS exposes no read for these — always neutral, never "On".
         XCTAssertEqual(availability(states, "battery"), .openSettings)
         XCTAssertEqual(availability(states, "autostart"), .openSettings)
@@ -63,7 +62,6 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(availability(states, "usage"), .notGranted)
         XCTAssertEqual(availability(states, "screen"), .notGranted)
         XCTAssertEqual(availability(states, "microphone"), .notGranted)
-        XCTAssertEqual(availability(states, "camera"), .notGranted)
         XCTAssertEqual(availability(states, "battery"), .openSettings)
         XCTAssertEqual(availability(states, "autostart"), .openSettings)
     }
@@ -81,7 +79,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         // Order matches the design board's B11 summary (and the C5 status list).
         XCTAssertEqual(ids, [
             "notifications", "battery", "screen", "usage", "autostart",
-            "location", "bglocation", "microphone", "camera"
+            "location", "bglocation", "microphone"
         ])
     }
 }

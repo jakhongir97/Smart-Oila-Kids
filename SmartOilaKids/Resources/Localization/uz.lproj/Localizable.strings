@@ -750,6 +750,8 @@
 "settings2.connection_value" = "Ota-ona bilan ulangan";
 "settings2.about" = "Ilova haqida";
 "settings2.version" = "Bolajon360 · v";
+"settings2.privacy_policy" = "Maxfiylik siyosati";
+"settings2.privacy_policy_sub" = "Ilova ma'lumatlaringizdan qanday foydalanadi";
 "settings2.disconnect" = "Aloqani uzish";
 "settings2.disconnect_sub" = "Ota-ona PIN kodi talab qilinadi";
 "settings2.enable" = "Yoqish";

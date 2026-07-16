@@ -750,6 +750,8 @@
 "settings2.connection_value" = "Подключено к родителю";
 "settings2.about" = "О приложении";
 "settings2.version" = "Bolajon360 · v";
+"settings2.privacy_policy" = "Политика конфиденциальности";
+"settings2.privacy_policy_sub" = "Как приложение использует данные";
 "settings2.disconnect" = "Отключить связь";
 "settings2.disconnect_sub" = "Требуется родительский PIN-код";
 "settings2.enable" = "Включить";

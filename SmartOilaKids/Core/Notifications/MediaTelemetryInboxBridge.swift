@@ -105,28 +105,15 @@ private extension MediaTelemetryInboxBridge {
     }
 
     func localizedEventBody(for event: MediaTelemetryEvent) -> String? {
+        // These per-event `_body` keys are not localized in en/ru/uz, so looking them up would
+        // leak the raw dot-key into the inbox/media card (and transliterate to garbled Cyrillic
+        // in uz-Cyrl). Return nil so `localizedBody` falls back to the localized
+        // `notifications.media.default_body`. permissionRevoked/foregroundInterrupted already
+        // carry their own `reason` copy upstream. Add per-event bodies here once localized.
         switch event {
-        case .recordingStarted:
-            return L10n.tr("notifications.media.recording_started_body")
-        case .recordingCompleted:
-            return L10n.tr("notifications.media.recording_completed_body")
-        case .recordingUploadQueued:
-            return L10n.tr("notifications.media.recording_upload_queued_body")
-        case .recordingDiscarded:
-            return L10n.tr("notifications.media.recording_discarded_body")
-        case .recordingFailed:
-            return L10n.tr("notifications.media.recording_failed_body")
-        case .recordingCancelled:
-            return L10n.tr("notifications.media.recording_cancelled_body")
-        case .streamStarted:
-            return L10n.tr("notifications.media.stream_started_body")
-        case .streamStopped:
-            return L10n.tr("notifications.media.stream_stopped_body")
-        case .streamFailed:
-            return L10n.tr("notifications.media.stream_failed_body")
-        case .streamDeliveryFailed:
-            return L10n.tr("notifications.media.stream_delivery_failed_body")
-        case .permissionRevoked, .foregroundInterrupted:
+        case .recordingStarted, .recordingCompleted, .recordingUploadQueued, .recordingDiscarded,
+             .recordingFailed, .recordingCancelled, .streamStarted, .streamStopped, .streamFailed,
+             .streamDeliveryFailed, .permissionRevoked, .foregroundInterrupted:
             return nil
         }
     }

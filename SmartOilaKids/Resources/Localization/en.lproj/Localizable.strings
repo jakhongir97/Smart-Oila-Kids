@@ -750,6 +750,8 @@
 "settings2.connection_value" = "Connected to parent";
 "settings2.about" = "About";
 "settings2.version" = "Bolajon360 · v";
+"settings2.privacy_policy" = "Privacy Policy";
+"settings2.privacy_policy_sub" = "How this app uses your data";
 "settings2.disconnect" = "Disconnect";
 "settings2.disconnect_sub" = "Parent PIN required";
 "settings2.enable" = "Enable";

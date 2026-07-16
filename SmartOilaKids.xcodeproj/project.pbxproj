@@ -10,6 +10,7 @@
 		0259B31C4B6320BCFCE28738 /* SettingsMediaHistoryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F955AA292C0FBE9226B2C2 /* SettingsMediaHistoryPanelView.swift */; };
 		02A2F11140840028AD044865 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */; };
 		033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E35F67AF2A306DA50B1B2381 /* Assets.xcassets */; };
+		FF95F66EA06BAC5CB2DD5F18 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */; };
 		0471EB68BA714117949399DD /* GeoBackgroundService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF3557C69399FBBC4168B3DA /* GeoBackgroundService.swift */; };
 		069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717167572124BB3D730729A1 /* OilaTelemetryService.swift */; };
 		071EC0F04F004B7B1338FA2F /* TaskView+Content.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACE607570F6285D31C4A9EE0 /* TaskView+Content.swift */; };
@@ -528,6 +529,7 @@
 		E20C46AB23B8E51CC39523FC /* APIClientDebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientDebugLogger.swift; sourceTree = "<group>"; };
 		E2585515F2A3C8A3A99FEC33 /* GeoPermissionIntroStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoPermissionIntroStageView.swift; sourceTree = "<group>"; };
 		E35F67AF2A306DA50B1B2381 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E381C1C47BEBF468020D9CF3 /* PushInboxStore+Mutations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushInboxStore+Mutations.swift"; sourceTree = "<group>"; };
 		E4C5A1120F9A4C18A1B23341 /* SettingsGeoParentVisibilityVerificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsGeoParentVisibilityVerificationService.swift; sourceTree = "<group>"; };
 		E754CCA082B78AD3632D642D /* DisplayVideoRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayVideoRecorder.swift; sourceTree = "<group>"; };
@@ -655,6 +657,7 @@
 			isa = PBXGroup;
 			children = (
 				E35F67AF2A306DA50B1B2381 /* Assets.xcassets */,
+				D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */,
 				EDD4594ADF522CD5EB9CC29A /* Info.plist */,
 				0C39B2B99B81F60FCF4C0283 /* SmartOilaKids.entitlements */,
 				41CDAF7955224D3F1FA70A80 /* Fonts */,
@@ -1287,6 +1290,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */,
+				FF95F66EA06BAC5CB2DD5F18 /* PrivacyInfo.xcprivacy in Resources */,
 				A40E9E9756993DEA0DB04A4D /* InfoPlist.strings in Resources */,
 				1369F7E2A3CC99F3D2B4F0BF /* Localizable.strings in Resources */,
 			);
@@ -1666,7 +1670,7 @@
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.1;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -1692,7 +1696,7 @@
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.1;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -1716,7 +1720,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -1742,7 +1746,7 @@
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.1;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -1766,7 +1770,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = uz.smartoila.kids;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -1856,7 +1860,7 @@
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.1;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -1881,7 +1885,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.1;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SmartOilaKids.app/SmartOilaKids";
 				TEST_TARGET_NAME = SmartOilaKids;
 			};
@@ -1907,7 +1911,7 @@
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.1;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SmartOilaKids.app/SmartOilaKids";
 				TEST_TARGET_NAME = SmartOilaKids;
 			};

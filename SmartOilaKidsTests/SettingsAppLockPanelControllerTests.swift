@@ -1873,9 +1873,11 @@ final class MediaTelemetryInboxBridgeTests: XCTestCase {
             MediaTelemetryEvent.streamFailed.rawValue,
             MediaTelemetryEvent.streamStarted.rawValue
         ])
-        XCTAssertEqual(items[0].body, L10n.tr("notifications.media.recording_completed_body"))
+        // recording_completed / stream_started have no localized per-event body, so they fall
+        // back to the localized default body (never leak the raw dot-key).
+        XCTAssertEqual(items[0].body, L10n.tr("notifications.media.default_body"))
         XCTAssertEqual(items[1].body, "disconnected")
-        XCTAssertEqual(items[2].body, L10n.tr("notifications.media.stream_started_body"))
+        XCTAssertEqual(items[2].body, L10n.tr("notifications.media.default_body"))
         XCTAssertEqual(Set(bridgeDefaults.stringArray(forKey: "SMARTOILA_MEDIA_INBOX_SYNCED_IDS") ?? []), [
             "media-1",
             "media-2",

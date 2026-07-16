@@ -18,6 +18,12 @@ enum AppConfig {
         envKey: "SMARTOILA_INVITE_SHARE_URL",
         fallback: "https://smart-oila.uz"
     )
+    /// Public privacy policy, surfaced from Settings and required by App Store Guideline 5.1.1(i)
+    /// for an app that collects background location + microphone audio.
+    static let privacyPolicyURL = configuredURL(
+        envKey: "SMARTOILA_PRIVACY_POLICY_URL",
+        fallback: "https://oila360.uz/uz/privacy"
+    )
     static let legacyDeviceClaimURL = configuredURL(
         envKey: "SMARTOILA_LEGACY_DEVICE_CLAIM_URL",
         fallback: "https://child-tracker.uz/upload-v2/device"

@@ -32,8 +32,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>Camera access is used for child safety features, including QR setup and parent-requested remote captures.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID confirms the parent before changing protected settings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Location is used so the parent can see the child device location, including while the app is in the background.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
@@ -41,9 +41,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used so the parent can see the child device location while the app is open.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone access supports parent-requested audio safety features.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Photo library access lets the child send chat attachments.</string>
+	<string>Microphone access lets a parent request a short audio recording from this device for your child's safety.</string>
 	<key>SMARTOILA_SCREEN_TIME_FEATURES_ENABLED</key>
 	<false/>
 	<key>UIApplicationSceneManifest</key>
@@ -66,13 +64,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
 </dict>
 </plist>
