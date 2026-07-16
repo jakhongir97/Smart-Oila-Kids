@@ -196,6 +196,9 @@ protocol OilaDeviceServicing {
     func updateFCMToken(_ token: String) async throws
     func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws
     func postDeviceStatus(_ status: OilaDeviceStatus) async throws
+    /// Report app-usage deltas (`POST /device/apps/usage`); the response is the enforcement
+    /// state (locked packages + per-app limit/remaining) that drives on-device app-limit locking.
+    func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse
     func fetchLockState() async throws -> OilaLockState
     /// Report an app removal/tamper attempt (`POST /device/apps/removal-attempt`).
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws
@@ -237,13 +240,14 @@ final class OilaDeviceClient: OilaDeviceServicing {
             "appVersion": OilaDeviceIdentity.appVersion,
             "timezone": OilaDeviceIdentity.timezone
         ]
-        // TODO(firebase): this is an APNs device token standing in for an FCM token. The
-        // Firebase SDK is not yet integrated (blocked on team config `uz.oila360.child`), so we
-        // forward whatever push token PushTokenSyncCoordinator captured (UserDefaults key
-        // "PUSH_NOTIFICATION_TOKEN") in the `fcmToken` field. Best-effort: if no token is held
-        // yet, the key is simply omitted and pairing still succeeds. Swap for the real FCM
-        // registration token once the Firebase SDK lands.
-        if let pushToken = userDefaults.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty {
+        // Prefer the real Firebase FCM registration token (`OILA_FCM_TOKEN`, populated by
+        // FCMPushRegistrar once the Firebase SDK + GoogleService-Info.plist ship). Fall back to the
+        // raw APNs token only as a stopgap before Firebase lands — the backend is FCM-only, so the
+        // fallback cannot actually receive pushes, but it keeps the push address non-empty. If no
+        // token is held yet the key is omitted and pairing still succeeds.
+        let pushToken = userDefaults.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty
+            ?? userDefaults.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty
+        if let pushToken {
             body["fcmToken"] = pushToken
         }
 
@@ -400,11 +404,11 @@ final class OilaDeviceClient: OilaDeviceServicing {
     }
 
     func updateFCMToken(_ token: String) async throws {
-        userDefaults.set(token, forKey: "OILA_FCM_TOKEN")
-        // TODO(firebase): `token` here is an APNs device token (hex), not a Firebase FCM
-        // registration token — the Firebase SDK is not yet integrated (blocked on team config
-        // `uz.oila360.child`). We send it in `fcmToken` so the backend has *some* push address
-        // to reach this device; replace with the real FCM token once Firebase is wired.
+        userDefaults.set(token, forKey: FCMPushRegistrar.fcmTokenDefaultsKey)
+        // `token` is the real Firebase FCM registration token once FCMPushRegistrar is live
+        // (SDK + GoogleService-Info.plist present); before then it's a raw APNs stopgap that the
+        // FCM-only backend cannot deliver to. Either way the backend stores it as this device's
+        // push address (`PATCH /device/fcm-token`).
         _ = try await requestJSON(
             path: "device/fcm-token",
             method: .patch,
@@ -436,6 +440,14 @@ final class OilaDeviceClient: OilaDeviceServicing {
         if let sound = status.soundMode { body["soundMode"] = sound }
         guard !body.isEmpty else { return }
         _ = try await requestJSON(path: "device/status", method: .post, body: body, authorized: true)
+    }
+
+    func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse {
+        let payload: [[String: Any]] = items.map { ["packageName": $0.packageName, "usedSeconds": $0.usedSeconds] }
+        let data = try await requestJSON(path: "device/apps/usage", method: .post, body: ["items": payload], authorized: true)
+        let object = (data as? [String: Any]) ?? [:]
+        let jsonData = try JSONSerialization.data(withJSONObject: object)
+        return try JSONDecoder().decode(DeviceApplicationUsageReportResponse.self, from: jsonData)
     }
 
     func fetchLockState() async throws -> OilaLockState {

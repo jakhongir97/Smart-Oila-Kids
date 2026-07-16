@@ -134,6 +134,9 @@ private final class SOSServiceSpy: OilaDeviceServicing {
     func updateFCMToken(_ token: String) async throws {}
     func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {}
     func postDeviceStatus(_ status: OilaDeviceStatus) async throws {}
+    func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse {
+        DeviceApplicationUsageReportResponse(lockedPackages: [], stats: [])
+    }
     func fetchLockState() async throws -> OilaLockState { throw Unimplemented() }
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws {}
     func completeRecording(recordingID: String, fileURL: URL, durationSeconds: Int?) async throws -> [String: Any] { [:] }

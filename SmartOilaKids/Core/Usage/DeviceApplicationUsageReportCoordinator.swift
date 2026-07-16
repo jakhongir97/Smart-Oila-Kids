@@ -4,14 +4,11 @@ struct DeviceApplicationUsageReportItemRequest: Codable, Equatable {
     let packageName: String
     let usedSeconds: Int
 
+    // Live oila360 contract (`POST /device/apps/usage`, PostUsageDto/UsageItemDto) is camelCase.
     enum CodingKeys: String, CodingKey {
-        case packageName = "package_name"
-        case usedSeconds = "used_seconds"
+        case packageName
+        case usedSeconds
     }
-}
-
-private struct DeviceApplicationUsageReportRequest: Encodable {
-    let items: [DeviceApplicationUsageReportItemRequest]
 }
 
 struct DeviceApplicationUsageReportStat: Decodable, Equatable {
@@ -22,13 +19,14 @@ struct DeviceApplicationUsageReportStat: Decodable, Equatable {
     let remainingSeconds: Int?
     let isLimitReached: Bool
 
+    // Live oila360 contract (usage response `stats[]`, mirrors Android AppUsageStatDto) is camelCase.
     enum CodingKeys: String, CodingKey {
-        case packageName = "package_name"
-        case usageDate = "usage_date"
-        case usedSeconds = "used_seconds"
-        case dailyLimitSeconds = "daily_limit_seconds"
-        case remainingSeconds = "remaining_seconds"
-        case isLimitReached = "is_limit_reached"
+        case packageName
+        case usageDate
+        case usedSeconds
+        case dailyLimitSeconds
+        case remainingSeconds
+        case isLimitReached
     }
 }
 
@@ -36,8 +34,9 @@ struct DeviceApplicationUsageReportResponse: Decodable, Equatable {
     let lockedPackages: [String]
     let stats: [DeviceApplicationUsageReportStat]
 
+    // Live oila360 contract (usage response, mirrors Android UsageReportResponse) is camelCase.
     enum CodingKeys: String, CodingKey {
-        case lockedPackages = "locked_packages"
+        case lockedPackages
         case stats
     }
 }
@@ -50,29 +49,23 @@ protocol DeviceApplicationUsageReportServicing {
 }
 
 final class DeviceApplicationUsageReportService: DeviceApplicationUsageReportServicing {
-    init(client: APIClient = APIClient()) {
+    init(client: OilaDeviceServicing = OilaDeviceClient.shared) {
         self.client = client
     }
 
+    /// Reports app-usage deltas to the live oila360 device surface
+    /// (`POST /api/v1/device/apps/usage`). The device is identified by its bearer token, so
+    /// `dsn` no longer appears in the path — it is retained only for the coordinator's queue
+    /// keying/diagnostics. The non-empty response is the enforcement state that drives
+    /// on-device app-limit locking.
     func reportUsage(
         dsn: String,
         items: [DeviceApplicationUsageReportItemRequest]
     ) async throws -> DeviceApplicationUsageReportResponse {
-        let request = DeviceApplicationUsageReportRequest(items: items)
-        let body = try JSONEncoder().encode(request)
-
-        return try await client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "devices/\(dsn)/applications/usage",
-            method: .post,
-            headers: ["Accept": "application/json"],
-            body: body,
-            contentType: "application/json",
-            as: DeviceApplicationUsageReportResponse.self
-        )
+        try await client.reportAppUsage(items: items)
     }
 
-    private let client: APIClient
+    private let client: OilaDeviceServicing
 }
 
 actor DeviceApplicationUsageReportCoordinator {
@@ -416,7 +409,7 @@ actor DeviceApplicationUsageReportCoordinator {
     }
 
     private func endpoint(for dsn: String) -> String {
-        "\(AppConfig.apiBaseURL.absoluteString)/devices/\(dsn)/applications/usage"
+        "\(AppConfig.oilaAPIBaseURL.absoluteString)/device/apps/usage"
     }
 
     private func scheduleRetry() {
