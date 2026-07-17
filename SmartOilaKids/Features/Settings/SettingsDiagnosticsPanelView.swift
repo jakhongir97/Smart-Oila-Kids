@@ -501,7 +501,7 @@ struct DiagnosticsPanelView: View {
             .joined(separator: "\n\n")
 
         let header = [
-            "Smart Oila Kids Diagnostics Snapshot",
+            "Bolajon360 Diagnostics Snapshot",
             "\(L10n.tr("diagnostics.export_generated")): \(SettingsDiagnosticsValueMapper.timestamp(Date()))",
             "\(L10n.tr("diagnostics.export_app_version")): \(exportAppVersionText())",
             "\(L10n.tr("diagnostics.export_bundle_id")): \(Bundle.main.bundleIdentifier ?? "-")",

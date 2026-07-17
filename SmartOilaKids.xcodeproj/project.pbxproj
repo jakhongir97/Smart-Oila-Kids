@@ -1710,7 +1710,7 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
+				INFOPLIST_KEY_CFBundleDisplayName = "Bolajon360";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1760,7 +1760,7 @@
 				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Smart Oila Kids";
+				INFOPLIST_KEY_CFBundleDisplayName = "Bolajon360";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

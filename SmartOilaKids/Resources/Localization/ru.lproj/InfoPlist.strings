@@ -1,7 +1,5 @@
-"CFBundleDisplayName" = "Smart Oila Kids";
-"NSCameraUsageDescription" = "Доступ к камере нужен для функций безопасности ребенка, включая QR-настройку и удаленные запросы родителя на съемку.";
+"CFBundleDisplayName" = "Bolajon360";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Геолокация нужна, чтобы родитель видел местоположение устройства ребенка, в том числе когда приложение работает в фоне.";
 "NSLocationAlwaysUsageDescription" = "Геолокация нужна, чтобы родитель видел местоположение устройства ребенка, в том числе когда приложение работает в фоне.";
 "NSLocationWhenInUseUsageDescription" = "Геолокация нужна, чтобы родитель видел местоположение устройства ребенка, когда приложение открыто.";
 "NSMicrophoneUsageDescription" = "Доступ к микрофону нужен для функций безопасности ребенка по запросу родителя.";
-"NSPhotoLibraryUsageDescription" = "Доступ к фото нужен, чтобы ребенок мог отправлять вложения в чате.";
