@@ -15,7 +15,7 @@ and tracks tasks/rewards — all against the live backend.
 |---|---|
 | **App name (in build)** | Bolajon360 |
 | **Bundle id** | `uz.smartoila.kids` (team `3TWN5NW4BL`) |
-| **Version** | 1.1 (build 4) |
+| **Version** | 1.1 (build 5) — the build intended for the next App Store submission |
 | **Branch** | `redesign/bolajon360-oila360` |
 | **Backend (live)** | `https://api.oila360.uz/api/v1` — Bearer `deviceToken` (single long-lived token, no refresh) |
 | **Auth model** | Parent generates a **5-digit** pairing code → child redeems via `POST /device/pair`. No username/password, no QR, no phone-OTP in production. |
