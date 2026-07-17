@@ -76,13 +76,20 @@ if [[ "${RUN_IOS_SIMULATOR_TESTS:-0}" == "1" ]]; then
   echo
 
   echo "== SmartOilaKids build warning gate =="
-  # Allowlisted: two Swift 6 non-Sendable-capture warnings in ChatWebSocketService, the legacy
-  # chat WebSocket service. Chat is unreachable in Release (targets the dead backend.smart-oila.uz
-  # host, debug-route only) and is slated for deletion; asserting Sendable on it would be a false
-  # claim, so it is allowlisted rather than force-fixed. Remove this --allow when the file is deleted.
+  # Allowlisted warnings (toolchain/SDK-drift, not real defects):
+  #  1. ChatWebSocketService non-Sendable captures — legacy chat WS service, unreachable in Release
+  #     (targets the dead backend.smart-oila.uz host, debug-route only), slated for deletion;
+  #     asserting Sendable on it would be a false claim.
+  #  2. ScreenTimeAuthorizationManager "switch must be exhaustive" — the FamilyControls enums
+  #     AuthorizationStatus / FamilyControlsError gained new cases (.approvedWithDataAccess,
+  #     .unauthorized) in the Xcode 26.5 SDK that do NOT exist in the 26.3 SDK the team builds on,
+  #     so they cannot be named explicitly without breaking the local build. Both switches already
+  #     carry a fail-safe `@unknown default`, so the new cases are handled safely. Replace with
+  #     explicit cases once the toolchain floor moves to 26.5.
   python3 scripts/check_build_warnings.py \
     --log .build/test-results/ios-tests.log \
     --allow 'ChatWebSocketService\.swift:.*non-Sendable' \
+    --allow 'ScreenTimeAuthorizationManager\.swift:.*switch must be exhaustive' \
     --max-unapproved 0
   echo
 fi
