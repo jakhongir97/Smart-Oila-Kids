@@ -218,7 +218,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         do {
             let state = try await service.fetchLockState()
             guard isRunning, sequence == lockRefreshSequence else { return }
-            if state.isLocked != isLocked { isLocked = state.isLocked }
+            // Only apply a recognized shape. A nil (unrecognized 200) keeps the last-known lock —
+            // never releases an active parental lock on an unexpected payload (fail closed).
+            if let locked = state.isLocked, locked != isLocked { isLocked = locked }
         } catch let error as OilaAPIError where error.requiresRePair {
             handleAuthorizationLoss()
         } catch {

@@ -126,7 +126,10 @@ struct OilaDeviceStatus {
 
 /// Resolved lock state from `GET /device/lock/state` (schema untyped in the spec — parsed tolerantly).
 struct OilaLockState {
-    let isLocked: Bool
+    /// nil = the 200 response shape was not recognized (no known lock key, no nested `global`
+    /// object). Callers MUST treat nil as "unknown" and keep the last-known lock — never as
+    /// "unlocked" — so an unexpected shape can never silently release an active parental lock.
+    let isLocked: Bool?
     let raw: [String: Any]
 }
 
@@ -453,12 +456,28 @@ final class OilaDeviceClient: OilaDeviceServicing {
     func fetchLockState() async throws -> OilaLockState {
         let data = try await requestJSON(path: "device/lock/state", method: .get, authorized: true)
         let object = (data as? [String: Any]) ?? [:]
-        // Tolerant: accept common key spellings for the global lock flag.
-        let locked = (object["isLocked"] as? Bool)
-            ?? (object["locked"] as? Bool)
-            ?? (object["globalLock"] as? Bool)
-            ?? ((object["state"] as? String)?.lowercased() == "locked")
-        return OilaLockState(isLocked: locked, raw: object)
+        return OilaLockState(isLocked: Self.parseGlobalLock(from: object), raw: object)
+    }
+
+    /// Tolerant global-lock read for `GET /device/lock/state` (spec response is untyped). Accepts
+    /// the flat top-level keys and a nested `global` object, covering `isLocked` / `locked` /
+    /// `enabled` / `globalLock` booleans (the sibling SetManualLockDto uses `enabled`) and a
+    /// `state` string. Returns nil when NONE are present so the caller fails closed (keeps the
+    /// last-known lock) instead of defaulting an unrecognized 200 to unlocked.
+    static func parseGlobalLock(from object: [String: Any]) -> Bool? {
+        func read(_ dict: [String: Any]) -> Bool? {
+            for key in ["isLocked", "locked", "enabled", "globalLock"] {
+                if let value = dict[key] as? Bool { return value }
+            }
+            if let state = (dict["state"] as? String)?.lowercased() {
+                if state == "locked" { return true }
+                if state == "unlocked" || state == "unlock" { return false }
+            }
+            return nil
+        }
+        if let value = read(object) { return value }
+        if let global = object["global"] as? [String: Any], let value = read(global) { return value }
+        return nil
     }
 
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws {

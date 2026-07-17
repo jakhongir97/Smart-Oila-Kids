@@ -13,7 +13,7 @@ struct DeviceApplicationUsageReportItemRequest: Codable, Equatable {
 
 struct DeviceApplicationUsageReportStat: Decodable, Equatable {
     let packageName: String
-    let usageDate: String
+    let usageDate: String?
     let usedSeconds: Int
     let dailyLimitSeconds: Int?
     let remainingSeconds: Int?
@@ -30,6 +30,23 @@ struct DeviceApplicationUsageReportStat: Decodable, Equatable {
     }
 }
 
+// Tolerant decode mirroring Android's proven-nullable AppUsageStatDto (secondary all-null ctor):
+// the live backend sometimes omits/nulls these fields, so decode must never throw on a sparse
+// 200 — otherwise the usage batch fails to decode, the coordinator retries the same delta
+// forever, and the enforcement state never reaches the app-limit monitor. The custom init lives
+// in an extension so the memberwise initializer (used by tests) is preserved.
+extension DeviceApplicationUsageReportStat {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        packageName = try c.decodeIfPresent(String.self, forKey: .packageName) ?? ""
+        usageDate = try c.decodeIfPresent(String.self, forKey: .usageDate)
+        usedSeconds = try c.decodeIfPresent(Int.self, forKey: .usedSeconds) ?? 0
+        dailyLimitSeconds = try c.decodeIfPresent(Int.self, forKey: .dailyLimitSeconds)
+        remainingSeconds = try c.decodeIfPresent(Int.self, forKey: .remainingSeconds)
+        isLimitReached = try c.decodeIfPresent(Bool.self, forKey: .isLimitReached) ?? false
+    }
+}
+
 struct DeviceApplicationUsageReportResponse: Decodable, Equatable {
     let lockedPackages: [String]
     let stats: [DeviceApplicationUsageReportStat]
@@ -38,6 +55,18 @@ struct DeviceApplicationUsageReportResponse: Decodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case lockedPackages
         case stats
+    }
+}
+
+// Tolerant decode mirroring Android's nullable UsageReportResponse (all-null secondary ctor): a
+// sparse/null 200 decodes to empty lists instead of throwing, so the batch is accepted and the
+// queue advances rather than retrying forever. Custom init in an extension keeps the memberwise
+// initializer available to tests.
+extension DeviceApplicationUsageReportResponse {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lockedPackages = try c.decodeIfPresent([String].self, forKey: .lockedPackages) ?? []
+        stats = try c.decodeIfPresent([DeviceApplicationUsageReportStat].self, forKey: .stats) ?? []
     }
 }
 

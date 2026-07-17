@@ -3230,3 +3230,78 @@ private func waitForRefreshRequestCount(
         try? await Task.sleep(nanoseconds: 10_000_000)
     }
 }
+
+/// Regression coverage for the `POST /device/apps/usage` response contract: the live backend can
+/// send a sparse/null payload (proven by Android's nullable UsageReportResponse), so decoding must
+/// never throw — a throw would fail the batch, retry the same delta forever, and starve enforcement.
+final class DeviceApplicationUsageReportDecodingTests: XCTestCase {
+    private func decode(_ json: String) throws -> DeviceApplicationUsageReportResponse {
+        try JSONDecoder().decode(DeviceApplicationUsageReportResponse.self, from: Data(json.utf8))
+    }
+
+    func testDecodesEmptyObjectToEmptyEnforcementStateWithoutThrowing() throws {
+        let response = try decode("{}")
+        XCTAssertEqual(response.lockedPackages, [])
+        XCTAssertEqual(response.stats, [])
+    }
+
+    func testDecodesExplicitNullTopLevelFieldsToEmpty() throws {
+        let response = try decode(#"{"lockedPackages": null, "stats": null}"#)
+        XCTAssertEqual(response.lockedPackages, [])
+        XCTAssertEqual(response.stats, [])
+    }
+
+    func testDecodesSparseStatWithMissingOptionalFields() throws {
+        let response = try decode(#"{"lockedPackages":["com.x"],"stats":[{"packageName":"com.x","isLimitReached":true}]}"#)
+        XCTAssertEqual(response.lockedPackages, ["com.x"])
+        XCTAssertEqual(response.stats.count, 1)
+        let stat = response.stats[0]
+        XCTAssertEqual(stat.packageName, "com.x")
+        XCTAssertNil(stat.usageDate)
+        XCTAssertEqual(stat.usedSeconds, 0)
+        XCTAssertNil(stat.dailyLimitSeconds)
+        XCTAssertTrue(stat.isLimitReached)
+    }
+
+    func testDecodesFullCamelCasePayload() throws {
+        let response = try decode(#"{"lockedPackages":["a"],"stats":[{"packageName":"com.y","usageDate":"2026-07-17","usedSeconds":120,"dailyLimitSeconds":3600,"remainingSeconds":3480,"isLimitReached":false}]}"#)
+        let stat = response.stats[0]
+        XCTAssertEqual(stat.usageDate, "2026-07-17")
+        XCTAssertEqual(stat.usedSeconds, 120)
+        XCTAssertEqual(stat.dailyLimitSeconds, 3600)
+        XCTAssertEqual(stat.remainingSeconds, 3480)
+        XCTAssertFalse(stat.isLimitReached)
+    }
+}
+
+/// Regression coverage for the `GET /device/lock/state` global-lock parse. The critical invariant:
+/// an unrecognized 200 shape resolves to nil (unknown) — NEVER false — so the telemetry layer keeps
+/// the last-known lock and can never silently release an active parental lock (fail closed).
+final class OilaLockStateParsingTests: XCTestCase {
+    func testReadsCommonFlatBooleanKeys() {
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["isLocked": true]), true)
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["locked": false]), false)
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["globalLock": true]), true)
+    }
+
+    func testReadsEnabledKeyUsedByTheSiblingManualLockDto() {
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["enabled": true]), true)
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["enabled": false]), false)
+    }
+
+    func testReadsStateString() {
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["state": "locked"]), true)
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["state": "unlocked"]), false)
+    }
+
+    func testReadsNestedGlobalObject() {
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["global": ["enabled": true]]), true)
+        XCTAssertEqual(OilaDeviceClient.parseGlobalLock(from: ["global": ["isLocked": false]]), false)
+    }
+
+    func testUnrecognizedShapeReturnsNilSoCallerFailsClosed() {
+        XCTAssertNil(OilaDeviceClient.parseGlobalLock(from: [:]))
+        XCTAssertNil(OilaDeviceClient.parseGlobalLock(from: ["somethingElse": 42]))
+        XCTAssertNil(OilaDeviceClient.parseGlobalLock(from: ["state": "weird"]))
+    }
+}
