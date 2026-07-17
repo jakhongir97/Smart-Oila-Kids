@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: 5.10
-    TARGETED_DEVICE_FAMILY: "1"
+    TARGETED_DEVICE_FAMILY: "1,2"
 
 schemes:
   SmartOilaKids:
