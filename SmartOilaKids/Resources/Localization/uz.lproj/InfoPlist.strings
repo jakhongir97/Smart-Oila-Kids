@@ -1,4 +1,5 @@
 "CFBundleDisplayName" = "Bolajon360";
+"NSCameraUsageDescription" = "Kameradan farzand qurilmasidan ota-ona so'ragan xavfsizlik foto yoki videolari uchun foydalaniladi.";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini, ilova fonda ishlaganda ham, ko'ra olishi uchun ishlatiladi.";
 "NSLocationAlwaysUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini, ilova fonda ishlaganda ham, ko'ra olishi uchun ishlatiladi.";
 "NSLocationWhenInUseUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini ilova ochiq paytda ko'ra olishi uchun ishlatiladi.";
