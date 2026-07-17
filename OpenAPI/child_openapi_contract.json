@@ -82,7 +82,7 @@
     },
     {
       "method": "POST",
-      "path": "/api/devices/{}/applications/usage"
+      "path": "/api/device/apps/usage"
     },
     {
       "method": "GET",

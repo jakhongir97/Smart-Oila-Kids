@@ -23,6 +23,12 @@ spec, so it does **not** prove conformance to the live server. Do **not** "corre
 `device/*` paths toward the legacy `awards/…` / `devices/dsn/…` forms — that would point working
 code at the dead host. Repointing the gate at `oila360_live_openapi.json` is tracked as follow-up.
 
+**Exception (2026-07-18):** the app-usage endpoint was migrated in code from the dead legacy
+`POST devices/{dsn}/applications/usage` to the live `POST device/apps/usage` (commit 649889c).
+The child contract entry now names the live path, and the live path was added to `rest_openapi.json`
+so the coverage gate reflects the endpoint the app actually calls (restores REST 32/32). This is the
+first endpoint repointed onto the live spec; the rest of the gate migration remains follow-up.
+
 Then run:
 
 ```bash

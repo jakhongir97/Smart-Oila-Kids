@@ -76,8 +76,13 @@ if [[ "${RUN_IOS_SIMULATOR_TESTS:-0}" == "1" ]]; then
   echo
 
   echo "== SmartOilaKids build warning gate =="
+  # Allowlisted: two Swift 6 non-Sendable-capture warnings in ChatWebSocketService, the legacy
+  # chat WebSocket service. Chat is unreachable in Release (targets the dead backend.smart-oila.uz
+  # host, debug-route only) and is slated for deletion; asserting Sendable on it would be a false
+  # claim, so it is allowlisted rather than force-fixed. Remove this --allow when the file is deleted.
   python3 scripts/check_build_warnings.py \
     --log .build/test-results/ios-tests.log \
+    --allow 'ChatWebSocketService\.swift:.*non-Sendable' \
     --max-unapproved 0
   echo
 fi

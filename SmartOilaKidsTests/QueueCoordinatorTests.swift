@@ -1229,13 +1229,21 @@ final class ChatPersistenceTests: XCTestCase {
 
         let baseDate = ISO8601DateFormatter().date(from: "2026-03-01T00:00:00Z")!
         let formatter = ISO8601DateFormatter()
-        let messages = (0 ..< 405).map { index in
-            Datum(
-                userType: index.isMultiple(of: 2) ? "parent" : "child",
+        // NOTE: each field is hoisted into an explicitly-typed local. Inlining the ternaries
+        // directly into the Datum(...) initializer inside this .map closure tips the Swift 6
+        // type-checker into an "unable to type-check in reasonable time" failure on Xcode 26.5
+        // (it type-checks fine on 26.3), which reddened the iOS Simulator Tests CI workflow.
+        let messages: [Datum] = (0 ..< 405).map { index in
+            let userType: String = index.isMultiple(of: 2) ? "parent" : "child"
+            let attachments: [String] = index == 404 ? ["https://example.com/final.jpg"] : []
+            let senderName: String? = index == 404 ? "  Parent Final  " : nil
+            let time: String = formatter.string(from: baseDate.addingTimeInterval(TimeInterval(index * 60)))
+            return Datum(
+                userType: userType,
                 text: "message-\(index)",
-                attachments: index == 404 ? ["https://example.com/final.jpg"] : [],
-                time: formatter.string(from: baseDate.addingTimeInterval(TimeInterval(index * 60))),
-                senderName: index == 404 ? "  Parent Final  " : nil
+                attachments: attachments,
+                time: time,
+                senderName: senderName
             )
         }
 

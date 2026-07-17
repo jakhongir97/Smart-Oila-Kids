@@ -223,6 +223,20 @@ struct BolajonHomeView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(AppColors.inkTertiary)
                 }
+                // Surface a failed "Done" tap: complete() sets errorMessage but the Home card
+                // had no place to show it, so a failure was silent. Tapping the card opens the
+                // Tasks screen, which carries the full error banner + retry.
+                if let error = viewModel.errorMessage {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppColors.sosCoral)
+                        Text(error)
+                            .font(AppTypography.caption(12))
+                            .foregroundStyle(AppColors.inkSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
                 if viewModel.previewTasks.isEmpty {
                     Text(L10n.tr("home2.tasks.empty"))
                         .font(AppTypography.bodyText(13))
@@ -394,6 +408,11 @@ final class BolajonHomeViewModel: ObservableObject {
     @Published var sosFailed = false
     @Published var errorMessage: String?
 
+    /// Tasks whose completion is currently in flight — guards against a rapid double-tap
+    /// firing two concurrent completeTask calls for the same task (the second would error and
+    /// surface a confusing failure for what the child sees as one successful action).
+    private var completingTaskIDs: Set<String> = []
+
     /// Today's total usage of the parent-tracked apps (seconds), read from the local
     /// DeviceActivity report. Nil when Screen Time isn't authorized/configured or no report
     /// has been written yet — the Home card is hidden then. The device has no endpoint for
@@ -406,11 +425,14 @@ final class BolajonHomeViewModel: ObservableObject {
 
     init(
         service: OilaDeviceServicing = OilaDeviceClient.shared,
-        telemetry: SOSTelemetryProviding = OilaTelemetryService.shared,
+        // Resolved inside the @MainActor init body rather than as a default argument:
+        // OilaTelemetryService.shared is main-actor-isolated, and default-argument expressions
+        // are evaluated in a nonisolated context (a hard error under the Swift 6 language mode).
+        telemetry: SOSTelemetryProviding? = nil,
         screenTimeUsage: ScreenTimeUsageProviding = LocalScreenTimeUsageProvider()
     ) {
         self.service = service
-        self.telemetry = telemetry
+        self.telemetry = telemetry ?? OilaTelemetryService.shared
         self.screenTimeUsage = screenTimeUsage
     }
 
@@ -451,9 +473,17 @@ final class BolajonHomeViewModel: ObservableObject {
     }
 
     func complete(_ task: OilaDeviceTask) async {
+        guard !completingTaskIDs.contains(task.id) else { return }
+        completingTaskIDs.insert(task.id)
+        defer { completingTaskIDs.remove(task.id) }
         do {
             try await service.completeTask(id: task.id)
             tasks = try await service.fetchTasks()
+            errorMessage = nil
+        } catch let error as OilaAPIError where error.requiresRePair {
+            // A revoked/unpaired device token can't recover here — route back to pairing
+            // instead of leaving the child staring at a generic failure forever.
+            NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
         }
@@ -485,6 +515,14 @@ final class BolajonHomeViewModel: ObservableObject {
                 errorMessage = nil
                 return
             } catch {
+                if let apiError = error as? OilaAPIError, apiError.requiresRePair {
+                    // A revoked/unpaired token will never succeed on retry — surface failure and
+                    // route back to pairing immediately instead of burning the remaining attempts.
+                    sosFailed = true
+                    errorMessage = NetworkError.userMessage(for: error)
+                    NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
+                    return
+                }
                 if attempt == maxAttempts {
                     sosFailed = true
                     errorMessage = NetworkError.userMessage(for: error)

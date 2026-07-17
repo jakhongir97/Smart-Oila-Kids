@@ -34,13 +34,14 @@ final class BolajonPermissionChecklistTests: XCTestCase {
     }
 
     func testAllGrantedMarksOSRowsGrantedAndUnreadableRowsOpenSettings() {
+        // screenTimeEnabled: true so the screen/usage rows exist and their live mapping is covered.
         let states = BolajonPermissionChecklist.states(from: snapshot(
             location: .authorizedAlways,
             notifications: .authorized,
             microphone: .granted,
             camera: .authorized,
             screenTime: .granted
-        ))
+        ), screenTimeEnabled: true)
 
         XCTAssertEqual(availability(states, "notifications"), .granted)
         XCTAssertEqual(availability(states, "location"), .granted)
@@ -54,7 +55,8 @@ final class BolajonPermissionChecklistTests: XCTestCase {
     }
 
     func testAllDeniedMarksOSRowsNotGranted() {
-        let states = BolajonPermissionChecklist.states(from: snapshot())
+        // screenTimeEnabled: true so the screen/usage rows exist and their denied mapping is covered.
+        let states = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: true)
 
         XCTAssertEqual(availability(states, "notifications"), .notGranted)
         XCTAssertEqual(availability(states, "location"), .notGranted)
@@ -75,11 +77,23 @@ final class BolajonPermissionChecklistTests: XCTestCase {
 
     func testChecklistShapeIsStableSoBothScreensMatch() {
         // B11 and C5 build from this one ordered list, so the id set keeps them in sync.
-        let ids = BolajonPermissionChecklist.states(from: snapshot()).map(\.id)
-        // Order matches the design board's B11 summary (and the C5 status list).
-        XCTAssertEqual(ids, [
+        // With Screen Time enabled the full board (incl. screen/usage) shows, in board order.
+        let enabledIDs = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: true).map(\.id)
+        XCTAssertEqual(enabledIDs, [
             "notifications", "battery", "screen", "usage", "autostart",
             "location", "bglocation", "microphone"
         ])
+    }
+
+    func testScreenTimeRowsAreHiddenWhenFeatureDisabled() {
+        // Shipped config (SMARTOILA_SCREEN_TIME_FEATURES_ENABLED=false): the screen/usage rows are
+        // dropped so the Settings "N off" badge can reach zero and B11/C5 show no inert Enable rows.
+        let ids = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false).map(\.id)
+        XCTAssertEqual(ids, [
+            "notifications", "battery", "autostart",
+            "location", "bglocation", "microphone"
+        ])
+        XCTAssertNil(availability(BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false), "screen"))
+        XCTAssertNil(availability(BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false), "usage"))
     }
 }

@@ -35,7 +35,17 @@ struct BolajonPermissionStep: Identifiable {
     var id: String { "\(kind)" }
     var showsDecline: Bool { !isMandatory && kind != .intro && kind != .summary }
 
-    static let all: [BolajonPermissionStep] = [
+    /// Onboarding steps, screen-time-gated. The `.usage` / `.appLimits` steps are only shown
+    /// when `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` is on; otherwise the child would tap an
+    /// "Enable" button that can never grant anything (no FamilyControls entitlement/prompt ships).
+    static var all: [BolajonPermissionStep] {
+        guard AppRuntime.screenTimeFeaturesEnabled else {
+            return allSteps.filter { $0.kind != .usage && $0.kind != .appLimits }
+        }
+        return allSteps
+    }
+
+    private static let allSteps: [BolajonPermissionStep] = [
         .init(kind: .intro, icon: "shield.lefthalf.filled", intent: .lavender,
               titleKey: "perm2.intro.title", bodyKey: "perm2.intro.body", primaryKey: "perm2.intro.cta", isMandatory: true),
         .init(kind: .notifications, icon: "bell.fill", intent: .lavender,
@@ -351,7 +361,8 @@ struct BolajonPermissionState: Identifiable {
 
 enum BolajonPermissionChecklist {
     /// Pure mapping from a status snapshot to checklist rows — deterministic and unit-testable.
-    static func states(from snapshot: PermissionStatusSnapshot) -> [BolajonPermissionState] {
+    static func states(from snapshot: PermissionStatusSnapshot,
+                       screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled) -> [BolajonPermissionState] {
         let notifications = [.authorized, .provisional, .ephemeral].contains(snapshot.notificationAuthorizationStatus)
         let location = [.authorizedAlways, .authorizedWhenInUse].contains(snapshot.locationAuthorizationStatus)
         let backgroundLocation = snapshot.locationAuthorizationStatus == .authorizedAlways
@@ -361,17 +372,27 @@ enum BolajonPermissionChecklist {
         func live(_ granted: Bool) -> BolajonPermissionState.Availability { granted ? .granted : .notGranted }
 
         // Order matches the design board's B11 summary (and therefore the C5 status list):
-        // notifications, battery, screen(overlay), usage, autostart, location, bg-location,
+        // notifications, battery, [screen(overlay), usage,] autostart, location, bg-location,
         // microphone. (Camera row removed — the app requests no camera permission.)
-        return [
+        var rows: [BolajonPermissionState] = [
             BolajonPermissionState(id: "notifications", icon: "bell.fill", labelKey: "perm2.item.notifications",
                                    descriptionKey: "perm2.notifications.body", availability: live(notifications), requirement: .notifications),
             BolajonPermissionState(id: "battery", icon: "battery.100.bolt", labelKey: "perm2.item.battery",
-                                   descriptionKey: "perm2.battery.body", availability: .openSettings, requirement: nil),
-            BolajonPermissionState(id: "screen", icon: "square.stack.3d.up.fill", labelKey: "perm2.item.screen",
-                                   descriptionKey: "perm2.limits.body", availability: live(screenTime), requirement: .usageStats),
-            BolajonPermissionState(id: "usage", icon: "chart.bar.fill", labelKey: "perm2.item.usage",
-                                   descriptionKey: "perm2.usage.body", availability: live(screenTime), requirement: .usageStats),
+                                   descriptionKey: "perm2.battery.body", availability: .openSettings, requirement: nil)
+        ]
+
+        // Screen Time rows only when the feature actually ships. With
+        // SMARTOILA_SCREEN_TIME_FEATURES_ENABLED off there is no FamilyControls prompt to grant,
+        // so these two rows could never turn green — showing them kept the Settings "N off" badge
+        // permanently lit and left inert "Enable" buttons in B11/C5. Hide until enforcement ships.
+        if screenTimeEnabled {
+            rows.append(BolajonPermissionState(id: "screen", icon: "square.stack.3d.up.fill", labelKey: "perm2.item.screen",
+                                               descriptionKey: "perm2.limits.body", availability: live(screenTime), requirement: .usageStats))
+            rows.append(BolajonPermissionState(id: "usage", icon: "chart.bar.fill", labelKey: "perm2.item.usage",
+                                               descriptionKey: "perm2.usage.body", availability: live(screenTime), requirement: .usageStats))
+        }
+
+        rows.append(contentsOf: [
             BolajonPermissionState(id: "autostart", icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart",
                                    descriptionKey: "perm2.autostart.body", availability: .openSettings, requirement: nil),
             BolajonPermissionState(id: "location", icon: "location.fill", labelKey: "perm2.item.location",
@@ -380,11 +401,13 @@ enum BolajonPermissionChecklist {
                                    descriptionKey: "perm2.bglocation.body", availability: live(backgroundLocation), requirement: .location),
             BolajonPermissionState(id: "microphone", icon: "mic.fill", labelKey: "perm2.item.microphone",
                                    descriptionKey: "perm2.microphone.body", availability: live(microphone), requirement: .microphone)
-        ]
+        ])
+        return rows
     }
 
     @MainActor
-    static func states(from manager: LocationPermissionManager) -> [BolajonPermissionState] {
-        states(from: manager.statusSnapshot())
+    static func states(from manager: LocationPermissionManager,
+                       screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled) -> [BolajonPermissionState] {
+        states(from: manager.statusSnapshot(), screenTimeEnabled: screenTimeEnabled)
     }
 }

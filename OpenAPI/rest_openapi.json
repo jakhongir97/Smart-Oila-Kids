@@ -2816,6 +2816,21 @@
         }
       }
     },
+    "/api/device/apps/usage": {
+      "post": {
+        "tags": [
+          "Applications"
+        ],
+        "summary": "Report Applications Usage (live oila360 device endpoint)",
+        "description": "Live api.oila360.uz/api/v1 replacement for the legacy devices/{dsn}/applications/usage. The child device authenticates by bearer deviceToken and reports usage deltas here (OilaDeviceAPI.reportAppUsage). Added so the coverage gate reflects the live endpoint the app actually calls.",
+        "operationId": "report_device_apps_usage_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/api/devices/{dsn}/applications/usage": {
       "post": {
         "tags": [
