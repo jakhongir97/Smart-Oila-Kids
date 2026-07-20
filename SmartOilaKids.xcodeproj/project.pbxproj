@@ -119,6 +119,7 @@
 		F1A0B1C2D3E4F50617283970 /* DeviceLockShieldControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283971 /* DeviceLockShieldControllerTests.swift */; };
 		F1A0B1C2D3E4F506172839A0 /* SettingsProtectionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */; };
 		F1A0B1C2D3E4F506172839A2 /* BolajonHomeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */; };
+		F1A0B1C2D3E4F50617283A01 /* OilaDeviceClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */; };
 		F1A0B1C2D3E4F506172839A4 /* BolajonPermissionChecklistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */; };
 		F616424CC01DE567EE1A1EBE /* HTTPMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C8610E862B6B9260CC2085 /* HTTPMethod.swift */; };
 		F8D5039166D5E3FFDFA908D5 /* LoadPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = D616AA2DBAE5C7A3E9BBC183 /* LoadPhase.swift */; };
@@ -253,6 +254,7 @@
 		F1A0B1C2D3E4F50617283971 /* DeviceLockShieldControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockShieldControllerTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsProtectionControllerTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonHomeViewModelTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaDeviceClientTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonPermissionChecklistTests.swift; sourceTree = "<group>"; };
 		F3642A198E04D3C7E8388312 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		F3856E652D5D319DC95A00A3 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
@@ -594,6 +596,7 @@
 				F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */,
 				F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */,
 				F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */,
+				F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */,
 				F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */,
 			);
 			path = SmartOilaKidsTests;
@@ -933,6 +936,7 @@
 				F1A0B1C2D3E4F50617283952 /* SettingsAppLockPanelControllerTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A0 /* SettingsProtectionControllerTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A2 /* BolajonHomeViewModelTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283A01 /* OilaDeviceClientTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A4 /* BolajonPermissionChecklistTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
