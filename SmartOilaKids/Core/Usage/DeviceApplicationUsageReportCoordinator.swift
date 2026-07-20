@@ -206,6 +206,11 @@ actor DeviceApplicationUsageReportCoordinator {
         }
 
         persistedState.pendingBatches.append(batch)
+        // Bound the backlog: an extended offline period (or a permanently-wedged head, now guarded
+        // below) must not let the queue grow without limit. Oldest batches are the least useful.
+        if persistedState.pendingBatches.count > maxPendingBatches {
+            persistedState.pendingBatches.removeFirst(persistedState.pendingBatches.count - maxPendingBatches)
+        }
         persistedState.lastPayloadSummary = payloadSummary(for: batch)
         persistedState.lastEndpoint = endpoint(for: batch.dsn)
         persistedState.lastErrorSummary = "-"
@@ -355,6 +360,25 @@ actor DeviceApplicationUsageReportCoordinator {
                 persistedState.lastEndpoint = endpoint
                 persistedState.lastPayloadSummary = payloadSummary
                 persistedState.lastErrorSummary = error.localizedDescription
+
+                if Self.isPermanentReject(error) {
+                    // The server will never accept this batch (4xx validation error). Drop it so it
+                    // cannot wedge the head of the queue forever, and continue with the rest.
+                    persistedState.pendingBatches.removeFirst()
+                    persistState()
+                    updateDiagnostics(
+                        status: persistedState.pendingBatches.isEmpty ? "synced" : "queued",
+                        dsn: batch.dsn,
+                        endpoint: endpoint,
+                        queuedBatchCount: persistedState.pendingBatches.count,
+                        lastPayload: payloadSummary,
+                        lastResponse: persistedState.lastResponseSummary ?? "-",
+                        lastUploadAt: persistedState.lastSuccessfulUploadAt,
+                        lastError: "dropped: \(error.localizedDescription)"
+                    )
+                    continue
+                }
+
                 persistState()
 
                 updateDiagnostics(
@@ -545,6 +569,23 @@ actor DeviceApplicationUsageReportCoordinator {
 
     private static let storageKey = "DEVICE_APPLICATION_USAGE_REPORT_STATE"
     private let endpointPlaceholder = "-"
+    /// Cap on the offline backlog. Beyond this the oldest (least useful) batches are dropped.
+    private let maxPendingBatches = 500
+
+    /// A batch the server rejects with a non-auth 4xx will never succeed on retry, so it should be
+    /// dropped rather than retried forever. 401 (auth), 408/425 (timeout) and 429 (rate limit) are
+    /// transient and stay queued; 5xx and network errors are transient too.
+    private static func isPermanentReject(_ error: Error) -> Bool {
+        guard let api = error as? OilaAPIError else { return false }
+        switch api.statusCode {
+        case 401, 408, 425, 429:
+            return false
+        case 400 ..< 500:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 private extension DeviceApplicationUsageReportCoordinator {

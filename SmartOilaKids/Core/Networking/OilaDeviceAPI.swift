@@ -110,7 +110,7 @@ struct OilaDeviceTask: Identifiable {
 }
 
 /// One GPS fix for `POST /device/location/batch` (LocationPointDto).
-struct OilaLocationFix {
+struct OilaLocationFix: Codable, Equatable {
     let lat: Double
     let lng: Double
     let accuracy: Double?

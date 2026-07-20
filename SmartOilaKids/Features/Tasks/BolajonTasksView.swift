@@ -163,6 +163,7 @@ private struct TaskRow: View {
 final class BolajonTasksViewModel: ObservableObject {
     @Published var tasks: [OilaDeviceTask] = []
     @Published var errorMessage: String?
+    @Published private(set) var completingTaskIDs: Set<String> = []
 
     private let service: OilaDeviceServicing
 
@@ -221,6 +222,11 @@ final class BolajonTasksViewModel: ObservableObject {
     }
 
     func complete(_ task: OilaDeviceTask) async {
+        // Guard against a double-tap firing the non-idempotent complete POST twice (the second
+        // call 404s/errors and surfaces a spurious banner). Mirrors the Home screen's guard.
+        guard !completingTaskIDs.contains(task.id) else { return }
+        completingTaskIDs.insert(task.id)
+        defer { completingTaskIDs.remove(task.id) }
         do {
             try await service.completeTask(id: task.id)
             tasks = try await service.fetchTasks()

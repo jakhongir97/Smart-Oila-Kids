@@ -36,6 +36,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// UserDefaults key for the persisted fail-closed lock state.
     private static let lockStateKey = "OILA_LAST_LOCK_STATE"
+    /// UserDefaults key for the persisted pending location backlog (survives process death so an
+    /// offline route isn't lost if iOS kills the app; cleared on unpair via stop()).
+    private static let pendingFixesKey = "OILA_PENDING_LOCATION_FIXES"
 
     private let service: OilaDeviceServicing
     private let locationManager = CLLocationManager()
@@ -77,8 +80,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         isRunning = true
         didSignalInvalidation = false
         isConfirmingInvalidation = false
-        // A new session must never inherit fixes queued under a previous pairing.
-        pendingFixes.removeAll()
+        // Restore any backlog persisted before a process kill. A genuinely new pairing is always
+        // preceded by stop() (unpair / invalidation), which clears the persisted store — so this
+        // can only inherit fixes from a killed-then-relaunched run of the SAME session.
+        restorePendingFixes()
 
         UIDevice.current.isBatteryMonitoringEnabled = true
 
@@ -128,6 +133,24 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         networkType = nil
         isLocked = false
         pendingFixes.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.pendingFixesKey)
+    }
+
+    private func persistPendingFixes() {
+        if pendingFixes.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.pendingFixesKey)
+        } else if let data = try? JSONEncoder().encode(pendingFixes) {
+            UserDefaults.standard.set(data, forKey: Self.pendingFixesKey)
+        }
+    }
+
+    private func restorePendingFixes() {
+        guard let data = UserDefaults.standard.data(forKey: Self.pendingFixesKey),
+              let restored = try? JSONDecoder().decode([OilaLocationFix].self, from: data) else {
+            pendingFixes.removeAll()
+            return
+        }
+        pendingFixes = Array(restored.suffix(maxQueuedFixes))
     }
 
     /// Flush the queue immediately (e.g. on backgrounding). Takes a background-task
@@ -215,6 +238,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             guard isRunning else { return }
             pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
         }
+        // Persist the (possibly re-queued) backlog so an offline route survives a process kill.
+        persistPendingFixes()
     }
 
     private func postStatus() async {
