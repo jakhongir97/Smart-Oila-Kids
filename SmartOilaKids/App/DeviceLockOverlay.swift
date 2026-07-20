@@ -78,9 +78,7 @@ struct DeviceLockOverlay: View {
                 onConfirm: { Task { await sos.send() } },
                 onClose: { sos.dismiss() }
             )
-            .presentationDetents([sosSheetDetent])
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled(sos.isSending)
+            .sosSheetChrome(dismissDisabled: sos.isSending)
         }
     }
 }

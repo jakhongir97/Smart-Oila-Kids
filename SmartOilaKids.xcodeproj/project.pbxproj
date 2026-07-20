@@ -32,7 +32,6 @@
 		3A7AF5DCE4D2C9C519B25E16 /* GeoPermissionIntroStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2585515F2A3C8A3A99FEC33 /* GeoPermissionIntroStageView.swift */; };
 		3C465EFD824F4F06990EA633 /* DeviceLockScheduleSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */; };
 		46A8F0403F7C195BE3D999A2 /* PermissionStatusSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6686EB0A6F26CDBAD6ABC37 /* PermissionStatusSnapshot.swift */; };
-		491CD988E505A78417F9A20C /* SettingsAppLockPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B822C0BFEC24DD6406A7D25 /* SettingsAppLockPanelView.swift */; };
 		4B4E1FF589C595FD088F8B62 /* DeviceApplicationStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C45ED121A102053D74358C91 /* DeviceApplicationStateService.swift */; };
 		4D835BC4403A3627B4CD5564 /* DeviceAppLimitMonitorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611DF2DB1B84CE6845E61F65 /* DeviceAppLimitMonitorController.swift */; };
 		4E0C31E83F3E48D0964937D2 /* SmartOilaUsageReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6A7F416F8F47B5A633F74E /* SmartOilaUsageReport.swift */; };
@@ -87,7 +86,6 @@
 		B13A490B95DA82840D403B4E /* String+Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFDAC27DF29466EDA313D2C5 /* String+Formatting.swift */; };
 		B15E91A197BAF88553BFD699 /* ChildChromeNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3F19AEC0C6D1D3132D54D1 /* ChildChromeNavigation.swift */; };
 		BD96FDE910D0B24E8DF6AD59 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3856E652D5D319DC95A00A3 /* AppConfig.swift */; };
-		C04F8DA41024451490FDDE1C /* SettingsAppLockPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18E85045B1843458E485FC3 /* SettingsAppLockPanelController.swift */; };
 		C0E98A711DFE4543A7BA3C20 /* SmartOilaKidsDeviceActivityMonitorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85956B25DDB545FE94EF8499 /* SmartOilaKidsDeviceActivityMonitorExtension.swift */; };
 		C381EAF82D8031A6DE4E1FE2 /* ChildChromeBranding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B35C83F2A4F548512EB20FB /* ChildChromeBranding.swift */; };
 		C85F8BC5229FDB43AE443559 /* BolajonHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */; };
@@ -112,7 +110,7 @@
 		F11DBEA0585748DF16A3D3F4 /* NetworkError.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7613A83E34A4278DABAA4E3 /* NetworkError.swift */; };
 		F1A0B1C2D3E4F50617283940 /* NetworkErrorRetryPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */; };
 		F1A0B1C2D3E4F50617283950 /* QueueCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */; };
-		F1A0B1C2D3E4F50617283952 /* SettingsAppLockPanelControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */; };
+		F1A0B1C2D3E4F50617283952 /* SmartOilaKidsCoreUnitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283953 /* SmartOilaKidsCoreUnitTests.swift */; };
 		F1A0B1C2D3E4F50617283964 /* DeviceLockCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */; };
 		F1A0B1C2D3E4F50617283966 /* DeviceAppLimitMonitorControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283967 /* DeviceAppLimitMonitorControllerTests.swift */; };
 		F1A0B1C2D3E4F50617283968 /* DeviceLockScheduleMonitorControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283969 /* DeviceLockScheduleMonitorControllerTests.swift */; };
@@ -204,7 +202,6 @@
 		9875708CE038752BC580714F /* PushCommandRouter+Parsing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushCommandRouter+Parsing.swift"; sourceTree = "<group>"; };
 		98D120F82B2D862255E144CE /* DeviceLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockService.swift; sourceTree = "<group>"; };
 		9B35C83F2A4F548512EB20FB /* ChildChromeBranding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildChromeBranding.swift; sourceTree = "<group>"; };
-		9B822C0BFEC24DD6406A7D25 /* SettingsAppLockPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAppLockPanelView.swift; sourceTree = "<group>"; };
 		9BE5577AC7D949BB8D31E0B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A8CB88E59DE6518D215B75D0 /* RootView+PushHandling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RootView+PushHandling.swift"; sourceTree = "<group>"; };
 		A9330607ECABFAFCD014BA56 /* PushInboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushInboxStore.swift; sourceTree = "<group>"; };
@@ -243,11 +240,10 @@
 		EDD4594ADF522CD5EB9CC29A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		EE5059CB7695B1358A8AC465 /* DeviceAppLockSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLockSyncCoordinator.swift; sourceTree = "<group>"; };
 		EFDAC27DF29466EDA313D2C5 /* String+Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Formatting.swift"; sourceTree = "<group>"; };
-		F18E85045B1843458E485FC3 /* SettingsAppLockPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAppLockPanelController.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283942 /* SmartOilaKidsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmartOilaKidsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkErrorRetryPolicyTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueCoordinatorTests.swift; sourceTree = "<group>"; };
-		F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAppLockPanelControllerTests.swift; sourceTree = "<group>"; };
+		F1A0B1C2D3E4F50617283953 /* SmartOilaKidsCoreUnitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaKidsCoreUnitTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockCoordinatorTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283967 /* DeviceAppLimitMonitorControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLimitMonitorControllerTests.swift; sourceTree = "<group>"; };
 		F1A0B1C2D3E4F50617283969 /* DeviceLockScheduleMonitorControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockScheduleMonitorControllerTests.swift; sourceTree = "<group>"; };
@@ -387,8 +383,6 @@
 		600A8AED1619799B7074185D /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				F18E85045B1843458E485FC3 /* SettingsAppLockPanelController.swift */,
-				9B822C0BFEC24DD6406A7D25 /* SettingsAppLockPanelView.swift */,
 				38A09C3F9BEAB5F94EAA672B /* SettingsDiagnosticsValueMapper.swift */,
 				960DB08C9B3AA4CDF8B04423 /* BolajonSettingsView.swift */,
 			);
@@ -593,7 +587,7 @@
 				F1A0B1C2D3E4F50617283971 /* DeviceLockShieldControllerTests.swift */,
 				F1A0B1C2D3E4F50617283943 /* NetworkErrorRetryPolicyTests.swift */,
 				F1A0B1C2D3E4F50617283951 /* QueueCoordinatorTests.swift */,
-				F1A0B1C2D3E4F50617283953 /* SettingsAppLockPanelControllerTests.swift */,
+				F1A0B1C2D3E4F50617283953 /* SmartOilaKidsCoreUnitTests.swift */,
 				F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */,
 				F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */,
 				F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */,
@@ -911,8 +905,6 @@
 				9C7A2A347700F00EB29AED4D /* ScreenTimeUsageSharedStore.swift in Sources */,
 				61B80B9F1BC6B50E2B10DED8 /* SecureTokenStore.swift in Sources */,
 				02A2F11140840028AD044865 /* SessionStore.swift in Sources */,
-				C04F8DA41024451490FDDE1C /* SettingsAppLockPanelController.swift in Sources */,
-				491CD988E505A78417F9A20C /* SettingsAppLockPanelView.swift in Sources */,
 				549053EC342E9E528DD2F8DC /* SettingsDiagnosticsValueMapper.swift in Sources */,
 				AC66ED9A739886DD1535E3E5 /* SettingsProtectionController.swift in Sources */,
 				6E27C030E7CD94583976FDFB /* BolajonSettingsView.swift in Sources */,
@@ -933,7 +925,7 @@
 				F1A0B1C2D3E4F50617283970 /* DeviceLockShieldControllerTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283940 /* NetworkErrorRetryPolicyTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283950 /* QueueCoordinatorTests.swift in Sources */,
-				F1A0B1C2D3E4F50617283952 /* SettingsAppLockPanelControllerTests.swift in Sources */,
+				F1A0B1C2D3E4F50617283952 /* SmartOilaKidsCoreUnitTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A0 /* SettingsProtectionControllerTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A2 /* BolajonHomeViewModelTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283A01 /* OilaDeviceClientTests.swift in Sources */,

@@ -84,10 +84,7 @@ struct BolajonHomeView: View {
                     onConfirm: { Task { await viewModel.sendSOS() } },
                     onClose: { showSOSConfirm = false }
                 )
-                .presentationDetents([sosSheetDetent])
-                .presentationDragIndicator(.visible)
-                // Never let a swipe dismiss the sheet mid-send — the child must see the result.
-                .interactiveDismissDisabled(viewModel.isSendingSOS)
+                .sosSheetChrome(dismissDisabled: viewModel.isSendingSOS)
             }
         }
         .bolajonNavigationTint()
@@ -404,6 +401,25 @@ struct SOSConfirmTakeover: View {
 
 /// The sheet height that fits the SOS content in its tallest state (failed, with the error line).
 let sosSheetDetent: PresentationDetent = .height(380)
+
+extension View {
+    /// Native chrome for the SOS confirmation sheet: fixed detent, grabber, and the design's card
+    /// surface (`cardWhite` adapts light/dark — the default systemBackground read as a flat grey in
+    /// dark mode). Dismissal is blocked while sending so the child always sees the result.
+    @ViewBuilder
+    func sosSheetChrome(dismissDisabled: Bool) -> some View {
+        if #available(iOS 16.4, *) {
+            self.presentationDetents([sosSheetDetent])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AppColors.cardWhite)
+                .interactiveDismissDisabled(dismissDisabled)
+        } else {
+            self.presentationDetents([sosSheetDetent])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(dismissDisabled)
+        }
+    }
+}
 
 // MARK: - View model
 
