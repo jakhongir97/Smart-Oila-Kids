@@ -435,7 +435,11 @@ final class BolajonSetupViewModel: ObservableObject {
         do {
             return try await service.pair(code: code)
         } catch let error as OilaAPIError {
-            errorMessage = error.fieldErrors.first ?? error.message
+            // Never show the backend's raw (English) message to the child. A 4xx here means the
+            // 5-digit code is wrong or expired; anything else is a generic connection failure.
+            errorMessage = (400 ... 499).contains(error.statusCode)
+                ? L10n.tr("setup.connect.error_invalid_code")
+                : L10n.tr("setup.connect.error_generic")
             code = ""
             return nil
         } catch {

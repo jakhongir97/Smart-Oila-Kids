@@ -30,10 +30,13 @@ enum L10n {
         lock.unlock()
 
         let format = bundle.localizedString(forKey: key, value: nil, table: nil)
-        let result = args.isEmpty
-            ? format
-            : String(format: format, locale: Locale.current, arguments: args)
-        return toCyrillic ? UzbekCyrillic.transliterate(result) : result
+        // Transliterate the FORMAT string first, then substitute args — so runtime values (an app
+        // name via %@, a number via %d) are inserted after transliteration and not mangled into
+        // Cyrillic gibberish. transliterate() protects the format specifiers themselves.
+        let localizedFormat = toCyrillic ? UzbekCyrillic.transliterate(format) : format
+        return args.isEmpty
+            ? localizedFormat
+            : String(format: localizedFormat, locale: Locale.current, arguments: args)
     }
 }
 
@@ -56,9 +59,19 @@ enum UzbekCyrillic {
         }
         cacheLock.unlock()
 
-        var s = input
+        // Protect printf-style format specifiers (%d, %@, %1$@, %%, …) so their conversion letter
+        // isn't transliterated (e.g. %d → %д), which would break a String(format:) applied later
+        // and silently drop the value.
+        let (protectedInput, specifiers) = protectFormatSpecifiers(input)
+
+        var s = protectedInput
+        // Word-initial "e" is "э" in Uzbek Cyrillic (elsewhere "е"). Apply before the general map.
+        s = replaceWordInitialE(s)
         for (from, to) in map {
             s = s.replacingOccurrences(of: from, with: to)
+        }
+        for (index, specifier) in specifiers.enumerated() {
+            s = s.replacingOccurrences(of: token(index), with: specifier)
         }
 
         cacheLock.lock()
@@ -66,6 +79,50 @@ enum UzbekCyrillic {
         cache[input] = s
         cacheLock.unlock()
         return s
+    }
+
+    /// Private-use sentinel wrapping a run index. Both the PUA scalars and the digits pass through
+    /// the transliteration map untouched, so the token survives to be restored afterwards.
+    private static func token(_ index: Int) -> String { "\u{E000}\(index)\u{E001}" }
+
+    private static let formatSpecifierRegex = try? NSRegularExpression(
+        pattern: "%(?:\\d+\\$)?[-+ 0#]?\\d*(?:\\.\\d+)?[@%a-zA-Z]"
+    )
+
+    private static func protectFormatSpecifiers(_ input: String) -> (String, [String]) {
+        guard let regex = formatSpecifierRegex else { return (input, []) }
+        let ns = input as NSString
+        let matches = regex.matches(in: input, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return (input, []) }
+
+        var result = ""
+        var specifiers: [String] = []
+        var cursor = 0
+        for match in matches {
+            result += ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+            result += token(specifiers.count)
+            specifiers.append(ns.substring(with: match.range))
+            cursor = match.range.location + match.range.length
+        }
+        result += ns.substring(from: cursor)
+        return (result, specifiers)
+    }
+
+    private static let wordInitialERegex = try? NSRegularExpression(
+        pattern: "(?<![\\p{L}])([eE])"
+    )
+
+    private static func replaceWordInitialE(_ input: String) -> String {
+        guard let regex = wordInitialERegex else { return input }
+        let ns = input as NSString
+        var result = input
+        // Replace back-to-front so ranges stay valid.
+        for match in regex.matches(in: input, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let letter = ns.substring(with: match.range)
+            guard let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: letter == "E" ? "Э" : "э")
+        }
+        return result
     }
 
     private static let map: [(String, String)] = [

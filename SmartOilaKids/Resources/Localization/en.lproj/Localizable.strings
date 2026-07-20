@@ -113,8 +113,8 @@
 "main.media_subtitle" = "Recent recordings, streams, uploads, and failures.";
 "main.media_open" = "Open notifications";
 
-"lock.title" = "Device is locked";
-"lock.subtitle" = "This device is temporarily restricted by your parent.";
+"lock.title" = "App is paused";
+"lock.subtitle" = "Your parent has paused Bolajon for now.";
 "lock.schedule" = "Schedule: %@";
 "lock.local_time" = "Device time: %@";
 
@@ -671,6 +671,7 @@
 "setup.connect.step3" = "Enter the 5-digit code shown here";
 "setup.connect.connecting" = "Connecting...";
 "setup.connect.error_generic" = "Connection error. Please try again.";
+"setup.connect.error_invalid_code" = "The code is incorrect or expired. Check it and try again.";
 "setup.success.badge" = "Connected to parent";
 "setup.success.title" = "Successfully connected!";
 "setup.success.subtitle" = "Your child's device is connected to your app. Just a little setup left.";
@@ -706,8 +707,8 @@
 "perm2.usage.body" = "You'll see how much time each app takes and can set time limits.";
 "perm2.limits.title" = "Want to be able to restrict apps?";
 "perm2.limits.body" = "You'll be able to block apps at any time.";
-"perm2.autostart.title" = "Start the app automatically after a reboot?";
-"perm2.autostart.body" = "After the phone restarts the app launches itself, so protection isn't interrupted.";
+"perm2.autostart.title" = "Keep protection running after a restart";
+"perm2.autostart.body" = "iOS can't relaunch apps on its own after a restart. If you restart the phone, open Bolajon once so protection keeps running.";
 "perm2.microphone.title" = "Want to hear the sound around your child?";
 "perm2.microphone.body" = "When needed you can turn on the phone's microphone and listen to the surroundings.";
 "perm2.camera.title" = "Want to use the camera when needed?";

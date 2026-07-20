@@ -75,6 +75,22 @@ enum NetworkError: LocalizedError {
             }
         }
 
+        // oila360 API errors carry the backend's raw (English/developer) message. Never surface
+        // that to a child — map to a localized, friendly message by kind instead.
+        if let apiError = error as? OilaAPIError {
+            if apiError.requiresRePair { return L10n.tr("error.auth_required") }
+            switch apiError.statusCode {
+            case 404:
+                return L10n.tr("error.not_found")
+            case 408:
+                return L10n.tr("error.timeout")
+            case 429, 500 ... 599:
+                return L10n.tr("error.server_unavailable")
+            default:
+                return L10n.tr("error.request_failed")
+            }
+        }
+
         let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         if message.isEmpty {
             return L10n.tr("error.request_failed")

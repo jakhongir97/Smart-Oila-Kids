@@ -113,8 +113,8 @@
 "main.media_subtitle" = "So'nggi yozuvlar, streamlar, yuklashlar va xatolar.";
 "main.media_open" = "Bildirishnomalarni ochish";
 
-"lock.title" = "Qurilma bloklangan";
-"lock.subtitle" = "Ota-ona ushbu qurilmadan foydalanishni vaqtincha chekladi.";
+"lock.title" = "Ilova to'xtatildi";
+"lock.subtitle" = "Ota-onangiz Bolajon ilovasini hozircha to'xtatib qo'ydi.";
 "lock.schedule" = "Jadval: %@";
 "lock.local_time" = "Qurilma vaqti: %@";
 
@@ -671,6 +671,7 @@
 "setup.connect.step3" = "Chiqqan 5 xonali kodni shu yerga yozing";
 "setup.connect.connecting" = "Ulanmoqda...";
 "setup.connect.error_generic" = "Ulanishda xatolik. Qaytadan urinib ko'ring.";
+"setup.connect.error_invalid_code" = "Kod noto'g'ri yoki muddati o'tgan. Tekshirib, qaytadan urinib ko'ring.";
 "setup.success.badge" = "Ota-ona bilan ulandi";
 "setup.success.title" = "Muvaffaqiyatli ulandi!";
 "setup.success.subtitle" = "Farzandingiz qurilmasi sizning ilovangizga ulandi. Endi ozgina sozlab olsak kifoya.";
@@ -693,7 +694,7 @@
 "perm2.intro.title" = "Bolajon ilovasini sozlaymiz";
 "perm2.intro.body" = "Farzandingiz xavfsizligi uchun bir nechta ruxsat kerak bo'ladi. Keling, birma-bir, tushunarli qilib sozlaymiz.";
 "perm2.intro.cta" = "Boshlash";
-"perm2.notifications.title" = "Farzanding telefoni sizni nazoratingizda bo'lsinmi?";
+"perm2.notifications.title" = "Farzandingiz telefoni nazoratingizda bo'lsinmi?";
 "perm2.notifications.body" = "Bolajon360 doimo faol ekanini bildirish uchun bildirishnomalarga ruxsat kerak. Busiz ilova to'g'ri ishlamaydi.";
 "perm2.notifications.cta" = "Bildirishnomalarni yoqish";
 "perm2.battery.title" = "Ilova to'xtab qolishining oldini olish";
@@ -706,8 +707,8 @@
 "perm2.usage.body" = "Har bir ilovaga qancha vaqt sarflanganini ko'rasiz va vaqt chegarasini qo'yasiz.";
 "perm2.limits.title" = "Ilovalarni cheklash imkoniyatini xohlaysizmi?";
 "perm2.limits.body" = "Ilovalarni istalgan vaqtda bloklay olasiz.";
-"perm2.autostart.title" = "Telefon o'chib-yonganda ilova avtomatik yonsinmi?";
-"perm2.autostart.body" = "Telefon qayta yoqilganda ilova o'zi ishga tushadi va himoya uzilib qolmaydi.";
+"perm2.autostart.title" = "Qayta ishga tushgach himoya davom etishi uchun";
+"perm2.autostart.body" = "iOS qayta ishga tushgandan so'ng ilovalarni o'zi ocholmaydi. Telefonni qayta yoqsangiz, himoya davom etishi uchun Bolajonni bir marta oching.";
 "perm2.microphone.title" = "Farzandingiz atrofidagi ovozni eshitmoqchimisiz?";
 "perm2.microphone.body" = "Kerak bo'lganda telefon mikrofonini yoqib atrofdagi ovozni tinglay olasiz.";
 "perm2.camera.title" = "Kerak bo'lganda kameradan foydalanmoqchimisiz?";
