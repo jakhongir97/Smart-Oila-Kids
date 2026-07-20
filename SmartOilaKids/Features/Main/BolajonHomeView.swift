@@ -76,7 +76,7 @@ struct BolajonHomeView: View {
             .onChange(of: lockState.isLocked) { locked in
                 if locked { showSOSConfirm = false }
             }
-            .fullScreenCover(isPresented: $showSOSConfirm, onDismiss: { viewModel.resetSOS() }) {
+            .sheet(isPresented: $showSOSConfirm, onDismiss: { viewModel.resetSOS() }) {
                 SOSConfirmTakeover(
                     isSending: viewModel.isSendingSOS,
                     sent: viewModel.sosSent,
@@ -84,6 +84,10 @@ struct BolajonHomeView: View {
                     onConfirm: { Task { await viewModel.sendSOS() } },
                     onClose: { showSOSConfirm = false }
                 )
+                .presentationDetents([sosSheetDetent])
+                .presentationDragIndicator(.visible)
+                // Never let a swipe dismiss the sheet mid-send — the child must see the result.
+                .interactiveDismissDisabled(viewModel.isSendingSOS)
             }
         }
         .bolajonNavigationTint()
@@ -322,6 +326,9 @@ private struct HomeTaskRow: View {
 /// cancel. Presented via `.fullScreenCover`; a full-screen cover has no interactive
 /// dismissal, and the cancel button is disabled while the SOS is sending, so dismissal is
 /// blocked mid-send.
+/// Content of the SOS confirmation, designed to sit inside a **native** iOS sheet
+/// (`.presentationDetents`) — the system supplies the surface, grabber, corner radius, dimming and
+/// swipe-to-dismiss, so this only lays out the icon / copy / actions. `sosSheetDetent` pairs with it.
 struct SOSConfirmTakeover: View {
     let isSending: Bool
     let sent: Bool
@@ -329,86 +336,74 @@ struct SOSConfirmTakeover: View {
     let onConfirm: () -> Void
     let onClose: () -> Void
 
-    /// Fixed dark indigo backdrop (design board) — deliberately identical in light and
-    /// dark mode, like the brand gradient endpoints.
-    private let backdrop = Color(.sRGB, red: 74 / 255, green: 70 / 255, blue: 104 / 255, opacity: 1) // slate indigo
-
     var body: some View {
-        ZStack(alignment: .bottom) {
-            backdrop.ignoresSafeArea()
-
-            // White bottom card (design board "SOS — Tasdiqlash"): dark backdrop up top, a
-            // rounded-top white sheet below carrying the dark title / body / actions.
-            VStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill((sent ? AppColors.successGreen : AppColors.sosCoral).opacity(0.14))
-                        .frame(width: 92, height: 92)
-                    if sent {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 34, weight: .bold))
-                            .foregroundStyle(AppColors.successGreen)
-                    } else {
-                        Text("SOS")
-                            .font(AppTypography.title(22))
-                            .foregroundStyle(AppColors.sosCoral)
-                    }
-                }
-                .padding(.top, 6)
-
-                Text(sent ? L10n.tr("sos2.sent") : L10n.tr("sos2.title"))
-                    .font(AppTypography.title(24))
-                    .foregroundStyle(AppColors.inkPrimary)
-                    .multilineTextAlignment(.center)
-
-                if !sent {
-                    Text(L10n.tr("sos2.body"))
-                        .font(AppTypography.bodyText(15))
-                        .foregroundStyle(AppColors.inkSecondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4)
-                }
-
-                if !sent, failed, !isSending {
-                    Text(L10n.tr("sos2.failed"))
-                        .font(AppTypography.caption(13))
-                        .foregroundStyle(AppColors.sosCoral)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4)
-                }
-
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill((sent ? AppColors.successGreen : AppColors.sosCoral).opacity(0.14))
+                    .frame(width: 84, height: 84)
                 if sent {
-                    BolajonPrimaryButton(title: L10n.tr("common.done"), action: onClose)
-                        .padding(.top, 6)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(AppColors.successGreen)
                 } else {
-                    VStack(spacing: 4) {
-                        BolajonPrimaryButton(
-                            title: L10n.tr(failed ? "sos2.retry" : "sos2.confirm"),
-                            fill: AppColors.sosCoral,
-                            isLoading: isSending,
-                            action: onConfirm
-                        )
-                        GhostButton(title: L10n.tr("sos2.cancel"), action: onClose)
-                            .disabled(isSending)
-                            .opacity(isSending ? 0.4 : 1)
-                    }
-                    .padding(.top, 6)
+                    Text("SOS")
+                        .font(AppTypography.title(22))
+                        .foregroundStyle(AppColors.sosCoral)
                 }
             }
-            .padding(.horizontal, BolajonMetrics.screenPadding)
-            .padding(.top, 30)
-            .padding(.bottom, 14)
-            .frame(maxWidth: .infinity)
-            .background(
-                TopRoundedRectangle(radius: 38)
-                    .fill(AppColors.cardWhite)
-                    .ignoresSafeArea(edges: .bottom)
-            )
+            .padding(.top, 8)
+
+            Text(sent ? L10n.tr("sos2.sent") : L10n.tr("sos2.title"))
+                .font(AppTypography.title(23))
+                .foregroundStyle(AppColors.inkPrimary)
+                .multilineTextAlignment(.center)
+
+            if !sent {
+                Text(L10n.tr("sos2.body"))
+                    .font(AppTypography.bodyText(15))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+
+            if !sent, failed, !isSending {
+                Text(L10n.tr("sos2.failed"))
+                    .font(AppTypography.caption(13))
+                    .foregroundStyle(AppColors.sosCoral)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+
+            Spacer(minLength: 0)
+
+            if sent {
+                BolajonPrimaryButton(title: L10n.tr("common.done"), action: onClose)
+            } else {
+                VStack(spacing: 8) {
+                    BolajonPrimaryButton(
+                        title: L10n.tr(failed ? "sos2.retry" : "sos2.confirm"),
+                        fill: AppColors.sosCoral,
+                        isLoading: isSending,
+                        action: onConfirm
+                    )
+                    GhostButton(title: L10n.tr("sos2.cancel"), action: onClose)
+                        .disabled(isSending)
+                        .opacity(isSending ? 0.4 : 1)
+                }
+            }
         }
+        .padding(.horizontal, BolajonMetrics.screenPadding)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity)
     }
 }
+
+/// The sheet height that fits the SOS content in its tallest state (failed, with the error line).
+let sosSheetDetent: PresentationDetent = .height(380)
 
 // MARK: - View model
 

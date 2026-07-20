@@ -70,7 +70,7 @@ struct DeviceLockOverlay: View {
             .padding(.horizontal, 22)
         }
         .allowsHitTesting(true)
-        .fullScreenCover(isPresented: $sos.showConfirm, onDismiss: { sos.reset() }) {
+        .sheet(isPresented: $sos.showConfirm, onDismiss: { sos.reset() }) {
             SOSConfirmTakeover(
                 isSending: sos.isSending,
                 sent: sos.sent,
@@ -78,6 +78,9 @@ struct DeviceLockOverlay: View {
                 onConfirm: { Task { await sos.send() } },
                 onClose: { sos.dismiss() }
             )
+            .presentationDetents([sosSheetDetent])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(sos.isSending)
         }
     }
 }
