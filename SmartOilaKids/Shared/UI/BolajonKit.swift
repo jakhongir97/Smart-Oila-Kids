@@ -184,10 +184,11 @@ struct BolajonHeroSheet<Hero: View, SheetContent: View>: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Hero fills the remaining top space; content biased downward (2 units above,
-                // 1 below) so the icon hovers just over the sheet.
+                // Hero fills the remaining top space with the icon balanced (even space above and
+                // below) so it sits in the upper area per the design — on tall iPhones the old
+                // downward bias let the icon float low with a large empty void above it, which read
+                // as cross-platform.
                 VStack(spacing: 0) {
-                    Spacer(minLength: 8)
                     Spacer(minLength: 8)
                     hero()
                     Spacer(minLength: 8)

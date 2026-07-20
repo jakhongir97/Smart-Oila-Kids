@@ -200,6 +200,11 @@ struct BolajonPermissionsFlowView: View {
 
 // MARK: - Single step
 
+/// Follows the "Yumshoq lavanda" design (tinted hero with the icon, then a rounded-top white card
+/// carrying the title / body / CTAs). The only deviation from the shared BolajonHeroSheet is
+/// balancing the hero so the icon sits in the upper area with even space above and below — on a
+/// tall iPhone the shared layout let the icon float low with a large empty void, which read as
+/// cross-platform. Haptics are added on the CTAs (invisible to the design, native to iOS).
 private struct PermissionStepView: View {
     let step: BolajonPermissionStep
     /// Nil on the B1 intro root — the design shows no progress bar there.
@@ -210,42 +215,73 @@ private struct PermissionStepView: View {
     private var isIntro: Bool { step.kind == .intro }
 
     var body: some View {
-        BolajonHeroSheet(
-            intent: step.intent,
-            deepHero: isIntro,
-            blocksBack: isIntro,
-            progress: progress
-        ) {
-            if isIntro {
-                BolajonBrandBadge(diameter: 164)
-            } else {
-                IconBadge(systemName: step.icon, intent: step.intent, diameter: 156)
-            }
-        } sheet: {
-            VStack(spacing: 14) {
-                Text(L10n.tr(step.titleKey))
-                    .font(AppTypography.title(23))
-                    .foregroundStyle(AppColors.inkPrimary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-                Text(L10n.tr(step.bodyKey))
-                    .font(AppTypography.bodyText(14))
-                    .foregroundStyle(AppColors.inkSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+        ZStack(alignment: .top) {
+            HeroBackground(intent: step.intent, deep: isIntro)
+                .ignoresSafeArea()
 
-                // On the optional steps the outline decline sits ABOVE the purple primary.
-                // Fixed spacing (not a Spacer): the sheet hugs its content so the CTAs sit
-                // right below the copy — the hero absorbs the leftover height, per the board.
-                VStack(spacing: 10) {
-                    if step.showsDecline {
-                        OutlineButton(title: L10n.tr(step.declineKey), action: onDecline)
-                    }
-                    BolajonPrimaryButton(title: L10n.tr(step.primaryKey), action: onPrimary)
+            VStack(spacing: 0) {
+                // Even spacers above/below the icon keep it in the upper area (per the design)
+                // instead of biased down against the card.
+                Spacer(minLength: 24)
+                if isIntro {
+                    BolajonBrandBadge(diameter: 140)
+                } else {
+                    IconBadge(systemName: step.icon, intent: step.intent, diameter: 140)
                 }
-                .padding(.top, 12)
-                .padding(.bottom, 6)
+                Spacer(minLength: 24)
+
+                // Rounded-top white card with the copy + CTAs (design's bottom sheet panel).
+                VStack(spacing: 14) {
+                    Text(L10n.tr(step.titleKey))
+                        .font(AppTypography.title(23))
+                        .foregroundStyle(AppColors.inkPrimary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                    Text(L10n.tr(step.bodyKey))
+                        .font(AppTypography.bodyText(14))
+                        .foregroundStyle(AppColors.inkSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(spacing: 10) {
+                        if step.showsDecline {
+                            OutlineButton(title: L10n.tr(step.declineKey)) {
+                                AppHaptics.selection()
+                                onDecline()
+                            }
+                        }
+                        BolajonPrimaryButton(title: L10n.tr(step.primaryKey)) {
+                            AppHaptics.tap()
+                            onPrimary()
+                        }
+                    }
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.horizontal, BolajonMetrics.screenPadding)
+                .padding(.top, 28)
+                .padding(.bottom, 10)
+                .background(
+                    TopRoundedRectangle(radius: 38)
+                        .fill(AppColors.cardWhite)
+                        .shadow(color: Color.black.opacity(0.05), radius: 14, x: 0, y: -4)
+                        .ignoresSafeArea(edges: .bottom)
+                )
+            }
+        }
+        // Empty title → the next pushed step derives a bare "‹" back chevron (per the design),
+        // not the default "‹ Back" label.
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isIntro)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            if let progress {
+                ToolbarItem(placement: .principal) {
+                    PermissionProgressBar(current: progress.current, total: progress.total, mandatoryCount: 2)
+                }
             }
         }
     }
