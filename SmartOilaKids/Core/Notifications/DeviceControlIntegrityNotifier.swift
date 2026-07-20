@@ -303,6 +303,11 @@ private extension DeviceControlIntegrityNotifier {
     }
 
     func shouldRecord(fingerprint: String, now: Date) -> Bool {
+        // Sweep entries older than the cooldown before recording: they no longer suppress anything,
+        // so keeping them just let per-fingerprint keys accumulate unboundedly in UserDefaults (and
+        // linger after unpair). This bounds the set to fingerprints seen within the cooldown window.
+        pruneExpired(now: now)
+
         if let lastSentAt = lastSentAt(for: fingerprint),
            now.timeIntervalSince(lastSentAt) < cooldown {
             return false
@@ -310,6 +315,15 @@ private extension DeviceControlIntegrityNotifier {
 
         userDefaults.set(now.timeIntervalSince1970, forKey: key(for: fingerprint))
         return true
+    }
+
+    private func pruneExpired(now: Date) {
+        for key in userDefaults.dictionaryRepresentation().keys where key.hasPrefix(Keys.lastSentAtPrefix) {
+            let timestamp = userDefaults.double(forKey: key)
+            if timestamp <= 0 || now.timeIntervalSince1970 - timestamp >= cooldown {
+                userDefaults.removeObject(forKey: key)
+            }
+        }
     }
 
     func key(for fingerprint: String) -> String {

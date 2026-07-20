@@ -17,10 +17,14 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
-        // Skip the push prompt when previewing a specific screen via SMARTOILA_DEBUG_ROUTE (QA only).
+        // Do NOT prompt for notifications at launch — the B2 onboarding step owns that prompt so it
+        // arrives in context (a launch-time prompt fired over the A1 language screen before pairing).
+        // Only re-register for remote notifications when authorization was already granted, so an
+        // already-onboarded relaunch keeps its push address current without any prompt.
         if !AppRuntime.hasDebugRoute {
-            notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-                guard granted else { return }
+            notificationCenter.getNotificationSettings { settings in
+                guard settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional else { return }
                 DispatchQueue.main.async {
                     application.registerForRemoteNotifications()
                 }
@@ -28,9 +32,12 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         }
 
         if let remoteInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
+            // A launch via launchOptions[.remoteNotification] is a background (content-available)
+            // delivery, not a user tap — taps arrive through userNotificationCenter(_:didReceive:).
+            // Marking it as an interaction armed a tasks deep-link the child never requested.
             PushCommandRouter.handle(
                 userInfo: remoteInfo,
-                openedFromInteraction: true,
+                openedFromInteraction: false,
                 deliveryContext: .launch
             )
         }

@@ -65,10 +65,12 @@ struct BolajonHomeView: View {
                     }
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { notification in
+                guard pushMatchesSession(notification) else { return }
                 Task { await viewModel.load() }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenTasks)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenTasks)) { notification in
+                guard pushMatchesSession(notification) else { return }
                 navigateToTasks()
             }
             .onChange(of: lockState.isLocked) { locked in
@@ -90,6 +92,17 @@ struct BolajonHomeView: View {
     /// Drill in to Tasks from a push, avoiding a duplicate push if already there.
     private func navigateToTasks() {
         if path.last != .tasks { path.append(.tasks) }
+    }
+
+    /// Only act on a task push addressed to THIS device's DSN (a payload without a DSN is accepted,
+    /// matching the lock handler's policy) — mirrors RootView.shouldHandlePush so a push for a
+    /// different child can't refresh or open this child's tasks.
+    private func pushMatchesSession(_ notification: Notification) -> Bool {
+        guard let currentDSN = sessionStore.dsn?.trimmedNonEmpty else { return false }
+        guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
+            return true
+        }
+        return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
     }
 
     private var header: some View {

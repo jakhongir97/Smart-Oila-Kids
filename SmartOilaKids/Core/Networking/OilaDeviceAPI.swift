@@ -404,11 +404,10 @@ final class OilaDeviceClient: OilaDeviceServicing {
     }
 
     func updateFCMToken(_ token: String) async throws {
-        userDefaults.set(token, forKey: FCMPushRegistrar.fcmTokenDefaultsKey)
-        // `token` is the real Firebase FCM registration token once FCMPushRegistrar is live
-        // (SDK + GoogleService-Info.plist present); before then it's a raw APNs stopgap that the
-        // FCM-only backend cannot deliver to. Either way the backend stores it as this device's
-        // push address (`PATCH /device/fcm-token`).
+        // Do NOT write OILA_FCM_TOKEN here — that slot is owned by FCMPushRegistrar and holds ONLY
+        // the real Firebase registration token (which pair() prefers). This method may be handed the
+        // raw APNs stopgap before Firebase is live; persisting that here poisoned the slot so pairing
+        // sent an undeliverable push address. This call just registers whatever token it's given.
         _ = try await requestJSON(
             path: "device/fcm-token",
             method: .patch,

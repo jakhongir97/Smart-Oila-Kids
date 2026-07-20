@@ -176,13 +176,18 @@ private extension RootView {
     }
 
     func syncPushToken(with dsn: String?) async {
-        // Register the current push token via PATCH /device/fcm-token — only once this
-        // install has actually paired (otherwise it would just 401).
-        if dsn?.trimmedNonEmpty != nil,
-           sessionStore.oilaPaired,
-           let token = UserDefaults.standard.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty {
-            try? await OilaDeviceClient.shared.updateFCMToken(token)
-        }
+        // Register the current push token via PATCH /device/fcm-token — only once this install has
+        // actually paired (otherwise it would just 401). Prefer the real FCM registration token;
+        // fall back to the raw APNs token ONLY as a pre-Firebase stopgap and never when FCM is
+        // configured (FCMPushRegistrar uploads its own token then). Uploading the APNs token while
+        // FCM is live would overwrite the deliverable FCM address with an undeliverable one.
+        guard dsn?.trimmedNonEmpty != nil, sessionStore.oilaPaired else { return }
+        let fcmToken = UserDefaults.standard.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty
+        let apnsFallback = FCMPushRegistrar.shared.isConfigured
+            ? nil
+            : UserDefaults.standard.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty
+        guard let token = fcmToken ?? apnsFallback else { return }
+        try? await OilaDeviceClient.shared.updateFCMToken(token)
     }
 
     var localServiceDSN: String? {
