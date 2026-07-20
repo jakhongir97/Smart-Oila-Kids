@@ -365,12 +365,6 @@ final class PushCommandRouterTests: XCTestCase {
         await PushInboxStore.shared.clearAll()
         await PushDeepLinkStore.shared.clearAll()
         await MainActor.run { RuntimeDiagnosticsCenter.shared.resetPush() }
-        defer {
-            Task {
-                await PushInboxStore.shared.clearAll()
-                await PushDeepLinkStore.shared.clearAll()
-            }
-        }
 
         let names: [Notification.Name] = [
             .pushShouldRefreshDashboard,
@@ -443,12 +437,6 @@ final class PushCommandRouterTests: XCTestCase {
     func testHandleBackgroundDeliveryPersistsUnreadInboxItemWithoutOpenDeepLink() async {
         await PushInboxStore.shared.clearAll()
         await PushDeepLinkStore.shared.clearAll()
-        defer {
-            Task {
-                await PushInboxStore.shared.clearAll()
-                await PushDeepLinkStore.shared.clearAll()
-            }
-        }
 
         var received: [Notification.Name] = []
         let refreshToken = NotificationCenter.default.addObserver(
@@ -655,7 +643,6 @@ final class DeviceControlEventBridgeTests: XCTestCase {
 
     func testSyncNowAppendsSortedInboxItemsAndClearsPendingEvents() async {
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         seedDeviceControlPendingEventsForTests([
             DeviceControlEvent(
@@ -709,7 +696,6 @@ final class DeviceControlEventBridgeTests: XCTestCase {
 
     func testSyncNowUsesFallbackCopyForUnnamedAppLimitEvents() async {
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         seedDeviceControlPendingEventsForTests([
             DeviceControlEvent(
@@ -748,7 +734,6 @@ final class SmartOilaKidsAppDelegateTests: XCTestCase {
 
     func testApplicationDidBecomeActiveSyncsDeviceControlInboxSources() async {
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         seedDeviceControlPendingEventsForTests([
             DeviceControlEvent(
@@ -771,7 +756,6 @@ final class SmartOilaKidsAppDelegateTests: XCTestCase {
 
     func testDidReceiveRemoteNotificationRoutesPushAndCompletesWithNewData() async {
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         let completionExpectation = expectation(description: "background fetch completion")
         let appDelegate = SmartOilaKidsAppDelegate()
@@ -1119,7 +1103,6 @@ final class DeviceControlRecoveryNotifierTests: XCTestCase {
         let dsn = "child-lock-\(UUID().uuidString)"
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         let notifier = DeviceControlRecoveryNotifier(userDefaults: userDefaults)
         let expectation = expectation(description: "device control telemetry")
@@ -1156,7 +1139,6 @@ final class DeviceControlRecoveryNotifierTests: XCTestCase {
         let dsn = "child-limit-\(UUID().uuidString)"
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         let notifier = DeviceControlRecoveryNotifier(userDefaults: userDefaults)
         var telemetryRecords: [DeviceControlTelemetryRecord] = []
@@ -1197,7 +1179,6 @@ final class DeviceControlRecoveryNotifierTests: XCTestCase {
         let dsn = "child-app-lock-\(UUID().uuidString)"
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         let notifier = DeviceControlRecoveryNotifier(userDefaults: userDefaults)
         var telemetryRecords: [DeviceControlTelemetryRecord] = []
@@ -1272,7 +1253,6 @@ final class DeviceControlIntegrityNotifierTests: XCTestCase {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         let removalService = DeviceApplicationRemovalAttemptReportingServiceSpy()
         let removalCoordinator = DeviceApplicationRemovalAttemptCoordinator(service: removalService)
@@ -1336,7 +1316,6 @@ final class DeviceControlIntegrityNotifierTests: XCTestCase {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         let notifier = DeviceControlIntegrityNotifier(userDefaults: userDefaults)
         var telemetryRecords: [DeviceControlTelemetryRecord] = []
@@ -1371,7 +1350,6 @@ final class DeviceControlIntegrityNotifierTests: XCTestCase {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         await PushInboxStore.shared.clearAll()
-        defer { Task { await PushInboxStore.shared.clearAll() } }
 
         let notifier = DeviceControlIntegrityNotifier(userDefaults: userDefaults)
         var telemetryRecords: [DeviceControlTelemetryRecord] = []
@@ -2254,12 +2232,16 @@ final class RuntimeDiagnosticsHistoryTests: XCTestCase {
 @MainActor
 final class MiscUtilityTests: XCTestCase {
     func testLegacyClientDateFormattingAndAppHapticsFunctionsAreCallable() {
-        let date = makeUTCDate(year: 2026, month: 3, day: 11, hour: 9, minute: 8, second: 7)
-
-        let expectedFormatter = DateFormatter()
-        expectedFormatter.locale = Locale(identifier: "en_US")
-        expectedFormatter.dateFormat = "dd/MM/yyyy HH:mm:ss"
-        XCTAssertEqual(date.formattedLegacyClientDate(), expectedFormatter.string(from: date))
+        // Build the date from LOCAL components so the expected string is deterministic regardless of
+        // the device timezone (formattedLegacyClientDate formats in the current timezone). Asserting
+        // a hardcoded literal — not re-deriving it with the same DateFormatter — makes this a real
+        // regression test rather than a tautology.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let date = calendar.date(
+            from: DateComponents(year: 2026, month: 3, day: 11, hour: 9, minute: 8, second: 7)
+        )!
+        XCTAssertEqual(date.formattedLegacyClientDate(), "11/03/2026 09:08:07")
 
         AppHaptics.tap()
         AppHaptics.success()

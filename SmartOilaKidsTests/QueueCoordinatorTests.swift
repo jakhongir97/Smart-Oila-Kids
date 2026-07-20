@@ -845,7 +845,9 @@ private actor DeviceApplicationUsageReportServiceSpy: DeviceApplicationUsageRepo
 private func waitForRemovalAttemptCallCount(
     _ service: DeviceApplicationRemovalAttemptServiceSpy,
     count: Int,
-    timeoutNanoseconds: UInt64 = 1_000_000_000
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    file: StaticString = #filePath,
+    line: UInt = #line
 ) async {
     let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
     while DispatchTime.now().uptimeNanoseconds < deadline {
@@ -855,12 +857,18 @@ private func waitForRemovalAttemptCallCount(
         }
         try? await Task.sleep(nanoseconds: 10_000_000)
     }
+    // Fail at the wait site rather than returning silently — a silent timeout turns the real
+    // problem into a misleading downstream assertion failure.
+    let observed = await service.recordedCalls().count
+    XCTFail("Timed out waiting for \(count) removal-attempt call(s); observed \(observed).", file: file, line: line)
 }
 
 private func waitForRefreshRequestCount(
     _ spy: RefreshRequestDataSpy,
     count: Int,
-    timeoutNanoseconds: UInt64 = 1_000_000_000
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    file: StaticString = #filePath,
+    line: UInt = #line
 ) async {
     let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
 
@@ -872,6 +880,9 @@ private func waitForRefreshRequestCount(
 
         try? await Task.sleep(nanoseconds: 10_000_000)
     }
+
+    let observed = await spy.recordedRequests().count
+    XCTFail("Timed out waiting for \(count) refresh request(s); observed \(observed).", file: file, line: line)
 }
 
 /// Regression coverage for the `POST /device/apps/usage` response contract: the live backend can

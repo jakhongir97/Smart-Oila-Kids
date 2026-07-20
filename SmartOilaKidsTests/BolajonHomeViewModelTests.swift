@@ -207,5 +207,24 @@ final class UzbekCyrillicTransliterationTests: XCTestCase {
         XCTAssertEqual(first, second)
         XCTAssertNotEqual(first, input)
     }
+
+    func testPreservesFormatSpecifiers() {
+        // The conversion letter of a %-specifier must survive so a String(format:) applied AFTER
+        // transliteration still works (previously %d became %д and the value was dropped).
+        let format = UzbekCyrillic.transliterate("Qayta urinish %d daqiqadan so'ng")
+        XCTAssertTrue(format.contains("%d"), "expected %d to survive, got: \(format)")
+        XCTAssertEqual(String(format: format, 5), format.replacingOccurrences(of: "%d", with: "5"))
+        // Positional / object specifiers survive too.
+        XCTAssertTrue(UzbekCyrillic.transliterate("Ilova: %@").contains("%@"))
+        XCTAssertTrue(UzbekCyrillic.transliterate("%1$@ va %2$@").contains("%1$@"))
+    }
+
+    func testWordInitialEUsesCyrillicE() {
+        // Word-initial "e" is "э" in Uzbek Cyrillic; elsewhere it is "е".
+        XCTAssertEqual(UzbekCyrillic.transliterate("Ertalab"), "Эрталаб")
+        XCTAssertEqual(UzbekCyrillic.transliterate("eshik"), "эшик")
+        // Non-word-initial "e" stays "е".
+        XCTAssertEqual(UzbekCyrillic.transliterate("men"), "мен")
+    }
 }
 
