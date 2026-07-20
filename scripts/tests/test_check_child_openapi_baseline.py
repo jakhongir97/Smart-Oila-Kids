@@ -13,10 +13,11 @@ SPEC.loader.exec_module(MODULE)
 class ChildCoverageGateTests(unittest.TestCase):
     def test_default_baseline_matches_current_repo_snapshot(self) -> None:
         self.assertEqual(MODULE.DEFAULT_CONTRACT_SPEC_RELATIVE, Path("OpenAPI/child_openapi_contract.json"))
-        # 32 = 28 original child REST ops + 4 device-files CRUD ops (POST/GET /device/files,
-        # GET/DELETE /device/files/{id}) added when the file-storage surface was implemented.
-        self.assertEqual(MODULE.DEFAULT_MIN_REST, 32)
-        self.assertEqual(MODULE.DEFAULT_MIN_WS, 13)
+        # 6 = post-strip child surface: device-files CRUD (POST/GET /device/files,
+        # GET/DELETE /device/files/{id}) + app removal-attempt and usage reporting.
+        # 1 WS = parked applications/sync transport kept for the v1.1 Screen-Time path.
+        self.assertEqual(MODULE.DEFAULT_MIN_REST, 6)
+        self.assertEqual(MODULE.DEFAULT_MIN_WS, 1)
 
     def test_count_rest_hits_matches_with_path_variables(self) -> None:
         spec_ops = [

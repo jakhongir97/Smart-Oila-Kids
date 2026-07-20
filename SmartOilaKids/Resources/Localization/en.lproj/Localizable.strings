@@ -657,6 +657,8 @@
 /* MARK: - Bolajon360 setup flow (A1-A4) */
 "setup.language.title" = "Which language suits you?";
 "setup.continue" = "Continue";
+"setup.migrated.title" = "We've upgraded — please re-link";
+"setup.migrated.body" = "Bolajon360 replaced the old connection. Protection (location, SOS, lock) is paused until a parent links this device again with a new code.";
 "setup.welcome.title" = "Welcome to Bolajon360!";
 "setup.welcome.subtitle" = "This app links the phone with your parents so they can rest assured about your safety.";
 "setup.welcome.feature_contact" = "Always in touch with your parents";

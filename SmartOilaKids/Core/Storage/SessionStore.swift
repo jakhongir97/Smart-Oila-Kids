@@ -16,6 +16,7 @@ final class SessionStore: ObservableObject {
         static let onboardingCompleted = "BOLAJON_ONBOARDING_COMPLETED"
         static let oilaPaired = "BOLAJON_OILA_PAIRED"
         static let routingMigrated = "BOLAJON_ROUTING_MIGRATED"
+        static let migratedFromLegacy = "BOLAJON_MIGRATED_FROM_LEGACY"
     }
 
     @Published private(set) var dsn: String?
@@ -36,6 +37,11 @@ final class SessionStore: ObservableObject {
     /// True only after a successful oila360 `POST /device/pair` issued this install's tokens.
     /// Gates telemetry — a legacy DSN alone is NOT an oila360 credential.
     @Published private(set) var oilaPaired: Bool = false
+    /// True when the one-time routing migration reset an EXISTING install (legacy DSN or
+    /// previously-completed flow) — as opposed to a fresh install, which also runs the
+    /// migration branch but has nothing to lose. Drives the "re-link to keep protection on"
+    /// notice in the setup flow.
+    @Published private(set) var migratedFromLegacy: Bool = false
 
     init(
         userDefaults: UserDefaults = .standard,
@@ -66,14 +72,24 @@ final class SessionStore: ObservableObject {
         // skipping onboarding for "already linked" users is what left telemetry silently
         // un-permissioned. Marking them "paired" without tokens would 401-loop telemetry forever.
         if !userDefaults.bool(forKey: Keys.routingMigrated) {
+            // Capture BEFORE resetting: a fresh install also passes through this branch, but
+            // only an upgrading install has a legacy DSN or previously-completed flow state.
+            let hadExistingInstallState = dsn != nil
+                || userDefaults.bool(forKey: Keys.setupCompleted)
+                || userDefaults.bool(forKey: Keys.onboardingCompleted)
+                || userDefaults.bool(forKey: Keys.oilaPaired)
             userDefaults.set(false, forKey: Keys.setupCompleted)
             userDefaults.set(false, forKey: Keys.onboardingCompleted)
             userDefaults.set(false, forKey: Keys.oilaPaired)
             userDefaults.set(true, forKey: Keys.routingMigrated)
+            if hadExistingInstallState {
+                userDefaults.set(true, forKey: Keys.migratedFromLegacy)
+            }
         }
         setupCompleted = userDefaults.bool(forKey: Keys.setupCompleted)
         onboardingCompleted = userDefaults.bool(forKey: Keys.onboardingCompleted)
         oilaPaired = userDefaults.bool(forKey: Keys.oilaPaired)
+        migratedFromLegacy = userDefaults.bool(forKey: Keys.migratedFromLegacy)
 
 #if DEBUG
         SessionStore.debugThemeLog(

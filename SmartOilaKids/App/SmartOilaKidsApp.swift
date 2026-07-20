@@ -7,7 +7,6 @@ struct SmartOilaKidsApp: App {
     @AppStorage("APP_THEME") private var appThemeRawValue = AppTheme.system.rawValue
     @AppStorage("APP_LANGUAGE") private var appLanguageRawValue = AppLanguage.defaultForDevice.rawValue
     @StateObject private var sessionStore = SessionStore()
-    private let dependencies = AppDependencies.live
 
     var body: some Scene {
         let appTheme = AppTheme(rawValue: appThemeRawValue) ?? .system
@@ -16,7 +15,6 @@ struct SmartOilaKidsApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(sessionStore)
-                .environment(\.appDependencies, dependencies)
                 .environment(\.locale, Locale(identifier: appLanguage.localeIdentifier))
                 .preferredColorScheme(appTheme.colorScheme)
                 .onAppear {

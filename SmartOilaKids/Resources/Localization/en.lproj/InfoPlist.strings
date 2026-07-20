@@ -1,6 +1,4 @@
 "CFBundleDisplayName" = "Bolajon360";
-"NSCameraUsageDescription" = "Camera access is used for parent-requested safety photos or videos from your child's device.";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
 "NSLocationAlwaysUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
 "NSLocationWhenInUseUsageDescription" = "Location is used so the parent can see the child device location while the app is open.";
-"NSMicrophoneUsageDescription" = "Microphone access lets a parent request a short audio recording from this device for your child's safety.";

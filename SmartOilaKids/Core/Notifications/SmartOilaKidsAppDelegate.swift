@@ -17,7 +17,6 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
-        MediaTelemetryInboxBridge.shared.start()
         // Skip the push prompt when previewing a specific screen via SMARTOILA_DEBUG_ROUTE (QA only).
         if !AppRuntime.hasDebugRoute {
             notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
@@ -87,7 +86,6 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         }
         Task {
             await DeviceControlEventBridge.shared.syncNow()
-            await MediaTelemetryInboxBridge.shared.syncNow()
             await PushInboxStore.shared.reconcileAppBadge()
         }
     }
@@ -124,7 +122,6 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         )
         Task {
             await DeviceControlEventBridge.shared.syncNow()
-            await MediaTelemetryInboxBridge.shared.syncNow()
         }
         completionHandler([.banner, .sound, .badge])
     }
@@ -141,7 +138,6 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         )
         Task {
             await DeviceControlEventBridge.shared.syncNow()
-            await MediaTelemetryInboxBridge.shared.syncNow()
         }
         completionHandler()
     }

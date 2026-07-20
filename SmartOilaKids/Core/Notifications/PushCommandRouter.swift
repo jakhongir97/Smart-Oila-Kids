@@ -37,14 +37,6 @@ private extension PushCommandRouter {
         static let lock = ["lock"]
         static let tasks = ["task", "award"]
         static let chat = ["chat", "message", "sms"]
-        // Parent-triggered covert recording (oila360 TriggerRecordingDto via push). "record"
-        // is a prefix of most spellings; the longer tokens are kept for documentation and in
-        // case matching ever becomes exact.
-        static let recording = [
-            "recording", "recordings", "record",
-            "record_audio", "record_video",
-            "trigger_recording", "recording_trigger"
-        ]
     }
 
     static func persistInboxItem(_ payload: PushCommandPayload, openedFromInteraction: Bool) {
@@ -98,17 +90,8 @@ private extension PushCommandRouter {
             }
         }
 
-        if let command = payload.recordingCommand {
-            // Dispatch on the PARSED command regardless of the alert-text keyword haystack — a
-            // valid recording command must never be dropped just because the (often empty) alert
-            // body didn't happen to contain a recording keyword.
-            postRecordingCommand(command, dsn: payload.dsn)
-            routeActions.append("recording_trigger")
-        } else if containsAny(in: haystack, tokens: RoutingTokens.recording) {
-            // A recording-flavored push without a recording id cannot be uploaded — surface it in
-            // diagnostics instead of starting an orphan capture.
-            routeActions.append("recording_trigger_missing_id")
-        }
+        // Recording-trigger pushes are intentionally NOT routed: the audio-recording feature
+        // was cut for v1, so a parent-triggered record command has no consumer on-device.
 
         if let deepLinkDestination {
             saveDeepLink(destination: deepLinkDestination, dsn: payload.dsn)
@@ -133,19 +116,6 @@ private extension PushCommandRouter {
                 name: name,
                 object: nil,
                 userInfo: [PushUserInfoKeys.dsn: dsn ?? ""]
-            )
-        }
-    }
-
-    static func postRecordingCommand(_ command: PushRecordingCommand, dsn: String?) {
-        Task { @MainActor in
-            NotificationCenter.default.post(
-                name: .pushShouldStartRecording,
-                object: nil,
-                userInfo: [
-                    PushUserInfoKeys.dsn: dsn ?? "",
-                    PushUserInfoKeys.recordingCommand: command
-                ]
             )
         }
     }

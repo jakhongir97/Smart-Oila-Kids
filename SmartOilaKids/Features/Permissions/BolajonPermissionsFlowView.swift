@@ -63,13 +63,11 @@ struct BolajonPermissionStep: Identifiable {
               titleKey: "perm2.limits.title", bodyKey: "perm2.limits.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
         .init(kind: .autostart, icon: "arrow.clockwise.circle.fill", intent: .peach,
               titleKey: "perm2.autostart.title", bodyKey: "perm2.autostart.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
-        .init(kind: .microphone, icon: "mic.fill", intent: .peach,
-              titleKey: "perm2.microphone.title", bodyKey: "perm2.microphone.body", primaryKey: "perm2.allow.cta", isMandatory: false),
-        // Camera onboarding step intentionally removed: the shipping build has no camera
-        // consumer (video capture is parked, there is no QR scanner — pairing is a typed code),
-        // so requesting camera access would advertise a feature that does not exist (App Store
-        // Guideline 5.1.1). The parked video machinery + .camera enum case remain for the
-        // deferred video feature.
+        // Microphone + camera onboarding steps intentionally removed: the shipping build has
+        // no consumer for either (audio recording was cut for v1, video capture is parked,
+        // there is no QR scanner — pairing is a typed code), so requesting access would
+        // advertise features that do not exist (App Store Guideline 5.1.1). The
+        // .microphone/.camera enum cases remain for the deferred features.
         .init(kind: .summary, icon: "checkmark.shield.fill", intent: .lavender,
               titleKey: "perm2.summary.title", bodyKey: "perm2.summary.body", primaryKey: "perm2.summary.cta", isMandatory: true)
     ]
@@ -264,8 +262,8 @@ private struct PermissionSummaryView: View {
     // — see BolajonPermissionChecklist.
     private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
 
-    // The design tints the first permission icons purple and the location/audio ones orange.
-    private let orangeIcons: Set<String> = ["location", "bglocation", "microphone"]
+    // The design tints the first permission icons purple and the location ones orange.
+    private let orangeIcons: Set<String> = ["location", "bglocation"]
 
     @ViewBuilder
     private func summaryPill(for availability: BolajonPermissionState.Availability) -> some View {
@@ -367,13 +365,13 @@ enum BolajonPermissionChecklist {
         let location = [.authorizedAlways, .authorizedWhenInUse].contains(snapshot.locationAuthorizationStatus)
         let backgroundLocation = snapshot.locationAuthorizationStatus == .authorizedAlways
         let screenTime = snapshot.screenTimePermissionStatus == .granted
-        let microphone = snapshot.microphonePermission == .granted
 
         func live(_ granted: Bool) -> BolajonPermissionState.Availability { granted ? .granted : .notGranted }
 
         // Order matches the design board's B11 summary (and therefore the C5 status list):
-        // notifications, battery, [screen(overlay), usage,] autostart, location, bg-location,
-        // microphone. (Camera row removed — the app requests no camera permission.)
+        // notifications, battery, [screen(overlay), usage,] autostart, location, bg-location.
+        // (Microphone + camera rows removed — the app requests neither permission: audio
+        // recording was cut for v1 and there is no camera feature.)
         var rows: [BolajonPermissionState] = [
             BolajonPermissionState(id: "notifications", icon: "bell.fill", labelKey: "perm2.item.notifications",
                                    descriptionKey: "perm2.notifications.body", availability: live(notifications), requirement: .notifications),
@@ -398,9 +396,7 @@ enum BolajonPermissionChecklist {
             BolajonPermissionState(id: "location", icon: "location.fill", labelKey: "perm2.item.location",
                                    descriptionKey: "perm2.location.body", availability: live(location), requirement: .location),
             BolajonPermissionState(id: "bglocation", icon: "location.circle.fill", labelKey: "perm2.item.bglocation",
-                                   descriptionKey: "perm2.bglocation.body", availability: live(backgroundLocation), requirement: .location),
-            BolajonPermissionState(id: "microphone", icon: "mic.fill", labelKey: "perm2.item.microphone",
-                                   descriptionKey: "perm2.microphone.body", availability: live(microphone), requirement: .microphone)
+                                   descriptionKey: "perm2.bglocation.body", availability: live(backgroundLocation), requirement: .location)
         ])
         return rows
     }

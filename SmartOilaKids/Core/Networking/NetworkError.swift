@@ -62,10 +62,6 @@ enum NetworkError: LocalizedError {
             return networkError.userMessage
         }
 
-        if let mediaMessage = mediaUserMessage(for: error) {
-            return mediaMessage
-        }
-
         if let urlError = error as? URLError {
             switch urlError.code {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
@@ -84,85 +80,6 @@ enum NetworkError: LocalizedError {
             return L10n.tr("error.request_failed")
         }
         return message
-    }
-
-    private static func mediaUserMessage(for error: Error) -> String? {
-        if let error = error as? EnvironmentAudioRecorder.RecorderError {
-            switch error {
-            case .busy:
-                return L10n.tr("error.media_audio_busy")
-            case .cancelled:
-                return L10n.tr("error.media_audio_cancelled")
-            case .permissionDenied:
-                return L10n.tr("error.media_microphone_permission")
-            case .permissionPromptUnavailable:
-                return L10n.tr("error.media_keep_app_open")
-            case .failedToConfigureSession, .failedToPrepare, .failedToStart, .failedToFinish, .outputMissing:
-                return L10n.tr("error.media_audio_failed")
-            }
-        }
-
-        if let error = error as? CameraVideoRecorder.RecorderError {
-            switch error {
-            case .busy:
-                return L10n.tr("error.media_camera_busy")
-            case .cancelled:
-                return L10n.tr("error.media_camera_cancelled")
-            case .cameraPermissionDenied:
-                return L10n.tr("error.media_camera_permission")
-            case .microphonePermissionDenied:
-                return L10n.tr("error.media_microphone_permission")
-            case .permissionPromptUnavailable:
-                return L10n.tr("error.media_keep_app_open")
-            case .cameraUnavailable:
-                return L10n.tr("error.media_camera_unavailable")
-            case .failedToConfigureSession, .failedToStart, .failedToFinish, .outputMissing:
-                return L10n.tr("error.media_camera_failed")
-            }
-        }
-
-        if let error = error as? DisplayVideoRecorder.RecorderError {
-            switch error {
-            case .busy:
-                return L10n.tr("error.media_screen_busy")
-            case .cancelled:
-                return L10n.tr("error.media_screen_cancelled")
-            case .inactive:
-                return L10n.tr("error.media_keep_app_open_screen")
-            case .unavailable, .failedToConfigureWriter, .failedToStart, .failedToFinish, .outputMissing:
-                return L10n.tr("error.media_screen_failed")
-            }
-        }
-
-        if let error = error as? LiveAudioStreamCapture.CaptureError {
-            switch error {
-            case .busy:
-                return L10n.tr("error.media_audio_busy")
-            case .permissionDenied:
-                return L10n.tr("error.media_microphone_permission")
-            case .permissionPromptUnavailable:
-                return L10n.tr("error.media_keep_app_open")
-            case .failedToConfigureSession, .unsupportedInputFormat, .failedToStart:
-                return L10n.tr("error.media_audio_failed")
-            }
-        }
-
-        if let error = error as? LiveVideoStreamCapture.CaptureError {
-            switch error {
-            case .busy:
-                return L10n.tr("error.media_camera_busy")
-            case .permissionDenied:
-                return L10n.tr("error.media_camera_permission")
-            case .permissionPromptUnavailable, .inactive:
-                return L10n.tr("error.media_keep_app_open")
-            case .cameraUnavailable:
-                return L10n.tr("error.media_camera_unavailable")
-            case .failedToConfigureSession, .failedToStart:
-                return L10n.tr("error.media_camera_failed")
-            }
-        }
-
-        return nil
     }
 
     static func shouldRetry(_ error: Error, policy: RetryPolicy) -> Bool {

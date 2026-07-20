@@ -657,6 +657,8 @@
 /* MARK: - Bolajon360 setup flow (A1-A4) */
 "setup.language.title" = "Qaysi til sizga qulay?";
 "setup.continue" = "Davom etish";
+"setup.migrated.title" = "Ilova yangilandi — qaytadan ulang";
+"setup.migrated.body" = "Bolajon360 eski ulanish o'rnini egalladi. Himoya (joylashuv, SOS, qulf) ota-ona bu qurilmani yangi kod bilan qayta ulaguncha pauzada turadi.";
 "setup.welcome.title" = "Bolajon360 ga xush kelibsiz!";
 "setup.welcome.subtitle" = "Bu ilova telefoningizni ota-onangiz bilan bog'laydi — ular sizning xavfsizligingizdan xotirjam bo'lishadi.";
 "setup.welcome.feature_contact" = "Ota-onangiz bilan doim aloqada";

@@ -657,6 +657,8 @@
 /* MARK: - Bolajon360 setup flow (A1-A4) */
 "setup.language.title" = "Какой язык вам удобен?";
 "setup.continue" = "Продолжить";
+"setup.migrated.title" = "Мы обновились — подключите заново";
+"setup.migrated.body" = "Bolajon360 заменил старое подключение. Защита (геолокация, SOS, блокировка) приостановлена, пока родитель заново не привяжет это устройство новым кодом.";
 "setup.welcome.title" = "Добро пожаловать в Bolajon360!";
 "setup.welcome.subtitle" = "Это приложение свяжет телефон с родителями — они будут спокойны за вашу безопасность.";
 "setup.welcome.feature_contact" = "Всегда на связи с родителями";

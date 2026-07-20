@@ -65,38 +65,15 @@ protocol DeviceApplicationStateServicing {
     func fetchState(dsn: String) async throws -> DeviceApplicationStateFetchResult
 }
 
+/// PARKED transport (legacy backend decommissioned; runs only behind the Screen-Time flag,
+/// off in v1). Reimplement against the oila360 device API when v1.1 enforcement ships —
+/// see the note on `DeviceLockService`.
 final class DeviceApplicationStateService: DeviceApplicationStateServicing {
-    init(
-        client: APIClient = APIClient(),
-        memberDevicesService: MemberDevicesServicing = MemberDevicesService()
-    ) {
-        self.client = client
-        self.memberDevicesService = memberDevicesService
-    }
+    init() {}
 
     func fetchState(dsn: String) async throws -> DeviceApplicationStateFetchResult {
-        let device = try await memberDevicesService.resolveDevice(byDSN: dsn, limit: 100)
-        let applicationsEndpoint = "members/device/v2/\(device.id)/applications"
-
-        async let applicationsTask: [DeviceApplicationRecord]? = client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: applicationsEndpoint,
-            method: .get,
-            headers: ["Accept": "application/json"],
-            as: Optional<[DeviceApplicationRecord]>.self
-        )
-
-        let applications = try await applicationsTask ?? []
-
-        return DeviceApplicationStateFetchResult(
-            deviceID: device.id,
-            applicationsEndpoint: applicationsEndpoint,
-            applications: applications
-        )
+        throw NetworkError.invalidURL
     }
-
-    private let client: APIClient
-    private let memberDevicesService: MemberDevicesServicing
 }
 
 private extension String {

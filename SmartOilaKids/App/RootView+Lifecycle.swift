@@ -6,11 +6,7 @@ enum RootLocalServiceRuntime {
         debugRoute: DebugRoute?,
         hasLinkedChildDevice: Bool
     ) -> Bool {
-        if debugRoute == .main {
-            return true
-        }
-
-        return debugRoute == nil && hasLinkedChildDevice
+        debugRoute == nil && hasLinkedChildDevice
     }
 }
 
@@ -29,7 +25,6 @@ extension RootView {
         let now = Date()
 
         lastSessionDSN = sessionStore.dsn?.trimmedNonEmpty
-        DeviceRecordingCoordinator.shared.setApplicationActive(UIApplication.shared.applicationState == .active)
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
             scenePhase: "appeared",
             applicationState: SettingsDiagnosticsValueMapper.applicationState(UIApplication.shared.applicationState),
@@ -39,7 +34,6 @@ extension RootView {
         )
         syncGeoService(with: localServiceDSN)
         syncLockService(with: localServiceDSN, armRecoveryCheck: shouldArmLaunchRecovery)
-        syncMediaService(with: localServiceDSN)
         clearPersistedBackgroundTimestamp()
         lastBackgroundedAt = nil
         Task {
@@ -56,7 +50,6 @@ extension RootView {
 
         syncGeoService(with: localServiceDSN)
         syncLockService(with: localServiceDSN)
-        syncMediaService(with: localServiceDSN)
 
         Task {
             await DeviceApplicationUsageReportCoordinator.shared.updateDSN(screenTimeServiceDSN)
@@ -85,7 +78,6 @@ extension RootView {
         if newValue == .background {
             lastBackgroundedAt = now
             persistBackgroundTimestamp(now)
-            DeviceRecordingCoordinator.shared.setApplicationActive(false)
             OilaTelemetryService.shared.flushNow()
             if shouldRunLocalChildServices,
                AppRuntime.screenTimeFeaturesEnabled {
@@ -104,7 +96,6 @@ extension RootView {
         }
 
         if newValue == .inactive {
-            DeviceRecordingCoordinator.shared.setApplicationActive(false)
             RuntimeDiagnosticsCenter.shared.updateLifecycle(
                 scenePhase: phase,
                 applicationState: applicationState,
@@ -115,7 +106,6 @@ extension RootView {
         }
 
         guard newValue == .active else { return }
-        DeviceRecordingCoordinator.shared.setApplicationActive(true)
         OilaTelemetryService.shared.refreshLockNow()
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
             scenePhase: phase,
@@ -144,8 +134,6 @@ extension RootView {
                 await ScreenTimeUsageCoordinator.shared.retryNow()
             }
         }
-
-        syncMediaService(with: localServiceDSN)
     }
 
     func handleLockRefreshNotification(_ notification: Notification) {
@@ -169,11 +157,9 @@ extension RootView {
 
 private extension RootView {
     func syncGeoService(with dsn: String?) {
-        // The REST telemetry pipeline replaces the legacy WebSocket geo service, and only
-        // runs once B1–B11 onboarding is complete — so no OS permission prompt fires mid-setup.
-        geoBackgroundService.stop()
-        // Requires an actual oila360 pairing (tokens), not just a legacy DSN —
-        // otherwise every upload would 401 with no recovery path.
+        // REST telemetry only runs once B1–B11 onboarding is complete — so no OS permission
+        // prompt fires mid-setup. Requires an actual oila360 pairing (tokens), not just a
+        // legacy DSN — otherwise every upload would 401 with no recovery path.
         if let dsn, !dsn.isEmpty, sessionStore.onboardingCompleted, sessionStore.oilaPaired {
             OilaTelemetryService.shared.start()
         } else {
@@ -187,20 +173,6 @@ private extension RootView {
             return
         }
         lockCoordinator.start(dsn: dsn, armRecoveryCheck: armRecoveryCheck)
-    }
-
-    func syncMediaService(with dsn: String?) {
-        // Legacy recordings WebSocket backend is dead — keep the coordinator parked (nil → stop).
-        DeviceRecordingCoordinator.shared.start(dsn: nil)
-        // The covert-recording trigger arrives via push (PushCommandRouter →
-        // .pushShouldStartRecording) and uploads via PUT /device/recordings/{id}/complete.
-        // Live only with an oila360 device session; onboardingCompleted keeps the mic
-        // permission prompt from firing mid-onboarding (mirrors the telemetry gate).
-        if let dsn, !dsn.isEmpty, sessionStore.onboardingCompleted, sessionStore.oilaPaired {
-            OilaRecordingTriggerService.shared.start(dsn: dsn)
-        } else {
-            OilaRecordingTriggerService.shared.stop()
-        }
     }
 
     func syncPushToken(with dsn: String?) async {

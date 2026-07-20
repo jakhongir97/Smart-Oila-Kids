@@ -32,8 +32,6 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>Camera access is used for parent-requested safety photos or videos from your child's device.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID confirms the parent before changing protected settings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
@@ -42,8 +40,6 @@
 	<string>Location is used so the parent can see the child device location, including while the app is in the background.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used so the parent can see the child device location while the app is open.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone access lets a parent request a short audio recording from this device for your child's safety.</string>
 	<key>SMARTOILA_SCREEN_TIME_FEATURES_ENABLED</key>
 	<false/>
 	<key>UIApplicationSceneManifest</key>
@@ -55,7 +51,6 @@
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>audio</string>
 		<string>location</string>
 		<string>remote-notification</string>
 	</array>

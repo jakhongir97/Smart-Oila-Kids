@@ -48,7 +48,8 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(availability(states, "bglocation"), .granted)
         XCTAssertEqual(availability(states, "usage"), .granted)
         XCTAssertEqual(availability(states, "screen"), .granted)
-        XCTAssertEqual(availability(states, "microphone"), .granted)
+        // Microphone row removed — audio recording was cut for v1, no mic permission is requested.
+        XCTAssertNil(availability(states, "microphone"))
         // iOS exposes no read for these — always neutral, never "On".
         XCTAssertEqual(availability(states, "battery"), .openSettings)
         XCTAssertEqual(availability(states, "autostart"), .openSettings)
@@ -63,7 +64,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(availability(states, "bglocation"), .notGranted)
         XCTAssertEqual(availability(states, "usage"), .notGranted)
         XCTAssertEqual(availability(states, "screen"), .notGranted)
-        XCTAssertEqual(availability(states, "microphone"), .notGranted)
+        XCTAssertNil(availability(states, "microphone"))
         XCTAssertEqual(availability(states, "battery"), .openSettings)
         XCTAssertEqual(availability(states, "autostart"), .openSettings)
     }
@@ -81,7 +82,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         let enabledIDs = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: true).map(\.id)
         XCTAssertEqual(enabledIDs, [
             "notifications", "battery", "screen", "usage", "autostart",
-            "location", "bglocation", "microphone"
+            "location", "bglocation"
         ])
     }
 
@@ -91,7 +92,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         let ids = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false).map(\.id)
         XCTAssertEqual(ids, [
             "notifications", "battery", "autostart",
-            "location", "bglocation", "microphone"
+            "location", "bglocation"
         ])
         XCTAssertNil(availability(BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false), "screen"))
         XCTAssertNil(availability(BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false), "usage"))

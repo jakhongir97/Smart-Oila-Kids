@@ -5,9 +5,6 @@ struct PushCommandPayload {
     let dsn: String?
     let title: String?
     let body: String?
-    /// Present when the payload carries a parent-triggered recording command
-    /// (recording id + type + duration + camera), parsed tolerantly.
-    var recordingCommand: PushRecordingCommand? = nil
 
     var routingHaystack: String {
         let normalizedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""

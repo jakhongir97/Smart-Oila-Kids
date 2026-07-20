@@ -13,12 +13,13 @@ enum PermissionRequirement: String, CaseIterable, Identifiable {
         .location
     ]
 
+    // Microphone/camera stay out of the visible catalog: the audio-recording and camera
+    // features were cut for v1, so surfacing their toggles would advertise permissions with
+    // no consumer (App Store 5.1.1). The enum cases remain for the evaluator + diagnostics.
     static var settingsCases: [PermissionRequirement] {
         var requirements: [PermissionRequirement] = [
             .location,
-            .notifications,
-            .microphone,
-            .camera
+            .notifications
         ]
 
         if AppRuntime.screenTimeFeaturesEnabled {

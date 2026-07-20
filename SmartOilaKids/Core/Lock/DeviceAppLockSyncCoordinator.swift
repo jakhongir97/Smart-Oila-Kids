@@ -18,24 +18,15 @@ protocol DeviceAppLockSyncServicing {
     func syncApplications(_ entries: [DeviceAppLockSyncEntry], dsn: String) async throws
 }
 
+/// PARKED transport (legacy backend decommissioned; runs only behind the Screen-Time flag,
+/// off in v1). Reimplement against the oila360 device API (`PUT /device/apps/sync`) when
+/// v1.1 enforcement ships. Throwing routes the coordinator into its retry/backoff path.
 final class DeviceAppLockSyncService: DeviceAppLockSyncServicing {
-    init(client: APIClient = APIClient()) {
-        self.client = client
-    }
+    init() {}
 
     func syncApplications(_ entries: [DeviceAppLockSyncEntry], dsn: String) async throws {
-        let body = try JSONEncoder().encode(entries)
-        _ = try await client.requestDataWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "devices/\(dsn)/applications/sync",
-            method: .put,
-            headers: ["Accept": "application/json"],
-            body: body,
-            contentType: "application/json"
-        )
+        throw NetworkError.invalidURL
     }
-
-    private let client: APIClient
 }
 
 actor DeviceAppLockSyncCoordinator {
@@ -71,7 +62,7 @@ actor DeviceAppLockSyncCoordinator {
         let signature = signatureForCurrentState(dsn: dsn)
         guard force || signature != lastSyncedSignature else { return }
 
-        let endpoint = "\(AppConfig.apiBaseURL.absoluteString)/devices/\(dsn)/applications/sync"
+        let endpoint = "devices/\(dsn)/applications/sync"
         updateDiagnostics(
             status: retryTask == nil ? "syncing" : "retrying",
             endpoint: endpoint,

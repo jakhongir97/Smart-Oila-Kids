@@ -7,10 +7,6 @@ import UserNotifications
 
 extension LocationPermissionManager {
     func refreshStatuses() {
-        let previousMicrophonePermission = microphonePermission
-        let previousCameraAuthorizationStatus = cameraAuthorizationStatus
-        let previousDisplayCaptureAvailabilityStatus = displayCaptureAvailabilityStatus
-
         setLocationAuthorizationStatus(currentLocationAuthorizationStatus())
         let currentMicrophonePermission = AVAudioSession.sharedInstance().recordPermission
         let currentCameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -23,20 +19,6 @@ extension LocationPermissionManager {
         setBackgroundRefreshStatus(UIApplication.shared.backgroundRefreshStatus)
         setLowPowerModeEnabled(ProcessInfo.processInfo.isLowPowerModeEnabled)
         refreshLocationChecklistState()
-
-        notifyMediaIntegrityIfNeeded(
-            previousMicrophonePermission: previousMicrophonePermission,
-            currentMicrophonePermission: currentMicrophonePermission,
-            previousCameraAuthorizationStatus: previousCameraAuthorizationStatus,
-            currentCameraAuthorizationStatus: currentCameraAuthorizationStatus,
-            previousDisplayCaptureAvailabilityStatus: previousDisplayCaptureAvailabilityStatus,
-            currentDisplayCaptureAvailabilityStatus: currentDisplayCaptureAvailabilityStatus
-        )
-        notifyMediaPermissionStatusChanged(
-            currentMicrophonePermission: currentMicrophonePermission,
-            currentCameraAuthorizationStatus: currentCameraAuthorizationStatus,
-            currentDisplayCaptureAvailabilityStatus: currentDisplayCaptureAvailabilityStatus
-        )
 
         Task {
             let status = await notificationStatus()
@@ -93,52 +75,6 @@ extension LocationPermissionManager {
 }
 
 private extension LocationPermissionManager {
-    func notifyMediaIntegrityIfNeeded(
-        previousMicrophonePermission: AVAudioSession.RecordPermission,
-        currentMicrophonePermission: AVAudioSession.RecordPermission,
-        previousCameraAuthorizationStatus: AVAuthorizationStatus,
-        currentCameraAuthorizationStatus: AVAuthorizationStatus,
-        previousDisplayCaptureAvailabilityStatus: DisplayCaptureAvailabilityStatus,
-        currentDisplayCaptureAvailabilityStatus: DisplayCaptureAvailabilityStatus
-    ) {
-        if previousMicrophonePermission == .granted,
-           currentMicrophonePermission == .denied {
-            Task {
-                await MediaIntegrityNotifier.shared.recordPermissionRevoked(mediaType: .environment)
-            }
-        }
-
-        if previousCameraAuthorizationStatus == .authorized,
-           currentCameraAuthorizationStatus == .denied || currentCameraAuthorizationStatus == .restricted {
-            Task {
-                await MediaIntegrityNotifier.shared.recordPermissionRevoked(mediaType: .camera)
-            }
-        }
-
-        if previousDisplayCaptureAvailabilityStatus == .ready,
-           currentDisplayCaptureAvailabilityStatus == .unavailable {
-            Task {
-                await MediaIntegrityNotifier.shared.recordPermissionRevoked(mediaType: .display)
-            }
-        }
-    }
-
-    func notifyMediaPermissionStatusChanged(
-        currentMicrophonePermission: AVAudioSession.RecordPermission,
-        currentCameraAuthorizationStatus: AVAuthorizationStatus,
-        currentDisplayCaptureAvailabilityStatus: DisplayCaptureAvailabilityStatus
-    ) {
-        NotificationCenter.default.post(
-            name: .mediaPermissionStatusDidChange,
-            object: nil,
-            userInfo: [
-                MediaPermissionStatusUserInfoKey.microphoneGranted: currentMicrophonePermission == .granted,
-                MediaPermissionStatusUserInfoKey.cameraGranted: currentCameraAuthorizationStatus == .authorized,
-                MediaPermissionStatusUserInfoKey.displayCaptureAvailabilityStatus: currentDisplayCaptureAvailabilityStatus.rawValue
-            ]
-        )
-    }
-
     func currentDisplayCaptureAvailabilityStatus() -> DisplayCaptureAvailabilityStatus {
         guard UIApplication.shared.applicationState == .active else {
             return .inactive
@@ -160,12 +96,3 @@ private extension LocationPermissionManager {
     }
 }
 
-extension Notification.Name {
-    static let mediaPermissionStatusDidChange = Notification.Name("smartoila.mediaPermissionStatusDidChange")
-}
-
-enum MediaPermissionStatusUserInfoKey {
-    static let microphoneGranted = "microphoneGranted"
-    static let cameraGranted = "cameraGranted"
-    static let displayCaptureAvailabilityStatus = "displayCaptureAvailabilityStatus"
-}

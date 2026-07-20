@@ -205,9 +205,6 @@ protocol OilaDeviceServicing {
     func fetchLockState() async throws -> OilaLockState
     /// Report an app removal/tamper attempt (`POST /device/apps/removal-attempt`).
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws
-    /// Upload a finished recording clip (`PUT /device/recordings/{id}/complete`, multipart).
-    /// Returns the tolerant unwrapped `data` object (response shape is undocumented).
-    func completeRecording(recordingID: String, fileURL: URL, durationSeconds: Int?) async throws -> [String: Any]
 }
 
 // MARK: - Client
@@ -489,60 +486,6 @@ final class OilaDeviceClient: OilaDeviceServicing {
         )
     }
 
-    func completeRecording(recordingID: String, fileURL: URL, durationSeconds: Int?) async throws -> [String: Any] {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        let bodyData = try Self.multipartBody(
-            fileURL: fileURL,
-            durationSeconds: durationSeconds,
-            boundary: boundary
-        )
-        let encodedID = recordingID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? recordingID
-        let data = try await send(
-            path: "device/recordings/\(encodedID)/complete",
-            method: .put,
-            bodyData: bodyData,
-            contentType: "multipart/form-data; boundary=\(boundary)",
-            authorized: true
-        )
-        return (data as? [String: Any]) ?? [:]
-    }
-
-    private static func multipartBody(fileURL: URL, durationSeconds: Int?, boundary: String) throws -> Data {
-        let fileData = try Data(contentsOf: fileURL)
-        let lineBreak = "\r\n"
-        var body = Data()
-
-        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
-        body.append(
-            "Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\(lineBreak)"
-                .data(using: .utf8)!
-        )
-        body.append("Content-Type: \(mimeType(for: fileURL))\(lineBreak)\(lineBreak)".data(using: .utf8)!)
-        body.append(fileData)
-        body.append(lineBreak.data(using: .utf8)!)
-
-        if let durationSeconds {
-            body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"durationSeconds\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
-            body.append("\(durationSeconds)\(lineBreak)".data(using: .utf8)!)
-        }
-
-        body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
-        return body
-    }
-
-    private static func mimeType(for fileURL: URL) -> String {
-        switch fileURL.pathExtension.lowercased() {
-        case "m4a":
-            return "audio/mp4"
-        case "mp4":
-            return "video/mp4"
-        case "mov":
-            return "video/quicktime"
-        default:
-            return "application/octet-stream"
-        }
-    }
 
     // MARK: Device files (storage backend for device-uploaded media)
 
@@ -641,6 +584,23 @@ final class OilaDeviceClient: OilaDeviceServicing {
 
         body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
         return body
+    }
+
+    private static func mimeType(for fileURL: URL) -> String {
+        switch fileURL.pathExtension.lowercased() {
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "png":
+            return "image/png"
+        case "m4a":
+            return "audio/mp4"
+        case "mp4":
+            return "video/mp4"
+        case "mov":
+            return "video/quicktime"
+        default:
+            return "application/octet-stream"
+        }
     }
 
     // MARK: - Core request

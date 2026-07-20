@@ -77,10 +77,7 @@ if [[ "${RUN_IOS_SIMULATOR_TESTS:-0}" == "1" ]]; then
 
   echo "== SmartOilaKids build warning gate =="
   # Allowlisted warnings (toolchain/SDK-drift, not real defects):
-  #  1. ChatWebSocketService non-Sendable captures — legacy chat WS service, unreachable in Release
-  #     (targets the dead backend.smart-oila.uz host, debug-route only), slated for deletion;
-  #     asserting Sendable on it would be a false claim.
-  #  2. ScreenTimeAuthorizationManager "switch must be exhaustive" — the FamilyControls enums
+  #  1. ScreenTimeAuthorizationManager "switch must be exhaustive" — the FamilyControls enums
   #     AuthorizationStatus / FamilyControlsError gained new cases (.approvedWithDataAccess,
   #     .unauthorized) in the Xcode 26.5 SDK that do NOT exist in the 26.3 SDK the team builds on,
   #     so they cannot be named explicitly without breaking the local build. Both switches already
@@ -88,7 +85,6 @@ if [[ "${RUN_IOS_SIMULATOR_TESTS:-0}" == "1" ]]; then
   #     explicit cases once the toolchain floor moves to 26.5.
   python3 scripts/check_build_warnings.py \
     --log .build/test-results/ios-tests.log \
-    --allow 'ChatWebSocketService\.swift:.*non-Sendable' \
     --allow 'ScreenTimeAuthorizationManager\.swift:.*switch must be exhaustive' \
     --max-unapproved 0
   echo

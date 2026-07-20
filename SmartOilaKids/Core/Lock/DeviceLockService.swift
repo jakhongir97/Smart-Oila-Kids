@@ -5,52 +5,21 @@ protocol DeviceLockServicing {
     func fetchGlobalLockStatus(dsn: String) async throws -> Bool
 }
 
+/// PARKED transport. The legacy `backend.smart-oila.uz` lock REST endpoints are
+/// decommissioned, and this whole path only runs behind
+/// `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` (off in v1). When per-app Screen-Time
+/// enforcement ships (v1.1, Family Controls entitlement), reimplement against the
+/// oila360 device API (`GET /device/lock/state`, `POST /device/apps/usage`) instead.
+/// Throwing keeps `DeviceLockCoordinator`'s error path ("keep current lock state")
+/// intact if the flag is ever flipped before the new transport lands.
 final class DeviceLockService: DeviceLockServicing {
-    init(
-        client: APIClient = APIClient(),
-        globalLockParser: DeviceGlobalLockPayloadParser = DeviceGlobalLockPayloadParser()
-    ) {
-        self.client = client
-        self.globalLockParser = globalLockParser
-    }
+    init() {}
 
     func fetchFullLockStatus(dsn: String) async throws -> DeviceFullLockStatus {
-        let normalized = try normalizedDSN(dsn)
-
-        return try await client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "devices/dsn/\(normalized)/full_lock_status",
-            method: .get,
-            headers: ["Accept": "application/json"],
-            as: DeviceFullLockStatus.self
-        )
+        throw NetworkError.invalidURL
     }
 
     func fetchGlobalLockStatus(dsn: String) async throws -> Bool {
-        let normalized = try normalizedDSN(dsn)
-
-        let data = try await client.requestDataWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: "devices/dsn/\(normalized)/global_application_lock",
-            method: .get,
-            headers: ["Accept": "application/json"]
-        )
-
-        guard let parsed = globalLockParser.parse(from: data) else {
-            throw NetworkError.decodingFailed
-        }
-
-        return parsed
-    }
-
-    private let client: APIClient
-    private let globalLockParser: DeviceGlobalLockPayloadParser
-
-    private func normalizedDSN(_ dsn: String) throws -> String {
-        let normalized = dsn.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else {
-            throw NetworkError.unexpectedBody
-        }
-        return normalized
+        throw NetworkError.invalidURL
     }
 }

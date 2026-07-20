@@ -89,6 +89,33 @@ struct BolajonSetupFlowView: View {
     }
 }
 
+// MARK: - Migration re-link notice
+
+/// Shown on A1 only to installs whose one-time routing migration reset an existing v1.0
+/// session (see `SessionStore.migratedFromLegacy`): tells the family the update replaced the
+/// old connection and a parent must re-link before protection resumes. Disappears once
+/// `oilaPaired` flips back to true.
+struct MigrationRelinkNotice: View {
+    var body: some View {
+        InfoCard(padding: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(AppColors.glyphOrange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.tr("setup.migrated.title"))
+                        .font(AppTypography.bodyStrong(15))
+                        .foregroundStyle(AppColors.inkPrimary)
+                    Text(L10n.tr("setup.migrated.body"))
+                        .font(AppTypography.bodyText(13))
+                        .foregroundStyle(AppColors.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - A1 Language
 
 private struct LanguageStepView: View {
@@ -115,6 +142,14 @@ private struct LanguageStepView: View {
             BolajonBrandBadge(diameter: 164)
         } sheet: {
             VStack(spacing: 20) {
+                // Upgrade notice for migrated v1.0 installs: the routing migration reset their
+                // pairing, so protection is inert until a parent re-links. Fresh installs
+                // (migratedFromLegacy == false) never see this.
+                if sessionStore.migratedFromLegacy, !sessionStore.oilaPaired {
+                    MigrationRelinkNotice()
+                        .padding(.top, 6)
+                }
+
                 Text(L10n.tr("setup.language.title"))
                     .font(AppTypography.title(24))
                     .foregroundStyle(AppColors.inkPrimary)

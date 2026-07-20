@@ -1,147 +1,31 @@
 {
   "rest": [
     {
-      "method": "POST",
-      "path": "/api/auth/refresh_token"
+      "method": "DELETE",
+      "path": "/api/device/files/{}"
     },
     {
       "method": "GET",
-      "path": "/api/awards/devices/{}"
+      "path": "/api/device/files"
     },
     {
-      "method": "POST",
-      "path": "/api/awards/tasks/change-status/{}"
+      "method": "GET",
+      "path": "/api/device/files/{}"
     },
     {
       "method": "POST",
       "path": "/api/device/apps/removal-attempt"
     },
     {
-      "method": "GET",
-      "path": "/api/device/files"
-    },
-    {
-      "method": "POST",
-      "path": "/api/device/files"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/device/files/{}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/device/files/{}"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/device/recordings/{}/complete"
-    },
-    {
-      "method": "GET",
-      "path": "/api/devices/dsn/{}/firebase_notification_token"
-    },
-    {
-      "method": "POST",
-      "path": "/api/devices/dsn/{}/firebase_notification_token"
-    },
-    {
-      "method": "GET",
-      "path": "/api/devices/dsn/{}/full_lock_status"
-    },
-    {
-      "method": "GET",
-      "path": "/api/devices/dsn/{}/global_application_lock"
-    },
-    {
-      "method": "POST",
-      "path": "/api/devices/notify/member"
-    },
-    {
-      "method": "GET",
-      "path": "/api/devices/recordings"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/devices/recordings/{}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/devices/v2/{}/logs"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/devices/{}"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/devices/{}"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/devices/{}/applications/sync"
-    },
-    {
       "method": "POST",
       "path": "/api/device/apps/usage"
     },
     {
-      "method": "GET",
-      "path": "/api/devices/{}/current-location"
-    },
-    {
-      "method": "GET",
-      "path": "/api/devices/{}/logs"
-    },
-    {
-      "method": "GET",
-      "path": "/api/devices/{}/system_info"
-    },
-    {
       "method": "POST",
-      "path": "/api/devices/{}/upload-avatar"
-    },
-    {
-      "method": "GET",
-      "path": "/api/members/device/v2/{}/applications"
-    },
-    {
-      "method": "GET",
-      "path": "/api/members/me"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/members/me"
-    },
-    {
-      "method": "GET",
-      "path": "/api/members/me/devices"
-    },
-    {
-      "method": "GET",
-      "path": "/api/members/me/firebase_notification_token"
-    },
-    {
-      "method": "POST",
-      "path": "/api/messages"
-    },
-    {
-      "method": "GET",
-      "path": "/api/messages/{}"
+      "path": "/api/device/files"
     }
   ],
   "websocket": [
-    "/ws/{}/children/device/{}/applications/lock",
-    "/ws/{}/children/device/{}/applications/sync",
-    "/ws/{}/children/device/{}/chat",
-    "/ws/{}/children/device/{}/geo",
-    "/ws/{}/children/device/{}/global_application_lock",
-    "/ws/{}/children/device/{}/recordings",
-    "/ws/{}/children/device/{}/stream/audio",
-    "/ws/{}/children/device/{}/stream/camera",
-    "/ws/{}/children/device/{}/stream/front_camera",
-    "/ws/{}/children/device/{}/stream/status",
-    "/ws/{}/v2/children/device/{}/stream/audio",
-    "/ws/{}/v2/children/device/{}/stream/camera",
-    "/ws/{}/v2/children/device/{}/stream/front_camera"
+    "/ws/{}/children/device/{}/applications/sync"
   ]
 }

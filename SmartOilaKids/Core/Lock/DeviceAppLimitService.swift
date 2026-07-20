@@ -28,33 +28,13 @@ protocol DeviceAppLimitServicing {
     func fetchLimits(dsn: String) async throws -> DeviceAppLimitFetchResult
 }
 
+/// PARKED transport (legacy backend decommissioned; runs only behind the Screen-Time flag,
+/// off in v1). Reimplement against the oila360 device API when v1.1 enforcement ships —
+/// the per-app limit state already arrives in the `POST /device/apps/usage` response.
 final class DeviceAppLimitService: DeviceAppLimitServicing {
-    init(
-        client: APIClient = APIClient(),
-        memberDevicesService: MemberDevicesServicing = MemberDevicesService()
-    ) {
-        self.client = client
-        self.memberDevicesService = memberDevicesService
-    }
+    init() {}
 
     func fetchLimits(dsn: String) async throws -> DeviceAppLimitFetchResult {
-        let device = try await memberDevicesService.resolveDevice(byDSN: dsn, limit: 100)
-        let endpoint = "members/device/v2/\(device.id)/applications?is_limit_enabled=true"
-        let limits: [DeviceAppLimitResponse] = try await client.requestDecodableWithBaseFallback(
-            baseURLs: AppConfig.apiBaseCandidates,
-            path: endpoint,
-            method: .get,
-            headers: ["Accept": "application/json"],
-            as: [DeviceAppLimitResponse].self
-        )
-
-        return DeviceAppLimitFetchResult(
-            deviceID: device.id,
-            endpoint: endpoint,
-            limits: limits
-        )
+        throw NetworkError.invalidURL
     }
-
-    private let client: APIClient
-    private let memberDevicesService: MemberDevicesServicing
 }
