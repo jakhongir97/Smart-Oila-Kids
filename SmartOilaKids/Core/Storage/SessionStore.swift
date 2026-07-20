@@ -6,7 +6,6 @@ final class SessionStore: ObservableObject {
 
     private enum Keys {
         static let dsn = "DSN"
-        static let selectedRemoteDSN = "SELECTED_REMOTE_DSN"
         static let profileName = SessionStore.profileNameDefaultsKey
         static let childAvatarEmoji = "CHILD_AVATAR_EMOJI"
         static let childProfileColor = "CHILD_PROFILE_COLOR"
@@ -20,7 +19,6 @@ final class SessionStore: ObservableObject {
     }
 
     @Published private(set) var dsn: String?
-    @Published private(set) var selectedRemoteDSN: String?
     @Published var profileName: String
     /// Emoji avatar the parent chose for this child (from `POST /device/pair` → child.avatarEmoji).
     @Published private(set) var childAvatarEmoji: String?
@@ -58,7 +56,6 @@ final class SessionStore: ObservableObject {
         L10n.setLanguage(resolvedLanguage.rawValue)
 
         dsn = userDefaults.string(forKey: Keys.dsn)?.trimmedNonEmpty
-        selectedRemoteDSN = userDefaults.string(forKey: Keys.selectedRemoteDSN)?.trimmedNonEmpty
         profileName = userDefaults.string(forKey: Keys.profileName) ?? L10n.tr("common.user_default")
         childAvatarEmoji = userDefaults.string(forKey: Keys.childAvatarEmoji)?.trimmedNonEmpty
         childProfileColor = userDefaults.string(forKey: Keys.childProfileColor)?.trimmedNonEmpty
@@ -107,16 +104,6 @@ final class SessionStore: ObservableObject {
             userDefaults.set(normalized, forKey: Keys.dsn)
         } else {
             userDefaults.removeObject(forKey: Keys.dsn)
-        }
-    }
-
-    func setSelectedRemoteDSN(_ value: String?) {
-        let normalized = value?.trimmedNonEmpty
-        selectedRemoteDSN = normalized
-        if let normalized {
-            userDefaults.set(normalized, forKey: Keys.selectedRemoteDSN)
-        } else {
-            userDefaults.removeObject(forKey: Keys.selectedRemoteDSN)
         }
     }
 
@@ -202,7 +189,6 @@ final class SessionStore: ObservableObject {
 
     func clearSession() {
         setDSN(nil)
-        setSelectedRemoteDSN(nil)
         setAPIAccessToken(nil)
         setAPIRefreshToken(nil)
         setChildAvatarEmoji(nil)
@@ -246,10 +232,6 @@ final class SessionStore: ObservableObject {
     private let userDefaults: UserDefaults
     private let secureTokens: SecureTokenStoring
     private let deviceTokens: SecureTokenStoring
-
-    var activeRemoteDSN: String? {
-        selectedRemoteDSN?.trimmedNonEmpty ?? dsn?.trimmedNonEmpty
-    }
 
     var hasLinkedChildDevice: Bool {
         dsn?.trimmedNonEmpty != nil

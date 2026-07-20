@@ -36,16 +36,17 @@ class LocalizationKeyResolutionTests(unittest.TestCase):
                 ["some.made_up_key"],
             )
 
-    def test_allowlist_suppresses_known_dormant_key(self) -> None:
+    def test_allowlist_suppresses_referenced_undefined_key(self) -> None:
+        # A key referenced in code but intentionally undefined in strings is suppressed only when
+        # it is in the allowlist (the default allowlist is empty).
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "src"
             source.mkdir()
-            (source / "A.swift").write_text(
-                'L10n.tr("notifications.media.recording_started_body")', encoding="utf-8"
-            )
+            (source / "A.swift").write_text('L10n.tr("dormant.key")', encoding="utf-8")
             strings = Path(tmp) / "Localizable.strings"
             strings.write_text('"other.key" = "x";\n', encoding="utf-8")
-            self.assertEqual(MODULE.missing_keys(source, strings), [])
+            self.assertEqual(MODULE.missing_keys(source, strings, allowlist=set()), ["dormant.key"])
+            self.assertEqual(MODULE.missing_keys(source, strings, allowlist={"dormant.key"}), [])
 
     def test_ignores_interpolated_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

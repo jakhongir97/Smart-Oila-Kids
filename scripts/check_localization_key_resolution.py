@@ -5,29 +5,17 @@ Guards against the "raw localization key shown to the user" class of bug: `L10n.
 unknown key to the key string itself, so an undefined key surfaces as e.g. "error.timeout" in the
 UI. Only statically-literal keys are checked — interpolated/dynamic keys can't be resolved here.
 
-A small, documented allowlist covers the dormant legacy media-WebSocket telemetry inbox bodies
-(`MediaTelemetryInboxBridge`). That media-WS system points at the dead legacy host and never
-connects, and the recording/streaming feature is deferred; the copy for those notifications — which
-carries covert-recording implications — is a product decision made with that feature, not guessed.
+The allowlist is empty: the media-WebSocket telemetry bodies it used to cover belonged to
+`MediaTelemetryInboxBridge`, which was deleted in the legacy strip, so nothing references those
+keys anymore. Add an entry here only for a key that is intentionally referenced in code but
+deliberately left undefined in strings.
 """
 import argparse
 import re
 from pathlib import Path
 from typing import Iterable, List, Set
 
-# Dormant: legacy media-WS telemetry bodies (dead host, feature deferred). See module docstring.
-ALLOWLIST: Set[str] = {
-    "notifications.media.recording_started_body",
-    "notifications.media.recording_completed_body",
-    "notifications.media.recording_upload_queued_body",
-    "notifications.media.recording_discarded_body",
-    "notifications.media.recording_failed_body",
-    "notifications.media.recording_cancelled_body",
-    "notifications.media.stream_started_body",
-    "notifications.media.stream_stopped_body",
-    "notifications.media.stream_failed_body",
-    "notifications.media.stream_delivery_failed_body",
-}
+ALLOWLIST: Set[str] = set()
 
 L10N_CALL_RE = re.compile(r'L10n\.tr\(\s*"([a-zA-Z0-9_.]+)"')
 DEFINED_RE = re.compile(r'^"([a-zA-Z0-9_.]+)"\s*=', re.MULTILINE)
