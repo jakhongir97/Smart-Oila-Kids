@@ -334,7 +334,6 @@
 				D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */,
 				EDD4594ADF522CD5EB9CC29A /* Info.plist */,
 				0C39B2B99B81F60FCF4C0283 /* SmartOilaKids.entitlements */,
-				41CDAF7955224D3F1FA70A80 /* Fonts */,
 				8542E50D711B89214486D329 /* Localization */,
 			);
 			path = Resources;
@@ -362,20 +361,6 @@
 				32BC1A002F69914E00B088F7 /* DeviceApplicationsSyncWebSocketService.swift */,
 			);
 			path = Lock;
-			sourceTree = "<group>";
-		};
-		41CDAF7955224D3F1FA70A80 /* Fonts */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Fonts;
-			sourceTree = "<group>";
-		};
-		4374B512E56E3203B84EDB26 /* Socket */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Socket;
 			sourceTree = "<group>";
 		};
 		4AA5339A6BBCC84515881AAD /* Usage */ = {
@@ -433,23 +418,14 @@
 				1C0B6D85899BFBB8B1E0481E /* Config */,
 				B3709C0DC79D9CDC0AF3735C /* Localization */,
 				3E56C91D3D5260BD667E8B4B /* Lock */,
-				6FF2AD85FF333FE162D41EE5 /* Media */,
 				C1555C3164EF0C23E9D187FC /* Networking */,
 				B6B434DC74D447F3371CF870 /* Notifications */,
 				C485208B51F45B66DE07EE6D /* Security */,
-				4374B512E56E3203B84EDB26 /* Socket */,
 				9AC95EE7A705614E14CD50F1 /* Storage */,
 				4AA5339A6BBCC84515881AAD /* Usage */,
 				F4E300A486B52081F6F555E7 /* Utils */,
 			);
 			path = Core;
-			sourceTree = "<group>";
-		};
-		6FF2AD85FF333FE162D41EE5 /* Media */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Media;
 			sourceTree = "<group>";
 		};
 		72A82078E66BE4CC33084B37 /* SmartOilaKids */ = {
@@ -504,13 +480,6 @@
 				78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */,
 			);
 			path = ScreenTimeUsage;
-			sourceTree = "<group>";
-		};
-		B2D41F5A9C7E43D18F4A6203 /* Templates */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Templates;
 			sourceTree = "<group>";
 		};
 		B3709C0DC79D9CDC0AF3735C /* Localization */ = {
@@ -579,11 +548,9 @@
 			isa = PBXGroup;
 			children = (
 				66EDD309FE1D599BA9C5D46F /* Auth */,
-				F365AA779BB3A93DD9D6D9C8 /* Chat */,
 				5D62E1ADB111B2D869E35122 /* Main */,
 				F9EFC7D5BC90296C513DCEBB /* Permissions */,
 				600A8AED1619799B7074185D /* Settings */,
-				B2D41F5A9C7E43D18F4A6203 /* Templates */,
 				16B10C18D05E8920F64AC61F /* Tasks */,
 			);
 			path = Features;
@@ -630,13 +597,6 @@
 				F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */,
 			);
 			path = SmartOilaKidsTests;
-			sourceTree = "<group>";
-		};
-		F365AA779BB3A93DD9D6D9C8 /* Chat */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Chat;
 			sourceTree = "<group>";
 		};
 		F4E300A486B52081F6F555E7 /* Utils */ = {
