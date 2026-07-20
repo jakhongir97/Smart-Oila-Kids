@@ -303,7 +303,9 @@ final class DeviceLockCoordinator: ObservableObject {
                 for: dsn,
                 force: forceApplicationStateRefresh || pendingForegroundRecoveryCheck
             )
-            if let globalLockStatus = await resolveGlobalLockStatus(dsn: dsn) {
+            let resolvedGlobalLock = await resolveGlobalLockStatus(dsn: dsn)
+            guard currentDSN == dsn else { return }
+            if let globalLockStatus = resolvedGlobalLock {
                 updateState(State(
                     isLocked: globalLockStatus,
                     deviceLocalTime: nil,
@@ -325,7 +327,9 @@ final class DeviceLockCoordinator: ObservableObject {
             }
         } catch {
             guard currentDSN == dsn else { return }
-            if let globalLockStatus = await resolveGlobalLockStatus(dsn: dsn) {
+            let resolvedGlobalLock = await resolveGlobalLockStatus(dsn: dsn)
+            guard currentDSN == dsn else { return }
+            if let globalLockStatus = resolvedGlobalLock {
                 updateState(State(
                     isLocked: globalLockStatus,
                     deviceLocalTime: state.deviceLocalTime,

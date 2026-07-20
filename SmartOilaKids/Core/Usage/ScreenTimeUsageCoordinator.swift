@@ -14,9 +14,15 @@ final class ScreenTimeUsageCoordinator: ObservableObject {
     @Published private(set) var currentDayKey = ScreenTimeUsageDayFormatter.dayKey(for: Date())
 
     func updateBridge(dsn: String?, selectedApplications: [ManagedSettings.Application]) async {
+        // Guard against reentrancy: a newer updateBridge can run during the await below. Without
+        // this, the superseded (older) invocation would resume and clobber currentSignature and
+        // cancel the fresh refresh task. @MainActor makes the counter race-free.
+        bridgeGeneration &+= 1
+        let generation = bridgeGeneration
         currentDayKey = ScreenTimeUsageDayFormatter.dayKey(for: Date())
         currentDSN = normalizedDSN(dsn)
         await DeviceApplicationUsageReportCoordinator.shared.updateDSN(currentDSN)
+        guard generation == bridgeGeneration else { return }
 
         let selectedIdentifiers = selectedApplications
             .compactMap { normalizedIdentifier($0.bundleIdentifier) }
@@ -143,10 +149,15 @@ final class ScreenTimeUsageCoordinator: ObservableObject {
     }
 
     func usedTime(for packageName: String, dsn: String?) -> Int {
+        // Compare the snapshot against TODAY computed live, not the cached `currentDayKey` (which is
+        // only refreshed in updateBridge). After midnight the cached key is stale, so a snapshot
+        // from yesterday would otherwise be treated as current and lock apps on yesterday's usage
+        // for the whole new day.
+        let todayKey = ScreenTimeUsageDayFormatter.dayKey(for: Date())
         guard let normalizedDSN = normalizedDSN(dsn),
               normalizedDSN.caseInsensitiveCompare(currentDSN ?? "") == .orderedSame,
               let normalizedPackageName = normalizedIdentifier(packageName),
-              latestSnapshot?.dayKey == currentDayKey else {
+              latestSnapshot?.dayKey == todayKey else {
             return 0
         }
 
@@ -159,6 +170,7 @@ final class ScreenTimeUsageCoordinator: ObservableObject {
 
     private var refreshTask: Task<Void, Never>?
     private var currentSignature: String?
+    private var bridgeGeneration = 0
 }
 
 private extension ScreenTimeUsageCoordinator {

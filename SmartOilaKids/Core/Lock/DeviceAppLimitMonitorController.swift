@@ -51,6 +51,7 @@ final class DeviceAppLimitMonitorController: ObservableObject {
         matchedConfigurationsFromLimits: MatchedConfigurationsAction? = nil,
         startMonitoring: MonitorStartAction? = nil,
         stopMonitoring: MonitorStopAction? = nil,
+        activeActivities: (() -> [DeviceActivityName])? = nil,
         applyShield: SnapshotAction? = nil,
         clearShield: (() -> Void)? = nil,
         reportRecovery: SnapshotAction? = nil
@@ -83,6 +84,7 @@ final class DeviceAppLimitMonitorController: ObservableObject {
         self.stopMonitoring = stopMonitoring ?? { activityName in
             activityCenter.stopMonitoring([activityName])
         }
+        self.activeActivities = activeActivities ?? { activityCenter.activities }
         self.applyShield = applyShield ?? { snapshot in
             Self.defaultApplyLimitShield(using: snapshot, store: limitStore)
         }
@@ -411,6 +413,7 @@ final class DeviceAppLimitMonitorController: ObservableObject {
     private let matchedConfigurationsFromLimits: MatchedConfigurationsAction
     private let startMonitoring: MonitorStartAction
     private let stopMonitoring: MonitorStopAction
+    private let activeActivities: () -> [DeviceActivityName]
     private let applyShield: SnapshotAction
     private let clearShield: () -> Void
     private let reportRecovery: SnapshotAction
@@ -618,8 +621,13 @@ private extension DeviceAppLimitMonitorController {
             }
         )
         let matchedIdentifiers = Set(configurations.map(\.packageName))
-        let reachedIdentifiers = existingReachedIdentifiers
-            .union(remoteReachedIdentifiers)
+        // Reached membership is recomputed from CURRENT state (remote report OR local usage still
+        // over the current limit), not unioned with the previous reached set. Unioning made it
+        // monotonic for the day, so a parent raising a limit — or usage resetting at midnight —
+        // could never release the lock until the next calendar day. `existingReachedIdentifiers`
+        // is still read for diagnostics/recovery but no longer pins a stale reached entry.
+        _ = existingReachedIdentifiers
+        let reachedIdentifiers = remoteReachedIdentifiers
             .union(localReachedIdentifiers)
             .intersection(matchedIdentifiers)
 
@@ -631,7 +639,6 @@ private extension DeviceAppLimitMonitorController {
         )
 
         try sharedStore.saveSnapshot(snapshot)
-        applyLimitShield(using: snapshot)
         reportRecoveryIfNeeded(using: snapshot)
 
         let signature = monitoringSignature(for: snapshot)
@@ -676,6 +683,10 @@ private extension DeviceAppLimitMonitorController {
             }
         }
 
+        // Apply the shield AFTER any monitoring restart. stopCurrentMonitoring() calls clearShield(),
+        // so applying it before the restart block left a reached app un-shielded until the next poll.
+        applyLimitShield(using: snapshot)
+
         publishState(
             status: "monitoring",
             dsn: dsn,
@@ -707,9 +718,16 @@ private extension DeviceAppLimitMonitorController {
     }
 
     func stopCurrentMonitoring() {
-        if let currentActivityName {
-            stopMonitoring(currentActivityName)
+        // Reconcile against the OS: DeviceActivityCenter registrations persist across process death,
+        // so stop every registered app-limit activity, not only the in-memory one — otherwise a
+        // registration from a prior process (or a leftover after unpair) keeps enforcing forever.
+        var names = Set<DeviceActivityName>()
+        if let currentActivityName { names.insert(currentActivityName) }
+        for activity in activeActivities()
+        where DeviceAppLimitActivityIdentifier.isAppLimitActivity(rawValue: activity.rawValue) {
+            names.insert(activity)
         }
+        for name in names { stopMonitoring(name) }
         currentActivityName = nil
         currentSignature = nil
         pendingForegroundRecoveryCheck = false
@@ -734,8 +752,11 @@ private extension DeviceAppLimitMonitorController {
         let configs = snapshot.configurations.map { configuration in
             "\(configuration.packageName):\(configuration.dailyLimitMinutes)"
         }.joined(separator: ",")
-        let reached = snapshot.reachedPackageNames.joined(separator: ",")
-        return "\(snapshot.dsn)|\(configs)|\(reached)"
+        // The reached set is deliberately NOT part of the signature: it changes as the child uses
+        // apps, and restarting the DeviceActivity monitor resets each threshold's usage accounting
+        // to zero (thresholds only count post-start time), handing back a fresh allowance. Only the
+        // app set and limits define whether monitoring must actually be re-registered.
+        return "\(snapshot.dsn)|\(configs)"
     }
 
     func reportRecoveryIfNeeded(using snapshot: DeviceAppLimitSnapshot) {
@@ -929,10 +950,21 @@ private extension DeviceAppLimitMonitorController {
             let name = DeviceActivityEvent.Name(
                 DeviceAppLimitEventIdentifier.rawValue(packageName: configuration.packageName)
             )
-            result[name] = DeviceActivityEvent(
-                applications: [configuration.applicationToken],
-                threshold: defaultThresholdComponents(for: configuration.dailyLimitMinutes)
-            )
+            // includesPastActivity (iOS 17.4+) makes the threshold count usage already accrued today,
+            // so a monitor (re)started mid-day doesn't hand the child a fresh full allowance. Without
+            // it, every process launch reset the counter to zero.
+            if #available(iOS 17.4, *) {
+                result[name] = DeviceActivityEvent(
+                    applications: [configuration.applicationToken],
+                    threshold: defaultThresholdComponents(for: configuration.dailyLimitMinutes),
+                    includesPastActivity: true
+                )
+            } else {
+                result[name] = DeviceActivityEvent(
+                    applications: [configuration.applicationToken],
+                    threshold: defaultThresholdComponents(for: configuration.dailyLimitMinutes)
+                )
+            }
         }
     }
 

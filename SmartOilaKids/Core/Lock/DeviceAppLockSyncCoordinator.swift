@@ -100,14 +100,21 @@ actor DeviceAppLockSyncCoordinator {
         nextRetryDelay = min(nextRetryDelay * 2, maxRetryDelay)
 
         retryTask?.cancel()
-        retryTask = Task {
+        retryGeneration &+= 1
+        let generation = retryGeneration
+        retryTask = Task { [weak self] in
             let nanoseconds = UInt64(delay * 1_000_000_000)
             try? await Task.sleep(nanoseconds: nanoseconds)
-            await self.handleRetry(expectedSignature: expectedSignature)
+            // A cancelled sleep returns immediately; without this guard the superseded retry would
+            // fire right away and, worse, clear the replacement task that just cancelled it.
+            guard !Task.isCancelled else { return }
+            await self?.handleRetry(expectedSignature: expectedSignature, generation: generation)
         }
     }
 
-    private func handleRetry(expectedSignature: String) async {
+    private func handleRetry(expectedSignature: String, generation: Int) async {
+        // Only the currently-scheduled retry may act / clear the shared task handle.
+        guard generation == retryGeneration else { return }
         retryTask = nil
 
         guard let dsn = currentDSN else { return }
@@ -181,6 +188,7 @@ actor DeviceAppLockSyncCoordinator {
     private var currentEntries: [DeviceAppLockSyncEntry] = []
     private var lastSyncedSignature: String?
     private var retryTask: Task<Void, Never>?
+    private var retryGeneration = 0
     private let initialRetryDelay: TimeInterval = 5
     private let maxRetryDelay: TimeInterval = 300
     private var nextRetryDelay: TimeInterval = 5

@@ -53,6 +53,10 @@ enum DeviceAppLimitActivityIdentifier {
         return String(rawValue.dropFirst(prefixValue.count)).nilIfEmpty
     }
 
+    static func isAppLimitActivity(rawValue: String) -> Bool {
+        rawValue.hasPrefix(prefix + separator)
+    }
+
     private static func normalizedDSN(_ dsn: String) -> String {
         let allowedScalars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         let sanitized = dsn.unicodeScalars.map { scalar -> Character in

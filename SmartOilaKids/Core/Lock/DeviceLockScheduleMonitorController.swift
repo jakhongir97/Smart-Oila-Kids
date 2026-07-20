@@ -7,6 +7,7 @@ final class DeviceLockScheduleMonitorController {
     typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
     typealias StartMonitoringAction = (_ activityName: DeviceActivityName, _ schedule: DeviceActivitySchedule) throws -> Void
     typealias StopMonitoringAction = (_ activityNames: [DeviceActivityName]) -> Void
+    typealias ActiveActivitiesAction = () -> [DeviceActivityName]
     typealias VoidAction = () -> Void
     typealias CurrentDateAction = () -> Date
     typealias DiagnosticsAction = (
@@ -21,6 +22,7 @@ final class DeviceLockScheduleMonitorController {
         authorizationStatus: AuthorizationStatusAction? = nil,
         startMonitoring: StartMonitoringAction? = nil,
         stopMonitoring: StopMonitoringAction? = nil,
+        activeActivities: ActiveActivitiesAction? = nil,
         clearMonitoringStore: VoidAction? = nil,
         currentDate: CurrentDateAction? = nil,
         diagnosticsUpdater: DiagnosticsAction? = nil
@@ -40,6 +42,7 @@ final class DeviceLockScheduleMonitorController {
         self.stopMonitoring = stopMonitoring ?? { activityNames in
             activityCenter.stopMonitoring(activityNames)
         }
+        self.activeActivities = activeActivities ?? { activityCenter.activities }
         self.clearMonitoringStore = clearMonitoringStore ?? {
             DeviceLockManagedSettingsStoreFactory.clearAllSettings(scheduleStore)
         }
@@ -155,6 +158,7 @@ final class DeviceLockScheduleMonitorController {
     private let authorizationStatus: AuthorizationStatusAction
     private let startMonitoring: StartMonitoringAction
     private let stopMonitoring: StopMonitoringAction
+    private let activeActivities: ActiveActivitiesAction
     private let clearMonitoringStore: VoidAction
     private let currentDate: CurrentDateAction
     private let diagnosticsUpdater: DiagnosticsAction
@@ -348,8 +352,16 @@ private extension DeviceLockScheduleMonitorController {
     }
 
     func stopCurrentMonitoring() {
-        if !currentActivities.isEmpty {
-            stopMonitoring(currentActivities)
+        // Reconcile against the OS: DeviceActivityCenter registrations persist across process death,
+        // so stopping only the in-memory `currentActivities` orphaned any activity registered by a
+        // prior process (or started before a mid-loop failure in applySchedule). Stop every
+        // registered schedule activity, regardless of in-memory tracking.
+        let orphaned = activeActivities().filter {
+            DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: $0.rawValue)
+        }
+        let toStop = Array(Set(currentActivities).union(orphaned))
+        if !toStop.isEmpty {
+            stopMonitoring(toStop)
         }
         currentActivities = []
         currentSignature = nil
