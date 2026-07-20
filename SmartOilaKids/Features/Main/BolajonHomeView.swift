@@ -322,7 +322,7 @@ private struct HomeTaskRow: View {
 /// cancel. Presented via `.fullScreenCover`; a full-screen cover has no interactive
 /// dismissal, and the cancel button is disabled while the SOS is sending, so dismissal is
 /// blocked mid-send.
-private struct SOSConfirmTakeover: View {
+struct SOSConfirmTakeover: View {
     let isSending: Bool
     let sent: Bool
     let failed: Bool

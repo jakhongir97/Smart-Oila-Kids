@@ -191,6 +191,13 @@ final class SessionStore: ObservableObject {
     func setOilaPaired(_ value: Bool) {
         oilaPaired = value
         userDefaults.set(value, forKey: Keys.oilaPaired)
+        if value {
+            // The migration re-link notice is a one-time upgrade prompt. Once this install pairs,
+            // clear the flag so a later voluntary disconnect doesn't resurrect the notice for a
+            // user who is no longer a freshly-migrated install.
+            migratedFromLegacy = false
+            userDefaults.set(false, forKey: Keys.migratedFromLegacy)
+        }
     }
 
     func clearSession() {

@@ -1,5 +1,3 @@
-import AVFAudio
-import AVFoundation
 import Foundation
 import UIKit
 import UserNotifications
@@ -43,10 +41,13 @@ extension LocationPermissionManager {
             requestScreenTimePermission()
         case .notifications:
             requestNotificationPermission()
-        case .microphone:
-            requestMicrophonePermission()
-        case .camera:
-            requestCameraPermission()
+        case .microphone, .camera:
+            // Audio recording and camera capture were cut for v1, so there is no consumer to
+            // request these for. The enum cases remain only for the permission evaluator and
+            // diagnostics; actively requesting access (AVAudioSession.requestRecordPermission /
+            // AVCaptureDevice.requestAccess) with no matching Info.plist purpose string is exactly
+            // what triggers App Store rejection ITMS-90683, so this is intentionally a no-op.
+            break
         }
     }
 }
@@ -70,40 +71,6 @@ private extension LocationPermissionManager {
     func scheduleStatusRefresh() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.refreshStatuses()
-        }
-    }
-
-    func requestMicrophonePermission() {
-        switch microphonePermission {
-        case .granted:
-            break
-        case .undetermined:
-            AVAudioSession.sharedInstance().requestRecordPermission { [weak self] _ in
-                Task { @MainActor in
-                    self?.refreshStatuses()
-                }
-            }
-        case .denied:
-            openAppSettings()
-        @unknown default:
-            openAppSettings()
-        }
-    }
-
-    func requestCameraPermission() {
-        switch cameraAuthorizationStatus {
-        case .authorized:
-            break
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] _ in
-                Task { @MainActor in
-                    self?.refreshStatuses()
-                }
-            }
-        case .denied, .restricted:
-            openAppSettings()
-        @unknown default:
-            openAppSettings()
         }
     }
 
