@@ -117,10 +117,6 @@ private final class SOSServiceSpy: OilaDeviceServicing {
     func pair(code: String) async throws -> OilaPairResult { throw Unimplemented() }
     func refreshSession() async throws {}
     func logout() async throws {}
-    func requestOtp(phone: String) async throws {}
-    func verifyOtp(phone: String, code: String) async throws -> OilaOtpResult { throw Unimplemented() }
-    func telegramInit() async throws -> OilaTelegramSession { throw Unimplemented() }
-    func telegramStatus(sessionId: String) async throws -> OilaTelegramStatus { throw Unimplemented() }
     func fetchActiveTasks() async throws -> [OilaDeviceTask] { [] }
     func fetchTasks() async throws -> [OilaDeviceTask] {
         fetchTasksCallCount += 1

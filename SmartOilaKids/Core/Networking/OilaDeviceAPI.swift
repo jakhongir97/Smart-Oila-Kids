@@ -133,26 +133,6 @@ struct OilaLockState {
     let raw: [String: Any]
 }
 
-/// Result of a successful phone OTP verification (`POST /auth/otp/verify`).
-struct OilaOtpResult {
-    let tokens: OilaTokens
-    let child: OilaChildProfile?
-}
-
-/// A Telegram magic-link login session started by `POST /auth/telegram/init`.
-struct OilaTelegramSession {
-    let sessionId: String
-    /// Deep link / URL that opens the Telegram bot, when the backend returns one.
-    let url: String?
-}
-
-/// Poll result for `GET /auth/telegram/status/{sessionId}`.
-enum OilaTelegramStatus {
-    case pending
-    case authorized(OilaTokens, child: OilaChildProfile?)
-    case expired
-}
-
 // MARK: - Device files
 
 /// Visibility for a device-storage file (`POST /device/files` `visibility`, `GET` list filter).
@@ -183,14 +163,6 @@ protocol OilaDeviceServicing {
     func pair(code: String) async throws -> OilaPairResult
     func refreshSession() async throws
     func logout() async throws
-    /// Request a one-time phone login code (`POST /auth/otp/request`).
-    func requestOtp(phone: String) async throws
-    /// Verify a phone login code and persist the issued session (`POST /auth/otp/verify`).
-    func verifyOtp(phone: String, code: String) async throws -> OilaOtpResult
-    /// Start a Telegram magic-link login session (`POST /auth/telegram/init`).
-    func telegramInit() async throws -> OilaTelegramSession
-    /// Poll a Telegram login session; persists tokens once authorized (`GET /auth/telegram/status/{id}`).
-    func telegramStatus(sessionId: String) async throws -> OilaTelegramStatus
     func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws
     func fetchActiveTasks() async throws -> [OilaDeviceTask]
     /// Active + recently-completed tasks (for the tasks screen + collected-stars total).
@@ -284,68 +256,6 @@ final class OilaDeviceClient: OilaDeviceServicing {
             body: ["refreshToken": refresh],
             authorized: true
         )
-    }
-
-    // MARK: Phone / Telegram login (public — no session required)
-
-    func requestOtp(phone: String) async throws {
-        _ = try await requestJSON(
-            path: "auth/otp/request",
-            method: .post,
-            body: ["phone": phone],
-            authorized: false
-        )
-    }
-
-    func verifyOtp(phone: String, code: String) async throws -> OilaOtpResult {
-        let data = try await requestJSON(
-            path: "auth/otp/verify",
-            method: .post,
-            body: ["phone": phone, "code": code],
-            authorized: false
-        )
-        guard let tokens = Self.parseTokens(from: data) else {
-            throw OilaAPIError(
-                statusCode: 200,
-                message: "Verification response missing tokens",
-                errorCode: "OTP_NO_TOKEN",
-                fieldErrors: []
-            )
-        }
-        persist(tokens)
-        return OilaOtpResult(tokens: tokens, child: Self.parseChild(from: data))
-    }
-
-    func telegramInit() async throws -> OilaTelegramSession {
-        let data = try await requestJSON(path: "auth/telegram/init", method: .post, authorized: false)
-        let object = (data as? [String: Any]) ?? [:]
-        guard let sessionId = Self.firstString(object, ["sessionId", "session_id", "id"]) else {
-            throw OilaAPIError(
-                statusCode: 200,
-                message: "Telegram init response missing sessionId",
-                errorCode: "TG_NO_SESSION",
-                fieldErrors: []
-            )
-        }
-        let url = Self.firstString(object, ["url", "link", "deepLink", "magicLink", "tgUrl", "botUrl"])
-        return OilaTelegramSession(sessionId: sessionId, url: url)
-    }
-
-    func telegramStatus(sessionId: String) async throws -> OilaTelegramStatus {
-        let encoded = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId
-        let data = try await requestJSON(path: "auth/telegram/status/\(encoded)", method: .get, authorized: false)
-        if let tokens = Self.parseTokens(from: data) {
-            persist(tokens)
-            return .authorized(tokens, child: Self.parseChild(from: data))
-        }
-        let object = (data as? [String: Any]) ?? [:]
-        let status = (Self.firstString(object, ["status", "state"]) ?? "pending").lowercased()
-        switch status {
-        case "expired", "cancelled", "canceled", "failed", "rejected", "timeout":
-            return .expired
-        default:
-            return .pending
-        }
     }
 
     // MARK: Device surface
