@@ -1,5 +1,11 @@
 # SmartOilaKids App Store Submission Package
 
+> ⚠️ **STALE — pre-rebrand (April 2026). Do not submit from this file.** It describes the
+> pre-Bolajon360 app and features that were since **removed** (chat, media/covert recording,
+> camera/microphone). For current state, gates, and the submission checklist, use
+> **`BOLAJON360_STATUS.md`** (the single source of truth). This file needs a full rewrite for the
+> Bolajon360 rebrand before it is used again.
+
 Prepared on April 1, 2026 for the iOS app currently built from this repository.
 
 This package is based on:

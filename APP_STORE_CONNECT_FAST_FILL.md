@@ -1,5 +1,9 @@
 # Smart Oila Kids App Store Connect Fast Fill
 
+> ⚠️ **STALE — pre-rebrand (April 2026). Do not submit from this file.** It predates the Bolajon360
+> rebrand and the legacy strip (chat, media/covert recording, camera/microphone were removed).
+> Use **`BOLAJON360_STATUS.md`** for current state; rewrite this for the rebrand before reuse.
+
 Prepared on 2026-04-06 from the current repository state.
 
 Use this file for fast App Store Connect entry. Keep `APP_STORE_SUBMISSION_PACKAGE.md` as the longer reference.
