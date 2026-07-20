@@ -45,6 +45,20 @@ jobs:
       - name: List Available iOS Simulators
         run: xcrun simctl list devices available
 
+      - name: Compile Screen Time extensions
+        # The extensions aren't embedded in the app target (Screen Time ships disabled in v1), so the
+        # app scheme never builds them. Compile them explicitly so their sources can't silently
+        # bit-rot before the enforcement release.
+        run: |
+          xcodebuild build \
+            -project SmartOilaKids.xcodeproj \
+            -target SmartOilaKidsScheduleMonitorExtension \
+            -destination 'generic/platform=iOS Simulator' -quiet
+          xcodebuild build \
+            -project SmartOilaKids.xcodeproj \
+            -target SmartOilaKidsUsageReportExtension \
+            -destination 'generic/platform=iOS Simulator' -quiet
+
       - name: Run SmartOilaKids Simulator Tests
         run: ./scripts/run_ios_tests.sh
 

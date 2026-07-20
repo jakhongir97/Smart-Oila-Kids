@@ -1,6 +1,9 @@
-# Reference-only manifest.
-# The checked-in SmartOilaKids.xcodeproj is the canonical project until this file
-# is restored to full parity with all targets and build settings.
+# ⚠️ REFERENCE-ONLY MANIFEST — DO NOT RUN `xcodegen` AGAINST THIS FILE. ⚠️
+# The checked-in SmartOilaKids.xcodeproj is the canonical, hand-maintained project. This spec
+# describes ONLY the app target — it omits SmartOilaKidsTests and both Screen Time app-extension
+# targets (SmartOilaKidsScheduleMonitorExtension, SmartOilaKidsUsageReportExtension). Regenerating
+# from it would SILENTLY replace the 4-target project with a 1-target one that can't run tests or
+# ship the extensions. Restore full parity here before this file is ever used to generate.
 name: SmartOilaKids
 options:
   minimumXcodeGenVersion: 2.40.0

@@ -20,3 +20,6 @@ tmp/
 # Python caches (script tests)
 __pycache__/
 *.pyc
+
+# xcodebuild default output dir (extension standalone builds)
+build/
