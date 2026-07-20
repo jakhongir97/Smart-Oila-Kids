@@ -1,5 +1,3 @@
-@preconcurrency import AVFoundation
-import AVFAudio
 import CoreLocation
 import Foundation
 import SwiftUI
@@ -91,29 +89,6 @@ enum SettingsDiagnosticsValueMapper {
         case .notDetermined: return "notDetermined"
         @unknown default: return "unknown"
         }
-    }
-
-    static func microphoneStatus(_ status: AVAudioSession.RecordPermission) -> String {
-        switch status {
-        case .granted: return "granted"
-        case .denied: return "denied"
-        case .undetermined: return "undetermined"
-        @unknown default: return "unknown"
-        }
-    }
-
-    static func cameraStatus(_ status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .authorized: return "authorized"
-        case .denied: return "denied"
-        case .restricted: return "restricted"
-        case .notDetermined: return "notDetermined"
-        @unknown default: return "unknown"
-        }
-    }
-
-    static func displayCaptureStatus(_ status: DisplayCaptureAvailabilityStatus) -> String {
-        status.rawValue
     }
 
     static func screenTimeStatus(_ status: ScreenTimePermissionStatus) -> String {

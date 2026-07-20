@@ -1610,19 +1610,6 @@ final class SettingsDiagnosticsValueMapperTests: XCTestCase {
         XCTAssertEqual(SettingsDiagnosticsValueMapper.notificationStatus(.denied), "denied")
         XCTAssertEqual(SettingsDiagnosticsValueMapper.notificationStatus(.notDetermined), "notDetermined")
 
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.microphoneStatus(.granted), "granted")
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.microphoneStatus(.denied), "denied")
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.microphoneStatus(.undetermined), "undetermined")
-
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.cameraStatus(.authorized), "authorized")
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.cameraStatus(.denied), "denied")
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.cameraStatus(.restricted), "restricted")
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.cameraStatus(.notDetermined), "notDetermined")
-
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.displayCaptureStatus(.ready), "ready")
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.displayCaptureStatus(.inactive), "inactive")
-        XCTAssertEqual(SettingsDiagnosticsValueMapper.displayCaptureStatus(.unavailable), "unavailable")
-
         XCTAssertEqual(SettingsDiagnosticsValueMapper.screenTimeStatus(.notDetermined), "notDetermined")
         XCTAssertEqual(SettingsDiagnosticsValueMapper.screenTimeStatus(.denied), "denied")
         XCTAssertEqual(SettingsDiagnosticsValueMapper.screenTimeStatus(.granted), "granted")
