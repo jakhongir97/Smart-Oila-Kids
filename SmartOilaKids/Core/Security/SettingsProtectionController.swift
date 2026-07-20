@@ -147,9 +147,17 @@ final class SettingsProtectionController: ObservableObject {
 
         switch activePINPrompt {
         case .unlock:
-            guard verify(normalizedPIN) else {
+            // Enforce the brute-force lockout on this path too. It was previously enforced only by
+            // the disconnect screen's own gate, so any UI wired to this prompt would have been an
+            // un-rate-limited oracle for the same shared PIN.
+            if pinLockRemaining != nil {
                 return L10n.tr("settings.control_protection_pin_incorrect")
             }
+            guard verify(normalizedPIN) else {
+                recordPINAttempt(success: false)
+                return L10n.tr("settings.control_protection_pin_incorrect")
+            }
+            recordPINAttempt(success: true)
             startUnlockSession()
             completePINPrompt(result: true)
             return nil
@@ -185,6 +193,9 @@ final class SettingsProtectionController: ObservableObject {
     /// True when `pin` matches the stored custom PIN. False if no custom PIN is set or the
     /// input is the wrong length. Never throws — safe to call on every keystroke.
     func verifyCustomPIN(_ pin: String) -> Bool {
+        // Deny (without recording an attempt — this is called on every keystroke) while a lockout
+        // is active, so no caller can turn live verification into an unlimited guessing oracle.
+        guard pinLockRemaining == nil else { return false }
         let normalized = normalizePIN(pin)
         guard normalized.count == pinLength else { return false }
         return verify(normalized)

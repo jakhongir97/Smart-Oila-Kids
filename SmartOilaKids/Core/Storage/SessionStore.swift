@@ -45,10 +45,12 @@ final class SessionStore: ObservableObject {
 
     init(
         userDefaults: UserDefaults = .standard,
-        secureTokens: SecureTokenStoring = SecureTokenStore.shared
+        secureTokens: SecureTokenStoring = SecureTokenStore.shared,
+        deviceTokens: SecureTokenStoring = SecureTokenStore.oila
     ) {
         self.userDefaults = userDefaults
         self.secureTokens = secureTokens
+        self.deviceTokens = deviceTokens
 
         secureTokens.migrateFromUserDefaults(userDefaults)
 
@@ -198,6 +200,12 @@ final class SessionStore: ObservableObject {
         setAPIRefreshToken(nil)
         setChildAvatarEmoji(nil)
         setChildProfileColor(nil)
+        // Wipe the live oila360 device credential too. `secureTokens` only holds the (unused)
+        // legacy account tokens; the Bearer token minted by `POST /device/pair` lives in the
+        // separate `deviceTokens` slots, and leaving it behind meant a server-side unpair (or a
+        // spurious 401) returned the child to pairing while a still-valid token lingered in the
+        // Keychain.
+        deviceTokens.clear()
         // Disconnect returns the child to the setup flow.
         setSetupCompleted(false)
         setOnboardingCompleted(false)
@@ -230,6 +238,7 @@ final class SessionStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private let secureTokens: SecureTokenStoring
+    private let deviceTokens: SecureTokenStoring
 
     var activeRemoteDSN: String? {
         selectedRemoteDSN?.trimmedNonEmpty ?? dsn?.trimmedNonEmpty

@@ -49,6 +49,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// Post-once guard so a burst of simultaneous 401s (location + status + lock) raises a single
     /// session-invalidation signal per run.
     private var didSignalInvalidation = false
+    private var isConfirmingInvalidation = false
     /// Monotonic tag for lock-state reads so a slow poll can't overwrite a newer push refresh.
     private var lockRefreshSequence = 0
 
@@ -75,6 +76,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         guard !isRunning else { return }
         isRunning = true
         didSignalInvalidation = false
+        isConfirmingInvalidation = false
         // A new session must never inherit fixes queued under a previous pairing.
         pendingFixes.removeAll()
 
@@ -167,9 +169,30 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
     }
 
-    /// Signals — once per run — that the device credential is no longer valid so the app can clear
-    /// the session and prompt re-pairing, then tears telemetry down.
+    /// A telemetry call reported `requiresRePair`. Rather than tear the pairing down on the first
+    /// 401 — a transient infra/proxy 401 would falsely unpair the device, since paired devices hold
+    /// no refresh token and `send()`'s refresh path therefore always fails — confirm with one
+    /// independent authorized probe before invalidating. Real revocation makes the probe fail too;
+    /// a transient blip does not.
     private func handleAuthorizationLoss() {
+        guard !didSignalInvalidation, !isConfirmingInvalidation else { return }
+        isConfirmingInvalidation = true
+        Task { [weak self] in await self?.confirmAndInvalidate() }
+    }
+
+    private func confirmAndInvalidate() async {
+        defer { isConfirmingInvalidation = false }
+        guard !didSignalInvalidation, isRunning else { return }
+        do {
+            _ = try await service.fetchLockState()
+            // Probe succeeded → the earlier 401 was transient. Keep the session.
+            return
+        } catch let error as OilaAPIError where error.requiresRePair {
+            // Independently confirmed the credential is dead — fall through to invalidate.
+        } catch {
+            // Probe failed transiently (offline / 5xx) → not a confirmed revocation. Keep session.
+            return
+        }
         guard !didSignalInvalidation else { return }
         didSignalInvalidation = true
         NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)

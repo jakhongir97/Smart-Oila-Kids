@@ -96,31 +96,34 @@ final class SecureTokenStore: SecureTokenStoring {
         return String(data: data, encoding: .utf8)
     }
 
-    private func writeValue(_ value: String?, for account: String) {
+    /// Persists (or clears) a value and reports the final Keychain status. Uses update-first so
+    /// the read/write is a single atomic Keychain call — the previous check-then-write left a
+    /// window where a concurrent writer produced errSecDuplicateItem that was silently swallowed.
+    /// On a duplicate we delete-then-add so a corrupt/partial prior entry cannot wedge the slot.
+    @discardableResult
+    private func writeValue(_ value: String?, for account: String) -> OSStatus {
         let query = baseQuery(for: account)
         guard let value = value?.trimmedNonEmpty else {
-            SecItemDelete(query as CFDictionary)
-            return
+            let status = SecItemDelete(query as CFDictionary)
+            return status == errSecItemNotFound ? errSecSuccess : status
         }
 
-        let data = Data(value.utf8)
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        let attributes: [String: Any] = [
+            kSecValueData as String: Data(value.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
 
-        switch status {
-        case errSecSuccess:
-            let attributesToUpdate: [String: Any] = [
-                kSecValueData as String: data,
-                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            ]
-            SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
-        case errSecItemNotFound:
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
             var insertQuery = query
-            insertQuery[kSecValueData as String] = data
-            insertQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            SecItemAdd(insertQuery as CFDictionary, nil)
-        default:
-            break
+            insertQuery.merge(attributes) { _, new in new }
+            status = SecItemAdd(insertQuery as CFDictionary, nil)
+            if status == errSecDuplicateItem {
+                SecItemDelete(query as CFDictionary)
+                status = SecItemAdd(insertQuery as CFDictionary, nil)
+            }
         }
+        return status
     }
 
     private func baseQuery(for account: String) -> [String: Any] {
