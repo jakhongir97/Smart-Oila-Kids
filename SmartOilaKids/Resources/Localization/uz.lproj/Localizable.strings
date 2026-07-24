@@ -277,3 +277,24 @@
 "settings2.status_subtitle" = "Ilova to'g'ri ishlashi uchun quyidagilar yoqilgan bo'lishi kerak.";
 "settings2.status_on" = "Yoqilgan";
 "settings2.status_off" = "O'chiq";
+
+/* Chat (Bolajon360) */
+"chat2.peer" = "Ota-ona";
+"chat2.online" = "onlayn";
+"chat2.connecting" = "ulanmoqda…";
+"chat2.placeholder" = "Xabar yozing…";
+"chat2.empty" = "Hozircha xabar yo'q";
+"chat2.empty_hint" = "Ota-onangizga yozing";
+"chat2.unread" = "O'qilmagan xabarlar";
+"chat2.photo" = "Rasm";
+"chat2.send" = "Yuborish";
+"home2.chat.title" = "Ota-ona bilan suhbat";
+"home2.chat.subtitle" = "Oila bilan yozishing";
+
+/* Live audio (Bolajon360) */
+"audio2.listening" = "Ota-ona tinglayapti";
+"audio2.consent.title" = "Jonli ovozga ruxsat berasizmi?";
+"audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. U yoniq bo'lganda yuqorida doim qizil belgi ko'rinadi.";
+"audio2.consent.hint" = "Yoniqligini doim ko'rasiz";
+"audio2.consent.allow" = "Ruxsat berish";
+"audio2.consent.decline" = "Hozir emas";

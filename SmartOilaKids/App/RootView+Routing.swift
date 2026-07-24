@@ -42,6 +42,10 @@ extension RootView {
             // Standalone debug entry: production reaches Tasks as a push on the Home stack.
             NavigationStack { BolajonTasksView() }
                 .bolajonNavigationTint()
+        case .bolajonChat:
+            // Standalone debug entry: production reaches Chat as a push on the Home stack.
+            NavigationStack { BolajonChatView() }
+                .bolajonNavigationTint()
         case .bolajonSettings:
             BolajonSettingsView()
                 .environmentObject(sessionStore)

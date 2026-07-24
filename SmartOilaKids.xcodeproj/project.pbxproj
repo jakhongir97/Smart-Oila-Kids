@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		26DA40009D4D477E9E4B7F98 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = E893646BD59D45E08D43E0B9 /* LiveKit */; };
 		02A2F11140840028AD044865 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */; };
 		033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E35F67AF2A306DA50B1B2381 /* Assets.xcassets */; };
 		FF95F66EA06BAC5CB2DD5F18 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */; };
@@ -23,6 +24,8 @@
 		213E610135A06A9976AA6C95 /* PushInboxStore+Mutations.swift in Sources */ = {isa = PBXBuildFile; fileRef = E381C1C47BEBF468020D9CF3 /* PushInboxStore+Mutations.swift */; };
 		21CD5BDD52E44B109A0B7C87 /* DeviceControlEventSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CB267462E8296CE7B50CDD /* DeviceControlEventSharedStore.swift */; };
 		22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */; };
+		D92FB27F658843A99A64703B /* DeviceAudioStreaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94C925FD951F4E88BF801EDC /* DeviceAudioStreaming.swift */; };
+		1B19EA5F7FAA404FA265E868 /* DeviceChatWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BE4393B632412F9FC38C67 /* DeviceChatWebSocketService.swift */; };
 		22E7F6EB6E023F4549FC91F0 /* PermissionRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 406257A2E792217E0DA9B72A /* PermissionRequirement.swift */; };
 		32BC1A012F69914E00B088F7 /* DeviceApplicationsSyncWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32BC1A002F69914E00B088F7 /* DeviceApplicationsSyncWebSocketService.swift */; };
 		34E7EE4BAA5D64256E27662B /* ScreenTimeUsageActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9E55F392A6E47D99AA4BE7 /* ScreenTimeUsageActivitySummary.swift */; };
@@ -86,6 +89,8 @@
 		C0E98A711DFE4543A7BA3C20 /* SmartOilaKidsDeviceActivityMonitorExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85956B25DDB545FE94EF8499 /* SmartOilaKidsDeviceActivityMonitorExtension.swift */; };
 		C381EAF82D8031A6DE4E1FE2 /* ChildChromeBranding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B35C83F2A4F548512EB20FB /* ChildChromeBranding.swift */; };
 		C85F8BC5229FDB43AE443559 /* BolajonHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */; };
+		D19C4A05161742768A0BC8B0 /* AudioListeningIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBE607DED51E4527A405E13C /* AudioListeningIndicator.swift */; };
+		95E3958D70744828A5896930 /* BolajonChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B3AE1E539B44AAA4E9A234 /* BolajonChatView.swift */; };
 		CC3DCFC38FAF38F886C60468 /* AppTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 902BD06432A3F2707A5BF113 /* AppTypography.swift */; };
 		CD93BE5694226779BF5707C9 /* PushNotificationTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2567114AF6B224317CA7ACFF /* PushNotificationTypes.swift */; };
 		CF094EFE3B06048BBA6C907E /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41D40E74ED4CC61BE7C6A0B2 /* L10n.swift */; };
@@ -205,6 +210,8 @@
 		AA8AAD15D93BEA1AEC4822E4 /* DeviceApplicationUsageReportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceApplicationUsageReportCoordinator.swift; sourceTree = "<group>"; };
 		AB1969F4FA44EB2A77CA5084 /* DSNScopedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DSNScopedStorage.swift; sourceTree = "<group>"; };
 		AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonHomeView.swift; sourceTree = "<group>"; };
+		FBE607DED51E4527A405E13C /* AudioListeningIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioListeningIndicator.swift; sourceTree = "<group>"; };
+		A3B3AE1E539B44AAA4E9A234 /* BolajonChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonChatView.swift; sourceTree = "<group>"; };
 		B156D03B8A8CFF9B5F3A42FE /* DeviceLockWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockWebSocketService.swift; sourceTree = "<group>"; };
 		B4C6C570B71E54A7F777CB04 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
 		B6299D7514F1C609FFA8BCAB /* DeviceLockModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockModels.swift; sourceTree = "<group>"; };
@@ -253,6 +260,8 @@
 		F3AE0F8316C44BC78E962C07 /* SmartOilaKidsUsageReportExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaKidsUsageReportExtension.swift; sourceTree = "<group>"; };
 		F3EC448F6E28C731606F52D2 /* DeviceApplicationRemovalAttemptCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceApplicationRemovalAttemptCoordinator.swift; sourceTree = "<group>"; };
 		F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaDeviceAPI.swift; sourceTree = "<group>"; };
+		94C925FD951F4E88BF801EDC /* DeviceAudioStreaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAudioStreaming.swift; sourceTree = "<group>"; };
+		90BE4393B632412F9FC38C67 /* DeviceChatWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceChatWebSocketService.swift; sourceTree = "<group>"; };
 		FCBB1073C8D888EFA17C2397 /* uz */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = uz; path = uz.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -370,6 +379,8 @@
 			isa = PBXGroup;
 			children = (
 				AE0BB44306A2070B7F7C6FDD /* BolajonHomeView.swift */,
+				FBE607DED51E4527A405E13C /* AudioListeningIndicator.swift */,
+				A3B3AE1E539B44AAA4E9A234 /* BolajonChatView.swift */,
 			);
 			path = Main;
 			sourceTree = "<group>";
@@ -506,6 +517,8 @@
 			isa = PBXGroup;
 			children = (
 				F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */,
+				94C925FD951F4E88BF801EDC /* DeviceAudioStreaming.swift */,
+				90BE4393B632412F9FC38C67 /* DeviceChatWebSocketService.swift */,
 				717167572124BB3D730729A1 /* OilaTelemetryService.swift */,
 				E9C8610E862B6B9260CC2085 /* HTTPMethod.swift */,
 				E7613A83E34A4278DABAA4E3 /* NetworkError.swift */,
@@ -636,6 +649,7 @@
 			buildConfigurationList = 4706FBD956A243CB5168CB9F /* Build configuration list for PBXNativeTarget "SmartOilaKids" */;
 			buildPhases = (
 				EEA838EAC925999ADC328F04 /* Sources */,
+				5015AD37DC8F4C21AC444D4C /* Frameworks */,
 				28887B92E3F6E1CFF7D811DA /* Resources */,
 			);
 			buildRules = (
@@ -644,6 +658,7 @@
 			);
 			name = SmartOilaKids;
 			packageProductDependencies = (
+				E893646BD59D45E08D43E0B9 /* LiveKit */,
 			);
 			productName = SmartOilaKids;
 			productReference = 4D0BC0423D576553D183CB83 /* SmartOilaKids.app */;
@@ -735,6 +750,9 @@
 				uz,
 			);
 			mainGroup = 277015A331DCDE45AAED27E4;
+			packageReferences = (
+				DBB31FF197A647ECB4005341 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
+			);
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
@@ -813,6 +831,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */,
+				D92FB27F658843A99A64703B /* DeviceAudioStreaming.swift in Sources */,
+				1B19EA5F7FAA404FA265E868 /* DeviceChatWebSocketService.swift in Sources */,
 				069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */,
 				50B88251B0431D3F098B7EF5 /* ActivityShareSheet.swift in Sources */,
 				1802E26A36C0451F1831F065 /* AppColors.swift in Sources */,
@@ -864,6 +884,8 @@
 				5BF7B3C886CE178FFD227EBD /* LocationPermissionManager+Observation.swift in Sources */,
 				72F6D3C5E18214B1604AD294 /* LocationPermissionManager.swift in Sources */,
 				C85F8BC5229FDB43AE443559 /* BolajonHomeView.swift in Sources */,
+				D19C4A05161742768A0BC8B0 /* AudioListeningIndicator.swift in Sources */,
+				95E3958D70744828A5896930 /* BolajonChatView.swift in Sources */,
 				F11DBEA0585748DF16A3D3F4 /* NetworkError.swift in Sources */,
 				E0B997DFBFA98D1D8905B1BC /* PermissionChecklistEvaluator.swift in Sources */,
 				22E7F6EB6E023F4549FC91F0 /* PermissionRequirement.swift in Sources */,
@@ -1282,6 +1304,36 @@
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5015AD37DC8F4C21AC444D4C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				26DA40009D4D477E9E4B7F98 /* LiveKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DBB31FF197A647ECB4005341 /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/livekit/client-sdk-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E893646BD59D45E08D43E0B9 /* LiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DBB31FF197A647ECB4005341 /* XCRemoteSwiftPackageReference "client-sdk-swift" */;
+			productName = LiveKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		3A1916603E6F4D1BAF62FF3B /* Build configuration list for PBXNativeTarget "SmartOilaKidsScheduleMonitorExtension" */ = {

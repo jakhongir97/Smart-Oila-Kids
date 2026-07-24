@@ -7,6 +7,7 @@ import SwiftUI
 /// Drill-in destinations pushed onto the Home NavigationStack.
 enum HomeRoute: Hashable {
     case tasks
+    case chat
     case settings
     case settingsPermissions
     case settingsDisconnect
@@ -18,6 +19,7 @@ enum HomeRoute: Hashable {
 func homeRouteDestination(_ route: HomeRoute, path: Binding<[HomeRoute]>) -> some View {
     switch route {
     case .tasks: BolajonTasksView()
+    case .chat: BolajonChatView()
     case .settings: SettingsRootView(path: path)
     case .settingsPermissions: SettingsPermissionsScreen()
     case .settingsDisconnect: SettingsDisconnectScreen()
@@ -42,6 +44,9 @@ struct BolajonHomeView: View {
                         screenTimeCard
                     }
                     sosCard
+                    if AppRuntime.chatFeaturesEnabled {
+                        ChatHomeCard(onOpen: { path.append(.chat) })
+                    }
                     tasksCard
                 }
             }

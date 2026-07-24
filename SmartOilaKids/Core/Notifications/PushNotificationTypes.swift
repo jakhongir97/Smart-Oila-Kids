@@ -6,6 +6,8 @@ extension Notification.Name {
     static let pushShouldOpenTasks = Notification.Name("smartoila.push.openTasks")
     static let pushShouldRefreshChat = Notification.Name("smartoila.push.refreshChat")
     static let pushShouldOpenChat = Notification.Name("smartoila.push.openChat")
+    static let pushShouldStartAudioStream = Notification.Name("smartoila.push.startAudioStream")
+    static let pushShouldStopAudioStream = Notification.Name("smartoila.push.stopAudioStream")
     static let pushShouldRefreshDashboard = Notification.Name("smartoila.push.refreshDashboard")
     static let pushInboxDidChange = Notification.Name("smartoila.push.inboxDidChange")
 }

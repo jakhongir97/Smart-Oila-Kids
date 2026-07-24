@@ -277,3 +277,24 @@
 "settings2.status_subtitle" = "The following should be enabled for the app to work correctly.";
 "settings2.status_on" = "On";
 "settings2.status_off" = "Off";
+
+/* Chat (Bolajon360) */
+"chat2.peer" = "Parent";
+"chat2.online" = "online";
+"chat2.connecting" = "connecting…";
+"chat2.placeholder" = "Message…";
+"chat2.empty" = "No messages yet";
+"chat2.empty_hint" = "Write to your parent";
+"chat2.unread" = "Unread messages";
+"chat2.photo" = "Photo";
+"chat2.send" = "Send";
+"home2.chat.title" = "Chat with parent";
+"home2.chat.subtitle" = "Message your family";
+
+/* Live audio (Bolajon360) */
+"audio2.listening" = "Parent is listening";
+"audio2.consent.title" = "Allow live audio?";
+"audio2.consent.body" = "Your parent can listen to your surroundings for your safety. You will always see a red indicator at the top while it is on.";
+"audio2.consent.hint" = "You always see when it's on";
+"audio2.consent.allow" = "Allow";
+"audio2.consent.decline" = "Not now";

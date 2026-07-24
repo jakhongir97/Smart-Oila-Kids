@@ -37,6 +37,8 @@ private extension PushCommandRouter {
         static let lock = ["lock"]
         static let tasks = ["task", "award"]
         static let chat = ["chat", "message", "sms"]
+        static let audioStream = ["stream", "audio", "listen", "efir", "tingla", "mic"]
+        static let stopStream = ["stop", "end", "hangup", "disconnect", "tugat"]
     }
 
     static func persistInboxItem(_ payload: PushCommandPayload, openedFromInteraction: Bool) {
@@ -90,8 +92,21 @@ private extension PushCommandRouter {
             }
         }
 
-        // Recording-trigger pushes are intentionally NOT routed: the audio-recording feature
-        // was cut for v1, so a parent-triggered record command has no consumer on-device.
+        // Live-audio wake: the parent tapping "listen" sends a data-push whose payload mentions
+        // stream/audio → start publishing (gated by the flag + one-time consent in the manager);
+        // a matching stop/end payload tears the session down.
+        if containsAny(in: haystack, tokens: RoutingTokens.audioStream) {
+            if containsAny(in: haystack, tokens: RoutingTokens.stopStream) {
+                post(.pushShouldStopAudioStream, dsn: payload.dsn)
+                routeActions.append("audio_stop")
+            } else {
+                post(.pushShouldStartAudioStream, dsn: payload.dsn)
+                routeActions.append("audio_start")
+            }
+        }
+
+        // Recording-trigger (covert clip) pushes remain intentionally unrouted — that feature was
+        // cut for v1; this block handles only LIVE audio, which is non-covert (indicator + consent).
 
         if let deepLinkDestination {
             saveDeepLink(destination: deepLinkDestination, dsn: payload.dsn)

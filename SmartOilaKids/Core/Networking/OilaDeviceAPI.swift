@@ -774,3 +774,255 @@ private actor OilaRefreshGate {
         try await refreshTask.value
     }
 }
+
+// MARK: - Chat + live-audio models (Bolajon360 realtime)
+
+/// One message in the parent↔child thread (`GET/POST /device/chat/messages`).
+/// The message schema is undocumented in the spec, so every field is parsed tolerantly.
+struct OilaChatMessage: Identifiable, Equatable {
+    enum Sender: String {
+        case parent
+        case child
+        case unknown
+    }
+
+    let id: String
+    let text: String?
+    let sender: Sender
+    let createdAt: Date?
+    /// True when the message carries an image attachment — fetch the signed URL lazily via
+    /// `fetchChatAttachmentURL(messageId:)`; never persist a long-lived media URL for a minor.
+    let hasImage: Bool
+    /// True once the peer (the parent, for a child-sent message) has read it.
+    let readByPeer: Bool
+    /// The full tolerant object, for callers needing keys not surfaced above.
+    let raw: [String: Any]
+
+    var isFromChild: Bool { sender == .child }
+
+    static func == (lhs: OilaChatMessage, rhs: OilaChatMessage) -> Bool {
+        lhs.id == rhs.id
+            && lhs.text == rhs.text
+            && lhs.sender == rhs.sender
+            && lhs.createdAt == rhs.createdAt
+            && lhs.hasImage == rhs.hasImage
+            && lhs.readByPeer == rhs.readByPeer
+    }
+}
+
+/// One page of chat history (`GET /device/chat/messages`), newest-first as the backend returns it.
+struct OilaChatPage: Equatable {
+    let messages: [OilaChatMessage]
+    /// Opaque cursor to pass back as `before` to load the next (older) page; nil at the head of history.
+    let nextCursor: String?
+}
+
+/// A minted LiveKit token for this device's live-audio room (`POST /device/stream/token`).
+/// The device always receives a PUBLISHER token; the response schema is undocumented in the
+/// spec, so the token / signaling URL / room are read tolerantly.
+struct OilaStreamToken: Equatable {
+    /// The LiveKit access token (JWT) — handed to the LiveKit SDK, never logged.
+    let token: String
+    /// The LiveKit signaling URL, e.g. `wss://stream.oila360.uz`.
+    let url: String
+    let room: String?
+    let identity: String?
+
+    static func == (lhs: OilaStreamToken, rhs: OilaStreamToken) -> Bool {
+        lhs.token == rhs.token && lhs.url == rhs.url && lhs.room == rhs.room && lhs.identity == rhs.identity
+    }
+}
+
+// MARK: - Chat + streaming service protocols
+//
+// Kept SEPARATE from `OilaDeviceServicing` on purpose: the existing device-API mocks
+// (e.g. BolajonHomeViewModelTests) don't have to implement chat/streaming to keep compiling.
+
+protocol OilaChatServicing {
+    /// Cursor history for this device's thread, newest-first (`GET /device/chat/messages`).
+    func fetchChatMessages(limit: Int, before: String?) async throws -> OilaChatPage
+    /// Send a message to the parent — text and/or a single image (`POST /device/chat/messages`).
+    @discardableResult
+    func sendChatMessage(text: String?, imageData: Data?, imageMimeType: String?) async throws -> OilaChatMessage
+    /// Advance the child read watermark for this thread (`POST /device/chat/read`).
+    func markChatRead(lastMessageId: String?) async throws
+    /// Unread messages from the parent for this device (`GET /device/chat/unread-count`).
+    func fetchChatUnreadCount() async throws -> Int
+    /// A fresh signed URL for a message's image attachment (`GET /device/chat/messages/{id}/attachment`).
+    func fetchChatAttachmentURL(messageId: String) async throws -> URL
+}
+
+protocol OilaStreamServicing {
+    /// Mint a LiveKit PUBLISHER token for this device's live-audio room (`POST /device/stream/token`).
+    func mintStreamToken() async throws -> OilaStreamToken
+}
+
+// MARK: - Chat + streaming implementation
+//
+// Same-file extension so it can reuse the private `requestJSON` / `send` transport (device
+// Bearer + `{ success, data }` envelope + single-flight 401 refresh) and the tolerant parse helpers.
+
+extension OilaDeviceClient: OilaChatServicing, OilaStreamServicing {
+    func fetchChatMessages(limit: Int = 30, before: String? = nil) async throws -> OilaChatPage {
+        var query = [URLQueryItem(name: "limit", value: String(max(1, min(limit, 100))))]
+        if let before, !before.isEmpty {
+            query.append(URLQueryItem(name: "before", value: before))
+        }
+        let data = try await requestJSON(path: "device/chat/messages", method: .get, query: query, authorized: true)
+        return Self.parseChatPage(from: data)
+    }
+
+    @discardableResult
+    func sendChatMessage(text: String?, imageData: Data? = nil, imageMimeType: String? = nil) async throws -> OilaChatMessage {
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasText = (trimmed?.isEmpty == false)
+        guard hasText || imageData != nil else {
+            throw OilaAPIError(statusCode: -1, message: "Empty message", errorCode: "EMPTY_MESSAGE", fieldErrors: [])
+        }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let body = Self.chatMultipartBody(
+            text: hasText ? trimmed : nil,
+            imageData: imageData,
+            imageMimeType: imageMimeType ?? "image/jpeg",
+            boundary: boundary
+        )
+        let data = try await send(
+            path: "device/chat/messages",
+            method: .post,
+            bodyData: body,
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            authorized: true
+        )
+        return Self.parseChatMessage(fromAny: data)
+            ?? OilaChatMessage(
+                id: UUID().uuidString,
+                text: hasText ? trimmed : nil,
+                sender: .child,
+                createdAt: nil,
+                hasImage: imageData != nil,
+                readByPeer: false,
+                raw: [:]
+            )
+    }
+
+    func markChatRead(lastMessageId: String? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let lastMessageId, !lastMessageId.isEmpty { body["lastMessageId"] = lastMessageId }
+        _ = try await requestJSON(path: "device/chat/read", method: .post, body: body, authorized: true)
+    }
+
+    func fetchChatUnreadCount() async throws -> Int {
+        let data = try await requestJSON(path: "device/chat/unread-count", method: .get, authorized: true)
+        if let object = Self.dict(from: data) {
+            return Self.intValue(object, ["count", "unread", "unreadCount", "total"]) ?? 0
+        }
+        if let number = data as? NSNumber { return number.intValue }
+        return 0
+    }
+
+    func fetchChatAttachmentURL(messageId: String) async throws -> URL {
+        let data = try await requestJSON(
+            path: "device/chat/messages/\(messageId)/attachment",
+            method: .get,
+            authorized: true
+        )
+        let object = Self.dict(from: data) ?? [:]
+        guard let raw = Self.firstString(object, ["url", "downloadUrl", "downloadURL", "signedUrl", "signedURL", "attachmentUrl"]),
+              let url = URL(string: raw) else {
+            throw OilaAPIError(statusCode: 200, message: "Attachment URL missing", errorCode: "NO_ATTACHMENT_URL", fieldErrors: [])
+        }
+        return url
+    }
+
+    func mintStreamToken() async throws -> OilaStreamToken {
+        let data = try await requestJSON(path: "device/stream/token", method: .post, body: [:], authorized: true)
+        let object = Self.dict(from: data) ?? [:]
+        guard let token = Self.firstString(object, ["token", "accessToken", "livekitToken", "jwt"]),
+              let url = Self.firstString(object, ["url", "wsUrl", "wsURL", "serverUrl", "serverURL", "signalingUrl", "livekitUrl", "host"]) else {
+            throw OilaAPIError(statusCode: 200, message: "Stream token response missing token/url", errorCode: "NO_STREAM_TOKEN", fieldErrors: [])
+        }
+        return OilaStreamToken(
+            token: token,
+            url: url,
+            room: Self.firstString(object, ["room", "roomName", "roomId"]),
+            identity: Self.firstString(object, ["identity", "participant", "participantIdentity"])
+        )
+    }
+
+    // MARK: Parsing
+
+    static func parseChatPage(from data: Any) -> OilaChatPage {
+        let rawItems: [[String: Any]]
+        var cursor: String?
+        if let array = data as? [[String: Any]] {
+            rawItems = array
+        } else if let object = data as? [String: Any] {
+            rawItems = (object["items"] as? [[String: Any]])
+                ?? (object["messages"] as? [[String: Any]])
+                ?? (object["results"] as? [[String: Any]])
+                ?? (object["data"] as? [[String: Any]])
+                ?? []
+            let meta = (object["meta"] as? [String: Any]) ?? object
+            cursor = firstString(meta, ["nextCursor", "next_cursor", "before", "cursor"])
+        } else {
+            rawItems = []
+        }
+        return OilaChatPage(messages: rawItems.compactMap { parseChatMessage($0) }, nextCursor: cursor)
+    }
+
+    static func parseChatMessage(fromAny data: Any) -> OilaChatMessage? {
+        guard let object = data as? [String: Any] else { return nil }
+        // The send response may wrap the created message under `message`/`data`.
+        if let nested = (object["message"] as? [String: Any]) ?? (object["data"] as? [String: Any]),
+           nested["id"] != nil || nested["_id"] != nil || nested["messageId"] != nil {
+            return parseChatMessage(nested)
+        }
+        return parseChatMessage(object)
+    }
+
+    static func parseChatMessage(_ item: [String: Any]) -> OilaChatMessage? {
+        guard let id = firstString(item, ["id", "messageId", "_id"]) else { return nil }
+        let senderRaw = (firstString(item, ["sender", "senderType", "from", "author", "direction"]) ?? "").lowercased()
+        let sender: OilaChatMessage.Sender
+        if senderRaw.contains("parent") {
+            sender = .parent
+        } else if senderRaw.contains("child") || senderRaw.contains("device") || senderRaw.contains("kid") {
+            sender = .child
+        } else {
+            sender = .unknown
+        }
+        let hasImage = item["imageUrl"] != nil || item["image"] != nil || item["attachment"] != nil
+            || (item["hasImage"] as? Bool == true) || (item["hasAttachment"] as? Bool == true)
+        let readByPeer = item["readAt"] != nil || (item["readByPeer"] as? Bool == true)
+            || (item["isReadByPeer"] as? Bool == true) || (item["read"] as? Bool == true)
+        return OilaChatMessage(
+            id: id,
+            text: firstString(item, ["text", "body", "message", "content"]),
+            sender: sender,
+            createdAt: date(item, ["createdAt", "created_at", "sentAt", "timestamp", "ts"]),
+            hasImage: hasImage,
+            readByPeer: readByPeer,
+            raw: item
+        )
+    }
+
+    static func chatMultipartBody(text: String?, imageData: Data?, imageMimeType: String, boundary: String) -> Data {
+        let lineBreak = "\r\n"
+        var body = Data()
+        if let text {
+            body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"text\"\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+            body.append("\(text)\(lineBreak)".data(using: .utf8)!)
+        }
+        if let imageData {
+            let ext = imageMimeType.contains("png") ? "png" : "jpg"
+            body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"image\"; filename=\"chat.\(ext)\"\(lineBreak)".data(using: .utf8)!)
+            body.append("Content-Type: \(imageMimeType)\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+            body.append(imageData)
+            body.append(lineBreak.data(using: .utf8)!)
+        }
+        body.append("--\(boundary)--\(lineBreak)".data(using: .utf8)!)
+        return body
+    }
+}

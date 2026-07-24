@@ -5,6 +5,7 @@ struct RootView: View {
     @EnvironmentObject var sessionStore: SessionStore
     @StateObject var lockCoordinator = DeviceLockCoordinator.shared
     @StateObject var oilaTelemetry = OilaTelemetryService.shared
+    @StateObject var audioStream = DeviceAudioStreamManager.shared
     @State var lastSessionDSN: String?
     @State var lastBackgroundedAt: Date?
     @State var didHandleInitialAppear = false
@@ -19,6 +20,11 @@ struct RootView: View {
         }
         .onAppear {
             handleAppear()
+#if DEBUG
+            if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_AUDIO"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { audioStream.requestStart() }
+            }
+#endif
         }
         .onChange(of: sessionStore.dsn) { newValue in
             handleDSNChange(newValue)
@@ -57,6 +63,18 @@ struct RootView: View {
                 ScreenTimeUsageReportBridgeView(dsn: sessionStore.dsn)
             }
         }
+        // Non-covert live-audio surfaces, mounted app-wide so they show over any screen.
+        .overlay(alignment: .top) {
+            if AppRuntime.audioStreamingEnabled, audioStream.isLive {
+                AudioListeningIndicator()
+            }
+        }
+        .sheet(isPresented: audioConsentPresented) {
+            AudioConsentSheet(
+                onAllow: { audioStream.grantConsentAndStart() },
+                onDecline: { audioStream.declineConsent() }
+            )
+        }
     }
 }
 
@@ -70,6 +88,15 @@ private extension RootView {
             // lock cover the pairing or B1–B11 onboarding screens.
             get: { oilaTelemetry.isLocked && sessionStore.oilaPaired && sessionStore.onboardingCompleted },
             set: { _ in }
+        )
+    }
+
+    /// Presents the one-time live-audio consent sheet when a listen request arrives before the
+    /// child has ever consented. Dismissing counts as "not now" (declineConsent).
+    var audioConsentPresented: Binding<Bool> {
+        Binding(
+            get: { AppRuntime.audioStreamingEnabled && audioStream.needsConsent },
+            set: { if !$0 { audioStream.declineConsent() } }
         )
     }
 }
