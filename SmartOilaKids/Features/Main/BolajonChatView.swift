@@ -35,6 +35,7 @@ final class BolajonChatViewModel: ObservableObject {
         self.socket = socket
         socket.onConnectedChange = { [weak self] connected in self?.isConnected = connected }
         socket.onMessage = { [weak self] message in self?.ingest(message) }
+        socket.onEvent = { [weak self] event, payload in self?.applyEvent(event, payload) }
         socket.onAuthExpired = { [weak self] in
             self?.isConnected = false
             // Transient token rejection — retry shortly; a persistent one is handled by the app's
@@ -107,6 +108,24 @@ final class BolajonChatViewModel: ObservableObject {
             // Arrived while the thread is open → immediately read.
             Task { [weak self] in try? await self?.chat.markChatRead(lastMessageId: message.id) }
         }
+    }
+
+    /// Realtime read receipt (`chat:read`): the parent read our messages — flip ✓✓ on our own sent
+    /// messages up to `readAt`. Ignore an echo of the child's own reads (reader == "child").
+    private func applyEvent(_ event: String, _ payload: [String: Any]) {
+        guard event.localizedCaseInsensitiveContains("read") else { return }
+        if (payload["reader"] as? String)?.lowercased() == "child" { return }
+        let readAt = Self.parseISO(payload["readAt"]) ?? Date()
+        messages = messages.map { message in
+            (message.sender == .child && !message.readByPeer && (message.createdAt ?? .distantPast) <= readAt)
+                ? message.markedReadByPeer() : message
+        }
+    }
+
+    private static let isoParser = ISO8601DateFormatter()
+    private static func parseISO(_ any: Any?) -> Date? {
+        guard let string = any as? String else { return nil }
+        return isoParser.date(from: string)
     }
 
     private func refreshUnreadBoundaryAndMarkRead() async {
@@ -197,7 +216,11 @@ struct BolajonChatView: View {
                         if message.id == viewModel.unreadBoundaryID {
                             UnreadDivider().id("unread-divider")
                         }
-                        ChatBubble(message: message).id(message.id)
+                        if message.sender == .system {
+                            ChatSystemNotice(message: message).id(message.id)
+                        } else {
+                            ChatBubble(message: message).id(message.id)
+                        }
                     }
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
                 }
@@ -337,6 +360,36 @@ private struct ChatBubble: View {
     private static func timeString(_ date: Date?) -> String? {
         guard let date else { return nil }
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - System notice (SOS etc.)
+
+private struct ChatSystemNotice: View {
+    let message: OilaChatMessage
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if message.systemKind == "sos" {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(AppColors.sosCoral)
+            }
+            Text(noticeText)
+                .font(AppTypography.caption(12))
+                .foregroundStyle(message.systemKind == "sos" ? AppColors.sosCoral : AppColors.inkTertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(message.systemKind == "sos" ? AppColors.sosCoral.opacity(0.12) : AppColors.chipNeutral))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
+    private var noticeText: String {
+        if message.systemKind == "sos" { return L10n.tr("chat2.system.sos") }
+        if let text = message.text, !text.isEmpty { return text }
+        return L10n.tr("chat2.system.generic")
     }
 }
 

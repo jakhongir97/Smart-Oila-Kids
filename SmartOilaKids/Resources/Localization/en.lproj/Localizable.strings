@@ -298,3 +298,5 @@
 "audio2.consent.hint" = "You always see when it's on";
 "audio2.consent.allow" = "Allow";
 "audio2.consent.decline" = "Not now";
+"chat2.system.sos" = "SOS — help requested";
+"chat2.system.generic" = "System message";

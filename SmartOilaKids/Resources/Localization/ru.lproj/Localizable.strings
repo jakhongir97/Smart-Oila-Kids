@@ -298,3 +298,5 @@
 "audio2.consent.hint" = "Вы всегда видите, когда включено";
 "audio2.consent.allow" = "Разрешить";
 "audio2.consent.decline" = "Не сейчас";
+"chat2.system.sos" = "SOS — запрошена помощь";
+"chat2.system.generic" = "Системное сообщение";

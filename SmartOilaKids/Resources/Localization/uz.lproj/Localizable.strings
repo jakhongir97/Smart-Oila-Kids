@@ -298,3 +298,5 @@
 "audio2.consent.hint" = "Yoniqligini doim ko'rasiz";
 "audio2.consent.allow" = "Ruxsat berish";
 "audio2.consent.decline" = "Hozir emas";
+"chat2.system.sos" = "SOS — yordam so'raldi";
+"chat2.system.generic" = "Tizim xabari";

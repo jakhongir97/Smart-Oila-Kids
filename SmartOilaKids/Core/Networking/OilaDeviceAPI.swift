@@ -783,6 +783,7 @@ struct OilaChatMessage: Identifiable, Equatable {
     enum Sender: String {
         case parent
         case child
+        case system
         case unknown
     }
 
@@ -797,8 +798,31 @@ struct OilaChatMessage: Identifiable, Equatable {
     let readByPeer: Bool
     /// The full tolerant object, for callers needing keys not surfaced above.
     let raw: [String: Any]
+    /// For a system notice (`sender == .system`) — e.g. `"sos"` — with any structured payload.
+    let systemKind: String?
+    let systemData: [String: Any]?
+
+    init(id: String, text: String?, sender: Sender, createdAt: Date?, hasImage: Bool,
+         readByPeer: Bool, raw: [String: Any], systemKind: String? = nil, systemData: [String: Any]? = nil) {
+        self.id = id
+        self.text = text
+        self.sender = sender
+        self.createdAt = createdAt
+        self.hasImage = hasImage
+        self.readByPeer = readByPeer
+        self.raw = raw
+        self.systemKind = systemKind
+        self.systemData = systemData
+    }
 
     var isFromChild: Bool { sender == .child }
+
+    /// A copy with the peer-read receipt set — used when a `chat:read` WS event arrives so the
+    /// child's own sent messages flip to ✓✓ in realtime instead of only on a history refetch.
+    func markedReadByPeer() -> OilaChatMessage {
+        OilaChatMessage(id: id, text: text, sender: sender, createdAt: createdAt, hasImage: hasImage,
+                        readByPeer: true, raw: raw, systemKind: systemKind, systemData: systemData)
+    }
 
     static func == (lhs: OilaChatMessage, rhs: OilaChatMessage) -> Bool {
         lhs.id == rhs.id
@@ -986,6 +1010,8 @@ extension OilaDeviceClient: OilaChatServicing, OilaStreamServicing {
         let sender: OilaChatMessage.Sender
         if senderRaw.contains("parent") {
             sender = .parent
+        } else if senderRaw.contains("system") {
+            sender = .system
         } else if senderRaw.contains("child") || senderRaw.contains("device") || senderRaw.contains("kid") {
             sender = .child
         } else {
@@ -1002,7 +1028,9 @@ extension OilaDeviceClient: OilaChatServicing, OilaStreamServicing {
             createdAt: date(item, ["createdAt", "created_at", "sentAt", "timestamp", "ts"]),
             hasImage: hasImage,
             readByPeer: readByPeer,
-            raw: item
+            raw: item,
+            systemKind: firstString(item, ["systemKind", "system_kind"]),
+            systemData: item["systemData"] as? [String: Any]
         )
     }
 
