@@ -3,3 +3,5 @@
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
 "NSLocationAlwaysUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
 "NSLocationWhenInUseUsageDescription" = "Location is used so the parent can see the child device location while the app is open.";
+"NSCameraUsageDescription" = "The camera is used only when a parent starts a live video check. Your child always sees an on-screen indicator while it is on.";
+"NSMicrophoneUsageDescription" = "The microphone is used only when a parent starts a live audio check. Your child always sees an on-screen indicator while it is on.";
