@@ -37,8 +37,30 @@ private extension PushCommandRouter {
         static let lock = ["lock"]
         static let tasks = ["task", "award"]
         static let chat = ["chat", "message", "sms"]
-        static let audioStream = ["stream", "audio", "listen", "efir", "tingla", "mic"]
-        static let stopStream = ["stop", "end", "hangup", "disconnect", "tugat"]
+        /// Audio subject stems, prefix-matched against whole event tokens — never as a raw
+        /// substring of the event, because "mic" also sits inside ordinary words like "dynamic".
+        static let audioSubjects = ["stream", "audio", "listen", "efir", "tingla", "mic"]
+        /// Stop verb stems, prefix-matched against a whole token. Prefix-on-token is what makes
+        /// inflections work without reintroducing the substring bug: "stopped"/"ended"/
+        /// "disconnected" all START with a stem, while "sending"/"friend" merely CONTAIN "end" and
+        /// so never match.
+        static let stopVerbs = ["stop", "end", "hangup", "disconnect", "tugat", "cancel", "close"]
+        /// Start verb stems, same prefix-on-token rule ("started", "boshlandi").
+        static let startVerbs = ["start", "begin", "open", "wake", "resume", "boshla"]
+        /// For a GLUED event ("streamaudiostopped") there are no token boundaries to prefix-match,
+        /// so these are searched as plain substrings. Only stems that cannot hide inside an
+        /// ordinary word qualify — "end" is deliberately absent, which is exactly the trap the
+        /// original substring matcher fell into.
+        static let gluedStopVerbs = ["stop", "hangup", "disconnect", "tugat", "cancel"]
+        static let gluedStartVerbs = ["start", "begin", "wake", "resume", "boshla"]
+        /// Verb-less wake events, matched by WHOLE-EVENT equality (never as a substring) — the one
+        /// shape allowed to start a stream without naming a start verb. Whole-event equality is
+        /// safe because the event field is machine-authored; a parent cannot type into it.
+        static let bareAudioStartEvents = [
+            "stream", "audio", "listen", "efir", "tingla", "mic",
+            "stream.audio", "audio.stream", "streamaudio", "audiostream",
+            "stream_audio", "audio_stream", "device.stream", "device_stream"
+        ]
     }
 
     static func persistInboxItem(_ payload: PushCommandPayload, openedFromInteraction: Bool) {
@@ -92,17 +114,22 @@ private extension PushCommandRouter {
             }
         }
 
-        // Live-audio wake: the parent tapping "listen" sends a data-push whose payload mentions
-        // stream/audio → start publishing (gated by the flag + one-time consent in the manager);
-        // a matching stop/end payload tears the session down.
-        if containsAny(in: haystack, tokens: RoutingTokens.audioStream) {
-            if containsAny(in: haystack, tokens: RoutingTokens.stopStream) {
-                post(.pushShouldStopAudioStream, dsn: payload.dsn)
-                routeActions.append("audio_stop")
-            } else {
-                post(.pushShouldStartAudioStream, dsn: payload.dsn)
-                routeActions.append("audio_start")
-            }
+        // Live-audio wake: the parent tapping "listen" sends a data-push whose EVENT names the
+        // stream → start publishing (gated by the flag + one-time consent in the manager); a
+        // matching stop event tears the session down. Unlike every block above, this one reads
+        // `commandHaystack` (the structured event alone) and never `routingHaystack`: the haystack
+        // also carries the notification title/body, and for a chat push the body is the parent's own
+        // message, so a parent writing "tingla" was enough to open the child's microphone. The
+        // blocks above keep the wide haystack on purpose — they only refresh or deep-link.
+        switch audioRoute(forCommand: payload.commandHaystack) {
+        case .start:
+            post(.pushShouldStartAudioStream, dsn: payload.dsn)
+            routeActions.append("audio_start")
+        case .stop:
+            post(.pushShouldStopAudioStream, dsn: payload.dsn)
+            routeActions.append("audio_stop")
+        case .none:
+            break
         }
 
         // Recording-trigger (covert clip) pushes remain intentionally unrouted — that feature was
@@ -134,7 +161,73 @@ private extension PushCommandRouter {
             )
         }
     }
+}
 
+// MARK: - Live-audio command routing
+//
+// Deliberately NOT in the private extension above: this is the one routing decision that opens
+// hardware, so it is kept internal and directly unit-tested (see PushAudioCommandRoutingTests).
+
+extension PushCommandRouter {
+    enum AudioCommandRoute {
+        case start
+        case stop
+    }
+
+    /// Decides whether a push is a live-audio wake, a stop, or neither — from the structured command
+    /// (event) alone, because this is the only route that opens hardware.
+    ///
+    /// The backend event contract is not documented in this repo, so matching stays tolerant WITHIN
+    /// the event: the explicit names ("stream.audio.start", "stream.start", "audio.start",
+    /// "listen.start" and their .stop/.end counterparts) as well as looser ones ("stream",
+    /// "audio_start", "streamAudioStop") all route — but only because the machine-authored event
+    /// names the audio subject, never because a human typed "listen" in the message body.
+    ///
+    /// Two rules make this safe rather than merely tolerant:
+    ///
+    ///  • STOP WINS, and is matched on a token PREFIX, so every inflection the backend might send
+    ///    ("stopped", "ended", "disconnected") still stops the stream. Getting this wrong is the
+    ///    dangerous direction: a stop misread as a start opens a microphone at the exact moment the
+    ///    parent hung up.
+    ///  • It FAILS CLOSED. An audio-subject event with no recognised verb ("stream.audio.failed",
+    ///    "audio.token.expired", "stream.status") routes to `nil` — no action — instead of falling
+    ///    through to start. A wake that silently does nothing is a bug found in testing; a mic that
+    ///    opens on an informational event is a privacy incident on a children's device.
+    ///
+    /// The one exception to failing closed is a BARE subject event ("stream", "stream.audio"),
+    /// matched by whole-event equality: that is the plausible shape of a verb-less wake command,
+    /// and whole-event equality cannot be reached by human-authored text.
+    ///
+    /// Note the parser lowercases the event before it ever gets here, so camelCase humps are
+    /// already gone — "streamAudioStop" arrives as one glued token and is handled by the glued
+    /// substring pass, which uses only stems that cannot hide inside an ordinary word.
+    static func audioRoute(forCommand command: String) -> AudioCommandRoute? {
+        let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+
+        let tokens = normalized.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        guard tokens.contains(where: { hasStem($0, in: RoutingTokens.audioSubjects) }) else { return nil }
+
+        if tokens.contains(where: { hasStem($0, in: RoutingTokens.stopVerbs) })
+            || containsAny(in: normalized, tokens: RoutingTokens.gluedStopVerbs) {
+            return .stop
+        }
+        if tokens.contains(where: { hasStem($0, in: RoutingTokens.startVerbs) })
+            || containsAny(in: normalized, tokens: RoutingTokens.gluedStartVerbs) {
+            return .start
+        }
+        if RoutingTokens.bareAudioStartEvents.contains(normalized) { return .start }
+        return nil
+    }
+
+    /// True when `token` begins with any of `stems` — the matching rule that lets "stopped" count
+    /// as "stop" while keeping "sending" from counting as "end".
+    static func hasStem(_ token: String, in stems: [String]) -> Bool {
+        stems.contains { token.hasPrefix($0) }
+    }
+}
+
+private extension PushCommandRouter {
     static func saveDeepLink(destination: PushDeepLinkDestination, dsn: String?) {
         Task {
             await PushDeepLinkStore.shared.save(destination: destination, dsn: dsn)

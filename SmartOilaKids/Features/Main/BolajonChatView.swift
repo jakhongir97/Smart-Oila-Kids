@@ -23,6 +23,8 @@ final class BolajonChatViewModel: ObservableObject {
     private let chat: OilaChatServicing
     private let socket: DeviceChatWebSocketService
     private var loadedOnce = false
+    /// Pending post-auth-expiry reconnect, cancelled when the screen goes away.
+    private var authRetryTask: Task<Void, Never>?
 
     init(
         chat: OilaChatServicing = OilaDeviceClient.shared,
@@ -37,11 +39,16 @@ final class BolajonChatViewModel: ObservableObject {
         socket.onMessage = { [weak self] message in self?.ingest(message) }
         socket.onEvent = { [weak self] event, payload in self?.applyEvent(event, payload) }
         socket.onAuthExpired = { [weak self] in
-            self?.isConnected = false
+            guard let self else { return }
+            self.isConnected = false
             // Transient token rejection — retry shortly; a persistent one is handled by the app's
-            // own auth flow (the device re-pairs), so we don't surface an error here.
-            Task { [weak self] in
+            // own auth flow (the device re-pairs), so we don't surface an error here. The retry is
+            // held so `disappear()` can cancel it: an uncancelled one reopened the socket five
+            // seconds after the child had already left the screen.
+            self.authRetryTask?.cancel()
+            self.authRetryTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled else { return }
                 self?.socket.connect()
             }
         }
@@ -53,6 +60,8 @@ final class BolajonChatViewModel: ObservableObject {
     }
 
     func disappear() {
+        authRetryTask?.cancel()
+        authRetryTask = nil
         socket.disconnect()
     }
 
@@ -113,19 +122,51 @@ final class BolajonChatViewModel: ObservableObject {
     /// Realtime read receipt (`chat:read`): the parent read our messages — flip ✓✓ on our own sent
     /// messages up to `readAt`. Ignore an echo of the child's own reads (reader == "child").
     private func applyEvent(_ event: String, _ payload: [String: Any]) {
-        guard event.localizedCaseInsensitiveContains("read") else { return }
+        guard Self.isReadReceiptEvent(event) else { return }
         if (payload["reader"] as? String)?.lowercased() == "child" { return }
-        let readAt = Self.parseISO(payload["readAt"]) ?? Date()
+        // Falling back to "now" is only correct for an event that genuinely carries no timestamp:
+        // the peer just read the thread, so everything already sent counts as read. Several key
+        // spellings are tried for the same reason `OilaDeviceClient` does it — the chat payload
+        // schema is undocumented, and landing on this fallback marks the WHOLE thread read.
+        let readAt = Self.parseISO(payload["readAt"])
+            ?? Self.parseISO(payload["read_at"])
+            ?? Self.parseISO(payload["readAtUtc"])
+            ?? Self.parseISO(payload["timestamp"])
+            ?? Self.parseISO(payload["ts"])
+            ?? Date()
         messages = messages.map { message in
             (message.sender == .child && !message.readByPeer && (message.createdAt ?? .distantPast) <= readAt)
                 ? message.markedReadByPeer() : message
         }
     }
 
+    /// True only for a genuine read-receipt event. A plain `contains("read")` also fires on
+    /// "unread" and "thread" — so `chat.unread_count` or `thread.updated` reached the `?? Date()`
+    /// fallback above and marked the entire thread as read by the parent. Matching "read" as a
+    /// whole separator-delimited token keeps `chat:read` / `chat.read` / `message_read` working
+    /// while excluding both impostors.
+    private static func isReadReceiptEvent(_ event: String) -> Bool {
+        event.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .contains { $0 == "read" }
+    }
+
+    // The backend emits fractional-second ISO timestamps ("2026-07-26T09:15:02.418Z"), and a
+    // default-configured ISO8601DateFormatter rejects those outright — which used to make every
+    // `readAt` parse fail and fall through to "now", marking the whole thread read. Mirror
+    // `OilaDeviceClient`'s own date helper: fractional-seconds first, then a plain formatter for
+    // payloads that omit the milliseconds. These are two separate immutable instances on purpose —
+    // toggling `formatOptions` on one shared formatter between calls would be a data race.
+    private static let isoParserFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
     private static let isoParser = ISO8601DateFormatter()
+
     private static func parseISO(_ any: Any?) -> Date? {
-        guard let string = any as? String else { return nil }
-        return isoParser.date(from: string)
+        guard let string = (any as? String)?.trimmedNonEmpty else { return nil }
+        return isoParserFractional.date(from: string) ?? isoParser.date(from: string)
     }
 
     private func refreshUnreadBoundaryAndMarkRead() async {

@@ -2738,3 +2738,107 @@ private func waitForMainQueue(timeout: TimeInterval = 1) {
     XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed)
 }
 
+
+// MARK: - Live-audio push command routing
+//
+// This is the only push route that opens hardware, so it is pinned down directly. The two
+// properties that matter are asymmetric on purpose: missing a START is a bug you find in testing,
+// while missing a STOP (or inventing a start) leaves a child's microphone open.
+
+final class PushAudioCommandRoutingTests: XCTestCase {
+
+    // MARK: Human-authored text can never reach the microphone
+
+    func testParentMessageBodyNeverStartsAudio() {
+        // The regression that motivated all of this: the router used to match over event + title +
+        // body, and for a chat push the body IS the parent's typed message.
+        for body in ["tingla", "listen", "audio darsi", "efirga chiq", "mic test", "stream"] {
+            let payload = PushCommandRouter.parsePayload(from: [
+                "event": "message_new",
+                "aps": ["alert": ["title": "Ota-ona", "body": body]]
+            ])
+            XCTAssertNil(
+                PushCommandRouter.audioRoute(forCommand: payload.commandHaystack),
+                "body \"\(body)\" must not reach the audio route"
+            )
+        }
+    }
+
+    func testCommandHaystackExcludesTitleAndBody() {
+        let payload = PushCommandRouter.parsePayload(from: [
+            "event": "message_new",
+            "aps": ["alert": ["title": "Listen", "body": "tingla"]]
+        ])
+        XCTAssertEqual(payload.commandHaystack, "message_new")
+        XCTAssertTrue(payload.routingHaystack.contains("tingla"), "the wide haystack is unchanged")
+    }
+
+    // MARK: Start
+
+    func testExplicitStartEventsStart() {
+        for event in ["stream.audio.start", "stream.start", "audio.start", "listen.start",
+                      "audio_start", "stream.audio.started", "device.audio.wake"] {
+            XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: event), .start, event)
+        }
+    }
+
+    func testBareSubjectEventStarts() {
+        for event in ["stream", "audio", "stream.audio", "streamaudio", "device.stream"] {
+            XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: event), .start, event)
+        }
+    }
+
+    // MARK: Stop wins, including inflections
+
+    func testExplicitStopEventsStop() {
+        for event in ["stream.audio.stop", "stream.stop", "audio.stop", "listen.stop",
+                      "stream.audio.end", "audio_stop", "efir.tugat"] {
+            XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: event), .stop, event)
+        }
+    }
+
+    func testInflectedStopEventsStillStop() {
+        // Whole-token EQUALITY would miss every one of these and — because the router previously
+        // fell through to .start — would have opened the mic exactly when the parent hung up.
+        for event in ["stream.audio.stopped", "audio.ended", "stream.stopping",
+                      "audio.disconnected", "stream.audio.cancelled", "streamaudiostopped"] {
+            XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: event), .stop, event)
+        }
+    }
+
+    func testStopWinsOverStart() {
+        XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: "stream.audio.start.stop"), .stop)
+    }
+
+    // MARK: The substring traps that caused the original bug
+
+    func testWordsMerelyContainingStopStemsDoNotStop() {
+        // "sending" and "friend" contain "end"; matching that as a substring turned a start into a
+        // stop. Prefix-on-token is what keeps them apart.
+        //
+        // "stream.audio.sending" names no verb at all, so the fail-closed rule makes it nil — the
+        // point here is only that "end" inside "sending" does not manufacture a .stop.
+        XCTAssertNotEqual(PushCommandRouter.audioRoute(forCommand: "stream.audio.sending"), .stop)
+        XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: "audio.friend.start"), .start)
+    }
+
+    func testWordsMerelyContainingSubjectStemsDoNotRoute() {
+        // "dynamic" contains "mic".
+        XCTAssertNil(PushCommandRouter.audioRoute(forCommand: "dynamic.config.changed"))
+        XCTAssertNil(PushCommandRouter.audioRoute(forCommand: "task.updated"))
+        XCTAssertNil(PushCommandRouter.audioRoute(forCommand: ""))
+    }
+
+    // MARK: Fails closed
+
+    func testAudioSubjectWithoutVerbDoesNotStart() {
+        // Informational audio events must not be read as a wake.
+        for event in ["stream.audio.failed", "audio.token.expired", "stream.status",
+                      "audio.quality.degraded", "stream.audio.error"] {
+            XCTAssertNil(
+                PushCommandRouter.audioRoute(forCommand: event),
+                "\(event) must not open the microphone"
+            )
+        }
+    }
+}

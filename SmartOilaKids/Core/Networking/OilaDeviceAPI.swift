@@ -42,6 +42,14 @@ enum OilaDeviceIdentity {
         return generated
     }
 
+    /// The DSN this install ALREADY has, without minting one. Read-only callers — deciding whether
+    /// an incoming push is addressed to this device, for instance — must use this rather than
+    /// `deviceDSN`, which persists a fresh UUID as a side effect and would quietly hand an
+    /// unpaired install an identity just by asking the question.
+    static func persistedDSN(userDefaults: UserDefaults = .standard) -> String? {
+        userDefaults.string(forKey: dsnKey)?.trimmedNonEmpty
+    }
+
     /// Clears the persisted device DSN so the next `deviceDSN(...)` call mints a fresh one.
     /// Called on disconnect: because every DSN-scoped local store keys off this value, minting a
     /// new DSN means re-pairing the device to a DIFFERENT child starts from an empty scope and

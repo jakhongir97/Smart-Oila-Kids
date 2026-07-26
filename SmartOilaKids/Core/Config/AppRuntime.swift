@@ -40,7 +40,13 @@ enum AppRuntime {
     /// capture is a deliberate, reviewed step (App Store Guideline 5.1.2) — it also requires a
     /// visible "parent is listening" indicator + child disclosure and the mic usage string.
     static var audioStreamingEnabled: Bool {
-        featureFlag("SMARTOILA_MEDIA_FEATURES_ENABLED")
+#if DEBUG
+        // Configuring a dev-stream secret is an unambiguous "I am testing the LiveKit path right
+        // now", so it turns the feature on by itself rather than making the tester remember a
+        // second variable. Release is unaffected — `devStreamSecret` does not exist there.
+        if devStreamSecret != nil { return true }
+#endif
+        return featureFlag("SMARTOILA_MEDIA_FEATURES_ENABLED")
     }
 
     static var debugRoute: DebugRoute? {
@@ -80,6 +86,31 @@ enum AppRuntime {
         return nil
 #endif
     }
+
+#if DEBUG
+    // MARK: Dev live-audio testing
+    //
+    // The backend exposes `POST /api/v1/dev/streaming/token` — "Dev/test only: mint a LiveKit token
+    // (X-Dev-Secret required)" — which mints against an arbitrary room/identity with NO device
+    // Bearer. That lets the real microphone → LiveKit → listener path be proven on a physical device
+    // without a paired session, without Firebase, and without the audio wake push (whose event name
+    // the backend has not defined yet). DEBUG-only by construction: none of this compiles in Release.
+
+    /// The `X-Dev-Secret` header value. Ask the backend owner for it; never commit it.
+    static var devStreamSecret: String? {
+        trimmed("SMARTOILA_DEV_STREAM_SECRET")
+    }
+
+    /// LiveKit room to publish into. The listener must mint a `subscriber` token for the SAME room.
+    static var devStreamRoom: String {
+        trimmed("SMARTOILA_DEV_STREAM_ROOM") ?? "bolajon-dev"
+    }
+
+    /// Participant identity for this device inside the room.
+    static var devStreamIdentity: String {
+        trimmed("SMARTOILA_DEV_STREAM_IDENTITY") ?? "child-ios"
+    }
+#endif
 
 }
 

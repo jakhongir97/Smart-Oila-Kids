@@ -21,7 +21,11 @@ struct RootView: View {
         .onAppear {
             handleAppear()
 #if DEBUG
-            if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_AUDIO"] == "1" {
+            // A dev-stream secret is on its own enough to arm this: it exists only to test the
+            // LiveKit publish path on a real device, and there is no other way to start a stream
+            // while the wake push has no defined event name. One variable, not two.
+            if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_AUDIO"] == "1"
+                || AppRuntime.devStreamSecret != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { audioStream.requestStart() }
             }
 #endif
