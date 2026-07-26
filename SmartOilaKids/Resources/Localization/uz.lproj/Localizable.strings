@@ -288,6 +288,18 @@
 "chat2.unread" = "O'qilmagan xabarlar";
 "chat2.photo" = "Rasm";
 "chat2.send" = "Yuborish";
+"chat2.attach" = "Rasm biriktirish";
+"chat2.attachment.remove" = "Rasmni olib tashlash";
+"chat2.attach_failed" = "Bu rasmni biriktirib bo'lmadi";
+"chat2.photo.loading" = "Rasm yuklanmoqda…";
+"chat2.photo.failed" = "Rasm yuklanmadi";
+"chat2.photo.retry" = "Qayta urinish uchun bosing";
+"chat2.image.open" = "Rasmni ochish";
+"chat2.image.close" = "Yopish";
+"chat2.status.sending" = "Yuborilmoqda…";
+"chat2.status.failed" = "Yuborilmadi";
+"chat2.status.retry" = "Qayta yuborish";
+"chat2.error.dismiss" = "Yashirish";
 "home2.chat.title" = "Ota-ona bilan suhbat";
 "home2.chat.subtitle" = "Oila bilan yozishing";
 
@@ -300,3 +312,20 @@
 "audio2.consent.decline" = "Hozir emas";
 "chat2.system.sos" = "SOS — yordam so'raldi";
 "chat2.system.generic" = "Tizim xabari";
+
+/* Parent PIN provisioning (Settings) */
+"settings2.section_parent" = "Ota-ona boshqaruvi";
+"settings2.parent_pin_set" = "Ota-ona PIN kodini o‘rnatish";
+"settings2.parent_pin_set_sub" = "Bu qurilmani uzish uchun kerak";
+"settings2.parent_pin_change" = "Ota-ona PIN kodini o‘zgartirish";
+"settings2.parent_pin_change_sub" = "Joriy PIN kod talab qilinadi";
+"settings2.parent_pin_remove" = "Ota-ona PIN kodini o‘chirish";
+"settings2.parent_pin_remove_sub" = "Keyin uzish faqat Oila360 ilovasida bo‘ladi";
+"settings2.parent_pin_prompt_current" = "Davom etish uchun joriy ota-ona PIN kodini kiriting.";
+"settings2.parent_pin_prompt_new" = "4 xonali PIN kod tanlang. Uni bolangizga aytmang — aynan shu kod qurilmani uzishga ruxsat beradi.";
+"settings2.parent_pin_prompt_confirm" = "Tasdiqlash uchun yangi PIN kodni yana bir marta kiriting.";
+"settings2.parent_pin_save" = "PIN kodni saqlash";
+"settings2.parent_pin_saved" = "Ota-ona PIN kodi saqlandi. Qurilmani uzishdan oldin u so‘raladi.";
+"settings2.parent_pin_removed" = "Ota-ona PIN kodi o‘chirildi. Endi qurilmani faqat Oila360 ilovasidan uzish mumkin.";
+"settings2.parent_pin_locked_out" = "Juda ko‘p urinish. Keyinroq qayta urinib ko‘ring.";
+"settings2.parent_pin_set_unavailable" = "PIN kodni faqat ulangandan keyin darhol o‘rnatish mumkin. Buning uchun qurilmani Oila360 ilovasidan qayta ulang.";

@@ -132,13 +132,156 @@ struct OilaDeviceStatus {
     let soundMode: String?     // "Normal" | "Silent" | "Vibrate" — not readable on iOS, usually nil
 }
 
+/// One row of `appLimits[]` in `GET /device/lock/state`: the parent's per-app daily budget plus
+/// today's spend for a single package. Parsed tolerantly (the endpoint's 2xx schema is `{}` in the
+/// spec), so the numbers are read through the shared `intValue` helper and may arrive as Int,
+/// Double or String.
+///
+/// iOS cannot ENFORCE these — per-app blocking needs the FamilyControls entitlement Apple has not
+/// granted this app — so the rows are informational: they tell the child which apps the parent
+/// limited and how much time is left today.
+struct OilaAppLimit: Identifiable, Equatable {
+    /// Package name / bundle id the limit applies to, e.g. `org.telegram.messenger`.
+    let packageName: String
+    /// The local day the usage figures belong to, exactly as the backend formatted it
+    /// (e.g. `"2026-07-22"`). Kept as a string: it is a display value, not a timestamp to parse.
+    let usageDate: String?
+    let usedSeconds: Int
+    /// nil when the payload carried no budget for this row (a usage-only stat).
+    let dailyLimitSeconds: Int?
+    /// nil when the payload carried no remaining figure; callers may derive `dailyLimit - used`.
+    let remainingSeconds: Int?
+    let isLimitReached: Bool
+
+    /// `packageName` is unique per row in the lock-state payload, so it doubles as the list id.
+    var id: String { packageName }
+}
+
 /// Resolved lock state from `GET /device/lock/state` (schema untyped in the spec — parsed tolerantly).
+///
+/// The live payload carries two independent halves and both are preserved here: the WHOLE-DEVICE
+/// lock (`isLocked`, plus the `manualLockEnabled` / `scheduleLocked` reasons behind it) and the
+/// PER-APP half (`lockedPackages`, `appLimits`). Only the whole-device half is safety-critical —
+/// the per-app half is informational on iOS, which cannot enforce it without FamilyControls.
 struct OilaLockState {
     /// nil = the 200 response shape was not recognized (no known lock key, no nested `global`
     /// object). Callers MUST treat nil as "unknown" and keep the last-known lock — never as
     /// "unlocked" — so an unexpected shape can never silently release an active parental lock.
     let isLocked: Bool?
+    /// The parent's manual (always-on) lock switch, when the payload reports it; nil when absent.
+    let manualLockEnabled: Bool?
+    /// True while a lock SCHEDULE window is currently in force, when the payload reports it.
+    let scheduleLocked: Bool?
+    /// The device-local wall clock the backend evaluated the schedules against, e.g. `"15:45"`.
+    /// Kept as the backend's own string — it is a display value, not a timestamp to parse.
+    let deviceLocalTime: String?
+    /// Packages the parent blocked outright (`lockedPackages`). Display-only on iOS.
+    let lockedPackages: [String]
+    /// Per-app daily budgets + today's spend (`appLimits`). Display-only on iOS.
+    let appLimits: [OilaAppLimit]
+    /// PROVISIONAL, UNTYPED: the only live sample had `activeSchedule: null` and `schedules: []`,
+    /// so the schedule object's real field names are unknown. Rather than invent a schema we keep
+    /// the raw JSON and read it best-effort through `resolvedScheduleRange()`.
+    let activeScheduleRaw: [String: Any]?
+    /// PROVISIONAL, UNTYPED — see `activeScheduleRaw`.
+    let schedulesRaw: [[String: Any]]
+    /// The full tolerant `data` object, for callers needing keys not surfaced above.
     let raw: [String: Any]
+
+    /// Everything but `isLocked` / `raw` defaults, so the original `OilaLockState(isLocked:raw:)`
+    /// call sites (and test doubles) keep compiling unchanged.
+    init(
+        isLocked: Bool?,
+        raw: [String: Any],
+        manualLockEnabled: Bool? = nil,
+        scheduleLocked: Bool? = nil,
+        deviceLocalTime: String? = nil,
+        lockedPackages: [String] = [],
+        appLimits: [OilaAppLimit] = [],
+        activeScheduleRaw: [String: Any]? = nil,
+        schedulesRaw: [[String: Any]] = []
+    ) {
+        self.isLocked = isLocked
+        self.raw = raw
+        self.manualLockEnabled = manualLockEnabled
+        self.scheduleLocked = scheduleLocked
+        self.deviceLocalTime = deviceLocalTime
+        self.lockedPackages = lockedPackages
+        self.appLimits = appLimits
+        self.activeScheduleRaw = activeScheduleRaw
+        self.schedulesRaw = schedulesRaw
+    }
+
+    /// The whole-device lock, resolved.
+    ///
+    /// `isLocked` stays AUTHORITATIVE — the backend owner confirmed it already means "the whole
+    /// phone", i.e. the server has folded the manual switch and the schedule window into it — so
+    /// whenever it is present it is returned untouched. The OR with `scheduleLocked` /
+    /// `manualLockEnabled` therefore only fires when the primary flag is MISSING entirely, and it
+    /// can only ever turn "unknown" into LOCKED, never into unlocked. That keeps the fail-closed
+    /// contract of `isLocked` intact: nil still means "unrecognized shape, keep the last-known
+    /// lock", and no payload can release an active lock through this property.
+    var isDeviceLocked: Bool? {
+        if let isLocked = isLocked { return isLocked }
+        // When the primary flag is missing, the reason flags stand in for it — but they must be
+        // able to report UNLOCKED too. Returning only true-or-nil made this a one-way latch: a
+        // payload carrying `scheduleLocked: false` with no `isLocked` resolved to nil, which the
+        // caller correctly reads as "keep the last-known lock", so a lock could never be released
+        // through this path. Derive from the reasons whenever ANY of them is present, and fall
+        // through to nil only when the shape is genuinely unrecognized.
+        if scheduleLocked != nil || manualLockEnabled != nil {
+            return (scheduleLocked ?? false) || (manualLockEnabled ?? false)
+        }
+        return nil
+    }
+
+    /// PROVISIONAL best-effort read of the active lock window's start/end times.
+    ///
+    /// The schedule object's real field names are UNKNOWN (the only live sample had
+    /// `activeSchedule: null` and `schedules: []`), so this walks the plausible spellings —
+    /// on the object itself and inside a nested window/range object — and returns nil the moment
+    /// nothing matches. Callers must read nil as "no window to display", never as "no schedule
+    /// exists". Replace with a typed parse once the backend sends a non-null sample.
+    func resolvedScheduleRange() -> (start: String, end: String)? {
+        var candidates: [[String: Any]] = []
+        if let activeScheduleRaw = activeScheduleRaw { candidates.append(activeScheduleRaw) }
+        candidates += schedulesRaw
+        for candidate in candidates {
+            // The times may sit on the schedule object itself or inside a nested window/range.
+            var scopes: [[String: Any]] = [candidate]
+            for key in Self.scheduleNestingKeys {
+                if let nested = candidate[key] as? [String: Any] { scopes.append(nested) }
+            }
+            for scope in scopes {
+                guard let start = Self.timeString(scope, Self.scheduleStartKeys),
+                      let end = Self.timeString(scope, Self.scheduleEndKeys) else { continue }
+                return (start, end)
+            }
+        }
+        return nil
+    }
+
+    /// `resolvedScheduleRange()` rendered for display, e.g. `"21:00 – 07:00"`; nil when the shape
+    /// isn't recognized. Deliberately unlocalized — it is only the two backend-formatted times.
+    var scheduleRangeText: String? {
+        guard let range = resolvedScheduleRange() else { return nil }
+        return "\(range.start) – \(range.end)"
+    }
+
+    private static let scheduleNestingKeys = ["schedule", "window", "timeRange", "range", "time", "activeWindow"]
+    private static let scheduleStartKeys = [
+        "startTime", "start", "startAt", "start_time", "from", "fromTime", "beginTime", "lockStart"
+    ]
+    private static let scheduleEndKeys = [
+        "endTime", "end", "endAt", "end_time", "to", "toTime", "finishTime", "lockEnd"
+    ]
+
+    private static func timeString(_ dict: [String: Any], _ keys: [String]) -> String? {
+        for key in keys {
+            if let value = (dict[key] as? String)?.trimmedNonEmpty { return value }
+        }
+        return nil
+    }
 }
 
 // MARK: - Device files
@@ -370,8 +513,80 @@ final class OilaDeviceClient: OilaDeviceServicing {
     func fetchLockState() async throws -> OilaLockState {
         let data = try await requestJSON(path: "device/lock/state", method: .get, authorized: true)
         let object = (data as? [String: Any]) ?? [:]
-        return OilaLockState(isLocked: Self.parseGlobalLock(from: object), raw: object)
+        return Self.parseLockState(from: object)
     }
+
+    /// Tolerant whole-payload read for `GET /device/lock/state`. The live response carries
+    /// `isLocked` / `manualLockEnabled` / `scheduleLocked` / `deviceLocalTime` / `lockedPackages` /
+    /// `appLimits` / `activeSchedule` / `schedules`, but the spec types the 2xx body as `{}` — so
+    /// each field is looked up under several plausible spellings and a key we don't recognize
+    /// degrades to nil/empty instead of failing the whole parse. One surprising key must never
+    /// cost us the rest of the state.
+    static func parseLockState(from object: [String: Any]) -> OilaLockState {
+        OilaLockState(
+            isLocked: parseGlobalLock(from: object),
+            raw: object,
+            manualLockEnabled: boolValue(object, ["manualLockEnabled", "manualLock", "manual_lock_enabled"]),
+            scheduleLocked: boolValue(object, ["scheduleLocked", "isScheduleLocked", "schedule_locked"]),
+            deviceLocalTime: firstString(object, ["deviceLocalTime", "device_local_time", "localTime", "deviceTime"]),
+            lockedPackages: parseLockedPackages(from: object),
+            appLimits: parseAppLimits(from: object),
+            activeScheduleRaw: firstDictionary(object, ["activeSchedule", "active_schedule", "currentSchedule"]),
+            schedulesRaw: firstArray(object, ["schedules", "lockSchedules", "schedule"]) ?? []
+        )
+    }
+
+    /// `lockedPackages` may arrive as bare identifier strings (what the live sample sends) or as
+    /// objects carrying the identifier under one of the usual package-name spellings.
+    static func parseLockedPackages(from object: [String: Any]) -> [String] {
+        for key in ["lockedPackages", "locked_packages", "lockedApps", "blockedPackages"] {
+            guard let value = object[key] else { continue }
+            if let strings = value as? [String] {
+                return strings.compactMap { $0.trimmedNonEmpty }
+            }
+            if let items = value as? [[String: Any]] {
+                return items.compactMap { firstString($0, packageNameKeys) }
+            }
+        }
+        return []
+    }
+
+    static func parseAppLimits(from object: [String: Any]) -> [OilaAppLimit] {
+        guard let rows = firstArray(object, ["appLimits", "app_limits", "applicationLimits", "limits", "stats"]) else {
+            return []
+        }
+        return rows.compactMap { parseAppLimit($0) }
+    }
+
+    /// A row without an identifiable package is dropped — there is nothing the UI could attribute
+    /// its numbers to. Everything else degrades to a safe default rather than dropping the row.
+    static func parseAppLimit(_ item: [String: Any]) -> OilaAppLimit? {
+        guard let packageName = firstString(item, packageNameKeys) else { return nil }
+        let used = intValue(item, ["usedSeconds", "used_seconds", "usageSeconds", "used"]) ?? 0
+        let daily = intValue(item, ["dailyLimitSeconds", "daily_limit_seconds", "limitSeconds", "dailyLimit"])
+        let remaining = intValue(item, ["remainingSeconds", "remaining_seconds", "remaining", "leftSeconds"])
+        // `isLimitReached` is authoritative when present; otherwise derive it from the numbers so a
+        // payload that only reports seconds still drives the right UI. No budget = never "reached".
+        let derivedReached: Bool = {
+            guard let daily = daily, daily > 0 else { return false }
+            return (remaining ?? (daily - used)) <= 0
+        }()
+        let reached = boolValue(item, ["isLimitReached", "is_limit_reached", "limitReached", "reached"])
+            ?? derivedReached
+        return OilaAppLimit(
+            packageName: packageName,
+            usageDate: firstString(item, ["usageDate", "usage_date", "date", "day"]),
+            usedSeconds: max(0, used),
+            dailyLimitSeconds: daily.map { max(0, $0) },
+            remainingSeconds: remaining.map { max(0, $0) },
+            isLimitReached: reached
+        )
+    }
+
+    /// Package-identifier spellings shared by `lockedPackages` objects and `appLimits` rows.
+    private static let packageNameKeys = [
+        "packageName", "package_name", "package", "packageId", "bundleId", "bundleIdentifier", "appId"
+    ]
 
     /// Tolerant global-lock read for `GET /device/lock/state` (spec response is untyped). Accepts
     /// the flat top-level keys and a nested `global` object, covering `isLocked` / `locked` /
@@ -738,6 +953,34 @@ final class OilaDeviceClient: OilaDeviceServicing {
             if let intValue = dict[key] as? Int { return intValue }
             if let doubleValue = dict[key] as? Double { return Int(doubleValue) }
             if let stringValue = dict[key] as? String, let parsed = Int(stringValue) { return parsed }
+        }
+        return nil
+    }
+
+    /// Same tolerance as `intValue`, for flags: a JSON boolean, or a stringified one (some
+    /// serializers send `"true"` / `"1"`). Returns nil when no listed key carries a usable value,
+    /// so callers can distinguish "absent" from "false".
+    private static func boolValue(_ dict: [String: Any], _ keys: [String]) -> Bool? {
+        for key in keys {
+            if let value = dict[key] as? Bool { return value }
+            if let raw = (dict[key] as? String)?.trimmedNonEmpty?.lowercased() {
+                if ["true", "1", "yes"].contains(raw) { return true }
+                if ["false", "0", "no"].contains(raw) { return false }
+            }
+        }
+        return nil
+    }
+
+    private static func firstArray(_ dict: [String: Any], _ keys: [String]) -> [[String: Any]]? {
+        for key in keys {
+            if let value = dict[key] as? [[String: Any]] { return value }
+        }
+        return nil
+    }
+
+    private static func firstDictionary(_ dict: [String: Any], _ keys: [String]) -> [String: Any]? {
+        for key in keys {
+            if let value = dict[key] as? [String: Any] { return value }
         }
         return nil
     }

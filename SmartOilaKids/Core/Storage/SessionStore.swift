@@ -14,6 +14,7 @@ final class SessionStore: ObservableObject {
         static let setupCompleted = "BOLAJON_SETUP_COMPLETED"
         static let onboardingCompleted = "BOLAJON_ONBOARDING_COMPLETED"
         static let oilaPaired = "BOLAJON_OILA_PAIRED"
+        static let pairedAt = "BOLAJON_PAIRED_AT"
         static let routingMigrated = "BOLAJON_ROUTING_MIGRATED"
         static let migratedFromLegacy = "BOLAJON_MIGRATED_FROM_LEGACY"
     }
@@ -175,9 +176,26 @@ final class SessionStore: ObservableObject {
         userDefaults.set(value, forKey: Keys.onboardingCompleted)
     }
 
+    /// When this install last completed `POST /device/pair`, or nil if it never has.
+    ///
+    /// This is a PARENT-PRESENCE signal, not a diagnostic. Pairing requires a code the parent
+    /// generates in the Oila360 app and types into this device, so the minutes right after a
+    /// successful pair are the one window in which we know an adult is holding the phone. The
+    /// parent-PIN provisioning gate keys off it — see `BolajonSettingsView`.
+    var pairedAt: Date? {
+        let stamp = userDefaults.double(forKey: Keys.pairedAt)
+        guard stamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: stamp)
+    }
+
     func setOilaPaired(_ value: Bool) {
         oilaPaired = value
         userDefaults.set(value, forKey: Keys.oilaPaired)
+        if value {
+            userDefaults.set(Date().timeIntervalSince1970, forKey: Keys.pairedAt)
+        } else {
+            userDefaults.removeObject(forKey: Keys.pairedAt)
+        }
         if value {
             // The migration re-link notice is a one-time upgrade prompt. Once this install pairs,
             // clear the flag so a later voluntary disconnect doesn't resurrect the notice for a

@@ -56,9 +56,13 @@ struct RootView: View {
         // no interactive dismissal). BolajonHomeView dismisses its SOS cover the moment
         // the lock engages, so this cover is never stuck behind another presentation.
         .fullScreenCover(isPresented: deviceLockCoverPresented) {
+            // Both were hardcoded nil, so the child saw a bare "locked" card even though the
+            // lock-state payload carries `deviceLocalTime` and the schedule window, and the overlay
+            // already knows how to render them. They come from the telemetry service now, which
+            // mirrors the last applied GET /device/lock/state.
             DeviceLockOverlay(
-                localTime: nil,
-                scheduleRange: nil
+                localTime: oilaTelemetry.deviceLocalTime,
+                scheduleRange: oilaTelemetry.scheduleRangeText
             )
         }
         .background(alignment: .topLeading) {

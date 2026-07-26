@@ -1,10 +1,147 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 // Bolajon360 Chat (parent ↔ child). Mirrors the Android child chat: peer header with an online
 // dot, child bubbles trailing (purple, with sent/read ticks), parent bubbles leading (white),
 // an "unread messages" divider, and a pill composer. Wired to the oila360 device chat API
 // (`OilaChatServicing`) for history/send/read + `DeviceChatWebSocketService` for realtime receive.
 // Gated by `AppRuntime.chatFeaturesEnabled`.
+
+// MARK: - Attachments
+
+/// How an image attachment is being displayed right now.
+enum ChatImageSource {
+    /// A freshly signed, short-lived URL from `GET /device/chat/messages/{id}/attachment`.
+    case remote(URL)
+    /// A photo the child just picked, still on its way to the server.
+    case local(UIImage)
+}
+
+/// Identifies which attachment the full-screen viewer is showing.
+private struct ChatImagePreviewItem: Identifiable {
+    let id: String
+    let source: ChatImageSource
+}
+
+/// In-memory-only store of chat image attachments, owned by the chat view model and therefore
+/// alive exactly as long as the screen is.
+///
+/// The backend hands out a **fresh signed URL that expires** for every
+/// `GET /device/chat/messages/{id}/attachment` call, so a URL must be fetched on demand and must
+/// never be persisted — a stored one both goes stale and leaves a minor's media reachable from
+/// disk. Nothing here touches UserDefaults, the Keychain, or the file system on purpose.
+@MainActor
+final class ChatAttachmentStore: ObservableObject {
+    enum LoadState: Equatable {
+        case loading
+        case ready(URL)
+        case failed
+    }
+
+    @Published private(set) var states: [String: LoadState] = [:]
+    /// Photos the child picked in this session, keyed by message id — shown immediately for the
+    /// optimistic echo and then carried over to the server's message id, so a just-sent photo
+    /// never round-trips through the attachment endpoint just to render itself.
+    @Published private(set) var previews: [String: UIImage] = [:]
+
+    private let chat: OilaChatServicing
+    /// Message ids with a request in flight, so a re-entrant `load` (LazyVStack re-appearing the
+    /// same row while scrolling) can't fire a second signed-URL request.
+    private var inFlight: Set<String> = []
+
+    init(chat: OilaChatServicing = OilaDeviceClient.shared) {
+        self.chat = chat
+    }
+
+    func state(for messageID: String) -> LoadState? { states[messageID] }
+    func preview(for messageID: String) -> UIImage? { previews[messageID] }
+
+    /// Fetches the signed URL once per message. `force` is the tap-to-retry path: it discards the
+    /// previous outcome (including a URL that has since expired) and asks for a brand new one.
+    func load(_ messageID: String, force: Bool = false) {
+        // A locally-previewed photo is already on screen; there is nothing to download.
+        guard previews[messageID] == nil else { return }
+        guard !inFlight.contains(messageID) else { return }
+        if !force, states[messageID] != nil { return }
+
+        inFlight.insert(messageID)
+        states[messageID] = .loading
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let url = try await self.chat.fetchChatAttachmentURL(messageId: messageID)
+                self.states[messageID] = .ready(url)
+            } catch {
+                self.states[messageID] = .failed
+            }
+            self.inFlight.remove(messageID)
+        }
+    }
+
+    func retry(_ messageID: String) { load(messageID, force: true) }
+
+    func setPreview(_ image: UIImage, for messageID: String) {
+        previews[messageID] = image
+    }
+
+    /// Re-keys a just-sent photo from its local echo id to the id the server assigned it.
+    func movePreview(from localID: String, to serverID: String) {
+        guard let image = previews.removeValue(forKey: localID) else { return }
+        previews[serverID] = image
+    }
+
+    func clearPreview(for messageID: String) {
+        previews[messageID] = nil
+    }
+}
+
+/// A photo picked in the composer and prepared for upload, plus the thumbnail shown while it
+/// waits there.
+struct PendingChatImage {
+    let data: Data
+    let preview: UIImage
+}
+
+/// Prepares a picked photo for upload. A 12MP original is several megabytes, and on the mobile
+/// connections this app actually runs on that upload times out, so the image is downscaled on its
+/// long edge and re-encoded as JPEG *before* it ever reaches the multipart body.
+enum ChatImagePreparer {
+    static let maxDimension: CGFloat = 1600
+    static let jpegQuality: CGFloat = 0.8
+
+    /// Deliberately synchronous and free of any actor isolation so the caller can run it off the
+    /// main actor (decoding a full-resolution photo costs hundreds of milliseconds). Returns nil
+    /// when the picked item isn't a decodable image.
+    static func jpegData(from original: Data) -> Data? {
+        guard let image = UIImage(data: original) else { return nil }
+        let longEdge = max(image.size.width, image.size.height)
+        guard longEdge > 0 else { return nil }
+
+        let scale = min(1, maxDimension / longEdge)
+        let targetSize = CGSize(width: max(1, (image.size.width * scale).rounded()),
+                                height: max(1, (image.size.height * scale).rounded()))
+        let format = UIGraphicsImageRendererFormat.default()
+        // Points == pixels: the source is already at full resolution, and letting the renderer
+        // apply the screen scale would silently multiply the output back up to ~3× the target.
+        format.scale = 1
+        // JPEG carries no alpha channel anyway, and an opaque context is cheaper to draw into.
+        format.opaque = true
+        let rendered = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+            // `draw(in:)` honours the photo's EXIF orientation, so a portrait shot doesn't arrive
+            // sideways at the parent.
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return rendered.jpegData(compressionQuality: jpegQuality)
+    }
+}
+
+/// Delivery state of a bubble the child sent, driving the tick / spinner / retry affordance.
+enum ChatDeliveryState: Equatable {
+    case sending
+    case sent
+    case failed
+}
 
 // MARK: - View model
 
@@ -14,17 +151,39 @@ final class BolajonChatViewModel: ObservableObject {
     @Published private(set) var messages: [OilaChatMessage] = []
     @Published var draft: String = ""
     @Published private(set) var isConnected = false
-    @Published private(set) var isSending = false
+    /// Number of sends currently in flight. Published (rather than a plain Bool) so several
+    /// optimistic sends can overlap without one finishing early and clearing the other's state.
+    @Published private(set) var inFlightSendCount = 0
+    @Published private(set) var isPreparingImage = false
     @Published private(set) var isLoading = false
+    @Published private(set) var pendingImage: PendingChatImage?
     @Published var errorMessage: String?
     /// The id of the first unread inbound message — the "unread" divider renders just above it.
     @Published private(set) var unreadBoundaryID: String?
+    /// Ids of local echoes still awaiting their server acknowledgement.
+    @Published private(set) var sendingLocalIDs: Set<String> = []
+    /// Ids of local echoes whose send failed — these keep their bubble and offer a retry.
+    @Published private(set) var failedLocalIDs: Set<String> = []
+
+    /// Signed-URL cache + local photo previews for this screen. Not `@Published`: views observe
+    /// it directly so a single attachment finishing loading doesn't rebuild the whole thread.
+    let attachments: ChatAttachmentStore
 
     private let chat: OilaChatServicing
     private let socket: DeviceChatWebSocketService
     private var loadedOnce = false
     /// Pending post-auth-expiry reconnect, cancelled when the screen goes away.
     private var authRetryTask: Task<Void, Never>?
+    /// What each unacknowledged echo was made of, so a failed send can be retried verbatim
+    /// instead of asking the child to type (or pick the photo) again.
+    private var outbox: [String: OutgoingChatDraft] = [:]
+
+    /// One message the child sent that the server hasn't acknowledged yet.
+    private struct OutgoingChatDraft {
+        let localID: String
+        let text: String?
+        let imageData: Data?
+    }
 
     init(
         chat: OilaChatServicing = OilaDeviceClient.shared,
@@ -35,6 +194,7 @@ final class BolajonChatViewModel: ObservableObject {
         let socket = socket ?? DeviceChatWebSocketService()
         self.chat = chat
         self.socket = socket
+        self.attachments = ChatAttachmentStore(chat: chat)
         socket.onConnectedChange = { [weak self] connected in self?.isConnected = connected }
         socket.onMessage = { [weak self] message in self?.ingest(message) }
         socket.onEvent = { [weak self] event, payload in self?.applyEvent(event, payload) }
@@ -52,6 +212,11 @@ final class BolajonChatViewModel: ObservableObject {
                 self?.socket.connect()
             }
         }
+    }
+
+    var isSending: Bool { inFlightSendCount > 0 }
+    var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pendingImage != nil
     }
 
     func appear() async {
@@ -78,7 +243,10 @@ final class BolajonChatViewModel: ObservableObject {
         isLoading = messages.isEmpty
         do {
             let page = try await chat.fetchChatMessages(limit: 40, before: nil)
-            messages = sortedDedup(page.messages)   // API is newest-first; sort makes it chronological
+            // Merge rather than replace: a local echo whose send is still in flight (or has
+            // failed) is not in the server's page, and dropping it would make the child's message
+            // vanish mid-send.
+            messages = sortedDedup(page.messages + unacknowledgedEchoes())
             errorMessage = nil
             loadedOnce = true
             await refreshUnreadBoundaryAndMarkRead()
@@ -88,23 +256,157 @@ final class BolajonChatViewModel: ObservableObject {
         isLoading = false
     }
 
+    func dismissError() { errorMessage = nil }
+
+    // MARK: Composing
+
+    /// Reads the picked photo, downscales/compresses it, and parks it in the composer. The picker
+    /// is out-of-process (`PhotosPicker`), so this needs no photo-library permission and never
+    /// touches the camera.
+    func attachImage(from item: PhotosPickerItem) async {
+        guard !isPreparingImage else { return }
+        isPreparingImage = true
+        defer { isPreparingImage = false }
+        do {
+            guard let original = try await item.loadTransferable(type: Data.self) else {
+                errorMessage = L10n.tr("chat2.attach_failed")
+                return
+            }
+            let prepared = await Task.detached(priority: .userInitiated) {
+                ChatImagePreparer.jpegData(from: original)
+            }.value
+            guard let prepared, let preview = UIImage(data: prepared) else {
+                errorMessage = L10n.tr("chat2.attach_failed")
+                return
+            }
+            pendingImage = PendingChatImage(data: prepared, preview: preview)
+            errorMessage = nil
+        } catch {
+            errorMessage = L10n.tr("chat2.attach_failed")
+        }
+    }
+
+    func clearPendingImage() { pendingImage = nil }
+
     func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
-        isSending = true
+        let image = pendingImage
+        guard !text.isEmpty || image != nil else { return }
+        // The composer is emptied up front and an echo takes the message's place, so the child
+        // sees the bubble immediately instead of after the whole round trip.
         draft = ""
-        do {
-            let sent = try await chat.sendChatMessage(text: text, imageData: nil, imageMimeType: nil)
-            ingest(sent)
-            unreadBoundaryID = nil
-        } catch {
-            errorMessage = NetworkError.userMessage(for: error)
-            draft = text   // restore the unsent text so the child can retry
-        }
-        isSending = false
+        pendingImage = nil
+
+        let outgoing = OutgoingChatDraft(
+            localID: Self.localIDPrefix + UUID().uuidString,
+            text: text.isEmpty ? nil : text,
+            imageData: image?.data
+        )
+        outbox[outgoing.localID] = outgoing
+        if let preview = image?.preview { attachments.setPreview(preview, for: outgoing.localID) }
+        appendEcho(for: outgoing)
+        await deliver(outgoing)
+    }
+
+    /// Re-sends a failed echo. Keyed by the echo's own id, so it stays matched to the bubble the
+    /// child tapped even if other messages arrived meanwhile.
+    func retrySend(_ localID: String) async {
+        guard let outgoing = outbox[localID], !sendingLocalIDs.contains(localID) else { return }
+        failedLocalIDs.remove(localID)
+        sendingLocalIDs.insert(localID)
+        errorMessage = nil
+        await deliver(outgoing)
+    }
+
+    func deliveryState(for messageID: String) -> ChatDeliveryState {
+        if failedLocalIDs.contains(messageID) { return .failed }
+        if sendingLocalIDs.contains(messageID) { return .sending }
+        return .sent
     }
 
     // MARK: Internals
+
+    private func appendEcho(for outgoing: OutgoingChatDraft) {
+        sendingLocalIDs.insert(outgoing.localID)
+        failedLocalIDs.remove(outgoing.localID)
+        // Goes through `ingest` so it reuses the existing dedup-by-id + chronological sort. The
+        // id is locally minted and prefixed, so it can never collide with a server id.
+        ingest(
+            OilaChatMessage(
+                id: outgoing.localID,
+                text: outgoing.text,
+                sender: .child,
+                createdAt: Date(),
+                hasImage: outgoing.imageData != nil,
+                readByPeer: false,
+                raw: [:]
+            )
+        )
+    }
+
+    private func deliver(_ outgoing: OutgoingChatDraft) async {
+        inFlightSendCount += 1
+        defer { inFlightSendCount -= 1 }
+        do {
+            let sent = try await chat.sendChatMessage(
+                text: outgoing.text,
+                imageData: outgoing.imageData,
+                imageMimeType: outgoing.imageData == nil ? nil : "image/jpeg"
+            )
+            let acknowledged = Self.reconciled(sent, echo: messages.first { $0.id == outgoing.localID })
+            // Hand the already-decoded photo to the real message before the echo goes away, so
+            // the bubble keeps rendering without a pointless attachment round trip.
+            attachments.movePreview(from: outgoing.localID, to: acknowledged.id)
+            removeEcho(outgoing.localID)
+            ingest(acknowledged)
+            unreadBoundaryID = nil
+            errorMessage = nil
+        } catch {
+            // Keep the bubble: it carries the retry affordance, and the text/photo lives on in
+            // `outbox` so nothing the child wrote is lost.
+            sendingLocalIDs.remove(outgoing.localID)
+            failedLocalIDs.insert(outgoing.localID)
+            errorMessage = NetworkError.userMessage(for: error)
+        }
+    }
+
+    /// Fills the gaps in the message the send endpoint returns before it replaces the local echo.
+    /// That 2xx schema is untyped (`{}` in the spec) and real responses routinely omit `sender`
+    /// and `createdAt` — which drops the child's own bubble on the PARENT's side of the thread and
+    /// sorts it to `.distantPast`, i.e. jumps it to the very top of the history. For a message we
+    /// just sent ourselves those values are known, so fill them in rather than trust the gap.
+    private static func reconciled(_ sent: OilaChatMessage, echo: OilaChatMessage?) -> OilaChatMessage {
+        let sender: OilaChatMessage.Sender = (sent.sender == .unknown) ? .child : sent.sender
+        let createdAt = sent.createdAt ?? echo?.createdAt ?? Date()
+        let hasImage = sent.hasImage || (echo?.hasImage ?? false)
+        guard sender != sent.sender || createdAt != sent.createdAt || hasImage != sent.hasImage else {
+            return sent
+        }
+        return OilaChatMessage(
+            id: sent.id,
+            text: sent.text ?? echo?.text,
+            sender: sender,
+            createdAt: createdAt,
+            hasImage: hasImage,
+            readByPeer: sent.readByPeer,
+            raw: sent.raw,
+            systemKind: sent.systemKind,
+            systemData: sent.systemData
+        )
+    }
+
+    private func removeEcho(_ localID: String) {
+        sendingLocalIDs.remove(localID)
+        failedLocalIDs.remove(localID)
+        outbox[localID] = nil
+        attachments.clearPreview(for: localID)
+        messages.removeAll { $0.id == localID }
+    }
+
+    /// The echoes currently on screen that the server doesn't know about yet.
+    private func unacknowledgedEchoes() -> [OilaChatMessage] {
+        messages.filter { sendingLocalIDs.contains($0.id) || failedLocalIDs.contains($0.id) }
+    }
 
     private func ingest(_ message: OilaChatMessage) {
         if let index = messages.firstIndex(where: { $0.id == message.id }) {
@@ -135,7 +437,11 @@ final class BolajonChatViewModel: ObservableObject {
             ?? Self.parseISO(payload["ts"])
             ?? Date()
         messages = messages.map { message in
-            (message.sender == .child && !message.readByPeer && (message.createdAt ?? .distantPast) <= readAt)
+            // An unacknowledged echo has no server identity yet, so the parent cannot have read
+            // it — leave its sending/failed presentation alone.
+            let isEcho = sendingLocalIDs.contains(message.id) || failedLocalIDs.contains(message.id)
+            return (message.sender == .child && !isEcho && !message.readByPeer
+                    && (message.createdAt ?? .distantPast) <= readAt)
                 ? message.markedReadByPeer() : message
         }
     }
@@ -164,6 +470,9 @@ final class BolajonChatViewModel: ObservableObject {
     }()
     private static let isoParser = ISO8601DateFormatter()
 
+    /// Prefix that marks a locally-minted echo id; server ids never carry it.
+    private static let localIDPrefix = "local-echo-"
+
     private static func parseISO(_ any: Any?) -> Date? {
         guard let string = (any as? String)?.trimmedNonEmpty else { return nil }
         return isoParserFractional.date(from: string) ?? isoParser.date(from: string)
@@ -177,7 +486,7 @@ final class BolajonChatViewModel: ObservableObject {
         } else {
             unreadBoundaryID = nil
         }
-        if let newest = messages.last?.id {
+        if let newest = messages.last(where: { !sendingLocalIDs.contains($0.id) && !failedLocalIDs.contains($0.id) })?.id {
             try? await chat.markChatRead(lastMessageId: newest)
         }
     }
@@ -215,12 +524,17 @@ final class BolajonChatViewModel: ObservableObject {
 struct BolajonChatView: View {
     @StateObject private var viewModel = BolajonChatViewModel()
     @FocusState private var composerFocused: Bool
+    @State private var pickedPhoto: PhotosPickerItem?
+    @State private var enlargedImage: ChatImagePreviewItem?
 
     var body: some View {
         ZStack {
             AppColors.screenBackground.ignoresSafeArea()
             VStack(spacing: 0) {
                 messageList
+                if let error = viewModel.errorMessage {
+                    ChatErrorStrip(message: error) { viewModel.dismissError() }
+                }
                 composer
             }
         }
@@ -244,6 +558,17 @@ struct BolajonChatView: View {
         }
         .task { await viewModel.appear() }
         .onDisappear { viewModel.disappear() }
+        .onChange(of: pickedPhoto) { item in
+            guard let item else { return }
+            Task {
+                await viewModel.attachImage(from: item)
+                // Reset so picking the SAME photo again still fires onChange.
+                pickedPhoto = nil
+            }
+        }
+        .fullScreenCover(item: $enlargedImage) { item in
+            ChatImageViewer(source: item.source) { enlargedImage = nil }
+        }
     }
 
     private var messageList: some View {
@@ -260,7 +585,16 @@ struct BolajonChatView: View {
                         if message.sender == .system {
                             ChatSystemNotice(message: message).id(message.id)
                         } else {
-                            ChatBubble(message: message).id(message.id)
+                            ChatBubble(
+                                message: message,
+                                deliveryState: viewModel.deliveryState(for: message.id),
+                                attachments: viewModel.attachments,
+                                onOpenImage: { source in
+                                    enlargedImage = ChatImagePreviewItem(id: message.id, source: source)
+                                },
+                                onRetry: { Task { await viewModel.retrySend(message.id) } }
+                            )
+                            .id(message.id)
                         }
                     }
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
@@ -277,32 +611,97 @@ struct BolajonChatView: View {
     }
 
     private var composer: some View {
-        HStack(spacing: 10) {
-            TextField(L10n.tr("chat2.placeholder"), text: $viewModel.draft, axis: .vertical)
-                .font(AppTypography.bodyText(15))
-                .foregroundStyle(AppColors.inkPrimary)
-                .lineLimit(1...4)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Capsule().fill(AppColors.cardWhite))
-                .focused($composerFocused)
-                .submitLabel(.send)
-                .onSubmit(send)
-
-            Button(action: send) {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppColors.inverseTextPrimary)
-                    .frame(width: 46, height: 46)
-                    .background(Circle().fill(canSend ? AppColors.ctaPurple : AppColors.ctaPurple.opacity(0.4)))
+        VStack(spacing: 10) {
+            if let pending = viewModel.pendingImage {
+                pendingImageStrip(pending)
             }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .accessibilityLabel(Text(L10n.tr("chat2.send")))
+            HStack(spacing: 10) {
+                photoButton
+                TextField(L10n.tr("chat2.placeholder"), text: $viewModel.draft, axis: .vertical)
+                    .font(AppTypography.bodyText(15))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Capsule().fill(AppColors.cardWhite))
+                    .focused($composerFocused)
+                    .submitLabel(.send)
+                    .onSubmit(send)
+
+                Button(action: send) {
+                    ZStack {
+                        Circle()
+                            .fill(viewModel.canSend ? AppColors.ctaPurple : AppColors.ctaPurple.opacity(0.4))
+                            .frame(width: 46, height: 46)
+                        if viewModel.isSending {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(AppColors.inverseTextPrimary)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(AppColors.inverseTextPrimary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!viewModel.canSend)
+                .accessibilityLabel(Text(L10n.tr("chat2.send")))
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(AppColors.screenBackground)
+    }
+
+    /// Out-of-process photo picker: it needs no `NSPhotoLibraryUsageDescription` and never opens
+    /// the camera, which is what keeps this composer shippable without extra Info.plist strings.
+    private var photoButton: some View {
+        // Read the view-model state HERE rather than inside the label builder: the picker's label
+        // closure is not main-actor-isolated, so touching `viewModel` from inside it is a
+        // concurrency violation (a warning today, an error under the Swift 6 language mode).
+        let preparing = viewModel.isPreparingImage
+        let busy = preparing || viewModel.isSending
+        return PhotosPicker(selection: $pickedPhoto, matching: .images, photoLibrary: .shared()) {
+            ZStack {
+                Circle().fill(AppColors.cardWhite).frame(width: 46, height: 46)
+                if preparing {
+                    ProgressView().progressViewStyle(.circular).tint(AppColors.ctaPurple)
+                } else {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppColors.ctaPurple)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .opacity(busy ? 0.5 : 1)
+        .accessibilityLabel(Text(L10n.tr("chat2.attach")))
+    }
+
+    private func pendingImageStrip(_ pending: PendingChatImage) -> some View {
+        HStack {
+            ZStack(alignment: .topTrailing) {
+                Image(uiImage: pending.preview)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Button { viewModel.clearPendingImage() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(AppColors.inverseTextPrimary, AppColors.inkPrimary.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .offset(x: 6, y: -6)
+                .accessibilityLabel(Text(L10n.tr("chat2.attachment.remove")))
+            }
+            .padding(.top, 6)
+            .padding(.trailing, 6)
+            Spacer()
+        }
     }
 
     private var emptyState: some View {
@@ -316,10 +715,6 @@ struct BolajonChatView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
-    }
-
-    private var canSend: Bool {
-        !viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !viewModel.isSending
     }
 
     private func send() {
@@ -338,17 +733,59 @@ struct BolajonChatView: View {
     private static let bottomAnchor = "chat-bottom-anchor"
 }
 
+// MARK: - Error strip
+
+/// Compact failure line above the composer. Load and send errors used to be written to
+/// `errorMessage` and then rendered nowhere, so a failed history fetch looked exactly like an
+/// empty thread.
+private struct ChatErrorStrip: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(AppColors.sosCoral)
+            Text(message)
+                .font(AppTypography.caption(12))
+                .foregroundStyle(AppColors.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(AppColors.inkTertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.tr("chat2.error.dismiss")))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(AppColors.sosCoral.opacity(0.12))
+        )
+        .padding(.horizontal, 14)
+    }
+}
+
 // MARK: - Bubble
 
 private struct ChatBubble: View {
     let message: OilaChatMessage
+    let deliveryState: ChatDeliveryState
+    @ObservedObject var attachments: ChatAttachmentStore
+    let onOpenImage: (ChatImageSource) -> Void
+    let onRetry: () -> Void
 
     var body: some View {
         HStack {
             if message.isFromChild { Spacer(minLength: 48) }
-            VStack(alignment: message.isFromChild ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: message.isFromChild ? .trailing : .leading, spacing: 6) {
                 content
                 metaRow
+                if message.isFromChild, deliveryState == .failed { retryRow }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -358,15 +795,19 @@ private struct ChatBubble: View {
     }
 
     @ViewBuilder private var content: some View {
+        if message.hasImage {
+            ChatImageAttachment(
+                messageID: message.id,
+                attachments: attachments,
+                isUploading: deliveryState == .sending,
+                onOpen: onOpenImage
+            )
+        }
         if let text = message.text, !text.isEmpty {
             Text(text)
                 .font(AppTypography.bodyText(15))
                 .foregroundStyle(message.isFromChild ? AppColors.inverseTextPrimary : AppColors.inkPrimary)
                 .fixedSize(horizontal: false, vertical: true)
-        } else if message.hasImage {
-            Label(L10n.tr("chat2.photo"), systemImage: "photo")
-                .font(AppTypography.bodyText(14))
-                .foregroundStyle(message.isFromChild ? AppColors.inverseTextPrimary : AppColors.inkSecondary)
         }
     }
 
@@ -378,11 +819,36 @@ private struct ChatBubble: View {
                     .foregroundStyle(message.isFromChild ? AppColors.inverseTextSecondary : AppColors.inkTertiary)
             }
             if message.isFromChild {
-                Text(message.readByPeer ? "✓✓" : "✓")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(AppColors.inverseTextSecondary)
+                switch deliveryState {
+                case .sending:
+                    Image(systemName: "clock")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(AppColors.inverseTextSecondary)
+                        .accessibilityLabel(Text(L10n.tr("chat2.status.sending")))
+                case .failed:
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AppColors.inverseTextPrimary)
+                case .sent:
+                    Text(message.readByPeer ? "✓✓" : "✓")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AppColors.inverseTextSecondary)
+                }
             }
         }
+    }
+
+    private var retryRow: some View {
+        Button(action: onRetry) {
+            HStack(spacing: 5) {
+                Text(L10n.tr("chat2.status.failed"))
+                Text("·")
+                Text(L10n.tr("chat2.status.retry")).underline()
+            }
+            .font(AppTypography.caption(11))
+            .foregroundStyle(AppColors.inverseTextPrimary)
+        }
+        .buttonStyle(.plain)
     }
 
     private var bubbleShape: some View {
@@ -401,6 +867,213 @@ private struct ChatBubble: View {
     private static func timeString(_ date: Date?) -> String? {
         guard let date else { return nil }
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Image attachment
+
+/// The image inside a bubble. The signed URL is fetched lazily on first appearance (never
+/// persisted — see `ChatAttachmentStore`), with an explicit loading state and a tap-to-retry
+/// failure state, since an expired URL is a normal outcome rather than an exception here.
+private struct ChatImageAttachment: View {
+    let messageID: String
+    @ObservedObject var attachments: ChatAttachmentStore
+    let isUploading: Bool
+    let onOpen: (ChatImageSource) -> Void
+
+    private static let width: CGFloat = 216
+    private static let placeholderHeight: CGFloat = 162
+    private static let maxHeight: CGFloat = 260
+
+    var body: some View {
+        Group {
+            if let preview = attachments.preview(for: messageID) {
+                framed(Image(uiImage: preview))
+                    .overlay { if isUploading { uploadOverlay } }
+                    .contentShape(Rectangle())
+                    .onTapGesture { if !isUploading { onOpen(.local(preview)) } }
+                    .accessibilityLabel(Text(L10n.tr(isUploading ? "chat2.status.sending" : "chat2.image.open")))
+            } else if let state = attachments.state(for: messageID) {
+                switch state {
+                case .ready(let url):
+                    remote(url)
+                case .failed:
+                    failedPlaceholder
+                        .onTapGesture { attachments.retry(messageID) }
+                case .loading:
+                    loadingPlaceholder
+                }
+            } else {
+                loadingPlaceholder
+            }
+        }
+        // `onAppear` rather than `task`: the store is @MainActor and this closure inherits the
+        // body's main-actor isolation, so no hop (and no cancellation on a LazyVStack recycle).
+        .onAppear { attachments.load(messageID) }
+    }
+
+    private func remote(_ url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                framed(image)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen(.remote(url)) }
+                    .accessibilityLabel(Text(L10n.tr("chat2.image.open")))
+            case .failure:
+                // The signed URL expires; a load failure is most often staleness, so retry means
+                // "ask for a brand new URL", not "re-request the same one".
+                failedPlaceholder
+                    .onTapGesture { attachments.retry(messageID) }
+            case .empty:
+                loadingPlaceholder
+            @unknown default:
+                loadingPlaceholder
+            }
+        }
+    }
+
+    private func framed(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: Self.width, maxHeight: Self.maxHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var loadingPlaceholder: some View {
+        placeholderSurface {
+            VStack(spacing: 6) {
+                ProgressView().progressViewStyle(.circular).tint(AppColors.inkTertiary)
+                Text(L10n.tr("chat2.photo.loading"))
+                    .font(AppTypography.caption(11))
+                    .foregroundStyle(AppColors.inkTertiary)
+            }
+        }
+    }
+
+    private var failedPlaceholder: some View {
+        placeholderSurface {
+            VStack(spacing: 6) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(AppColors.inkSecondary)
+                Text(L10n.tr("chat2.photo.failed"))
+                    .font(AppTypography.caption(11))
+                    .foregroundStyle(AppColors.inkSecondary)
+                Text(L10n.tr("chat2.photo.retry"))
+                    .font(AppTypography.caption(11))
+                    .foregroundStyle(AppColors.inkTertiary)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func placeholderSurface<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(AppColors.chipNeutral)
+            content()
+        }
+        .frame(width: Self.width, height: Self.placeholderHeight)
+    }
+
+    private var uploadOverlay: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.35))
+            ProgressView().progressViewStyle(.circular).tint(AppColors.inverseTextPrimary)
+        }
+    }
+}
+
+// MARK: - Full-screen image viewer
+
+/// Tap-to-enlarge. Double-tap toggles a 2.5× zoom and a drag pans while zoomed — enough to read a
+/// photo of a homework page without pulling in a gesture API deprecated after iOS 16.
+private struct ChatImageViewer: View {
+    let source: ChatImageSource
+    let onClose: () -> Void
+
+    @State private var zoom: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var dragStart: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+                .onTapGesture { onClose() }
+            content
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(Color.white.opacity(0.18)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(L10n.tr("chat2.image.close")))
+                }
+                Spacer()
+            }
+            .padding(18)
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch source {
+        case .local(let image):
+            zoomable(Image(uiImage: image))
+        case .remote(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    zoomable(image)
+                case .failure:
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.white.opacity(0.6))
+                        Text(L10n.tr("chat2.photo.failed"))
+                            .font(AppTypography.bodyText(14))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                default:
+                    ProgressView().progressViewStyle(.circular).tint(.white)
+                }
+            }
+        }
+    }
+
+    private func zoomable(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFit()
+            .scaleEffect(zoom)
+            .offset(offset)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard zoom > 1 else { return }
+                        offset = CGSize(width: dragStart.width + value.translation.width,
+                                        height: dragStart.height + value.translation.height)
+                    }
+                    .onEnded { _ in dragStart = offset }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    if zoom > 1 {
+                        zoom = 1
+                        offset = .zero
+                    } else {
+                        zoom = 2.5
+                    }
+                    dragStart = offset
+                }
+            }
     }
 }
 
@@ -458,11 +1131,21 @@ private struct UnreadDivider: View {
 
 /// The "Ota-ona bilan suhbat" card on the Home screen — its own small model so Home stays lean.
 struct ChatHomeCard: View {
+    /// Bumped by Home whenever the badge has to be re-synced: the app returning to the foreground,
+    /// leaving the thread, or a chat push. Push isn't delivered on this build yet, so those first
+    /// two are what actually keep the badge honest.
+    var refreshToken: Int = 0
     let onOpen: () -> Void
     @StateObject private var model = ChatHomeCardModel()
 
     var body: some View {
-        Button(action: onOpen) {
+        Button {
+            // Opening the thread marks it read on the server; clear the badge straight away so it
+            // can't linger behind the child while that call is in flight. Home re-syncs from
+            // `refreshToken` when the thread is closed again.
+            model.clearUnread()
+            onOpen()
+        } label: {
             InfoCard {
                 HStack(spacing: 14) {
                     ZStack(alignment: .topTrailing) {
@@ -499,7 +1182,9 @@ struct ChatHomeCard: View {
             }
         }
         .buttonStyle(.plain)
-        .task { await model.refresh() }
+        // `task(id:)` covers both cases with one call site: the first appearance, and every later
+        // refresh Home asks for by changing the token.
+        .task(id: refreshToken) { await model.refresh() }
     }
 }
 
@@ -525,4 +1210,6 @@ private final class ChatHomeCardModel: ObservableObject {
             }
         }
     }
+
+    func clearUnread() { unreadCount = 0 }
 }

@@ -201,13 +201,23 @@ final class SettingsProtectionController: ObservableObject {
         return verify(normalized)
     }
 
-    /// Stores a new custom PIN (used by the disconnect create-flow when none exists yet).
-    /// Returns false when the input isn't exactly `pinLength` digits.
+    /// Stores a new custom PIN (used by the Settings provisioning flow and by the disconnect
+    /// create-flow when none exists yet). Returns false when the input isn't exactly `pinLength`
+    /// digits.
     @discardableResult
     func saveCustomPIN(_ pin: String) -> Bool {
         let normalized = normalizePIN(pin)
         guard normalized.count == pinLength else { return false }
         pinStore.save(makeRecord(for: normalized))
+        // Confirm the record actually landed. `PINCredentialStoring.save` returns Void, so a
+        // Keychain rejection would otherwise be swallowed and this method would claim success while
+        // leaving the parent with no PIN at all — the same silent-failure class this release is
+        // fixing in SecureTokenStore. Verifying the just-chosen PIN round-trips proves the write.
+        guard verify(normalized) else { return false }
+        // A lockout is a rate limit on guessing the OLD secret; carrying it over would leave the
+        // parent unable to use the PIN they just chose. Reaching this point already required
+        // authorization (the current PIN, or the post-pairing window for the very first one).
+        recordPINAttempt(success: true)
         startUnlockSession()
         refreshAvailability()
         return true

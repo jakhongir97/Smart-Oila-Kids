@@ -288,6 +288,18 @@
 "chat2.unread" = "Непрочитанные сообщения";
 "chat2.photo" = "Фото";
 "chat2.send" = "Отправить";
+"chat2.attach" = "Прикрепить фото";
+"chat2.attachment.remove" = "Убрать фото";
+"chat2.attach_failed" = "Не удалось прикрепить это фото";
+"chat2.photo.loading" = "Фото загружается…";
+"chat2.photo.failed" = "Фото не загрузилось";
+"chat2.photo.retry" = "Нажмите, чтобы повторить";
+"chat2.image.open" = "Открыть фото";
+"chat2.image.close" = "Закрыть";
+"chat2.status.sending" = "Отправляется…";
+"chat2.status.failed" = "Не отправлено";
+"chat2.status.retry" = "Отправить снова";
+"chat2.error.dismiss" = "Скрыть";
 "home2.chat.title" = "Чат с родителем";
 "home2.chat.subtitle" = "Напишите семье";
 
@@ -300,3 +312,20 @@
 "audio2.consent.decline" = "Не сейчас";
 "chat2.system.sos" = "SOS — запрошена помощь";
 "chat2.system.generic" = "Системное сообщение";
+
+/* Parent PIN provisioning (Settings) */
+"settings2.section_parent" = "Родительские настройки";
+"settings2.parent_pin_set" = "Задать родительский PIN";
+"settings2.parent_pin_set_sub" = "Нужен, чтобы отвязать это устройство";
+"settings2.parent_pin_change" = "Изменить родительский PIN";
+"settings2.parent_pin_change_sub" = "Требуется текущий PIN";
+"settings2.parent_pin_remove" = "Удалить родительский PIN";
+"settings2.parent_pin_remove_sub" = "После этого отвязать можно только в приложении Oila360";
+"settings2.parent_pin_prompt_current" = "Введите текущий родительский PIN, чтобы продолжить.";
+"settings2.parent_pin_prompt_new" = "Придумайте 4-значный PIN. Не сообщайте его ребёнку — именно этот код позволяет отвязать устройство.";
+"settings2.parent_pin_prompt_confirm" = "Введите новый PIN ещё раз для подтверждения.";
+"settings2.parent_pin_save" = "Сохранить PIN";
+"settings2.parent_pin_saved" = "Родительский PIN сохранён. Он будет запрошен перед отвязкой этого устройства.";
+"settings2.parent_pin_removed" = "Родительский PIN удалён. Теперь отвязать устройство можно только в приложении Oila360.";
+"settings2.parent_pin_locked_out" = "Слишком много попыток. Повторите позже.";
+"settings2.parent_pin_set_unavailable" = "PIN можно задать только сразу после привязки. Привяжите устройство заново в приложении Oila360.";

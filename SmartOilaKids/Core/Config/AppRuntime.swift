@@ -21,19 +21,12 @@ enum AppRuntime {
         configuredBool("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY") ?? false
     }
 
-    /// Parent↔child chat surface (REST + `/ws/chat`). Visible by default in DEBUG so it can be
-    /// exercised from Xcode; in Release it stays OFF unless `SMARTOILA_CHAT_FEATURES_ENABLED` is
-    /// set (env or Info.plist), so the current App Store build ships unchanged. An explicit flag
-    /// value always wins, in either configuration.
+    /// Parent↔child chat surface (REST + `/ws/chat`). Ships ON: `SMARTOILA_CHAT_FEATURES_ENABLED`
+    /// is `true` in Info.plist, so DEBUG and Release now behave identically instead of chat being a
+    /// debug-only surface. A `SMARTOILA_CHAT_FEATURES_ENABLED` environment variable still wins over
+    /// the bundled value, which is how a tester turns chat off without editing the plist.
     static var chatFeaturesEnabled: Bool {
-        if let explicit = configuredBool("SMARTOILA_CHAT_FEATURES_ENABLED") {
-            return explicit
-        }
-#if DEBUG
-        return true
-#else
-        return featureFlag("SMARTOILA_CHAT_FEATURES_ENABLED")
-#endif
+        featureFlag("SMARTOILA_CHAT_FEATURES_ENABLED")
     }
 
     /// Live-audio publishing (LiveKit) from the child device. OFF by default: re-enabling mic

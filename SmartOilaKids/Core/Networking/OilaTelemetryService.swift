@@ -34,6 +34,30 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
     }
 
+    // The per-app half of GET /device/lock/state. iOS cannot ENFORCE any of it — per-app blocking
+    // needs the FamilyControls entitlement Apple has not granted this app — so these are published
+    // purely so the UI can SHOW the child what the parent configured. Unlike `isLocked` they are
+    // not fail-closed and not persisted: they are replaced wholesale by the latest server truth,
+    // because a stale "you have 12 minutes left" is worse than showing nothing.
+
+    /// The whole payload from the last applied `GET /device/lock/state` response, for callers
+    /// needing fields this service doesn't mirror individually. nil until the first poll lands.
+    /// Deliberately NOT @Published: `OilaLockState` holds an untyped `raw` dictionary so it cannot be
+    /// Equatable, which means publishing it would fire objectWillChange on every 30s poll no matter
+    /// what — invalidating every observing view and cancelling out the equality guards on the
+    /// individual properties below. Nothing outside this service reads it today; it exists so a
+    /// future caller can reach fields the service doesn't mirror.
+    private(set) var lockState: OilaLockState?
+    /// Packages the parent blocked outright (`lockedPackages`).
+    @Published private(set) var lockedPackages: [String] = []
+    /// Per-app daily budgets + today's spend (`appLimits`).
+    @Published private(set) var appLimits: [OilaAppLimit] = []
+    /// Device-local wall clock the backend evaluated the schedules against, e.g. "15:45".
+    @Published private(set) var deviceLocalTime: String?
+    /// The active lock window as "21:00 – 07:00". PROVISIONAL: the schedule schema is unknown, so
+    /// this stays nil whenever `OilaLockState.resolvedScheduleRange()` can't recognize the shape.
+    @Published private(set) var scheduleRangeText: String?
+
     /// UserDefaults key for the persisted fail-closed lock state.
     private static let lockStateKey = "OILA_LAST_LOCK_STATE"
     /// UserDefaults key for the persisted pending location backlog (survives process death so an
@@ -132,6 +156,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         pathMonitor = nil
         networkType = nil
         isLocked = false
+        // stop() runs on unpair / confirmed session invalidation, so drop the per-app state too:
+        // re-pairing to a DIFFERENT child must not inherit the previous child's blocked apps or
+        // remaining-time figures.
+        lockState = nil
+        lockedPackages = []
+        appLimits = []
+        deviceLocalTime = nil
+        scheduleRangeText = nil
         pendingFixes.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.pendingFixesKey)
     }
@@ -266,14 +298,33 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         do {
             let state = try await service.fetchLockState()
             guard isRunning, sequence == lockRefreshSequence else { return }
-            // Only apply a recognized shape. A nil (unrecognized 200) keeps the last-known lock —
-            // never releases an active parental lock on an unexpected payload (fail closed).
-            if let locked = state.isLocked, locked != isLocked { isLocked = locked }
+            applyLockState(state)
         } catch let error as OilaAPIError where error.requiresRePair {
             handleAuthorizationLoss()
         } catch {
             // Keep the last known lock state on a transient failure.
         }
+    }
+
+    /// Publishes one lock-state response. Callers must already have passed the sequence guard in
+    /// `refreshLock()` — this method assumes `state` is the newest response we've seen.
+    private func applyLockState(_ state: OilaLockState) {
+        // Whole device: only apply a recognized shape. A nil (unrecognized 200) keeps the
+        // last-known lock — never releases an active parental lock on an unexpected payload
+        // (fail closed). `isDeviceLocked` preserves that: nil still means "unrecognized, keep the
+        // last-known lock"; it only resolves a value when the payload actually reports one.
+        if let locked = state.isDeviceLocked, locked != isLocked { isLocked = locked }
+        // Per-app half: informational only (see the property docs), so it mirrors the server 1:1.
+        //
+        // Each assignment is guarded by an equality check because @Published fires
+        // objectWillChange unconditionally, and this runs on every 30s poll AND on every
+        // push-driven refresh. Assigning unchanged values would invalidate every SwiftUI view
+        // observing this service twice a minute, forever, for nothing.
+        lockState = state
+        if lockedPackages != state.lockedPackages { lockedPackages = state.lockedPackages }
+        if appLimits != state.appLimits { appLimits = state.appLimits }
+        if deviceLocalTime != state.deviceLocalTime { deviceLocalTime = state.deviceLocalTime }
+        if scheduleRangeText != state.scheduleRangeText { scheduleRangeText = state.scheduleRangeText }
     }
 }
 

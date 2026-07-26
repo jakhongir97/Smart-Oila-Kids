@@ -288,6 +288,18 @@
 "chat2.unread" = "Unread messages";
 "chat2.photo" = "Photo";
 "chat2.send" = "Send";
+"chat2.attach" = "Attach photo";
+"chat2.attachment.remove" = "Remove photo";
+"chat2.attach_failed" = "This photo could not be attached";
+"chat2.photo.loading" = "Loading photo…";
+"chat2.photo.failed" = "Photo did not load";
+"chat2.photo.retry" = "Tap to try again";
+"chat2.image.open" = "Open photo";
+"chat2.image.close" = "Close";
+"chat2.status.sending" = "Sending…";
+"chat2.status.failed" = "Not sent";
+"chat2.status.retry" = "Send again";
+"chat2.error.dismiss" = "Dismiss";
 "home2.chat.title" = "Chat with parent";
 "home2.chat.subtitle" = "Message your family";
 
@@ -300,3 +312,20 @@
 "audio2.consent.decline" = "Not now";
 "chat2.system.sos" = "SOS — help requested";
 "chat2.system.generic" = "System message";
+
+/* Parent PIN provisioning (Settings) */
+"settings2.section_parent" = "Parent controls";
+"settings2.parent_pin_set" = "Set parent PIN";
+"settings2.parent_pin_set_sub" = "Needed to disconnect this device";
+"settings2.parent_pin_change" = "Change parent PIN";
+"settings2.parent_pin_change_sub" = "Current PIN required";
+"settings2.parent_pin_remove" = "Remove parent PIN";
+"settings2.parent_pin_remove_sub" = "Disconnect will then need the Oila360 app";
+"settings2.parent_pin_prompt_current" = "Enter the current parent PIN to continue.";
+"settings2.parent_pin_prompt_new" = "Choose a 4-digit PIN. Keep it from your child — this code is what allows the device to be disconnected.";
+"settings2.parent_pin_prompt_confirm" = "Enter the new PIN once more to confirm.";
+"settings2.parent_pin_save" = "Save PIN";
+"settings2.parent_pin_saved" = "The parent PIN is saved. It will be asked before this device can be disconnected.";
+"settings2.parent_pin_removed" = "The parent PIN is removed. This device can now only be disconnected from the Oila360 app.";
+"settings2.parent_pin_locked_out" = "Too many attempts. Try again later.";
+"settings2.parent_pin_set_unavailable" = "A PIN can only be set right after linking. Re-link this device from the Oila360 app to set one.";

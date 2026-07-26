@@ -32,8 +32,17 @@ struct BolajonHomeView: View {
     /// Observed so the SOS takeover can be dismissed the moment the device lock engages —
     /// the root-level lock cover must never end up behind another presentation.
     @ObservedObject private var lockState = OilaTelemetryService.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var path: [HomeRoute] = []
     @State private var showSOSConfirm = false
+    /// Bumped whenever the chat unread badge has to be re-read from
+    /// `GET /device/chat/unread-count`. Push isn't delivered on this build, so the badge can only
+    /// stay honest by re-syncing on foreground, on leaving the thread, and on a chat push if one
+    /// ever arrives.
+    @State private var chatUnreadRefreshToken = 0
+    /// Whether the chat screen was on the stack at the last `path` change — the edge from true to
+    /// false is "the child just closed the thread", which is exactly when the badge is stale.
+    @State private var chatWasOpen = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -45,7 +54,7 @@ struct BolajonHomeView: View {
                     }
                     sosCard
                     if AppRuntime.chatFeaturesEnabled {
-                        ChatHomeCard(onOpen: { path.append(.chat) })
+                        ChatHomeCard(refreshToken: chatUnreadRefreshToken, onOpen: { path.append(.chat) })
                     }
                     tasksCard
                 }
@@ -62,11 +71,16 @@ struct BolajonHomeView: View {
 #if DEBUG
                 if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SOS"] == "1" { showSOSConfirm = true }
 #endif
-                // App launched/opened from a task push — consume the pending deep-link and drill in.
+                // App launched/opened from a push — consume the pending deep-link and drill in.
+                // `consume` CLEARS the stored intent, so it must be routed on every destination it
+                // can return: testing only for `.tasks` silently discarded a pending `.chat` one
+                // and the child never reached the message the parent tapped through to.
                 let dsn = sessionStore.dsn
                 Task { @MainActor in
-                    if await PushDeepLinkStore.shared.consume(matching: dsn) == .tasks {
-                        navigateToTasks()
+                    switch await PushDeepLinkStore.shared.consume(matching: dsn) {
+                    case .tasks: navigateToTasks()
+                    case .chat: navigateToChat()
+                    case .none: break
                     }
                 }
             }
@@ -77,6 +91,29 @@ struct BolajonHomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenTasks)) { notification in
                 guard pushMatchesSession(notification) else { return }
                 navigateToTasks()
+            }
+            // Chat pushes were posted by PushCommandRouter but observed by nobody, so a chat
+            // notification did nothing at all. Refresh the unread badge, and open the thread when
+            // the child actually tapped the notification.
+            .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshChat)) { notification in
+                guard pushMatchesSession(notification) else { return }
+                chatUnreadRefreshToken += 1
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenChat)) { notification in
+                guard pushMatchesSession(notification) else { return }
+                navigateToChat()
+            }
+            .onChange(of: scenePhase) { phase in
+                // Without push there is nothing to tell Home the parent wrote — coming back to
+                // the foreground is the reliable moment to re-read the unread count.
+                if phase == .active { chatUnreadRefreshToken += 1 }
+            }
+            .onChange(of: path) { newPath in
+                let chatOpen = newPath.contains(.chat)
+                // Leaving the thread: it was just marked read on the server, so re-sync the badge
+                // against that watermark instead of trusting the optimistic clear.
+                if chatWasOpen, !chatOpen { chatUnreadRefreshToken += 1 }
+                chatWasOpen = chatOpen
             }
             .onChange(of: lockState.isLocked) { locked in
                 if locked { showSOSConfirm = false }
@@ -100,9 +137,16 @@ struct BolajonHomeView: View {
         if path.last != .tasks { path.append(.tasks) }
     }
 
-    /// Only act on a task push addressed to THIS device's DSN (a payload without a DSN is accepted,
+    /// Drill in to Chat from a push, avoiding a duplicate push if already there. Gated on the same
+    /// flag as the Home card, so a chat push can't open a screen the build has chat disabled for.
+    private func navigateToChat() {
+        guard AppRuntime.chatFeaturesEnabled else { return }
+        if path.last != .chat { path.append(.chat) }
+    }
+
+    /// Only act on a push addressed to THIS device's DSN (a payload without a DSN is accepted,
     /// matching the lock handler's policy) — mirrors RootView.shouldHandlePush so a push for a
-    /// different child can't refresh or open this child's tasks.
+    /// different child can't refresh or open this child's tasks or chat.
     private func pushMatchesSession(_ notification: Notification) -> Bool {
         guard let currentDSN = sessionStore.dsn?.trimmedNonEmpty else { return false }
         guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {

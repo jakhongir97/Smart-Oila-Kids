@@ -51,7 +51,13 @@ struct SettingsRootView: View {
     @Binding var path: [HomeRoute]
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var permissionManager = LocationPermissionManager()
+    /// Drives the parent-PIN rows: `hasCustomPIN` decides whether this screen offers "set" or
+    /// "change / remove", and it changes the moment the provisioning sheet saves or clears one.
+    @ObservedObject private var protection = SettingsProtectionController.shared
     @Environment(\.openURL) private var openURL
+
+    /// Non-nil while the parent-PIN sheet is up; the case decides which steps it runs.
+    @State private var pinFlowIntent: ParentPINFlowIntent?
 
     /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). The
     /// battery/auto-start rows are unreadable on iOS, so they never count as "off".
@@ -103,6 +109,10 @@ struct SettingsRootView: View {
                         action: nil)
                 }
 
+                section(title: "settings2.section_parent") {
+                    parentPINRows
+                }
+
                 section(title: "settings2.section_other") {
                     row(glyph: .symbol("info.circle.fill"), tint: AppColors.glyphPurple,
                         title: "settings2.about", subtitleLiteral: appVersionText, action: nil)
@@ -115,7 +125,65 @@ struct SettingsRootView: View {
                 }
             }
         }
-        .onAppear { permissionManager.refreshStatuses() }
+        .onAppear {
+            permissionManager.refreshStatuses()
+            // Re-reads the Keychain, so the rows are right even if the PIN changed elsewhere.
+            protection.refreshAvailability()
+        }
+        .sheet(item: $pinFlowIntent) { intent in
+            ParentPINFlowSheet(intent: intent)
+        }
+    }
+
+    /// Set the disconnect PIN when there is none; otherwise offer change + remove, both of which
+    /// the sheet gates behind the current PIN.
+    @ViewBuilder
+    private var parentPINRows: some View {
+        if protection.hasCustomPIN {
+            row(glyph: .symbol("lock.rotation"), tint: AppColors.glyphPurple,
+                title: "settings2.parent_pin_change", subtitle: "settings2.parent_pin_change_sub",
+                action: { startPINFlow(.change) })
+            row(glyph: .symbol("lock.slash.fill"), tint: AppColors.sosCoral,
+                title: "settings2.parent_pin_remove", subtitle: "settings2.parent_pin_remove_sub",
+                titleColor: AppColors.sosCoral, action: { startPINFlow(.remove) })
+        } else if canProvisionFirstPIN {
+            row(glyph: .symbol("lock.fill"), tint: AppColors.glyphPurple,
+                title: "settings2.parent_pin_set", subtitle: "settings2.parent_pin_set_sub",
+                action: { startPINFlow(.set) })
+        } else {
+            // No PIN and the pairing window has closed: say so instead of offering a control that
+            // must not work here. Without a PIN, disconnect stays parent-managed (Oila360 app),
+            // which is the safe state — not a dead end.
+            row(glyph: .symbol("lock.fill"), tint: AppColors.inkTertiary,
+                title: "settings2.parent_pin_set", subtitle: "settings2.parent_pin_set_unavailable",
+                action: nil)
+        }
+    }
+
+    /// Setting the FIRST PIN is the one step with no existing secret to check — so the gate has to
+    /// come from somewhere else, and it MUST NOT be device-owner authentication.
+    ///
+    /// This screen lives on the CHILD's phone. Face ID, Touch ID and the device passcode all belong
+    /// to the child, so gating on `confirmDeviceOwner()` would let the child mint the disconnect PIN
+    /// and then unpair themselves — turning the strongest control in the app (disconnect is
+    /// impossible without a PIN) into one the monitored user holds. That is strictly worse than
+    /// leaving the PIN unset.
+    ///
+    /// The one moment we can actually infer a parent is present is just after pairing: the code
+    /// comes from the Oila360 parent app and an adult typed it into this device minutes ago. So
+    /// first-PIN provisioning is allowed only inside that window; afterwards the parent re-links
+    /// from their own app, which reopens it. Change and remove keep their own gate — the current
+    /// PIN, rate-limited by the shared lockout.
+    private var canProvisionFirstPIN: Bool {
+        guard let pairedAt = sessionStore.pairedAt else { return false }
+        return Date().timeIntervalSince(pairedAt) <= Self.firstPINProvisioningWindow
+    }
+
+    private static let firstPINProvisioningWindow: TimeInterval = 15 * 60
+
+    private func startPINFlow(_ intent: ParentPINFlowIntent) {
+        if intent == .set, !canProvisionFirstPIN { return }
+        pinFlowIntent = intent
     }
 
     private enum RowGlyph {
@@ -214,6 +282,268 @@ struct SettingsRootView: View {
         case .brokenLink:
             BrokenLinkIcon(size: 16, tint: tint)
         }
+    }
+}
+
+// MARK: - C4 Parent PIN provisioning
+//
+// The disconnect gate (C6) only opens against a parent-provisioned PIN, but nothing in the app
+// could provision one — so `hasCustomPIN` was permanently false and disconnect always fell back
+// to "ask a parent in the Oila360 app". These rows are the missing writer: a parent sets the PIN
+// during handover and can later change or remove it by proving the current one.
+
+/// What the parent asked to do with the disconnect PIN. Also decides which step the sheet opens on.
+enum ParentPINFlowIntent: String, Identifiable {
+    case set
+    case change
+    case remove
+
+    var id: String { rawValue }
+}
+
+/// Keypad sheet that sets, changes or removes the disconnect PIN. Deliberately reuses the C6
+/// disconnect screen's layout (badge → copy → dots → keypad) so the two PIN surfaces read as one
+/// feature, and its rate-limit contract so neither can be used as an unmetered guessing oracle.
+struct ParentPINFlowSheet: View {
+    let intent: ParentPINFlowIntent
+
+    @ObservedObject private var protection = SettingsProtectionController.shared
+    @Environment(\.dismiss) private var dismiss
+
+    /// `current` proves knowledge of the existing PIN; `entry` + `confirm` are the create-flow's
+    /// enter-it-twice semantics; `done` is the terminal receipt.
+    private enum Step { case current, entry, confirm, done }
+
+    @State private var step: Step
+    /// The digits on screen right now.
+    @State private var pin = ""
+    /// First of the two new-PIN entries, held only until `confirm` matches it.
+    @State private var firstEntry = ""
+    @State private var errorText: String?
+
+    private let pinLength = 4
+
+    init(intent: ParentPINFlowIntent) {
+        self.intent = intent
+        // Nothing to prove when there is no PIN yet, so "set" starts straight on the new-PIN entry.
+        _step = State(initialValue: intent == .set ? Step.entry : Step.current)
+    }
+
+    var body: some View {
+        ZStack {
+            AppColors.screenBackground.ignoresSafeArea()
+            VStack(spacing: 0) {
+                badge
+                    .padding(.top, 20)
+
+                Text(L10n.tr(titleKey))
+                    .font(AppTypography.title(21))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 14)
+
+                Text(L10n.tr(promptKey))
+                    .font(AppTypography.bodyText(15))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+                    .padding(.horizontal, 6)
+
+                if step != .done {
+                    pinDots.padding(.top, 20)
+                }
+
+                if let errorText {
+                    Text(errorText)
+                        .font(AppTypography.caption(12))
+                        .foregroundStyle(AppColors.sosCoral)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 12)
+                }
+
+                Spacer(minLength: 16)
+
+                if step == .done {
+                    BolajonPrimaryButton(title: L10n.tr("common.done")) { dismiss() }
+                } else {
+                    NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendDigit, onBackspace: removeDigit)
+                        .padding(.bottom, 12)
+                    BolajonPrimaryButton(
+                        title: L10n.tr(primaryTitleKey),
+                        fill: isDestructiveStep ? AppColors.sosCoral : AppColors.ctaPurple,
+                        disabled: pin.count != pinLength
+                    ) {
+                        submit()
+                    }
+                    GhostButton(title: L10n.tr("common.cancel")) { dismiss() }
+                }
+            }
+            .padding(.horizontal, BolajonMetrics.screenPadding)
+            .padding(.bottom, 8)
+        }
+    }
+
+    // MARK: Copy
+
+    private var titleKey: String {
+        switch intent {
+        case .set: return "settings2.parent_pin_set"
+        case .change: return "settings2.parent_pin_change"
+        case .remove: return "settings2.parent_pin_remove"
+        }
+    }
+
+    private var promptKey: String {
+        switch step {
+        case .current: return "settings2.parent_pin_prompt_current"
+        case .entry: return "settings2.parent_pin_prompt_new"
+        case .confirm: return "settings2.parent_pin_prompt_confirm"
+        case .done: return intent == .remove ? "settings2.parent_pin_removed" : "settings2.parent_pin_saved"
+        }
+    }
+
+    private var primaryTitleKey: String {
+        switch step {
+        case .current: return intent == .remove ? "settings2.parent_pin_remove" : "setup.continue"
+        case .entry: return "setup.continue"
+        case .confirm: return "settings2.parent_pin_save"
+        case .done: return "common.done"
+        }
+    }
+
+    /// Only the step that actually clears the PIN wears the coral treatment.
+    private var isDestructiveStep: Bool { intent == .remove && step == .current }
+
+    // MARK: Chrome
+
+    private var badgeTint: Color {
+        if step == .done { return AppColors.successGreen }
+        return intent == .remove ? AppColors.sosCoral : AppColors.glyphPurple
+    }
+
+    private var badgeSymbol: String {
+        if step == .done { return "checkmark" }
+        return intent == .remove ? "lock.slash.fill" : "lock.fill"
+    }
+
+    private var badge: some View {
+        ZStack {
+            Circle().fill(badgeTint.opacity(0.12)).frame(width: 88, height: 88)
+            Image(systemName: badgeSymbol)
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(badgeTint)
+        }
+    }
+
+    private var pinDots: some View {
+        HStack(spacing: 20) {
+            ForEach(0 ..< pinLength, id: \.self) { index in
+                Circle()
+                    .fill(index < pin.count ? AppColors.inkPrimary : Color.clear)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Circle().stroke(index < pin.count ? Color.clear : AppColors.inkTertiary.opacity(0.4),
+                                        lineWidth: 2)
+                    )
+            }
+        }
+    }
+
+    // MARK: Entry
+
+    private func appendDigit(_ digit: String) {
+        guard step != .done, pin.count < pinLength else { return }
+        pin += digit
+        AppHaptics.tap()
+    }
+
+    private func removeDigit() {
+        guard step != .done, !pin.isEmpty else { return }
+        pin.removeLast()
+        AppHaptics.tap()
+    }
+
+    private func submit() {
+        guard pin.count == pinLength else { return }
+
+        switch step {
+        case .current:
+            verifyCurrentPIN()
+        case .entry:
+            firstEntry = pin
+            pin = ""
+            errorText = nil
+            step = .confirm
+        case .confirm:
+            confirmNewPIN()
+        case .done:
+            break
+        }
+    }
+
+    /// Same contract as the disconnect screen: a live lockout rejects without consuming an attempt,
+    /// and every wrong guess is recorded — otherwise this screen would be an unmetered oracle for
+    /// the very PIN the disconnect gate rate-limits.
+    private func verifyCurrentPIN() {
+        if let remaining = protection.pinLockRemaining {
+            errorText = lockoutMessage(remaining)
+            pin = ""
+            return
+        }
+
+        guard protection.verifyCustomPIN(pin) else {
+            let lockedUntil = protection.recordPINAttempt(success: false)
+            pin = ""
+            errorText = lockedUntil.map { lockoutMessage($0.timeIntervalSinceNow) }
+                ?? L10n.tr("disconnect2.pin_incorrect")
+            return
+        }
+
+        protection.recordPINAttempt(success: true)
+        pin = ""
+        errorText = nil
+
+        switch intent {
+        case .remove:
+            protection.removeCustomPIN()
+            AppHaptics.success()
+            step = .done
+        case .set, .change:
+            step = .entry
+        }
+    }
+
+    private func confirmNewPIN() {
+        guard pin == firstEntry else {
+            // Restart the pair rather than letting the parent retry only the second entry — a
+            // mistyped first entry would otherwise be saved as the real PIN.
+            errorText = L10n.tr("settings.control_protection_pin_mismatch")
+            pin = ""
+            firstEntry = ""
+            step = .entry
+            return
+        }
+
+        guard protection.saveCustomPIN(pin) else {
+            errorText = L10n.tr("settings.control_protection_pin_invalid")
+            pin = ""
+            firstEntry = ""
+            step = .entry
+            return
+        }
+
+        pin = ""
+        firstEntry = ""
+        errorText = nil
+        AppHaptics.success()
+        step = .done
+    }
+
+    private func lockoutMessage(_ remaining: TimeInterval) -> String {
+        let minutes = max(1, Int((remaining / 60).rounded(.up)))
+        return String(format: L10n.tr("disconnect2.locked_out"), minutes)
     }
 }
 

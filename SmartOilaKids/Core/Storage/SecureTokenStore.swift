@@ -1,6 +1,23 @@
 import Foundation
 import Security
 
+/// Why the most recent Keychain write failed. Carries the raw `OSStatus` because that number is
+/// what identifies the class of problem (-34018 `errSecMissingEntitlement` = signing/entitlement,
+/// -25308 `errSecInteractionNotAllowed` = device locked before first unlock); a boolean alone
+/// cannot tell a support engineer those apart.
+struct SecureTokenStoreWriteFailure: Equatable {
+    /// The Keychain account slot that failed ("api_access_token", "oila_access_token", …).
+    /// Never the token value — this string reaches the diagnostics screen.
+    let account: String
+    let status: OSStatus
+    let occurredAt: Date
+
+    /// Single-line form used for the diagnostics timeline.
+    var diagnosticDescription: String {
+        "keychain_write_failed account=\(account) status=\(status)"
+    }
+}
+
 protocol SecureTokenStoring {
     func accessToken() -> String?
     func refreshToken() -> String?
@@ -8,6 +25,16 @@ protocol SecureTokenStoring {
     func setRefreshToken(_ token: String?)
     func migrateFromUserDefaults(_ userDefaults: UserDefaults)
     func clear()
+    /// The last write that the Keychain rejected, or nil when every write so far succeeded.
+    /// A failed write silently logs the child out, so callers that must not proceed on a lost
+    /// token can check this after storing.
+    var lastWriteFailure: SecureTokenStoreWriteFailure? { get }
+}
+
+extension SecureTokenStoring {
+    /// Defaulted so the existing conformers and test doubles — which predate write reporting and
+    /// live in files this change does not touch — keep compiling unchanged.
+    var lastWriteFailure: SecureTokenStoreWriteFailure? { nil }
 }
 
 final class SecureTokenStore: SecureTokenStoring {
@@ -33,12 +60,35 @@ final class SecureTokenStore: SecureTokenStoring {
     private let accessTokenAccount: String
     private let refreshTokenAccount: String
 
+    /// Writes come from whichever actor made the API call (the device client, the chat socket,
+    /// the session store on the main actor), so the outcome bookkeeping is lock-guarded.
+    private let stateLock = NSLock()
+    private var storedLastWriteStatus: OSStatus = errSecSuccess
+    private var storedLastWriteFailure: SecureTokenStoreWriteFailure?
+    /// Last failure already pushed to diagnostics — a wedged Keychain fails on every single write,
+    /// and an unbounded stream of identical entries would push the real history out of the
+    /// diagnostics timeline.
+    private var reportedFailureSignature: String?
+
     init(
         accessTokenAccount: String = Constants.accessTokenAccount,
         refreshTokenAccount: String = Constants.refreshTokenAccount
     ) {
         self.accessTokenAccount = accessTokenAccount
         self.refreshTokenAccount = refreshTokenAccount
+    }
+
+    /// Raw status of the most recent write (`errSecSuccess` until one fails).
+    var lastWriteStatus: OSStatus {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return storedLastWriteStatus
+    }
+
+    var lastWriteFailure: SecureTokenStoreWriteFailure? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return storedLastWriteFailure
     }
 
     func accessToken() -> String? {
@@ -50,11 +100,25 @@ final class SecureTokenStore: SecureTokenStoring {
     }
 
     func setAccessToken(_ token: String?) {
-        writeValue(token, for: accessTokenAccount)
+        _ = storeAccessToken(token)
     }
 
     func setRefreshToken(_ token: String?) {
-        writeValue(token, for: refreshTokenAccount)
+        _ = storeRefreshToken(token)
+    }
+
+    /// Same as `setAccessToken`, but reports whether the Keychain actually accepted the write.
+    /// Preferred at the points where a lost token is not recoverable (pairing, token refresh):
+    /// the void-returning protocol form cannot tell "stored" from "silently dropped".
+    @discardableResult
+    func storeAccessToken(_ token: String?) -> Bool {
+        write(token, for: accessTokenAccount)
+    }
+
+    /// Refresh-token counterpart of `storeAccessToken`.
+    @discardableResult
+    func storeRefreshToken(_ token: String?) -> Bool {
+        write(token, for: refreshTokenAccount)
     }
 
     func migrateFromUserDefaults(_ userDefaults: UserDefaults) {
@@ -96,11 +160,50 @@ final class SecureTokenStore: SecureTokenStoring {
         return String(data: data, encoding: .utf8)
     }
 
+    /// Performs the write and records its outcome. Returns true when the Keychain accepted it.
+    private func write(_ value: String?, for account: String) -> Bool {
+        let status = writeValue(value, for: account)
+        recordWriteOutcome(status: status, account: account)
+        return status == errSecSuccess
+    }
+
+    /// Remembers the outcome and, on a new failure, publishes it to the diagnostics screen.
+    /// Without this a rejected write is invisible: the token is simply gone on the next read and
+    /// the child appears to have been logged out for no reason.
+    private func recordWriteOutcome(status: OSStatus, account: String) {
+        stateLock.lock()
+        storedLastWriteStatus = status
+
+        guard status != errSecSuccess else {
+            storedLastWriteFailure = nil
+            // Clear the dedupe key so a failure that recurs after a healthy write is reported again.
+            reportedFailureSignature = nil
+            stateLock.unlock()
+            return
+        }
+
+        let failure = SecureTokenStoreWriteFailure(account: account, status: status, occurredAt: Date())
+        storedLastWriteFailure = failure
+        let signature = failure.diagnosticDescription
+        let isNewFailure = reportedFailureSignature != signature
+        reportedFailureSignature = signature
+        stateLock.unlock()
+
+        guard isNewFailure else { return }
+
+        // The diagnostics centre is main-actor isolated while writes arrive from any actor, so hop.
+        // It has no storage-specific snapshot, and the lifecycle timeline is the app-wide event
+        // channel the diagnostics screen already renders — so a wedged Keychain surfaces there
+        // rather than nowhere at all.
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(lastEvent: signature)
+        }
+    }
+
     /// Persists (or clears) a value and reports the final Keychain status. Uses update-first so
     /// the read/write is a single atomic Keychain call — the previous check-then-write left a
     /// window where a concurrent writer produced errSecDuplicateItem that was silently swallowed.
     /// On a duplicate we delete-then-add so a corrupt/partial prior entry cannot wedge the slot.
-    @discardableResult
     private func writeValue(_ value: String?, for account: String) -> OSStatus {
         let query = baseQuery(for: account)
         guard let value = value?.trimmedNonEmpty else {
