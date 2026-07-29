@@ -37,9 +37,6 @@ final class DeviceChatWebSocketService {
     private let pingInterval: TimeInterval = 25
     private let reconnectBase: TimeInterval = 1
     private let reconnectCap: TimeInterval = 30
-    /// Fallback heuristic only. When the peer vanishes without a close frame there is no close code
-    /// to read, and a close sooner than this after opening is *guessed* to be an auth rejection.
-    private let authCloseGrace: TimeInterval = 1.5
     /// Application close codes (the RFC 6455 4000–4999 private range) that mean "your token is no
     /// good": `4401` is the one this gateway documents, `4403` mirrors HTTP 403 for a device whose
     /// pairing was revoked. Anything else in the 4xxx range is a normal server-side close and gets
@@ -69,7 +66,8 @@ final class DeviceChatWebSocketService {
     private var reconnectAttempts = 0
     private var isActive = false
     private var openedAt: Date?
-    private var sawMessageThisConnection = false
+    /// True while a ping has been sent but its pong has not come back. See `startPinging`.
+    private var pingOutstanding = false
     private var isConnected = false
 
     init(
@@ -80,11 +78,25 @@ final class DeviceChatWebSocketService {
         self.session = session
     }
 
+    /// Last-resort teardown. `disconnect()` is driven by the chat screen's `onDisappear`, which does
+    /// NOT fire on a wholesale root swap — e.g. `.oilaSessionInvalidated` replacing the root while
+    /// the thread is open. Without this, an authenticated socket to a backend that may have just
+    /// revoked this device outlived the object that owned it.
+    deinit {
+        task?.cancel(with: .goingAway, reason: nil)
+        pingTask?.cancel()
+        reconnectTask?.cancel()
+    }
+
     // MARK: Lifecycle
 
     /// Idempotent: opens the socket (or reconnects). Safe to call after `onAuthExpired` + a token refresh.
     func connect() {
         isActive = true
+        // Reset the curve on an explicit (re)connect. The counter was only cleared after a drop that
+        // had survived 30s, so a child who left the chat screen mid-flap came back with it still
+        // elevated and the first drop of the new session waited up to 30s instead of 1s.
+        reconnectAttempts = 0
         openSocket()
     }
 
@@ -104,7 +116,7 @@ final class DeviceChatWebSocketService {
         let task = session.webSocketTask(with: url)
         self.task = task
         openedAt = Date()
-        sawMessageThisConnection = false
+        pingOutstanding = false
         // `teardown` above already bumped the generation, so this is the id of the socket we are
         // about to open; every callback armed below is stamped with it.
         let generation = self.generation
@@ -132,11 +144,7 @@ final class DeviceChatWebSocketService {
         // history is only refetched on screen entry. What a stale frame must NOT do is re-arm the
         // receive loop, or the current task would end up with two loops racing on one connection.
         let isCurrentConnection = (generation == self.generation && task != nil)
-        if isCurrentConnection, !isConnected {
-            isConnected = true
-            onConnectedChange?(true)
-        }
-        if isCurrentConnection { sawMessageThisConnection = true }
+        if isCurrentConnection { markConnected(generation: generation) }
         decode(message)
         guard isCurrentConnection else { return }
         receiveNext(generation: generation)
@@ -162,9 +170,21 @@ final class DeviceChatWebSocketService {
 
         if let event { onEvent?(event, payload) }
 
-        let looksLikeMessage = (event?.localizedCaseInsensitiveContains("message") ?? false)
-            || event == nil
-            || payload["id"] != nil || payload["messageId"] != nil
+        // A receipt is NOT a message. Inferring "message" from the mere presence of an id meant a
+        // `chat.read` frame — which carries `messageId` — parsed as a message with no text and no
+        // sender, overwriting the very message it acknowledged with a content-less phantom.
+        let isReceiptEvent = event.map { name in
+            let lowered = name.lowercased()
+            return lowered.contains("read")
+                || lowered.contains("receipt")
+                || lowered.contains("delivered")
+                || lowered.contains("typing")
+        } ?? false
+
+        let looksLikeMessage = !isReceiptEvent
+            && ((event?.localizedCaseInsensitiveContains("message") ?? false)
+                || event == nil
+                || payload["id"] != nil || payload["messageId"] != nil)
         if looksLikeMessage, let parsed = OilaDeviceClient.parseChatMessage(payload) {
             onMessage?(parsed)
         }
@@ -172,19 +192,53 @@ final class DeviceChatWebSocketService {
 
     // MARK: Heartbeat
 
+    /// Flip to connected on real transport evidence. Previously this happened ONLY inside
+    /// `handleReceived`, so the flag tracked inbound traffic rather than the connection: a healthy
+    /// but quiet thread — the normal state of a parent↔child chat — reported "connecting…" for the
+    /// entire session, and the child concluded chat was broken.
+    private func markConnected(generation: UInt64) {
+        guard generation == self.generation, task != nil, !isConnected else { return }
+        isConnected = true
+        onConnectedChange?(true)
+    }
+
     private func startPinging(generation: UInt64) {
         pingTask?.cancel()
         pingTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            // Ping IMMEDIATELY. The first completion is the earliest honest evidence the transport
+            // is up, and it is what flips `isConnected` — so a quiet socket still reports online.
+            var isFirstTick = true
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(self.pingInterval * 1_000_000_000))
-                if Task.isCancelled { return }
+                if !isFirstTick {
+                    try? await Task.sleep(nanoseconds: UInt64(self.pingInterval * 1_000_000_000))
+                    if Task.isCancelled { return }
+                }
+                isFirstTick = false
                 // Stop the moment this heartbeat's socket is gone: without the generation check a
                 // ping armed for the previous connection could report a failure against the new one.
                 guard generation == self.generation, let task = self.task else { return }
+
+                // A pong still outstanding from the previous tick means the peer vanished without a
+                // close frame. A carrier NAT dropping its mapping produces no FIN, no RST and no
+                // sendPing error, so the completion simply never fires — this deadline is the only
+                // way that half-open socket is ever detected. Without it the header said "onlayn"
+                // while messages silently stopped arriving.
+                if self.pingOutstanding {
+                    self.handleDisconnect(generation: generation)
+                    return
+                }
+
+                self.pingOutstanding = true
                 task.sendPing { [weak self] error in
-                    if error != nil {
-                        Task { @MainActor in self?.handleDisconnect(generation: generation) }
+                    Task { @MainActor in
+                        guard let self, generation == self.generation else { return }
+                        self.pingOutstanding = false
+                        if error != nil {
+                            self.handleDisconnect(generation: generation)
+                        } else {
+                            self.markConnected(generation: generation)
+                        }
                     }
                 }
             }
@@ -250,8 +304,14 @@ final class DeviceChatWebSocketService {
         if let status = (task.response as? HTTPURLResponse)?.statusCode, status == 401 || status == 403 {
             return true
         }
-        return !sawMessageThisConnection
-            && (openedAt.map { Date().timeIntervalSince($0) < authCloseGrace } ?? false)
+        // NO third-tier guess. It used to read "closed within 1.5s having seen no frame" as an auth
+        // rejection — but that matches EVERY offline attempt: with no network, `receive` fails in
+        // ~50ms with NSURLErrorNotConnectedToInternet, no close code and no HTTP response. So the
+        // most ordinary failure in mobile software was reported as token expiry, and the owner's
+        // fixed 5s auth retry then overrode this class's exponential backoff entirely — the case the
+        // backoff exists for was the one case it never ran in. A drop with neither a close code nor
+        // an HTTP response is a TRANSPORT failure; treat it as one and let the backoff do its job.
+        return false
     }
 
     private func scheduleReconnect() {
@@ -259,7 +319,12 @@ final class DeviceChatWebSocketService {
         // first chain's `teardown` immediately kills, and vice versa, forever.
         reconnectTask?.cancel()
         reconnectAttempts += 1
-        let delay = min(reconnectCap, reconnectBase * pow(2, Double(reconnectAttempts - 1)))
+        // Jittered. A bare exponential curve is deterministic, so every device that dropped for the
+        // same reason — a deploy, a gateway restart — retried in lockstep at 1s, 2s, 4s… The backoff
+        // protected each device from a hot loop while doing nothing about the synchronized herd that
+        // a deploy actually produces.
+        let base = min(reconnectCap, reconnectBase * pow(2, Double(reconnectAttempts - 1)))
+        let delay = base * Double.random(in: 0.8 ... 1.2)
         reconnectTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             if Task.isCancelled { return }
@@ -285,7 +350,7 @@ final class DeviceChatWebSocketService {
         // make the next drop look like it happened milliseconds after opening, which is exactly
         // the input the fallback auth heuristic reads.
         openedAt = nil
-        sawMessageThisConnection = false
+        pingOutstanding = false
         if isConnected && notifyDisconnected {
             isConnected = false
             onConnectedChange?(false)

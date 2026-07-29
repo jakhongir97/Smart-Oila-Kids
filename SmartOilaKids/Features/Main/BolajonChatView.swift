@@ -173,7 +173,8 @@ final class BolajonChatViewModel: ObservableObject {
     private let socket: DeviceChatWebSocketService
     private var loadedOnce = false
     /// Pending post-auth-expiry reconnect, cancelled when the screen goes away.
-    private var authRetryTask: Task<Void, Never>?
+    /// Refetch scheduled when the socket comes back up. See `onConnectedChange`.
+    private var resyncTask: Task<Void, Never>?
     /// What each unacknowledged echo was made of, so a failed send can be retried verbatim
     /// instead of asking the child to type (or pick the photo) again.
     private var outbox: [String: OutgoingChatDraft] = [:]
@@ -195,22 +196,34 @@ final class BolajonChatViewModel: ObservableObject {
         self.chat = chat
         self.socket = socket
         self.attachments = ChatAttachmentStore(chat: chat)
-        socket.onConnectedChange = { [weak self] connected in self?.isConnected = connected }
+        socket.onConnectedChange = { [weak self] connected in
+            guard let self else { return }
+            let wasConnected = self.isConnected
+            self.isConnected = connected
+            // Resync on every (re)connect, not once per view-model. History was fetched exactly
+            // once (`loadedOnce`) and nothing refetched afterwards, so any message the parent sent
+            // while the socket was down — up to the backoff cap, or a whole backgrounded stretch —
+            // never entered an already-open thread. It stayed missing until the child popped and
+            // re-pushed the screen. `load()` merges rather than replaces, so this is safe to repeat
+            // and cannot drop an in-flight local echo.
+            guard connected, !wasConnected, self.loadedOnce else { return }
+            self.resyncTask?.cancel()
+            self.resyncTask = Task { [weak self] in await self?.load() }
+        }
         socket.onMessage = { [weak self] message in self?.ingest(message) }
         socket.onEvent = { [weak self] event, payload in self?.applyEvent(event, payload) }
         socket.onAuthExpired = { [weak self] in
             guard let self else { return }
             self.isConnected = false
-            // Transient token rejection — retry shortly; a persistent one is handled by the app's
-            // own auth flow (the device re-pairs), so we don't surface an error here. The retry is
-            // held so `disappear()` can cancel it: an uncancelled one reopened the socket five
-            // seconds after the child had already left the screen.
-            self.authRetryTask?.cancel()
-            self.authRetryTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                guard !Task.isCancelled else { return }
-                self?.socket.connect()
-            }
+            // Deliberately NO retry here. This used to schedule a fixed 5s reconnect, which
+            // overrode the service's exponential backoff entirely — and because a fast transport
+            // failure was misread as auth expiry, that made an offline child retry every 5s
+            // indefinitely with the radio awake. A server-side unpair produced the same loop:
+            // ~720 rejected upgrades an hour that could never succeed, since no code path on a
+            // device can obtain a new token.
+            //
+            // The service owns retry timing and already re-reads the token in `makeURL()` on every
+            // attempt, so a refresh that lands meanwhile is picked up without any help from here.
         }
     }
 
@@ -225,8 +238,8 @@ final class BolajonChatViewModel: ObservableObject {
     }
 
     func disappear() {
-        authRetryTask?.cancel()
-        authRetryTask = nil
+        resyncTask?.cancel()
+        resyncTask = nil
         socket.disconnect()
     }
 
