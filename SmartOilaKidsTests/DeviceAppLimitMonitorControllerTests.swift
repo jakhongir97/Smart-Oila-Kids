@@ -63,6 +63,91 @@ final class DeviceAppLimitMonitorControllerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(clearShieldCount, 2)
     }
 
+    // MARK: - Usage-report enforcement set (audit regressions)
+
+    /// `dailyLimitSeconds: 0` means "no time allowed", NOT "no limit".
+    ///
+    /// The normalizer collapsed nil and 0 with `?? 0` and then read the result as "unlimited", so
+    /// the parent's strictest possible setting produced the loosest behaviour.
+    func testZeroDailyLimitBlocksImmediatelyRatherThanMeaningUnlimited() {
+        let controller = makeController(service: DeviceAppLimitServiceSpy(results: []))
+        controller.activate(dsn: "child-zero")
+
+        controller.applyUsageReportResponse(
+            DeviceApplicationUsageReportResponse(
+                lockedPackages: [],
+                stats: [
+                    DeviceApplicationUsageReportStat(
+                        packageName: "com.example.zero",
+                        usageDate: nil,
+                        usedSeconds: 0,
+                        dailyLimitSeconds: 0,
+                        remainingSeconds: nil,
+                        isLimitReached: false
+                    )
+                ]
+            ),
+            dsn: "child-zero"
+        )
+
+        // `remoteLimitCount` counts exactly the enforcement set (isLimitEnabled && minutes > 0),
+        // which is what the shield is driven from. Under the old `?? 0` collapse this was 0.
+        XCTAssertEqual(
+            controller.presentationState.remoteLimitCount, 1,
+            "an explicit 0 budget must survive into the enforcement set"
+        )
+    }
+
+    /// A `null` budget still means "no limit", and must NOT be shielded.
+    func testNullDailyLimitIsNotEnforced() {
+        let controller = makeController(service: DeviceAppLimitServiceSpy(results: []))
+        controller.activate(dsn: "child-null")
+
+        controller.applyUsageReportResponse(
+            DeviceApplicationUsageReportResponse(
+                lockedPackages: [],
+                stats: [
+                    DeviceApplicationUsageReportStat(
+                        packageName: "com.example.unlimited",
+                        usageDate: nil,
+                        usedSeconds: 1200,
+                        dailyLimitSeconds: nil,
+                        remainingSeconds: nil,
+                        isLimitReached: false
+                    )
+                ]
+            ),
+            dsn: "child-null"
+        )
+
+        XCTAssertEqual(
+            controller.presentationState.remoteLimitCount, 0,
+            "a null budget means no limit and must not be enforced"
+        )
+    }
+
+    /// A hard block and a time budget are INDEPENDENT parent controls; enforcement is their union.
+    ///
+    /// The set was derived from `stats` alone, so a blocked app the child had not opened today had
+    /// no row at all and was never shielded -- the client honoured only the intersection.
+    func testHardLockedPackageWithNoUsageRowIsStillEnforced() {
+        let controller = makeController(service: DeviceAppLimitServiceSpy(results: []))
+        controller.activate(dsn: "child-union")
+
+        controller.applyUsageReportResponse(
+            DeviceApplicationUsageReportResponse(
+                lockedPackages: ["com.example.blocked"],
+                stats: []
+            ),
+            dsn: "child-union"
+        )
+
+        XCTAssertEqual(
+            controller.presentationState.remoteLimitCount, 1,
+            "a locked package with no usage row must still reach the enforcement set"
+        )
+    }
+
     func testActivateWithNoEnabledLimitsPublishesNoLimits() async {
         let noLimitsResult = DeviceAppLimitFetchResult(
             deviceID: 7,

@@ -129,7 +129,7 @@ final class DeviceLockScheduleMonitorControllerTests: XCTestCase {
         XCTAssertEqual(startedActivities.map { $0.1.intervalEnd.minute }, [59, 45])
     }
 
-    func testApplyScheduleTreatsEqualStartAndEndAsAllDayLock() throws {
+    func testApplyScheduleTreatsZeroLengthWindowAsNoLock() throws {
         var startedActivities: [(DeviceActivityName, DeviceActivitySchedule)] = []
         var diagnostics: [ScheduleDiagnostics] = []
 
@@ -155,19 +155,22 @@ final class DeviceLockScheduleMonitorControllerTests: XCTestCase {
 
         controller.applySchedule(schedule, dsn: "child-always")
 
-        XCTAssertEqual(startedActivities.count, 1)
-        XCTAssertEqual(
-            startedActivities.first?.0.rawValue,
-            DeviceLockScheduleActivityIdentifier.rawValue(dsn: "child-always", suffix: "always")
-        )
-        XCTAssertEqual(startedActivities.first?.1.intervalStart.hour, 0)
-        XCTAssertEqual(startedActivities.first?.1.intervalStart.minute, 0)
-        XCTAssertEqual(startedActivities.first?.1.intervalEnd.hour, 23)
-        XCTAssertEqual(startedActivities.first?.1.intervalEnd.minute, 59)
-        XCTAssertEqual(diagnostics.last?.status, "monitoring")
+        // A zero-length window registers NOTHING.
+        //
+        // This previously asserted the opposite -- that start == end was promoted to a 00:00-23:59
+        // all-day lock. That is an unsafe reading of an ambiguous input: `CreateLockScheduleDto`
+        // puts an independent `minimum: 0, maximum: 1439` on startMinute and endMinute with NO
+        // cross-field constraint, so a parent-side picker defaulting both to the same value produces
+        // a body the backend accepts -- and the child was then locked around the clock while the
+        // parent saw what looked like an inert row.
+        //
+        // For a parental control, the safe reading of an ambiguous window is the one that does not
+        // lock a child indefinitely. If the backend ever defines zero-length as all-day it has to
+        // send 0...1439 explicitly.
+        XCTAssertEqual(startedActivities.count, 0)
+        XCTAssertEqual(diagnostics.last?.status, "disabled")
         XCTAssertEqual(diagnostics.last?.dsn, "child-always")
-        XCTAssertEqual(diagnostics.last?.schedule, "00:00 - 00:00")
-        XCTAssertEqual(diagnostics.last?.activityCount, 1)
+        XCTAssertEqual(diagnostics.last?.activityCount, 0)
     }
 
     func testApplyScheduleWithoutAuthorizationSkipsMonitoringAndReportsUnavailable() throws {

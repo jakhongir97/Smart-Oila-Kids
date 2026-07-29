@@ -29,12 +29,35 @@ protocol SecureTokenStoring {
     /// A failed write silently logs the child out, so callers that must not proceed on a lost
     /// token can check this after storing.
     var lastWriteFailure: SecureTokenStoreWriteFailure? { get }
+
+    /// Store and REPORT whether the Keychain accepted the write. Required on the protocol (not just
+    /// the concrete store) so `pair()` can fail loudly through the injected dependency rather than
+    /// silently reporting a successful pairing with no credential on disk.
+    @discardableResult
+    func storeAccessToken(_ token: String?) -> Bool
+    @discardableResult
+    func storeRefreshToken(_ token: String?) -> Bool
 }
 
 extension SecureTokenStoring {
     /// Defaulted so the existing conformers and test doubles — which predate write reporting and
     /// live in files this change does not touch — keep compiling unchanged.
     var lastWriteFailure: SecureTokenStoreWriteFailure? { nil }
+
+    /// Defaults for conformers that do not report write outcomes. They perform the write and then
+    /// verify by READING IT BACK, rather than optimistically returning true — an in-memory test
+    /// double answers correctly, and a real store that dropped the write is caught.
+    @discardableResult
+    func storeAccessToken(_ token: String?) -> Bool {
+        setAccessToken(token)
+        return accessToken()?.trimmedNonEmpty == token?.trimmedNonEmpty
+    }
+
+    @discardableResult
+    func storeRefreshToken(_ token: String?) -> Bool {
+        setRefreshToken(token)
+        return refreshToken()?.trimmedNonEmpty == token?.trimmedNonEmpty
+    }
 }
 
 final class SecureTokenStore: SecureTokenStoring {

@@ -20,9 +20,21 @@ struct OilaAPIError: LocalizedError {
 
     var errorDescription: String? { message }
 
-    /// The refresh token is no longer valid — the caller should force re-pairing.
+    /// Raised when this device holds no readable credential — an empty Keychain, or a read that
+    /// failed for a reason that is NOT "the item is absent" (notably errSecInteractionNotAllowed
+    /// before first unlock). Deliberately excluded from `requiresRePair`: see below.
+    static let noCredentialCode = "NO_LOCAL_CREDENTIAL"
+
+    /// The device credential is no longer valid server-side — the caller should force re-pairing.
+    ///
+    /// `NO_LOCAL_CREDENTIAL` is excluded on purpose. Requests used to be sent WITHOUT an
+    /// Authorization header whenever the Keychain read returned nil, so the server answered 401 and
+    /// "we cannot read our own token" became indistinguishable from "the parent unpaired this
+    /// device". The confirmation probe then re-read the same unreadable Keychain, got the same 401,
+    /// and self-confirmed the revocation -- destroying a perfectly valid pairing.
     var requiresRePair: Bool {
-        errorCode == "REFRESH_INVALID" || errorCode == "UNAUTHORIZED" || statusCode == 401
+        guard errorCode != Self.noCredentialCode else { return false }
+        return errorCode == "REFRESH_INVALID" || errorCode == "UNAUTHORIZED" || statusCode == 401
     }
 }
 
@@ -381,7 +393,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
         guard let tokens = Self.parseTokens(from: data) else {
             throw OilaAPIError(statusCode: 200, message: "Pairing response missing tokens", errorCode: "PAIR_NO_TOKEN", fieldErrors: [])
         }
-        persist(tokens)
+        try persist(tokens)
         return OilaPairResult(tokens: tokens, child: Self.parseChild(from: data), dsn: dsn)
     }
 
@@ -398,7 +410,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
         guard let tokens = Self.parseTokens(from: data) else {
             throw OilaAPIError(statusCode: 200, message: "Refresh response missing tokens", errorCode: "REFRESH_NO_TOKEN", fieldErrors: [])
         }
-        persist(tokens)
+        try persist(tokens)
     }
 
     func logout() async throws {
@@ -792,7 +804,18 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 request.setValue(contentType, forHTTPHeaderField: "Content-Type")
             }
         }
-        if authorized, let token = secureTokens.accessToken()?.trimmedNonEmpty {
+        if authorized {
+            // Fail fast instead of sending an UNAUTHENTICATED request. There was no `else` here, so
+            // an unreadable Keychain silently produced a request with no Authorization header, and
+            // the resulting 401 was treated as a revoked pairing.
+            guard let token = secureTokens.accessToken()?.trimmedNonEmpty else {
+                throw OilaAPIError(
+                    statusCode: 401,
+                    message: "No device credential available on this device",
+                    errorCode: OilaAPIError.noCredentialCode,
+                    fieldErrors: []
+                )
+            }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -830,10 +853,29 @@ final class OilaDeviceClient: OilaDeviceServicing {
 
     // MARK: - Parsing helpers
 
-    private func persist(_ tokens: OilaTokens) {
-        secureTokens.setAccessToken(tokens.accessToken)
-        if let refresh = tokens.refreshToken {
-            secureTokens.setRefreshToken(refresh)
+    /// Persist freshly minted tokens, THROWING if the Keychain rejects the write.
+    ///
+    /// This used the void-returning setters, so a rejected write (e.g. errSecMissingEntitlement on
+    /// a mis-signed TestFlight build) was swallowed: `pair()` returned success, `oilaPaired` was set
+    /// true, the child walked the whole onboarding, and then every authenticated call failed. The
+    /// checked API existed for exactly this and had zero callers anywhere in the repo, tests
+    /// included. Pairing is a point where a lost token is unrecoverable, so it must fail loudly.
+    private func persist(_ tokens: OilaTokens) throws {
+        guard secureTokens.storeAccessToken(tokens.accessToken) else {
+            throw OilaAPIError(
+                statusCode: -1,
+                message: "Could not store the device credential on this device",
+                errorCode: "KEYCHAIN_WRITE_FAILED",
+                fieldErrors: []
+            )
+        }
+        if let refresh = tokens.refreshToken, !secureTokens.storeRefreshToken(refresh) {
+            throw OilaAPIError(
+                statusCode: -1,
+                message: "Could not store the device credential on this device",
+                errorCode: "KEYCHAIN_WRITE_FAILED",
+                fieldErrors: []
+            )
         }
     }
 
