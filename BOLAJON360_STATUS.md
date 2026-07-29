@@ -18,7 +18,7 @@ backend.
 |---|---|
 | **App name (in build)** | Bolajon360 |
 | **Bundle id** | `uz.smartoila.kids` (team `3TWN5NW4BL`) |
-| **Version** | **1.1 (build 9)** |
+| **Version** | **1.1 (build 10)** |
 | **Branch** | `audit-fixes` off `main`. **`main` has unpushed commits — see "CI" below.** |
 | **Backend (live)** | `https://api.oila360.uz/api/v1` — Bearer `deviceToken`, single long-lived token |
 | **Auth model** | Parent generates a 5-digit pairing code → child redeems via `POST /device/pair` |
@@ -94,7 +94,7 @@ CI extension step fixed · RC gate now rejects NO-GO · a new live-endpoint gate
       backgrounded. Re-tighten the onboarding step when it lands.
 - [ ] **Run the four flows on an iPad simulator.** Width clamps are in; not visually verified.
 - [ ] **Push `main` and `audit-fixes`, get a green CI run.** `git rev-list --count origin/main..main`
-      was 3 before this branch: the chat, LiveKit and build-9 work exists only on this machine.
+      was 3 before this branch: the chat, LiveKit and build-9/10 work exists only on this machine.
 
 **Team / Apple / ASC**
 
