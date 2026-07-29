@@ -78,6 +78,17 @@ extension RootView {
         if newValue == .background {
             lastBackgroundedAt = now
             persistBackgroundTimestamp(now)
+            // End any live listening session on backgrounding. This handler previously never
+            // referenced audio at all: no `audio` background mode is declared, so iOS will not keep
+            // a capture session running — but the `location` mode keeps the PROCESS alive, so the
+            // room and its published track stayed connected. The parent's UI showed an active
+            // session while receiving silence, `state` never left `.live`, and capture resumed on
+            // foreground with no fresh trigger and no fresh consent. Note the corollary: the
+            // indicator's "always visible" promise is only true while the app is foreground, which
+            // is exactly why the session must not survive backgrounding.
+            if AppRuntime.audioStreamingEnabled {
+                DeviceAudioStreamManager.shared.stopByChild()
+            }
             OilaTelemetryService.shared.flushNow()
             if shouldRunLocalChildServices,
                AppRuntime.screenTimeFeaturesEnabled {

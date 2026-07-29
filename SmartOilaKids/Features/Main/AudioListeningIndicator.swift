@@ -4,6 +4,10 @@ import SwiftUI
 /// live. This is the child-facing disclosure that keeps live audio NON-COVERT — required to stay
 /// within App Store Guideline 5.1.2 (covert recording) for a monitoring app.
 struct AudioListeningIndicator: View {
+    /// Ends the session. The child must be able to stop this themselves — a one-time consent tap
+    /// that can never be withdrawn is not consent.
+    var onStop: (() -> Void)?
+
     @State private var pulse = false
 
     var body: some View {
@@ -19,6 +23,21 @@ struct AudioListeningIndicator: View {
             Text(L10n.tr("audio2.listening"))
                 .font(AppTypography.bodyStrong(13))
                 .foregroundStyle(Color.white)
+
+            if let onStop {
+                Button(action: onStop) {
+                    Text(L10n.tr("audio2.stop"))
+                        .font(AppTypography.bodyStrong(13))
+                        .foregroundStyle(AppColors.sosCoral)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.white))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(L10n.tr("audio2.stop")))
+                // Comfortably past the 44pt minimum once the capsule padding is counted.
+                .frame(minHeight: 32)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
@@ -29,6 +48,7 @@ struct AudioListeningIndicator: View {
             guard !UIAccessibility.isReduceMotionEnabled else { return }
             withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { pulse = true }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(L10n.tr("audio2.listening")))
     }
 }

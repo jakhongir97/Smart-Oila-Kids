@@ -254,6 +254,9 @@ final class DeviceAudioStreamManager: ObservableObject {
     private let stream: OilaStreamServicing
     private let defaults: UserDefaults
     private var publisher: LiveAudioPublishing?
+    /// Monotonic id of the current start attempt, so a resumption after an await can tell whether it
+    /// still owns the session. See `start()`.
+    private var startGeneration: UInt64 = 0
     private let consentKey = "OILA_AUDIO_CONSENT_GRANTED"
 
     init(stream: OilaStreamServicing = StreamTokenSourceFactory.make(), defaults: UserDefaults = .standard) {
@@ -277,12 +280,16 @@ final class DeviceAudioStreamManager: ObservableObject {
 
     /// Every other push route is DSN-gated by the view layer (`RootView.shouldHandlePush`), but the
     /// audio routes are observed directly here — so without this gate a push addressed to a SIBLING
-    /// device opened THIS child's microphone. Same policy as `shouldHandlePush`: a payload carrying
-    /// no DSN is accepted, a payload carrying one must match this install's DSN (the value pairing
-    /// sends as `dsn` and `SessionStore` mirrors) case-insensitively.
+    /// device opened THIS child's microphone.
+    ///
+    /// This route FAILS CLOSED, unlike `shouldHandlePush`. The shared policy accepts a payload that
+    /// carries no DSN at all, which is a defensible default for a lock refresh or a deep link — but
+    /// this is the one route that opens hardware on a child's device, and there a single broadcast
+    /// or malformed payload would have opened the microphone on EVERY paired install at once. An
+    /// unaddressed audio command is refused; the sender must name the device it means.
     private func pushMatchesThisDevice(_ notification: Notification) -> Bool {
         guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
-            return true
+            return false
         }
         // `persistedDSN`, not `deviceDSN`: the latter MINTS and stores a UUID when none exists, so
         // merely asking "is this push mine?" on a never-paired install would hand it an identity.
@@ -318,16 +325,41 @@ final class DeviceAudioStreamManager: ObservableObject {
         guard AppRuntime.audioStreamingEnabled else { return }
         guard AudioPublisherFactory.isLiveKitLinked else { state = .unsupported; return }
         guard #available(iOS 17.0, *) else { state = .unsupported; return }
+        // RE-ENTRANCY GUARD. `start()` had none, and a foreground alert+content-available push is
+        // delivered through BOTH didReceiveRemoteNotification and willPresent with no de-duplication
+        // by message id — so two calls could proceed while `state` was still .idle. Publisher A was
+        // then overwritten by B at `self.publisher = publisher`, both connected, both opened the
+        // mic, and `stop()` only ever disconnected B. Room A published indefinitely with the
+        // indicator off, endable only by force-quit or reboot.
+        guard state != .live, state != .connecting else { return }
         state = .connecting
-        guard await requestMicPermission() else { state = .error("mic_denied"); return }
+        // Every await below is a point where a concurrent stop() (or a newer start) can take
+        // ownership; `generation` lets each resumption check whether it is still the owner.
+        startGeneration &+= 1
+        let generation = startGeneration
+
+        guard await requestMicPermission() else {
+            if generation == startGeneration { state = .error("mic_denied") }
+            return
+        }
+        guard generation == startGeneration, state == .connecting else { return }
         do {
             let token = try await stream.mintStreamToken()
+            guard generation == startGeneration, state == .connecting else { return }
             let publisher = AudioPublisherFactory.make()
             publisher.onEnded = { [weak self] in
                 Task { @MainActor in await self?.handleSessionEndedByRoom() }
             }
             self.publisher = publisher
             try await publisher.connect(url: token.url, token: token.token)
+            // A stop() that landed WHILE connect() was awaiting nils `publisher` and returns, so
+            // without this the mic came up on an orphaned room and `state` flipped to .live with no
+            // publisher to stop -- banner off, room still publishing.
+            guard generation == startGeneration, self.publisher === publisher else {
+                publisher.onEnded = nil
+                await publisher.disconnect()
+                return
+            }
             state = .live
         } catch {
             // The throw can land AFTER `connect()` already joined the room (the mic-publish step is
@@ -341,7 +373,26 @@ final class DeviceAudioStreamManager: ObservableObject {
         }
     }
 
+    /// The child ending the session themselves, from the listening indicator.
+    ///
+    /// There was previously NO child-facing stop anywhere in the app: `stop()` was reachable only
+    /// from the parent's stop push and from the room's own teardown, so a one-time consent tap by a
+    /// seven-year-old was effectively perpetual and irrevocable. A grant that cannot be withdrawn is
+    /// not consent.
+    func stopByChild() {
+        Task { await stop() }
+    }
+
+    /// Revoke the one-time consent. The next listen request must ask again.
+    func revokeConsent() {
+        defaults.removeObject(forKey: consentKey)
+        needsConsent = false
+        Task { await stop() }
+    }
+
     func stop() async {
+        // Bump the generation so an in-flight start() cannot resume and claim ownership after us.
+        startGeneration &+= 1
         // Detach `onEnded` and drop the reference BEFORE disconnecting: the publisher now also
         // reports the room's own teardown through `onEnded`, and a local stop must not loop back
         // into `handleSessionEndedByRoom()`.

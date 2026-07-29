@@ -48,6 +48,10 @@ struct RootView: View {
             // Drop the session so the root routes back to pairing (setupCompleted + oilaPaired go
             // false) instead of stranding the child on Home with silently-dead telemetry.
             guard sessionStore.oilaPaired || sessionStore.setupCompleted else { return }
+            // Tear the live audio session down FIRST. clearSession() only dropped local credentials,
+            // so a publish in flight survived a parent-initiated unpair until the SFU token expired
+            // -- the microphone outliving the authorization to use it.
+            audioStream.stopByChild()
             sessionStore.clearSession()
         }
         // Device-lock takeover as a NATIVE full-screen presentation. The binding ignores
@@ -74,7 +78,7 @@ struct RootView: View {
         // Non-covert live-audio surfaces, mounted app-wide so they show over any screen.
         .overlay(alignment: .top) {
             if AppRuntime.audioStreamingEnabled, audioStream.isLive {
-                AudioListeningIndicator()
+                AudioListeningIndicator(onStop: { audioStream.stopByChild() })
             }
         }
         .sheet(isPresented: audioConsentPresented) {
