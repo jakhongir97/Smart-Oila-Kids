@@ -64,13 +64,16 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         UserDefaults.standard.set(token, forKey: "PUSH_NOTIFICATION_TOKEN")
         FCMPushRegistrar.shared.setAPNsToken(deviceToken)
 
-        // When FCM is live the real token is uploaded by FCMPushRegistrar. Only fall back to
-        // uploading the raw APNs token as a stopgap before the Firebase SDK/plist are present —
-        // the backend is FCM-only, so this stopgap cannot actually receive pushes, but it keeps
-        // the device's push address non-empty until Firebase lands.
-        guard !FCMPushRegistrar.shared.isConfigured else { return }
-        if UserDefaults.standard.bool(forKey: "BOLAJON_OILA_PAIRED") {
-            Task { try? await OilaDeviceClient.shared.updateFCMToken(token) }
+        // Do NOT upload the raw APNs token as a stand-in for an FCM registration token. The
+        // backend field is `fcmToken` and delivery is FCM-only, so a 64-char APNs hex string is not
+        // merely useless there -- it makes the device look addressable when it is not, which is why
+        // the parent app reports a healthy push channel that silently drops every command. Leave
+        // the address EMPTY until FirebaseMessaging is actually linked; empty is the honest value
+        // and the backend already tolerates its absence (`fcmToken` is optional at pairing).
+        guard FCMPushRegistrar.shared.isConfigured else { return }
+        if UserDefaults.standard.bool(forKey: "BOLAJON_OILA_PAIRED"),
+           let fcmToken = UserDefaults.standard.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty {
+            Task { try? await OilaDeviceClient.shared.updateFCMToken(fcmToken) }
         }
     }
 

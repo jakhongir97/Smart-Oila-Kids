@@ -13,6 +13,14 @@ enum BolajonMetrics {
     static let controlRadius: CGFloat = 16
     static let buttonHeight: CGFloat = 54
     static let screenPadding: CGFloat = 22
+    /// Maximum width of a content column.
+    ///
+    /// The app declares TARGETED_DEVICE_FAMILY "1,2" and all four iPad orientations, but carried no
+    /// size-class handling anywhere — repo-wide greps for horizontalSizeClass / verticalSizeClass
+    /// returned nothing — so every screen was an iPhone layout stretched edge to edge. At 1366pt a
+    /// pairing-code box rendered ~256pt wide and a keypad key ~433pt. Per QA1623 iPad support cannot
+    /// be dropped after shipping it, so the column is clamped and centred instead.
+    static let contentMaxWidth: CGFloat = 640
     static let cardPadding: CGFloat = 18
     static let stackSpacing: CGFloat = 16
 
@@ -196,6 +204,7 @@ struct BolajonHeroSheet<Hero: View, SheetContent: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 sheet()
+                    .frame(maxWidth: BolajonMetrics.contentMaxWidth, alignment: .top)
                     .frame(maxWidth: .infinity, alignment: .top)
                     .padding(.horizontal, BolajonMetrics.screenPadding)
                     .padding(.top, 28)
@@ -774,9 +783,13 @@ struct CodeEntryField: View {
                                     lineWidth: active ? 2 : 1)
                     )
                     .overlay(cursorContent(filled: filled, isCursor: isCursor, index: index))
-                    .frame(height: 58)
+                    // Intrinsic width, not "whatever the container gives me". These were unwidthed,
+                    // so on a 1366pt iPad each of the five boxes rendered ~256pt across -- on the
+                    // pairing screen, which is the first thing an App Review tester touches.
+                    .frame(width: 56, height: 58)
             }
         }
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(L10n.tr("a11y.code_entry")))
         .accessibilityValue(Text(L10n.tr("a11y.digits_entered", code.count, length)))
@@ -820,6 +833,8 @@ struct NumericKeypad: View {
     let onBackspace: () -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    /// Three `.flexible()` columns with nothing bounding them made each key ~433pt wide on iPad.
+    private let maxKeypadWidth: CGFloat = 320
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: 12) {
@@ -839,6 +854,8 @@ struct NumericKeypad: View {
             .buttonStyle(.plain)
             .accessibilityLabel(Text(L10n.tr("a11y.delete")))
         }
+        .frame(maxWidth: maxKeypadWidth)
+        .frame(maxWidth: .infinity)
     }
 
     private func key(_ title: String, action: @escaping () -> Void) -> some View {
@@ -878,6 +895,8 @@ struct ScreenScaffold<Content: View>: View {
                     .padding(.horizontal, BolajonMetrics.screenPadding)
                     .padding(.top, 8)
                     .padding(.bottom, 28)
+                    .frame(maxWidth: BolajonMetrics.contentMaxWidth)
+                    .frame(maxWidth: .infinity)
             }
             .appHiddenScrollIndicators()
         }
@@ -924,6 +943,8 @@ struct BolajonScreen<Content: View>: View {
                     .padding(.horizontal, BolajonMetrics.screenPadding)
                     .padding(.top, 4)
                     .padding(.bottom, 28)
+                    .frame(maxWidth: BolajonMetrics.contentMaxWidth)
+                    .frame(maxWidth: .infinity)
             }
             .appHiddenScrollIndicators()
         }

@@ -445,11 +445,30 @@ struct SOSConfirmTakeover: View {
         .padding(.top, 24)
         .padding(.bottom, 20)
         .frame(maxWidth: .infinity)
+        // Scrollable, because the content is NOT a fixed height: the failed state adds an error
+        // line, every string is translated into three languages, and the child's Dynamic Type
+        // setting scales all of it. Measured at ~418pt required against ~346pt usable after the
+        // home-indicator inset, and the controls that fell off the bottom were Cancel and Retry --
+        // on the panic path. `.basedOnSize` keeps it inert (no rubber-banding) whenever it fits.
+        .scrollableIfNeeded()
     }
 }
 
 /// The sheet height that fits the SOS content in its tallest state (failed, with the error line).
+/// The content scrolls inside it, so an overflow degrades to a scroll rather than clipped buttons.
 let sosSheetDetent: PresentationDetent = .height(380)
+
+extension View {
+    /// Wraps the receiver in a ScrollView that only actually scrolls when the content overflows.
+    @ViewBuilder
+    func scrollableIfNeeded() -> some View {
+        if #available(iOS 16.4, *) {
+            ScrollView { self }.scrollBounceBehavior(.basedOnSize)
+        } else {
+            ScrollView { self }
+        }
+    }
+}
 
 extension View {
     /// Native chrome for the SOS confirmation sheet: fixed detent, grabber, and the design's card

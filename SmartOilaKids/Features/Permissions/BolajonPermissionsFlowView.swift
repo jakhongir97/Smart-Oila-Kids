@@ -48,8 +48,14 @@ struct BolajonPermissionStep: Identifiable {
     private static let allSteps: [BolajonPermissionStep] = [
         .init(kind: .intro, icon: "shield.lefthalf.filled", intent: .lavender,
               titleKey: "perm2.intro.title", bodyKey: "perm2.intro.body", primaryKey: "perm2.intro.cta", isMandatory: true),
+        // NOT mandatory. FirebaseMessaging is not linked in this build (the app target has exactly
+        // one SPM package, LiveKit, and no GoogleService-Info.plist ships), so every
+        // `#if canImport(FirebaseMessaging)` body compiles out and this permission can never
+        // produce a single notification. A non-skippable gate for a dead channel is Guideline
+        // 5.1.1(i) / 2.1 exposure, and the `remote-notification` background mode has been dropped
+        // from Info.plist to match. Make this mandatory again once FCM actually ships.
         .init(kind: .notifications, icon: "bell.fill", intent: .lavender,
-              titleKey: "perm2.notifications.title", bodyKey: "perm2.notifications.body", primaryKey: "perm2.notifications.cta", isMandatory: true),
+              titleKey: "perm2.notifications.title", bodyKey: "perm2.notifications.body", primaryKey: "perm2.notifications.cta", isMandatory: false),
         .init(kind: .battery, icon: "battery.100.bolt", intent: .lavender,
               titleKey: "perm2.battery.title", bodyKey: "perm2.battery.body", primaryKey: "perm2.settings.cta", isMandatory: true),
         .init(kind: .location, icon: "location.fill", intent: .peach,

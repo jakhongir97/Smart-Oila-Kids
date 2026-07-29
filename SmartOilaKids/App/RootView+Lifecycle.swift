@@ -193,11 +193,12 @@ private extension RootView {
         // configured (FCMPushRegistrar uploads its own token then). Uploading the APNs token while
         // FCM is live would overwrite the deliverable FCM address with an undeliverable one.
         guard dsn?.trimmedNonEmpty != nil, sessionStore.oilaPaired else { return }
-        let fcmToken = UserDefaults.standard.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty
-        let apnsFallback = FCMPushRegistrar.shared.isConfigured
-            ? nil
-            : UserDefaults.standard.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty
-        guard let token = fcmToken ?? apnsFallback else { return }
+        // FCM registration token only — no APNs fallback. The backend delivers via FCM, so a raw
+        // APNs hex string in `fcmToken` is undeliverable; sending it made the device look
+        // addressable while every parent command was silently dropped. No token is the honest
+        // state until FirebaseMessaging is linked.
+        guard let token = UserDefaults.standard
+            .string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty else { return }
         try? await OilaDeviceClient.shared.updateFCMToken(token)
     }
 

@@ -368,8 +368,11 @@ final class OilaDeviceClient: OilaDeviceServicing {
         // raw APNs token only as a stopgap before Firebase lands — the backend is FCM-only, so the
         // fallback cannot actually receive pushes, but it keeps the push address non-empty. If no
         // token is held yet the key is omitted and pairing still succeeds.
+        // FCM registration token ONLY. The raw APNs token used to be sent as a fallback, which put
+        // an undeliverable address in the backend's `fcmToken` field and made the device look
+        // push-addressable when nothing could ever reach it. The field is optional at pairing, so
+        // omitting it is both legal and honest.
         let pushToken = userDefaults.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty
-            ?? userDefaults.string(forKey: "PUSH_NOTIFICATION_TOKEN")?.trimmedNonEmpty
         if let pushToken {
             body["fcmToken"] = pushToken
         }
