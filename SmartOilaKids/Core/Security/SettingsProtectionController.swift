@@ -109,7 +109,46 @@ final class SettingsProtectionController: ObservableObject {
     func removeCustomPIN() {
         guard hasCustomPIN else { return }
         pinStore.delete()
+        clearLockoutState()
         refreshAvailability()
+    }
+
+    /// Wipe every trace of the previous family's settings PIN. Called from the disconnect purge.
+    ///
+    /// The verifier lives device-globally in the Keychain (`settings_protection_pin_v2`,
+    /// AfterFirstUnlockThisDeviceOnly) while the purge only regenerated the DSN and cleared two
+    /// caches — so it SURVIVED an unpair. After a re-pair `hasCustomPIN` was still true, which meant
+    /// the new parent was offered only "change PIN" and "remove PIN", both of which demand the
+    /// PREVIOUS family's secret, and the disconnect flow opened straight into verification against
+    /// that stale verifier with a persisted lockout. On a resold or handed-down phone the previous
+    /// owner effectively retained on-device disconnect authority over another family's child.
+    ///
+    /// Unconditional (no `hasCustomPIN` guard) so a Keychain read failure cannot skip the wipe.
+    func resetForNewPairing() {
+        pinStore.delete()
+        clearLockoutState()
+        refreshAvailability()
+    }
+
+    /// Synchronous, nonisolated wipe of the PERSISTED PIN + lockout.
+    ///
+    /// `SessionStore.purgeChildScopedData()` is not main-actor isolated and must complete before the
+    /// disconnect returns, so it cannot await this controller. Hopping to the main actor instead
+    /// would let the purge return while the previous family's verifier was still on disk. This
+    /// writes the same storage the instance methods do (keys shared as statics above); the observable
+    /// `hasCustomPIN` is refreshed separately.
+    nonisolated static func wipePersistedPINState(userDefaults: UserDefaults = .standard) {
+        KeychainPINCredentialStore().delete()
+        userDefaults.removeObject(forKey: pinFailCountKey)
+        userDefaults.removeObject(forKey: pinLockUntilKey)
+        userDefaults.removeObject(forKey: pinLockoutTierKey)
+    }
+
+    private func clearLockoutState() {
+        userDefaults.removeObject(forKey: pinFailCountKey)
+        userDefaults.removeObject(forKey: pinLockUntilKey)
+        userDefaults.removeObject(forKey: pinLockoutTierKey)
+        pinLockedUntil = nil
     }
 
     func authenticateIfNeeded() async -> Bool {
@@ -257,9 +296,16 @@ final class SettingsProtectionController: ObservableObject {
         }
         let fails = userDefaults.integer(forKey: pinFailCountKey) + 1
         if fails >= maxPINAttempts {
-            let until = Date().addingTimeInterval(pinLockoutDuration)
+            // ESCALATING lockout. A flat 5-minute penalty with the counter reset to 0 each time
+            // allowed a constant ~288 guesses/day, which walks the whole 4-digit space in about
+            // five weeks of an unattended device — and the child holds the device. Each subsequent
+            // lockout in the same run climbs the ladder and the tier persists, so a relaunch cannot
+            // reset it.
+            let tier = min(userDefaults.integer(forKey: pinLockoutTierKey), Self.pinLockoutLadder.count - 1)
+            let until = Date().addingTimeInterval(Self.pinLockoutLadder[tier])
             userDefaults.set(until.timeIntervalSince1970, forKey: pinLockUntilKey)
             userDefaults.set(0, forKey: pinFailCountKey)
+            userDefaults.set(min(tier + 1, Self.pinLockoutLadder.count - 1), forKey: pinLockoutTierKey)
             pinLockedUntil = until
             return until
         }
@@ -276,10 +322,16 @@ final class SettingsProtectionController: ObservableObject {
     private let pinLength = 4
     private let protectionEnabledKey = "SETTINGS_PROTECTION_ENABLED"
     private let legacyPINHashKey = "SETTINGS_PROTECTION_PIN_HASH"
-    private let pinFailCountKey = "SETTINGS_PROTECTION_PIN_FAILS"
-    private let pinLockUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UNTIL"
+    private var pinFailCountKey: String { Self.pinFailCountKey }
+    private var pinLockUntilKey: String { Self.pinLockUntilKey }
+    private var pinLockoutTierKey: String { Self.pinLockoutTierKey }
+    nonisolated static let pinFailCountKey = "SETTINGS_PROTECTION_PIN_FAILS"
+    nonisolated static let pinLockUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UNTIL"
+    nonisolated static let pinLockoutTierKey = "SETTINGS_PROTECTION_PIN_LOCK_TIER"
+    /// Escalating lockout durations: 1min, 5min, 15min, 1h, 24h. Index persisted in
+    /// `pinLockoutTierKey` so a relaunch cannot walk back down the ladder.
+    static let pinLockoutLadder: [TimeInterval] = [60, 300, 900, 3600, 86_400]
     private let maxPINAttempts = 5
-    private let pinLockoutDuration: TimeInterval = 300
 
     // MARK: - PIN verifier (salted, slow KDF)
 

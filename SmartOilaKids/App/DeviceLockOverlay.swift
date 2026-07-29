@@ -138,12 +138,12 @@ final class LockOverlaySOSModel: ObservableObject {
                 failed = false
                 return
             } catch {
-                if let apiError = error as? OilaAPIError, apiError.requiresRePair {
-                    failed = true
-                    NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
-                    return
-                }
+                // No `requiresRePair` branch: this is SOS from behind the lock cover — the single
+                // most safety-critical path in the app — and a transient 401 used to destroy the
+                // pairing here rather than deliver the alert. Session invalidation belongs to
+                // OilaTelemetryService, which confirms with repeated independent probes.
                 if attempt == maxAttempts {
+                    telemetry.enqueueUndeliveredSOS(context)
                     failed = true
                 } else {
                     try? await Task.sleep(nanoseconds: UInt64(attempt) * 800_000_000)

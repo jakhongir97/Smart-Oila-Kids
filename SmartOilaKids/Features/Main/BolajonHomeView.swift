@@ -553,11 +553,11 @@ final class BolajonHomeViewModel: ObservableObject {
             try await service.completeTask(id: task.id)
             tasks = try await service.fetchTasks()
             errorMessage = nil
-        } catch let error as OilaAPIError where error.requiresRePair {
-            // A revoked/unpaired device token can't recover here — route back to pairing
-            // instead of leaving the child staring at a generic failure forever.
-            NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
         } catch {
+            // A 401 here used to post .oilaSessionInvalidated directly, which wiped the device
+            // token and regenerated the DSN on the strength of ONE response. Invalidation is now
+            // owned solely by OilaTelemetryService's confirmation probe; a genuinely revoked token
+            // will be confirmed there within one poll cycle and routed back to pairing then.
             errorMessage = NetworkError.userMessage(for: error)
         }
     }
@@ -574,6 +574,13 @@ final class BolajonHomeViewModel: ObservableObject {
         // A panic button must be resilient: retry transient failures a few times before giving
         // up, and always surface a clear failure state (never fail silently) so the child knows
         // to retry rather than assuming help is on the way.
+        //
+        // This loop used to be the WHOLE delivery guarantee, and it is a weak one: offline, all
+        // three attempts fail in milliseconds (URLError.notConnectedToInternet returns immediately),
+        // so the entire panic path was exhausted in ~2.4s and the alert was dropped forever. Every
+        // routine GPS breadcrumb in this app gets a persisted, restored, retried 200-deep queue --
+        // the one call that matters most had none. So a failed SOS is now ENQUEUED and retried by
+        // the telemetry service for as long as the app lives, across relaunches.
         let maxAttempts = 3
         for attempt in 1 ... maxAttempts {
             do {
@@ -588,15 +595,14 @@ final class BolajonHomeViewModel: ObservableObject {
                 errorMessage = nil
                 return
             } catch {
-                if let apiError = error as? OilaAPIError, apiError.requiresRePair {
-                    // A revoked/unpaired token will never succeed on retry — surface failure and
-                    // route back to pairing immediately instead of burning the remaining attempts.
-                    sosFailed = true
-                    errorMessage = NetworkError.userMessage(for: error)
-                    NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
-                    return
-                }
+                // NOTE: deliberately no `requiresRePair` branch here. This is the panic path -- the
+                // one control most likely to be pressed on a degraded network, and a single
+                // transient 401 used to destroy the pairing mid-emergency (wiping the Keychain token
+                // and regenerating the DSN) while the SOS itself was never delivered. Session
+                // invalidation is now owned solely by OilaTelemetryService, which confirms a 401
+                // with repeated independent probes before tearing anything down.
                 if attempt == maxAttempts {
+                    telemetry.enqueueUndeliveredSOS(context)
                     sosFailed = true
                     errorMessage = NetworkError.userMessage(for: error)
                 } else {

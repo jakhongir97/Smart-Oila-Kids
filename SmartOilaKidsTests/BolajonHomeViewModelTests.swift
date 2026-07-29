@@ -87,9 +87,17 @@ final class BolajonHomeViewModelTests: XCTestCase {
     }
 }
 
-private struct StubSOSTelemetry: SOSTelemetryProviding {
+private final class StubSOSTelemetry: SOSTelemetryProviding {
     let context: OilaSOSContext
+    /// Contexts handed to the durable outbox after every in-flight attempt failed.
+    private(set) var enqueued: [OilaSOSContext] = []
+
+    init(context: OilaSOSContext) {
+        self.context = context
+    }
+
     func currentSOSContext() -> OilaSOSContext { context }
+    func enqueueUndeliveredSOS(_ context: OilaSOSContext) { enqueued.append(context) }
 }
 
 private struct StubScreenTimeUsage: ScreenTimeUsageProviding {

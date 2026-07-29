@@ -237,6 +237,16 @@ final class SessionStore: ObservableObject {
         for key in ["SETTINGS_CACHE_PROFILE_NAME", "SETTINGS_CACHE_CONNECTED_DEVICES"] {
             userDefaults.removeObject(forKey: key)
         }
+        // 3. Clear the settings/disconnect PIN and its lockout. The verifier lives device-globally
+        //    in the Keychain, so it used to survive an unpair: the NEXT family inherited a PIN only
+        //    the previous parent knew, could not clear it without that secret, and the previous
+        //    owner kept on-device disconnect authority over another family's child.
+        SettingsProtectionController.wipePersistedPINState(userDefaults: userDefaults)
+        Task { @MainActor in SettingsProtectionController.shared.refreshAvailability() }
+        // 4. Clear the one-time microphone consent. It is device-global and not DSN-scoped, so
+        //    child A's consent would otherwise authorize listening on child B after a handover —
+        //    with no sheet shown, because the grant short-circuits the prompt.
+        userDefaults.removeObject(forKey: "OILA_AUDIO_CONSENT_GRANTED")
     }
 
     private static func defaultLanguage(userDefaults: UserDefaults) -> AppLanguage {

@@ -219,16 +219,18 @@ private extension DeviceLockScheduleMonitorController {
         let translatedStartMinutes = translatedWindow.startMinutes
         let translatedEndMinutes = translatedWindow.endMinutes
 
+        // A zero-length window is AMBIGUOUS, and the contract does not disambiguate it:
+        // `CreateLockScheduleDto` puts an independent `minimum: 0, maximum: 1439` on `startMinute`
+        // and `endMinute` with no cross-field constraint, so a parent-side picker that defaults both
+        // to the same value produces an accepted body. This used to be promoted to a 24-hour lock,
+        // which means a mis-set or default-valued schedule locked a child around the clock while the
+        // parent saw what looked like an inert row.
+        //
+        // For a parental control the safe reading of an ambiguous window is the one that does NOT
+        // lock a child indefinitely: treat it as "no window" and register nothing. If the backend
+        // ever defines zero-length as all-day it must send 0...1439 explicitly.
         if translatedStartMinutes == translatedEndMinutes {
-            guard let activity = makeActivity(
-                dsn: dsn,
-                suffix: "always",
-                startMinutes: 0,
-                endMinutes: (23 * 60) + 59
-            ) else {
-                return nil
-            }
-            return [("0-1439", activity)]
+            return []
         }
 
         if translatedStartMinutes < translatedEndMinutes {

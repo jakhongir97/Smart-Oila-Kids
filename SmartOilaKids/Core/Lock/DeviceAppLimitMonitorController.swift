@@ -308,27 +308,66 @@ final class DeviceAppLimitMonitorController: ObservableObject {
         guard isCurrent(dsn: dsn) else { return }
 
         let normalizedLockedPackages = Set(response.lockedPackages.compactMap(normalizedIdentifier(_:)))
-        let reportedLimits = response.stats.compactMap { stat -> DeviceAppLimitResponse? in
-            guard let packageName = normalizedIdentifier(stat.packageName) else {
-                return nil
-            }
 
+        // Enforcement is the UNION of two INDEPENDENT parent controls, not their intersection:
+        //   * `lockedPackages`           — a hard block ("this app is off"), no threshold involved
+        //   * `stats[].dailyLimitSeconds` — a time budget
+        // Deriving the set from `stats` alone failed OPEN twice over: a hard-blocked app the child
+        // had not opened today produced no row at all, and a hard-blocked app carrying no time
+        // budget was dropped downstream by the `dailyLimitMinutes > 0` filter. Either way the parent
+        // saw a blocked app that was never shielded.
+        var seenPackages = Set<String>()
+        var reportedLimits: [DeviceAppLimitResponse] = []
+
+        for stat in response.stats {
+            guard let packageName = normalizedIdentifier(stat.packageName) else { continue }
+            seenPackages.insert(packageName)
+
+            let isHardLocked = normalizedLockedPackages.contains(packageName)
             let normalizedUsedSeconds = max(0, stat.usedSeconds)
-            let normalizedDailyLimitSeconds = max(0, stat.dailyLimitSeconds ?? 0)
+
+            // `dailyLimitSeconds` is nullable in the contract and its two null-ish values mean
+            // OPPOSITE things: `null` = no limit at all, `0` = no time allowed. Collapsing them with
+            // `?? 0` turned the parent's strictest possible setting into the loosest behaviour.
+            let hasBudget = stat.dailyLimitSeconds != nil
+            let budgetSeconds = max(0, stat.dailyLimitSeconds ?? 0)
+            let blocksImmediately = isHardLocked || (hasBudget && budgetSeconds == 0)
+
             let normalizedRemainingSeconds = max(
                 0,
-                stat.remainingSeconds ?? max(0, normalizedDailyLimitSeconds - normalizedUsedSeconds)
+                stat.remainingSeconds ?? max(0, budgetSeconds - normalizedUsedSeconds)
             )
 
-            return DeviceAppLimitResponse(
-                packageName: packageName,
-                dailyLimitMinutes: normalizedDailyLimitSeconds > 0
-                    ? max(1, Int(ceil(Double(normalizedDailyLimitSeconds) / 60.0)))
-                    : 0,
-                isLimitEnabled: normalizedDailyLimitSeconds > 0,
-                usedTodaySeconds: normalizedUsedSeconds,
-                remainingTodaySeconds: normalizedRemainingSeconds,
-                isLimitReached: stat.isLimitReached || normalizedLockedPackages.contains(packageName)
+            reportedLimits.append(
+                DeviceAppLimitResponse(
+                    packageName: packageName,
+                    // Round DOWN. A sub-minute remainder should favour the parent's limit rather
+                    // than hand the child an extra partial minute; DeviceActivity thresholds are
+                    // whole DateComponents, so one minute is the smallest we can express.
+                    dailyLimitMinutes: blocksImmediately
+                        ? 1
+                        : (hasBudget && budgetSeconds > 0
+                            ? max(1, Int(Double(budgetSeconds) / 60.0))
+                            : 0),
+                    isLimitEnabled: blocksImmediately || (hasBudget && budgetSeconds > 0),
+                    usedTodaySeconds: normalizedUsedSeconds,
+                    remainingTodaySeconds: blocksImmediately ? 0 : normalizedRemainingSeconds,
+                    isLimitReached: blocksImmediately || stat.isLimitReached
+                )
+            )
+        }
+
+        // A hard-blocked app with no usage row today still has to be shielded.
+        for packageName in normalizedLockedPackages.sorted() where !seenPackages.contains(packageName) {
+            reportedLimits.append(
+                DeviceAppLimitResponse(
+                    packageName: packageName,
+                    dailyLimitMinutes: 1,
+                    isLimitEnabled: true,
+                    usedTodaySeconds: 0,
+                    remainingTodaySeconds: 0,
+                    isLimitReached: true
+                )
             )
         }
 

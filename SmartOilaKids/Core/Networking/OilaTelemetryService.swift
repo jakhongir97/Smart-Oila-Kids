@@ -35,10 +35,15 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     // The per-app half of GET /device/lock/state. iOS cannot ENFORCE any of it — per-app blocking
-    // needs the FamilyControls entitlement Apple has not granted this app — so these are published
-    // purely so the UI can SHOW the child what the parent configured. Unlike `isLocked` they are
-    // not fail-closed and not persisted: they are replaced wholesale by the latest server truth,
+    // needs the FamilyControls entitlement Apple has not granted this app. Unlike `isLocked` they
+    // are not fail-closed and not persisted: they are replaced wholesale by the latest server truth,
     // because a stale "you have 12 minutes left" is worse than showing nothing.
+    //
+    // NOTE: nothing reads these yet — no view observes them and enforcement is fed from the usage
+    // report's own `lockedPackages` (DeviceAppLimitMonitorController.applyUsageReportResponse), not
+    // from here. They are kept because the parsing is correct and a child-facing "what's restricted"
+    // screen is the obvious consumer, but until that ships this is decoded-and-dropped. Do not cite
+    // it as evidence that per-app config reaches the child.
 
     /// The whole payload from the last applied `GET /device/lock/state` response, for callers
     /// needing fields this service doesn't mirror individually. nil until the first poll lands.
@@ -63,6 +68,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// UserDefaults key for the persisted pending location backlog (survives process death so an
     /// offline route isn't lost if iOS kills the app; cleared on unpair via stop()).
     private static let pendingFixesKey = "OILA_PENDING_LOCATION_FIXES"
+    private static let pendingSOSKey = "OILA_PENDING_SOS"
 
     private let service: OilaDeviceServicing
     private let locationManager = CLLocationManager()
@@ -79,11 +85,29 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var isConfirmingInvalidation = false
     /// Monotonic tag for lock-state reads so a slow poll can't overwrite a newer push refresh.
     private var lockRefreshSequence = 0
+    /// How many times the OS has paused standard location updates this run. Surfaced in diagnostics
+    /// only — the recovery itself is automatic (see `handleLocationUpdatesPaused`).
+    private(set) var locationPauseCount = 0
 
     private let flushInterval: TimeInterval = 60
     private let statusInterval: TimeInterval = 300
     private let lockInterval: TimeInterval = 30
     private let maxQueuedFixes = 200
+    /// Undelivered panic alerts awaiting retry. See `enqueueUndeliveredSOS`.
+    private var pendingSOS: [OilaPendingSOS] = []
+    private let maxQueuedSOS = 20
+    /// An SOS older than this is dropped rather than delivered — a stale panic alert misinforms the
+    /// parent about where and when their child needed help.
+    private let sosMaxAge: TimeInterval = 6 * 60 * 60
+
+    /// How many independent authorized probes must all report `requiresRePair` before the pairing is
+    /// destroyed. See `confirmAndInvalidate`.
+    static let invalidationConfirmationsRequired = 2
+    /// Randomized gap between confirmation probes, in seconds. Randomized so a real mass revocation
+    /// does not produce a synchronized re-pair stampede across the fleet.
+    static let invalidationProbeDelayRange = 30 ... 120
+    /// Injection seam so tests can drive `confirmAndInvalidate` without real time passing.
+    var sleeper: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
 
     init(service: OilaDeviceServicing = OilaDeviceClient.shared) {
         self.service = service
@@ -124,8 +148,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
         applyAuthorization(locationManager.authorizationStatus)
 
+        restorePendingSOS()
+
         flushTimer = Timer.scheduledTimer(withTimeInterval: flushInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in await self?.flushLocations() }
+            Task { @MainActor [weak self] in
+                // SOS first: it is the only queue whose delivery is an emergency.
+                await self?.flushPendingSOS()
+                await self?.flushLocations()
+            }
         }
         statusTimer = Timer.scheduledTimer(withTimeInterval: statusInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.postStatus() }
@@ -166,6 +196,81 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         scheduleRangeText = nil
         pendingFixes.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.pendingFixesKey)
+        // The outbox is child-scoped: a queued SOS must never be delivered against a NEW pairing.
+        pendingSOS.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.pendingSOSKey)
+    }
+
+    // MARK: - SOS outbox
+
+    /// Durably queue an SOS whose in-flight attempts all failed.
+    ///
+    /// The child has pressed the panic button and been told it failed; the app must keep trying.
+    /// Bounded, because an SOS that is hours stale is worse than none — `maxQueuedSOS` most-recent
+    /// entries survive, and anything older than `sosMaxAge` is dropped on restore rather than
+    /// delivered as a phantom emergency.
+    func enqueueUndeliveredSOS(_ context: OilaSOSContext) {
+        pendingSOS.append(OilaPendingSOS(context: context, queuedAt: Date()))
+        if pendingSOS.count > maxQueuedSOS {
+            pendingSOS.removeFirst(pendingSOS.count - maxQueuedSOS)
+        }
+        persistPendingSOS()
+        // Don't wait up to `flushInterval` for the timer — an emergency retries now.
+        Task { await flushPendingSOS() }
+    }
+
+    /// True while at least one SOS is still undelivered. Lets the UI keep saying "still trying"
+    /// instead of a bare failure.
+    var hasUndeliveredSOS: Bool { !pendingSOS.isEmpty }
+
+    private func flushPendingSOS() async {
+        guard isRunning, !pendingSOS.isEmpty else { return }
+        let batch = pendingSOS
+        var delivered = Set<UUID>()
+
+        for entry in batch {
+            guard Date().timeIntervalSince(entry.queuedAt) <= sosMaxAge else {
+                delivered.insert(entry.id) // too stale to be useful — drop it
+                continue
+            }
+            do {
+                try await service.sendSOS(
+                    lat: entry.context.lat,
+                    lng: entry.context.lng,
+                    accuracy: entry.context.accuracy,
+                    batteryLevel: entry.context.batteryPercent.map(Double.init)
+                )
+                delivered.insert(entry.id)
+            } catch let error as OilaAPIError where error.requiresRePair {
+                // Don't spin: let the confirmation probe decide whether the pairing is really gone.
+                handleAuthorizationLoss()
+                break
+            } catch {
+                break // still offline — keep the whole remaining queue for the next flush
+            }
+        }
+
+        guard !delivered.isEmpty else { return }
+        pendingSOS.removeAll { delivered.contains($0.id) }
+        persistPendingSOS()
+    }
+
+    private func persistPendingSOS() {
+        if pendingSOS.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.pendingSOSKey)
+        } else if let data = try? JSONEncoder().encode(pendingSOS) {
+            UserDefaults.standard.set(data, forKey: Self.pendingSOSKey)
+        }
+    }
+
+    private func restorePendingSOS() {
+        guard let data = UserDefaults.standard.data(forKey: Self.pendingSOSKey),
+              let restored = try? JSONDecoder().decode([OilaPendingSOS].self, from: data) else {
+            pendingSOS.removeAll()
+            return
+        }
+        let cutoff = Date().addingTimeInterval(-sosMaxAge)
+        pendingSOS = Array(restored.filter { $0.queuedAt >= cutoff }.suffix(maxQueuedSOS))
     }
 
     private func persistPendingFixes() {
@@ -207,6 +312,20 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     // MARK: - Internals
 
+    /// Restart standard updates after the OS paused them. Re-reads the current authorization rather
+    /// than assuming, so a pause that straddles a permission change cannot re-arm background updates
+    /// the child has since revoked.
+    private func handleLocationUpdatesPaused() {
+        guard isRunning else { return }
+        locationPauseCount += 1
+        applyAuthorization(locationManager.authorizationStatus)
+    }
+
+    private func handleLocationUpdatesResumed() {
+        guard isRunning else { return }
+        applyAuthorization(locationManager.authorizationStatus)
+    }
+
     private func applyAuthorization(_ status: CLAuthorizationStatus) {
         guard isRunning else { return }
         switch status {
@@ -235,19 +354,43 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         Task { [weak self] in await self?.confirmAndInvalidate() }
     }
 
+    /// Confirm a reported `requiresRePair` before destroying the pairing.
+    ///
+    /// The probe used to fire milliseconds after the original 401 and invalidate on a single
+    /// confirmation. That made a backend-side blip that 401s for a few seconds — a JWT signing-key
+    /// rotation, a gateway restart mid-deploy — capable of unpairing every device in the fleet at
+    /// once, and recovery requires a parent to mint a new code. So: require
+    /// `invalidationConfirmationsRequired` independent confirmations, each preceded by a randomized
+    /// delay. Any probe that succeeds, or that fails for a non-auth reason, keeps the session.
+    ///
+    /// The randomized delay also de-synchronizes the fleet, so a real mass revocation does not
+    /// arrive as a synchronized re-pair stampede.
     private func confirmAndInvalidate() async {
         defer { isConfirmingInvalidation = false }
         guard !didSignalInvalidation, isRunning else { return }
-        do {
-            _ = try await service.fetchLockState()
-            // Probe succeeded → the earlier 401 was transient. Keep the session.
-            return
-        } catch let error as OilaAPIError where error.requiresRePair {
-            // Independently confirmed the credential is dead — fall through to invalidate.
-        } catch {
-            // Probe failed transiently (offline / 5xx) → not a confirmed revocation. Keep session.
-            return
+
+        for attempt in 1 ... Self.invalidationConfirmationsRequired {
+            let delay = Self.invalidationProbeDelayRange.randomElement() ?? 45
+            do {
+                try await sleeper(UInt64(delay) * 1_000_000_000)
+            } catch {
+                return // cancelled — treat as "not confirmed"
+            }
+            guard !didSignalInvalidation, isRunning else { return }
+
+            do {
+                _ = try await service.fetchLockState()
+                // Probe succeeded → the earlier 401 was transient. Keep the session.
+                return
+            } catch let error as OilaAPIError where error.requiresRePair {
+                // Confirmed once more. Keep going until we have enough agreement.
+                _ = attempt
+            } catch {
+                // Probe failed transiently (offline / 5xx) → not a confirmed revocation.
+                return
+            }
         }
+
         guard !didSignalInvalidation else { return }
         didSignalInvalidation = true
         NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
@@ -336,6 +479,25 @@ extension OilaTelemetryService: CLLocationManagerDelegate {
         }
     }
 
+    /// CoreLocation pauses standard updates once the device has been stationary for a while, and it
+    /// does NOT resume them on its own — restarting delivery is the app's responsibility. Without
+    /// this the very first time a child sat still (a classroom, a bedroom) location reporting
+    /// stopped for the rest of the process lifetime, while `postStatus` kept checking in every 300s
+    /// so the parent saw a healthy device with a map frozen at the last fix. Significant-location
+    /// monitoring stays armed under `.authorizedAlways` and still delivers coarse fixes, which is
+    /// exactly why the failure was invisible.
+    nonisolated func locationManagerDidPauseLocationUpdates(_ manager: CLLocationManager) {
+        Task { @MainActor [weak self] in
+            self?.handleLocationUpdatesPaused()
+        }
+    }
+
+    nonisolated func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
+        Task { @MainActor [weak self] in
+            self?.handleLocationUpdatesResumed()
+        }
+    }
+
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         let fixes = locations.map {
             OilaLocationFix(
@@ -361,11 +523,20 @@ extension OilaTelemetryService: CLLocationManagerDelegate {
 /// One-shot telemetry attached to an SOS: the latest known location fix (if any) plus the
 /// current battery percentage (0–100, matching `battery` in `POST /device/status`). Any field
 /// is nil when unavailable; the SOS call omits missing fields and still succeeds.
-struct OilaSOSContext {
+struct OilaSOSContext: Codable, Equatable {
     var lat: Double?
     var lng: Double?
     var accuracy: Double?
     var batteryPercent: Int?
+}
+
+/// One undelivered panic alert, persisted so it survives a process kill. `queuedAt` is the moment
+/// the CHILD pressed the button, not the moment of the retry — the parent needs to know when help
+/// was asked for, and it is what `sosMaxAge` is measured against.
+struct OilaPendingSOS: Codable, Equatable {
+    var id = UUID()
+    var context: OilaSOSContext
+    var queuedAt: Date
 }
 
 /// Supplies a one-shot SOS context. Abstracted so the Home view model's SOS call can be
@@ -373,6 +544,8 @@ struct OilaSOSContext {
 @MainActor
 protocol SOSTelemetryProviding {
     func currentSOSContext() -> OilaSOSContext
+    /// Durably queue an SOS that could not be delivered, for retry across relaunches.
+    func enqueueUndeliveredSOS(_ context: OilaSOSContext)
 }
 
 extension OilaTelemetryService: SOSTelemetryProviding {
