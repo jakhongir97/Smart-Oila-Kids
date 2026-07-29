@@ -49,15 +49,22 @@ jobs:
         # The extensions aren't embedded in the app target (Screen Time ships disabled in v1), so the
         # app scheme never builds them. Compile them explicitly so their sources can't silently
         # bit-rot before the enforcement release.
+        # `-target` and `-destination` do not combine: xcodebuild logs "Ignoring provided run
+        # destination because no scheme was passed", falls back to the DEVICE SDK, and then dies on
+        # "No profiles for 'uz.smartoila.kids.schedule-monitor' were found" (exit 65). That is why
+        # this job has been red on every run since 3b51a7d and the test step below never executed.
+        # Select the simulator SDK explicitly and disable signing instead.
         run: |
           xcodebuild build \
             -project SmartOilaKids.xcodeproj \
             -target SmartOilaKidsScheduleMonitorExtension \
-            -destination 'generic/platform=iOS Simulator' -quiet
+            -sdk iphonesimulator \
+            CODE_SIGNING_ALLOWED=NO -quiet
           xcodebuild build \
             -project SmartOilaKids.xcodeproj \
             -target SmartOilaKidsUsageReportExtension \
-            -destination 'generic/platform=iOS Simulator' -quiet
+            -sdk iphonesimulator \
+            CODE_SIGNING_ALLOWED=NO -quiet
 
       - name: Run SmartOilaKids Simulator Tests
         run: ./scripts/run_ios_tests.sh

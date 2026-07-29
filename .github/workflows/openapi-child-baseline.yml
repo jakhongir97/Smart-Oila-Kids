@@ -33,8 +33,18 @@ jobs:
       - name: Run scripts test suite
         run: ./scripts/run_script_tests.sh
 
-      - name: Enforce child OpenAPI baseline
+      - name: Enforce child OpenAPI baseline (legacy spec)
+        # NOTE: this validates against rest_openapi.json, which describes the DECOMMISSIONED
+        # backend, and its threshold is derived from the contract file it measures -- so it cannot
+        # fail on a real integration break. Kept only so the legacy surface does not rot; the gate
+        # that actually protects the live integration is the next step.
         run: |
           python3 scripts/check_child_openapi_baseline.py \
             --rest-spec OpenAPI/rest_openapi.json \
             --ws-spec OpenAPI/ws_openapi.json
+
+      - name: Enforce child endpoints against the LIVE spec
+        # Floor is pinned HERE, in the workflow, not read out of the data -- narrowing the contract
+        # until it passes has to fail the build instead. Raise it when call sites are added.
+        run: |
+          python3 scripts/check_child_live_endpoints.py --min-endpoints 19

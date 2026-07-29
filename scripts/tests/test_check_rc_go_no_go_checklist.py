@@ -34,6 +34,44 @@ Sign-offs:
 """
         self.assertEqual(validate(content), [])
 
+    def test_validate_fails_when_decision_is_no_go(self):
+        """A NO-GO decision must FAIL the gate, not merely be recorded.
+
+        This previously passed: the checklist could say "Decision: NO-GO" and the gate still
+        printed "RC checklist validation passed" and exited 0, because it only verified that a
+        decision line existed.
+        """
+        content = """# Smart Oila Kids - RC Go/No-Go Checklist
+Date: 2026-03-05
+
+## Gate Results
+- Script tests: PASS
+- Child OpenAPI baseline: PASS
+- Localization parity: PASS
+- Localization format specifiers: PASS
+- Parent-child simulator smoke: PASS
+- Build warning gate: PASS
+
+## Dependencies
+- Parent repository path resolved.
+
+## Risks
+- Real-device APNs validation pending.
+
+## Rollback Plan
+Rollback trigger: Sev1 regression in production.
+Rollback steps:
+1. Disable rollout.
+
+## Decision & Sign-Off
+Decision: NO-GO
+Sign-offs:
+- PM: Pending
+"""
+        errors = validate(content)
+
+        self.assertTrue(any("NO-GO" in error for error in errors), errors)
+
     def test_validate_fails_when_required_markers_missing(self):
         content = "# Smart Oila Kids - RC Go/No-Go Checklist\nDecision: GO\n"
         errors = validate(content)

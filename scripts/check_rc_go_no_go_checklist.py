@@ -41,9 +41,19 @@ def validate(content: str) -> list[str]:
     if not re.search(r"Date:\s*\d{4}-\d{2}-\d{2}", content):
         errors.append("Missing Date line in YYYY-MM-DD format")
 
+    # The decision must be GO for the gate to pass.
+    #
+    # This previously accepted either value: flipping the checklist to "Decision: NO-GO" still
+    # printed "RC checklist validation passed" and exited 0, so the gate verified that a decision
+    # had been WRITTEN DOWN, not what it was. A release gate whose only failure mode is a missing
+    # heading is not a gate.
     decision_match = re.search(r"Decision:\s*(GO|NO-GO)", content)
     if not decision_match:
         errors.append("Missing decision line (Decision: GO|NO-GO)")
+    elif decision_match.group(1) != "GO":
+        errors.append(
+            f"Release checklist decision is {decision_match.group(1)} — refusing to pass the gate"
+        )
 
     if "Rollback trigger:" not in content:
         errors.append("Missing rollback trigger")
