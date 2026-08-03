@@ -123,7 +123,15 @@ private extension PushCommandRouter {
         // blocks above keep the wide haystack on purpose — they only refresh or deep-link.
         switch audioRoute(forCommand: payload.commandHaystack) {
         case .start:
-            post(.pushShouldStartAudioStream, dsn: payload.dsn)
+            // Forward the server-owned lease fields (mode / cameraType / maxDurationSeconds /
+            // expiresAt) so the manager can drop a stale (Doze-delayed) command, size its lease, and
+            // pick audio-vs-video + camera. Absent fields default safely in the manager (audio-only).
+            post(.pushShouldStartAudioStream, dsn: payload.dsn, extra: [
+                PushUserInfoKeys.streamMode: payload.streamMode ?? "",
+                PushUserInfoKeys.streamCameraType: payload.streamCameraType ?? "",
+                PushUserInfoKeys.streamMaxDurationSeconds: payload.streamMaxDurationSeconds ?? "",
+                PushUserInfoKeys.streamExpiresAt: payload.streamExpiresAt ?? ""
+            ])
             routeActions.append("audio_start")
         case .stop:
             post(.pushShouldStopAudioStream, dsn: payload.dsn)
@@ -153,12 +161,14 @@ private extension PushCommandRouter {
     }
 
     static func post(_ name: Notification.Name, dsn: String?) {
+        post(name, dsn: dsn, extra: [:])
+    }
+
+    static func post(_ name: Notification.Name, dsn: String?, extra: [String: Any]) {
         Task { @MainActor in
-            NotificationCenter.default.post(
-                name: name,
-                object: nil,
-                userInfo: [PushUserInfoKeys.dsn: dsn ?? ""]
-            )
+            var userInfo: [String: Any] = [PushUserInfoKeys.dsn: dsn ?? ""]
+            userInfo.merge(extra) { _, new in new }
+            NotificationCenter.default.post(name: name, object: nil, userInfo: userInfo)
         }
     }
 }

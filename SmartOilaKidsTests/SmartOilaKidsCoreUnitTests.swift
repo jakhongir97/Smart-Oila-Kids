@@ -2842,3 +2842,96 @@ final class PushAudioCommandRoutingTests: XCTestCase {
         }
     }
 }
+
+// MARK: - D-073 stream.start command parsing
+//
+// The lease/mode/camera fields ride through the push layer as strings; StreamCommand parses them
+// once at the hardware boundary. These pin the drop-when-stale rule and the audio/video mapping.
+
+final class StreamCommandParsingTests: XCTestCase {
+
+    private func note(_ info: [String: Any]) -> Notification {
+        Notification(name: .pushShouldStartAudioStream, object: nil, userInfo: info)
+    }
+
+    func testVideoBackCommandParses() {
+        let future = Date().addingTimeInterval(120)
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "video",
+            PushUserInfoKeys.streamCameraType: "Back",
+            PushUserInfoKeys.streamMaxDurationSeconds: "90",
+            PushUserInfoKeys.streamExpiresAt: String(Int(future.timeIntervalSince1970 * 1000))
+        ]))
+        XCTAssertEqual(cmd.mode, .video)
+        XCTAssertEqual(cmd.cameraPosition, .back)
+        XCTAssertEqual(cmd.maxDurationSeconds, 90)
+        XCTAssertFalse(cmd.isStaleWake)
+    }
+
+    func testAudioCommandHasNoCamera() {
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            // Even if a stray cameraType leaks in, audio mode must never carry a camera position.
+            PushUserInfoKeys.streamCameraType: "Front",
+            PushUserInfoKeys.streamMaxDurationSeconds: "120",
+            PushUserInfoKeys.streamExpiresAt: String(Int(Date().addingTimeInterval(60).timeIntervalSince1970 * 1000))
+        ]))
+        XCTAssertEqual(cmd.mode, .audio)
+        XCTAssertNil(cmd.cameraPosition)
+    }
+
+    func testVideoWithoutCameraTypeDefaultsToFront() {
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "video",
+            PushUserInfoKeys.streamExpiresAt: String(Int(Date().addingTimeInterval(60).timeIntervalSince1970 * 1000))
+        ]))
+        XCTAssertEqual(cmd.cameraPosition, .front)
+    }
+
+    func testExpiredWakeIsStale() {
+        let past = Date().addingTimeInterval(-5)
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamExpiresAt: String(Int(past.timeIntervalSince1970 * 1000))
+        ]))
+        XCTAssertTrue(cmd.isStaleWake, "a wake past its expiresAt must be dropped")
+    }
+
+    func testMissingExpiresAtIsTreatedAsStale() {
+        // Per the contract, a missing/unparseable expiresAt is dropped too — FCM has no TTL.
+        let cmd = StreamCommand(notification: note([PushUserInfoKeys.streamMode: "audio"]))
+        XCTAssertTrue(cmd.isStaleWake)
+    }
+
+    func testDurationIsClampedToBackendBounds() {
+        let over = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamMaxDurationSeconds: "99999"
+        ]))
+        XCTAssertEqual(over.maxDurationSeconds, 300)
+
+        let bad = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamMaxDurationSeconds: "not-a-number"
+        ]))
+        XCTAssertEqual(bad.maxDurationSeconds, 120, "an unparseable duration falls back to 120s")
+    }
+
+    func testPayloadParsingLiftsStreamFieldsFromDataDictionary() {
+        // The fields can arrive nested under `data` (FCM silent data message).
+        let payload = PushCommandRouter.parsePayload(from: [
+            "data": [
+                "type": "stream.start",
+                "mode": "video",
+                "cameraType": "Back",
+                "maxDurationSeconds": "120",
+                "expiresAt": "1900000000000"
+            ]
+        ])
+        XCTAssertEqual(payload.event, "stream.start")
+        XCTAssertEqual(payload.streamMode, "video")
+        XCTAssertEqual(payload.streamCameraType, "Back")
+        XCTAssertEqual(payload.streamMaxDurationSeconds, "120")
+        XCTAssertEqual(payload.streamExpiresAt, "1900000000000")
+    }
+}

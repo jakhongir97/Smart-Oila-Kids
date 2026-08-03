@@ -4,10 +4,95 @@ import AVFoundation
 import LiveKit
 #endif
 
-// Live audio (child device = publisher, parent = subscriber) over LiveKit.
+// Live A/V (child device = publisher, parent = subscriber) over LiveKit.
 // Gated by `AppRuntime.audioStreamingEnabled`. Non-covert by design: the child device shows a
-// persistent "parent is listening" indicator (see AudioListeningIndicator) and grants a one-time
-// consent before the mic is ever opened.
+// persistent "parent is listening / watching" indicator (see AudioListeningIndicator) and grants a
+// one-time consent before the mic or camera is ever opened.
+//
+// Implements the D-073 `stream.start` / `stream.stop` contract: a silent FCM data push carries
+// `mode` (audio|video), `cameraType` (Front|Back, video only), `maxDurationSeconds` and `expiresAt`.
+// The lease is SERVER-OWNED — the child stops publishing when `maxDurationSeconds` elapses, and the
+// parent renews by re-sending `stream.start` at roughly half the lease. A `stream.start` that
+// arrives while already publishing is a RENEWAL: reset the lease timer and swap mode/camera in
+// place, never reconnect or re-mint. `recording.start` (the covert 15s clip) is NOT handled on iOS
+// at all (App Store 5.1.2), so there is no camera contention between recording and live video here.
+
+// MARK: - Stream command
+
+enum StreamMode: String {
+    case audio
+    case video
+}
+
+/// A parsed `stream.start` command. Values arrive from FCM as strings; this parses them once, at the
+/// boundary between the push layer and the hardware.
+struct StreamCommand {
+    let mode: StreamMode
+    /// nil ⇒ no camera (audio-only). The server strips `cameraType` for audio, and per the contract
+    /// an absent cameraType means "no camera", never "keep the previous one".
+    let cameraPosition: AVCaptureDevice.Position?
+    let maxDurationSeconds: Int
+    /// Epoch when the server-minted lease expires. nil when the push omitted it.
+    let expiresAt: Date?
+
+    /// A default audio command for the DEBUG on-device test path (no push, no expiry).
+    static let debugAudio = StreamCommand(mode: .audio, cameraPosition: nil, maxDurationSeconds: 120, expiresAt: nil)
+
+    /// True when a PUSH-originated wake must be dropped without opening hardware. Per the contract,
+    /// a missing or unparseable `expiresAt` is treated as stale too ("yo'q/parse bo'lmasa ham —
+    /// tashla"): FCM has no TTL, so Doze can hold a command for hours and light the camera long after
+    /// the parent closed the screen. The DEBUG path builds a command directly and never routes
+    /// through here, so it is unaffected.
+    var isStaleWake: Bool {
+        guard let expiresAt else { return true }
+        return Date() > expiresAt
+    }
+
+    init(mode: StreamMode, cameraPosition: AVCaptureDevice.Position?, maxDurationSeconds: Int, expiresAt: Date?) {
+        self.mode = mode
+        self.cameraPosition = cameraPosition
+        self.maxDurationSeconds = maxDurationSeconds
+        self.expiresAt = expiresAt
+    }
+
+    /// Build from the wake notification's userInfo (populated by PushCommandRouter).
+    init(notification: Notification) {
+        let info = notification.userInfo ?? [:]
+        func str(_ key: String) -> String? {
+            (info[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        }
+
+        let mode: StreamMode = (str(PushUserInfoKeys.streamMode)?.lowercased() == "video") ? .video : .audio
+        self.mode = mode
+
+        if mode == .video {
+            switch str(PushUserInfoKeys.streamCameraType)?.lowercased() {
+            case "back", "rear", "environment": cameraPosition = .back
+            default: cameraPosition = .front   // video with no/unknown cameraType ⇒ default front
+            }
+        } else {
+            cameraPosition = nil
+        }
+
+        // Clamp to the backend's own DTO bounds (1…300) with a 120s fallback, so a malformed value
+        // can neither create a zero-length lease nor pin the camera on indefinitely.
+        if let raw = str(PushUserInfoKeys.streamMaxDurationSeconds), let n = Int(raw) {
+            maxDurationSeconds = min(max(n, 1), 300)
+        } else {
+            maxDurationSeconds = 120
+        }
+
+        if let raw = str(PushUserInfoKeys.streamExpiresAt), let ms = Double(raw), ms > 0 {
+            expiresAt = Date(timeIntervalSince1970: ms / 1000)
+        } else {
+            expiresAt = nil
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
 
 // MARK: - Publisher seam
 //
@@ -15,25 +100,29 @@ import LiveKit
 // implementation is compiled only when the package is linked (`canImport(LiveKit)`); until then the
 // no-op keeps the build green and `start()` surfaces a clear "not linked" state.
 
-protocol LiveAudioPublishing: AnyObject {
+protocol LiveMediaPublishing: AnyObject {
     /// Called when the room ends the session from its side (disconnect / failure). May arrive on a
     /// transport thread, so the handler is responsible for hopping back to the main actor.
     var onEnded: (() -> Void)? { get set }
-    func connect(url: String, token: String) async throws
+    /// Connect and begin publishing per `mode`: microphone always, camera only for `.video`.
+    func connect(url: String, token: String, mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws
+    /// Apply a renewal in place — enable/disable the camera or switch its position WITHOUT tearing
+    /// down the room. Used when a `stream.start` arrives while already publishing.
+    func applyMode(_ mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws
     func disconnect() async
 }
 
-enum AudioPublisherFactory {
-    static func make() -> LiveAudioPublishing {
+enum MediaPublisherFactory {
+    static func make() -> LiveMediaPublishing {
 #if canImport(LiveKit)
-        return LiveKitAudioPublisher()
+        return LiveKitMediaPublisher()
 #else
-        return NoopAudioPublisher()
+        return NoopMediaPublisher()
 #endif
     }
 
     /// True once the LiveKit SPM package is linked. Surfaced in diagnostics so it's obvious whether
-    /// the build can actually publish audio yet.
+    /// the build can actually publish yet.
     static var isLiveKitLinked: Bool {
 #if canImport(LiveKit)
         true
@@ -44,23 +133,24 @@ enum AudioPublisherFactory {
 }
 
 /// Fallback until the LiveKit SPM package is added — never publishes; keeps the build green.
-final class NoopAudioPublisher: LiveAudioPublishing {
+final class NoopMediaPublisher: LiveMediaPublishing {
     var onEnded: (() -> Void)?
-    func connect(url: String, token: String) async throws {
+    func connect(url: String, token: String, mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws {
         throw OilaAPIError(
             statusCode: -1,
-            message: "Live audio is not available in this build (LiveKit SDK not linked).",
+            message: "Live streaming is not available in this build (LiveKit SDK not linked).",
             errorCode: "NO_LIVEKIT",
             fieldErrors: []
         )
     }
+    func applyMode(_ mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws {}
     func disconnect() async {}
 }
 
 #if canImport(LiveKit)
-/// Publishes the device microphone into the child's LiveKit room so the parent can listen.
-/// NOTE: LiveKit Swift SDK 2.x API — verify the exact call names against the pinned version.
-final class LiveKitAudioPublisher: LiveAudioPublishing {
+/// Publishes the device microphone (and, for video, the camera) into the child's LiveKit room so the
+/// parent can listen or watch. Verified against the pinned client-sdk-swift 2.15.2 source.
+final class LiveKitMediaPublisher: LiveMediaPublishing {
     var onEnded: (() -> Void)?
     private let room = Room()
     /// `Room` keeps its delegates in a weak table (`MulticastDelegate` → `NSHashTable.weakObjects()`),
@@ -70,25 +160,71 @@ final class LiveKitAudioPublisher: LiveAudioPublishing {
     init() {
         // Without this delegate `onEnded` only ever fired from the LOCAL `disconnect()` below, so a
         // room that ended from the far side (parent hangs up, SFU drops us, network dies) left the
-        // manager `.live` with the microphone publishing and the "parent is listening" indicator up.
+        // manager `.live` with the microphone/camera publishing and the indicator up.
         room.add(delegate: roomObserver)
     }
 
-    func connect(url: String, token: String) async throws {
+    func connect(url: String, token: String, mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws {
         try await room.connect(url: url, token: token)
+        // Mic always — the contract requires audio in both modes.
         try await room.localParticipant.setMicrophone(enabled: true)
+        if mode == .video {
+            try await room.localParticipant.setCamera(
+                enabled: true,
+                captureOptions: CameraCaptureOptions(position: cameraPosition ?? .front)
+            )
+        }
+    }
+
+    func applyMode(_ mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws {
+        // Mic stays on in every mode; unmute is idempotent if it was already publishing.
+        try await room.localParticipant.setMicrophone(enabled: true)
+
+        switch mode {
+        case .audio:
+            // Renewed as audio-only — drop the camera if one was up.
+            if room.localParticipant.isCameraEnabled() {
+                try await room.localParticipant.setCamera(enabled: false)
+            }
+        case .video:
+            let target = cameraPosition ?? .front
+            if let capturer = currentCameraCapturer() {
+                // A camera is already publishing. `setCamera(enabled:true)` on an existing
+                // publication only UNMUTES and ignores new capture options (2.15.2), so a
+                // front→back switch MUST go through the capturer — otherwise the position silently
+                // never changes (the exact bug the Android client hit).
+                if capturer.position != target {
+                    _ = try await capturer.set(cameraPosition: target)
+                }
+            } else {
+                try await room.localParticipant.setCamera(
+                    enabled: true,
+                    captureOptions: CameraCaptureOptions(position: target)
+                )
+            }
+        }
+    }
+
+    private func currentCameraCapturer() -> CameraCapturer? {
+        for publication in room.localParticipant.localVideoTracks {
+            if let track = publication.track as? LocalVideoTrack,
+               let capturer = track.capturer as? CameraCapturer {
+                return capturer
+            }
+        }
+        return nil
     }
 
     func disconnect() async {
         // `Room.disconnect()` runs the SDK's own clean-up, which unpublishes the local tracks and
-        // (per LiveKit's `unpublish` contract) stops them — that is what actually closes the mic.
-        // It is a no-op when the room already tore itself down, which is exactly the remote-end path.
+        // (per LiveKit's `unpublish` contract) stops them — that is what actually closes the mic and
+        // camera. It is a no-op when the room already tore itself down (the remote-end path).
         await room.disconnect()
         onEnded?()
     }
 }
 
-/// Bridges the room's own teardown back into `LiveAudioPublishing.onEnded`. It is a separate leaf
+/// Bridges the room's own teardown back into `LiveMediaPublishing.onEnded`. It is a separate leaf
 /// object rather than a conformance on the publisher because `RoomDelegate` is an `@objc`/`Sendable`
 /// protocol; keeping it here leaves the publisher a plain Swift class. LiveKit documents that these
 /// callbacks are NOT guaranteed to arrive on the main thread, hence `@unchecked Sendable` and the
@@ -246,6 +382,8 @@ final class DeviceAudioStreamManager: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
+    /// Whether the current/last session is audio-only or video — drives the indicator's text/icon.
+    @Published private(set) var activeMode: StreamMode = .audio
     /// Drives the one-time consent sheet at the app root.
     @Published var needsConsent = false
 
@@ -253,10 +391,15 @@ final class DeviceAudioStreamManager: ObservableObject {
 
     private let stream: OilaStreamServicing
     private let defaults: UserDefaults
-    private var publisher: LiveAudioPublishing?
+    private var publisher: LiveMediaPublishing?
     /// Monotonic id of the current start attempt, so a resumption after an await can tell whether it
     /// still owns the session. See `start()`.
     private var startGeneration: UInt64 = 0
+    /// The command awaiting consent, so `grantConsentAndStart()` starts the mode the parent asked for.
+    private var pendingCommand: StreamCommand?
+    /// The server-owned lease: an outstanding auto-stop scheduled for `maxDurationSeconds` after the
+    /// last start/renewal. Cancelled and rescheduled on renewal; fired only by the owning generation.
+    private var leaseTask: Task<Void, Never>?
     private let consentKey = "OILA_AUDIO_CONSENT_GRANTED"
 
     init(stream: OilaStreamServicing = StreamTokenSourceFactory.make(), defaults: UserDefaults = .standard) {
@@ -270,7 +413,12 @@ final class DeviceAudioStreamManager: ObservableObject {
 
     @objc private func onWakeStart(_ notification: Notification) {
         guard pushMatchesThisDevice(notification) else { return }
-        requestStart()
+        let command = StreamCommand(notification: notification)
+        // FCM has no TTL and Doze can hold a data message for hours; a stale wake would light the
+        // camera/mic long after the parent closed the screen. Drop it. A live-session renewal that
+        // is itself stale is likewise dropped, so the lease simply expires on its own.
+        guard !command.isStaleWake else { return }
+        requestStart(command: command)
     }
 
     @objc private func onWakeStop(_ notification: Notification) {
@@ -298,32 +446,47 @@ final class DeviceAudioStreamManager: ObservableObject {
         return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
     }
 
-    /// Entry point (the parent tapped "listen" → an FCM data-push wakes us here). Gated by the
-    /// feature flag and a one-time child consent; never opens the mic silently.
+    /// DEBUG on-device convenience: start an audio session with no push/lease. Used by the
+    /// `SMARTOILA_DEBUG_AUDIO` / dev-secret path in RootView.
     func requestStart() {
+        requestStart(command: .debugAudio)
+    }
+
+    /// Entry point (the parent tapped "listen"/"watch" → an FCM data-push wakes us here). Gated by
+    /// the feature flag and a one-time child consent; never opens hardware silently. A request while
+    /// already publishing is a RENEWAL — the lease is reset and the mode/camera swapped in place.
+    func requestStart(command: StreamCommand) {
         guard AppRuntime.audioStreamingEnabled else { return }
-        guard state != .live, state != .connecting else { return }
+        if state == .live {
+            Task { await renew(command: command) }
+            return
+        }
+        // A start racing an in-flight connect: remember the newer command so the connecting attempt
+        // and its lease reflect what the parent last asked for.
+        pendingCommand = command
+        guard state != .connecting else { return }
         guard defaults.bool(forKey: consentKey) else {
             needsConsent = true
             return
         }
-        Task { await start() }
+        Task { await start(command: command) }
     }
 
     func grantConsentAndStart() {
         defaults.set(true, forKey: consentKey)
         needsConsent = false
-        Task { await start() }
+        Task { await start(command: pendingCommand ?? .debugAudio) }
     }
 
     func declineConsent() {
         needsConsent = false
+        pendingCommand = nil
         state = .idle
     }
 
-    func start() async {
+    func start(command: StreamCommand) async {
         guard AppRuntime.audioStreamingEnabled else { return }
-        guard AudioPublisherFactory.isLiveKitLinked else { state = .unsupported; return }
+        guard MediaPublisherFactory.isLiveKitLinked else { state = .unsupported; return }
         guard #available(iOS 17.0, *) else { state = .unsupported; return }
         // RE-ENTRANCY GUARD. `start()` had none, and a foreground alert+content-available push is
         // delivered through BOTH didReceiveRemoteNotification and willPresent with no de-duplication
@@ -333,6 +496,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         // indicator off, endable only by force-quit or reboot.
         guard state != .live, state != .connecting else { return }
         state = .connecting
+        activeMode = command.mode
         // Every await below is a point where a concurrent stop() (or a newer start) can take
         // ownership; `generation` lets each resumption check whether it is still the owner.
         startGeneration &+= 1
@@ -342,16 +506,29 @@ final class DeviceAudioStreamManager: ObservableObject {
             if generation == startGeneration { state = .error("mic_denied") }
             return
         }
+        // Camera is only opened for a video session, and only after its own permission grant — the
+        // mic-consent tap does not silently extend to the camera.
+        if command.mode == .video {
+            guard await requestCameraPermission() else {
+                if generation == startGeneration { state = .error("camera_denied") }
+                return
+            }
+        }
         guard generation == startGeneration, state == .connecting else { return }
         do {
             let token = try await stream.mintStreamToken()
             guard generation == startGeneration, state == .connecting else { return }
-            let publisher = AudioPublisherFactory.make()
+            let publisher = MediaPublisherFactory.make()
             publisher.onEnded = { [weak self] in
                 Task { @MainActor in await self?.handleSessionEndedByRoom() }
             }
             self.publisher = publisher
-            try await publisher.connect(url: token.url, token: token.token)
+            try await publisher.connect(
+                url: token.url,
+                token: token.token,
+                mode: command.mode,
+                cameraPosition: command.cameraPosition
+            )
             // A stop() that landed WHILE connect() was awaiting nils `publisher` and returns, so
             // without this the mic came up on an orphaned room and `state` flipped to .live with no
             // publisher to stop -- banner off, room still publishing.
@@ -361,6 +538,11 @@ final class DeviceAudioStreamManager: ObservableObject {
                 return
             }
             state = .live
+            pendingCommand = nil
+            // Arm the server-owned lease: the child stops on its own at maxDurationSeconds unless the
+            // parent renews first. This is the guarantee that the camera/mic go dark even if every
+            // later stop command is lost.
+            scheduleLease(seconds: command.maxDurationSeconds, generation: generation)
         } catch {
             // The throw can land AFTER `connect()` already joined the room (the mic-publish step is
             // the second await), and `Room` has no deinit that disconnects — so a half-open session
@@ -370,6 +552,38 @@ final class DeviceAudioStreamManager: ObservableObject {
             failedPublisher?.onEnded = nil
             await failedPublisher?.disconnect()
             state = .error(NetworkError.userMessage(for: error))
+        }
+    }
+
+    /// A `stream.start` that arrived while already publishing. Per the contract this is a RENEWAL,
+    /// never a restart: reset the lease and swap mode/camera in place — do not reconnect or re-mint,
+    /// and never shorten a running lease. A failed in-place swap is logged into the state but does
+    /// NOT tear the session down (the audio half is still valuable).
+    private func renew(command: StreamCommand) async {
+        guard state == .live, let publisher else { return }
+        let generation = startGeneration
+        activeMode = command.mode
+        do {
+            try await publisher.applyMode(command.mode, cameraPosition: command.cameraPosition)
+        } catch {
+            // Keep streaming; a camera swap that failed shouldn't kill the audio the parent has.
+        }
+        guard generation == startGeneration, state == .live else { return }
+        scheduleLease(seconds: command.maxDurationSeconds, generation: generation)
+    }
+
+    /// (Re)arm the auto-stop. The previous lease is cancelled so a renewal always extends, never
+    /// shortens; the fired task tears down only if it still owns the session.
+    private func scheduleLease(seconds: Int, generation: UInt64) {
+        leaseTask?.cancel()
+        let deadlineNs = UInt64(max(seconds, 1)) * 1_000_000_000
+        leaseTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: deadlineNs)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.startGeneration == generation, self.state == .live else { return }
+                Task { await self.stop() }
+            }
         }
     }
 
@@ -391,8 +605,12 @@ final class DeviceAudioStreamManager: ObservableObject {
     }
 
     func stop() async {
-        // Bump the generation so an in-flight start() cannot resume and claim ownership after us.
+        // Bump the generation so an in-flight start() cannot resume and claim ownership after us,
+        // and so a pending lease task sees it no longer owns the session.
         startGeneration &+= 1
+        leaseTask?.cancel()
+        leaseTask = nil
+        pendingCommand = nil
         // Detach `onEnded` and drop the reference BEFORE disconnecting: the publisher now also
         // reports the room's own teardown through `onEnded`, and a local stop must not loop back
         // into `handleSessionEndedByRoom()`.
@@ -420,6 +638,17 @@ final class DeviceAudioStreamManager: ObservableObject {
             AVAudioApplication.requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
+        }
+    }
+
+    private func requestCameraPermission() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await AVCaptureDevice.requestAccess(for: .video)
+        default:
+            return false
         }
     }
 }

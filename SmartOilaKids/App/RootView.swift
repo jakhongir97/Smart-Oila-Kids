@@ -78,7 +78,7 @@ struct RootView: View {
         // Non-covert live-audio surfaces, mounted app-wide so they show over any screen.
         .overlay(alignment: .top) {
             if AppRuntime.audioStreamingEnabled, audioStream.isLive {
-                AudioListeningIndicator(onStop: { audioStream.stopByChild() })
+                AudioListeningIndicator(mode: audioStream.activeMode, onStop: { audioStream.stopByChild() })
             }
         }
         .sheet(isPresented: audioConsentPresented) {

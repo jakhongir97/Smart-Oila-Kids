@@ -39,7 +39,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used so the parent can see the child device location while the app is open.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Bolajon360 does not take photos or record video. This permission is listed only because the app links a real-time audio library that also references the camera API.</string>
+	<string>A parent can start a live video check to see your child's surroundings. Your child is asked to allow it, and an on-screen indicator appears while the camera is on. The app never records or saves video.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID confirms the parent before changing protected settings.</string>
 	<key>NSMicrophoneUsageDescription</key>

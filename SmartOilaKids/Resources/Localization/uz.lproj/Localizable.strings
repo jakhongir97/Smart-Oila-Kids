@@ -305,6 +305,7 @@
 
 /* Live audio (Bolajon360) */
 "audio2.listening" = "Ota-ona tinglayapti";
+"audio2.watching" = "Ota-ona kuzatyapti";
 "audio2.stop" = "To'xtatish";
 "audio2.consent.title" = "Jonli ovozga ruxsat berasizmi?";
 "audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. U yoniq bo'lganda yuqorida doim qizil belgi ko'rinadi.";

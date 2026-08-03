@@ -4,11 +4,18 @@ import SwiftUI
 /// live. This is the child-facing disclosure that keeps live audio NON-COVERT — required to stay
 /// within App Store Guideline 5.1.2 (covert recording) for a monitoring app.
 struct AudioListeningIndicator: View {
+    /// audio ⇒ "parent is listening"; video ⇒ "parent is watching". Keeps the disclosure honest
+    /// about which hardware is live.
+    var mode: StreamMode = .audio
     /// Ends the session. The child must be able to stop this themselves — a one-time consent tap
     /// that can never be withdrawn is not consent.
     var onStop: (() -> Void)?
 
     @State private var pulse = false
+
+    private var label: String {
+        mode == .video ? L10n.tr("audio2.watching") : L10n.tr("audio2.listening")
+    }
 
     var body: some View {
         HStack(spacing: 9) {
@@ -20,7 +27,10 @@ struct AudioListeningIndicator: View {
                     .opacity(pulse ? 0 : 0.9)
                 Circle().fill(Color.white).frame(width: 9, height: 9)
             }
-            Text(L10n.tr("audio2.listening"))
+            Image(systemName: mode == .video ? "video.fill" : "waveform")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.white)
+            Text(label)
                 .font(AppTypography.bodyStrong(13))
                 .foregroundStyle(Color.white)
 

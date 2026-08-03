@@ -305,6 +305,7 @@
 
 /* Live audio (Bolajon360) */
 "audio2.listening" = "Parent is listening";
+"audio2.watching" = "Parent is watching";
 "audio2.stop" = "Stop";
 "audio2.consent.title" = "Allow live audio?";
 "audio2.consent.body" = "Your parent can listen to your surroundings for your safety. You will always see a red indicator at the top while it is on.";
