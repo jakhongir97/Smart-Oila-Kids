@@ -14,6 +14,13 @@ extension Notification.Name {
 
 enum PushUserInfoKeys {
     static let dsn = "dsn"
+    /// Structured `stream.start` fields, forwarded from the FCM data payload to
+    /// `DeviceAudioStreamManager` so it can honour the server-owned lease contract (D-073).
+    /// All arrive as strings from FCM; the manager parses them.
+    static let streamMode = "streamMode"                     // "audio" | "video"
+    static let streamCameraType = "streamCameraType"         // "Front" | "Back" | absent
+    static let streamMaxDurationSeconds = "streamMaxDurationSeconds"  // e.g. "120"
+    static let streamExpiresAt = "streamExpiresAt"           // epoch milliseconds
 }
 
 enum PushDeepLinkDestination: String, Codable {

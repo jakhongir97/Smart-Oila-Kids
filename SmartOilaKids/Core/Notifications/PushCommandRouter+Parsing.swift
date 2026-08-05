@@ -7,8 +7,29 @@ extension PushCommandRouter {
             event: resolveEvent(from: userInfo),
             dsn: resolveDSN(from: userInfo),
             title: alert.0,
-            body: alert.1
+            body: alert.1,
+            streamMode: resolveStreamField(["mode", "streamMode", "stream_mode"], in: userInfo),
+            streamCameraType: resolveStreamField(["cameraType", "camera", "streamCameraType", "camera_type"], in: userInfo),
+            streamMaxDurationSeconds: resolveStreamField(["maxDurationSeconds", "maxDuration", "durationSeconds", "leaseSeconds"], in: userInfo),
+            streamExpiresAt: resolveStreamField(["expiresAt", "expires_at", "expiry", "leaseExpiresAt"], in: userInfo)
         )
+    }
+}
+
+private extension PushCommandRouter {
+    /// Reads a `stream.start` field from the top level or any nested data payload, tolerant of the
+    /// several shapes FCM data can arrive in (flat keys, a `data`/`payload` dict, or a JSON string).
+    /// Values are kept as strings — the backend sends them as strings and the manager parses them.
+    static func resolveStreamField(_ keys: [String], in userInfo: [AnyHashable: Any]) -> String? {
+        if let direct = resolveFirstString(keys: keys, in: userInfo)?.trimmedNonEmpty {
+            return direct
+        }
+        for payload in extractPayloadCandidates(from: userInfo) {
+            if let value = resolveFirstString(keys: keys, in: payload)?.trimmedNonEmpty {
+                return value
+            }
+        }
+        return nil
     }
 }
 

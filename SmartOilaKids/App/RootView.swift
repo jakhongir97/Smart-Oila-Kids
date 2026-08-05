@@ -78,11 +78,18 @@ struct RootView: View {
         // Non-covert live-audio surfaces, mounted app-wide so they show over any screen.
         .overlay(alignment: .top) {
             if AppRuntime.audioStreamingEnabled, audioStream.isLive {
-                AudioListeningIndicator(onStop: { audioStream.stopByChild() })
+                AudioListeningIndicator(
+                    mode: audioStream.activeMode,
+                    videoUnavailable: audioStream.videoUpgradeFailure != nil,
+                    onStop: { audioStream.stopByChild() }
+                )
             }
         }
         .sheet(isPresented: audioConsentPresented) {
             AudioConsentSheet(
+                // Mic and camera are consented to separately; the sheet must describe the hardware
+                // the pending command actually asks for.
+                mode: audioStream.consentMode,
                 onAllow: { audioStream.grantConsentAndStart() },
                 onDecline: { audioStream.declineConsent() }
             )

@@ -39,9 +39,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used so the parent can see the child device location while the app is open.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Bolajon360 does not take photos or record video. This permission is listed only because the app links a real-time audio library that also references the camera API.</string>
+	<string>A parent can start a live video check to see your child's surroundings. Your child is asked to allow it, and an on-screen indicator appears while the camera is on. The app never records or saves video.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>A parent can start a live audio check. Your child is asked to allow it the first time, and an on-screen indicator appears while the microphone is on.</string>
+	<string>A parent can start a live audio check, or a live video check that also carries sound. Your child is asked to allow it, and an on-screen indicator appears while the microphone is on. The app never records or saves audio.</string>
 	<key>SMARTOILA_CHAT_FEATURES_ENABLED</key>
 	<true/>
 	<key>SMARTOILA_MEDIA_FEATURES_ENABLED</key>

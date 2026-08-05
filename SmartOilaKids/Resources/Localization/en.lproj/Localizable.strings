@@ -306,9 +306,13 @@
 
 /* Live audio (Bolajon360) */
 "audio2.listening" = "Parent is listening";
+"audio2.watching" = "Parent is watching";
+"audio2.camera_unavailable" = "Camera did not open — sound only";
 "audio2.stop" = "Stop";
 "audio2.consent.title" = "Allow live audio?";
 "audio2.consent.body" = "Your parent can listen to your surroundings for your safety. You will always see a red indicator at the top while it is on.";
+"audio2.consent.video.title" = "Allow live video?";
+"audio2.consent.video.body" = "Your parent can see and hear what is around you for your safety. You will always see a red indicator at the top while the camera is on.";
 "audio2.consent.hint" = "You always see when it's on";
 "audio2.consent.allow" = "Allow";
 "audio2.consent.decline" = "Not now";

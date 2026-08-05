@@ -6,6 +6,14 @@ struct PushCommandPayload {
     let title: String?
     let body: String?
 
+    // Structured `stream.start` fields (D-073). Present only on a live-stream wake; nil otherwise.
+    // The backend sends every value as a string over FCM, so these stay strings here and are parsed
+    // at the hardware boundary in DeviceAudioStreamManager (see StreamCommand).
+    var streamMode: String? = nil
+    var streamCameraType: String? = nil
+    var streamMaxDurationSeconds: String? = nil
+    var streamExpiresAt: String? = nil
+
     var routingHaystack: String {
         let normalizedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         let normalizedBody = body?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
