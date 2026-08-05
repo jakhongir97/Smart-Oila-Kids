@@ -19,8 +19,8 @@ Use this file for fast App Store Connect entry. Keep `APP_STORE_SUBMISSION_PACKA
 | Minimum iOS | `16.0` |
 | Localizations in app | `en`, `ru`, `uz` |
 | Device families shipped now | `iPhone`, `iPad` |
-| Export compliance plist flag | `ITSAppUsesNonExemptEncryption = false` |
-| Background modes | `audio`, `location`, `remote-notification` |
+| Export compliance plist flag | `ITSAppUsesNonExemptEncryption = false` — **the shipped `Info.plist` said `true` until the 2026-08-05 audit aligned it to the value this table has always claimed. Re-read the plist before answering the questionnaire.** |
+| Background modes | `location` **only** — `audio` was removed in 6713fc0 (Guideline 2.5.4) and `remote-notification` when FirebaseMessaging was found unlinked. Do **not** declare background audio or push in ASC while the plist does not. |
 | Main app group | `group.3twn5nw4bl.uz.smartoila.kids` |
 | Usage report extension bundle ID | `uz.smartoila.kids.usage-report` |
 | Schedule monitor extension bundle ID | `uz.smartoila.kids.schedule-monitor` |

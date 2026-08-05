@@ -8,10 +8,18 @@ echo "== Script unit tests =="
 ./scripts/run_script_tests.sh
 echo
 
-echo "== Child OpenAPI baseline =="
+echo "== Child OpenAPI baseline (LEGACY spec — proves nothing about the live server) =="
 python3 scripts/check_child_openapi_baseline.py \
   --rest-spec OpenAPI/rest_openapi.json \
   --ws-spec OpenAPI/ws_openapi.json
+echo
+
+# The gate that actually protects the live integration. It was wired into the OpenAPI workflow but
+# never into this run, so a local release-readiness pass reported "completed" while the only
+# live-contract check had not executed.
+# Floor is pinned here, not derived from the data; the unit is METHOD+path (19 paths = 22 ops).
+echo "== Child endpoints vs the LIVE spec =="
+python3 scripts/check_child_live_endpoints.py --min-endpoints 22
 echo
 
 echo "== Child-vs-parent parity gap budget =="
@@ -32,6 +40,10 @@ python3 scripts/check_localization_format_specifiers.py \
   --base-dir SmartOilaKids/Resources/Localization \
   --source-language en \
   --languages en,ru,uz
+echo
+
+echo "== Localization key resolution (no raw key can reach the UI) =="
+python3 scripts/check_localization_key_resolution.py
 echo
 
 echo "== RC go/no-go checklist completeness =="

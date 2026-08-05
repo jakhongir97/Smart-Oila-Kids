@@ -32,6 +32,11 @@ enum AppRuntime {
     /// Live-audio publishing (LiveKit) from the child device. OFF by default: re-enabling mic
     /// capture is a deliberate, reviewed step (App Store Guideline 5.1.2) — it also requires a
     /// visible "parent is listening" indicator + child disclosure and the mic usage string.
+    ///
+    /// While it is off, a `stream.start` push is still ROUTED by `PushCommandRouter` and only then
+    /// discarded by `DeviceAudioStreamManager`. That drop is recorded as `audio_start_dropped_flag_off`
+    /// in `RuntimeDiagnosticsCenter.media`, so "the parent pressed listen and nothing happened" can be
+    /// told apart from "the push never arrived" without flipping this flag to find out.
     static var audioStreamingEnabled: Bool {
 #if DEBUG
         // Configuring a dev-stream secret is an unambiguous "I am testing the LiveKit path right

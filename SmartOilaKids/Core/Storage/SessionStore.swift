@@ -55,6 +55,11 @@ final class SessionStore: ObservableObject {
 
         let resolvedLanguage = SessionStore.defaultLanguage(userDefaults: userDefaults)
         L10n.setLanguage(resolvedLanguage.rawValue)
+        // Mirror on every launch, not only in setLanguage: a child who never opens the language
+        // picker still has a resolved language, and without this the schedule-monitor extension
+        // finds no APP_LANGUAGE in the App Group and falls back to the DEVICE language for its
+        // system notifications — the exact mismatch the localization fix was meant to remove.
+        ScreenTimeUsageAppGroup.sharedUserDefaults()?.set(resolvedLanguage.rawValue, forKey: Keys.appLanguage)
 
         dsn = userDefaults.string(forKey: Keys.dsn)?.trimmedNonEmpty
         profileName = userDefaults.string(forKey: Keys.profileName) ?? L10n.tr("common.user_default")
@@ -163,6 +168,9 @@ final class SessionStore: ObservableObject {
     func setLanguage(_ value: AppLanguage) {
         appLanguage = value
         userDefaults.set(value.rawValue, forKey: Keys.appLanguage)
+        // Mirror into the App Group so the schedule-monitor extension localizes its system
+        // notifications in the family's chosen language rather than the device language.
+        ScreenTimeUsageAppGroup.sharedUserDefaults()?.set(value.rawValue, forKey: Keys.appLanguage)
         L10n.setLanguage(value.rawValue)
     }
 
@@ -247,6 +255,22 @@ final class SessionStore: ObservableObject {
         //    child A's consent would otherwise authorize listening on child B after a handover —
         //    with no sheet shown, because the grant short-circuits the prompt.
         userDefaults.removeObject(forKey: "OILA_AUDIO_CONSENT_GRANTED")
+        // 5. Drop any pending removal-attempt reports. The queue survives relaunches by design, but
+        //    `POST /device/apps/removal-attempt` carries no dsn — the server attributes the report to
+        //    whichever device Bearer is held when it finally flushes. A report queued for the previous
+        //    child would therefore reach the NEXT family with the previous child's app names in it.
+        //    Keyed device-globally in `UserDefaults.standard`, which is the same store
+        //    `DeviceApplicationRemovalAttemptCoordinator` persists to in production.
+        userDefaults.removeObject(forKey: "DEVICE_APPLICATION_REMOVAL_ATTEMPT_QUEUE")
+        // 6. Same leak, same reasoning, for the queued app-usage batches: they carry the previous
+        //    child's package names and seconds, and `POST /device/apps/usage` carries no dsn either.
+        userDefaults.removeObject(forKey: "DEVICE_APPLICATION_USAGE_REPORT_STATE")
+        // 7. Both queues live in long-lived actors whose IN-MEMORY copies would otherwise survive the
+        //    disconnect and persist themselves straight back over steps 5 and 6.
+        Task {
+            await DeviceApplicationRemovalAttemptCoordinator.shared.purge()
+            await DeviceApplicationUsageReportCoordinator.shared.purge()
+        }
     }
 
     private static func defaultLanguage(userDefaults: UserDefaults) -> AppLanguage {

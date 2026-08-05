@@ -45,6 +45,8 @@
 		5A97564782C38B4656C7525D /* Date+Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B26323909457D23552B64D /* Date+Formatting.swift */; };
 		5BF7B3C886CE178FFD227EBD /* LocationPermissionManager+Observation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 646FB75A4701166CE156BEE6 /* LocationPermissionManager+Observation.swift */; };
 		5C29D76513395FB5680C999B /* DeviceLockWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B156D03B8A8CFF9B5F3A42FE /* DeviceLockWebSocketService.swift */; };
+		5E1C0A7B4D2F41A9B3C60011 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41D40E74ED4CC61BE7C6A0B2 /* L10n.swift */; };
+		5E1C0A7B4D2F41A9B3C60012 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 7D441635799ADCD5BD105D19 /* Localizable.strings */; };
 		61B80B9F1BC6B50E2B10DED8 /* SecureTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D4C3390ED8335A9549C15E1 /* SecureTokenStore.swift */; };
 		625127CEBE170750BC8BDC8E /* DeviceAppLockSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE5059CB7695B1358A8AC465 /* DeviceAppLockSyncCoordinator.swift */; };
 		641A8CF0BF72452F4485E701 /* DeviceAppLimitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 488D9F572931817683B921E7 /* DeviceAppLimitService.swift */; };
@@ -782,6 +784,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5E1C0A7B4D2F41A9B3C60012 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -818,6 +821,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C0E98A711DFE4543A7BA3C20 /* SmartOilaKidsDeviceActivityMonitorExtension.swift in Sources */,
+				5E1C0A7B4D2F41A9B3C60011 /* L10n.swift in Sources */,
 				B1346442FED346C1AE4965C6 /* DeviceAppLimitSharedStore.swift in Sources */,
 				21CD5BDD52E44B109A0B7C87 /* DeviceControlEventSharedStore.swift in Sources */,
 				3C465EFD824F4F06990EA633 /* DeviceLockScheduleSupport.swift in Sources */,

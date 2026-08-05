@@ -1,5 +1,13 @@
 # Bolajon360 / SmartOilaKids — Auth-flow handoff & finish plan
 
+> ⚠️ **PARTLY STALE — a session log, not a description of the tree. Verify before relying on it.**
+> The "GROUND-TRUTH FACTS" section still holds, but the per-session change lists below record work
+> as it was done at the time and at least one entry no longer matches the repo: the session-1 list
+> cites `SmartOilaKidsTests/AuthViewModelTests.swift` and
+> `testPairSendsFiveDigitCodeParsesDeviceTokenAndChildIdentity`, and **neither the file nor the test
+> exists** (audit 2026-08-05) — the `POST /device/pair` request contract was not in fact locked in
+> where this file says it is. For current state use **`BOLAJON360_STATUS.md`**.
+
 **Purpose:** continue and finish the Oila360 child-app (SmartOilaKids / "Bolajon360") migration onto
 the new *soft-lavender* design, wired to the live `api.oila360.uz` backend. This file is
 self-contained: paste the **"NEW-SESSION PROMPT"** block below into a fresh session (with Xcode /
@@ -74,6 +82,9 @@ Auth flow wired to the real contract + PIN fixed. Files changed:
 - **`SmartOilaKidsTests/AuthViewModelTests.swift`** — new
   `testPairSendsFiveDigitCodeParsesDeviceTokenAndChildIdentity` locks in the contract
   (5-digit code, `platform:"Ios"`, non-empty `dsn`, `deviceToken` → session token, child fields).
+  **STALE (2026-08-05): neither this file nor this test is in the repo.** Restoring pair-request
+  coverage is tracked as its own audit item; look for it under `SmartOilaKidsTests/` by assertion,
+  not by this filename.
 
 ### Session 2 (verified: `run_ios_tests.sh` green — 441 tests, 0 failures; localization parity + format clean)
 
@@ -84,6 +95,11 @@ Auth flow wired to the real contract + PIN fixed. Files changed:
   `saveCustomPIN`, `confirmDeviceOwner`. `BolajonSettingsView.DisconnectView` is now a 3-mode gate
   (PIN-if-set → biometric → create/confirm); `performDisconnect()` only runs after validation.
   New `disconnect2.*` strings (×3 locales). Test: `SettingsProtectionControllerTests`.
+  **STALE (2026-08-05): `confirmDeviceOwner` and the biometric mode are gone.** Face ID / Touch ID /
+  the passcode all belong to the CHILD on this device, so device-owner auth would have let the child
+  mint the disconnect PIN and unpair themselves. The gate is now PIN-if-set, with first-PIN
+  provisioning allowed only inside a 15-minute post-pairing window; `NSFaceIDUsageDescription` was
+  removed from `Info.plist` (and from all three `InfoPlist.strings`) to match.
 - **#2 SOS location/battery** — `OilaTelemetryService` exposes `currentSOSContext()` (latest fix +
   battery %, matching `/device/status`); `BolajonHomeViewModel.sendSOS()` attaches them, still
   succeeds when nil. **#2b confirmed:** `postStatus()` already fills `battery` from

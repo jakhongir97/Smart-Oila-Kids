@@ -79,6 +79,18 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var statusTimer: Timer?
     private var lockTimer: Timer?
     private var networkType: String?
+    /// When the last `postStatus()` was issued, for `eventStatusMinimumGap`.
+    private var lastStatusPostAt: Date?
+    /// Whether a status post has already carried a resolved `networkType` this run. `NWPathMonitor`
+    /// reports an unresolved `currentPath` until its first real callback lands, so the run's initial
+    /// `postStatus()` often goes out with a nil network and the transition that fills it in arrives
+    /// well inside `eventStatusMinimumGap` (which `start()` primes with its own post) — throttled
+    /// away, leaving the parent's first reading of a fresh pairing blank for up to `statusInterval`.
+    /// The first nil→value transition therefore bypasses the gap; every later change stays
+    /// rate-limited.
+    private var didPostResolvedNetworkType = false
+    /// Foreground observer: `.active` mirrors the backgrounding check-in (see `start`).
+    private var foregroundObserver: NSObjectProtocol?
     /// Post-once guard so a burst of simultaneous 401s (location + status + lock) raises a single
     /// session-invalidation signal per run.
     private var didSignalInvalidation = false
@@ -92,6 +104,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private let flushInterval: TimeInterval = 60
     private let statusInterval: TimeInterval = 300
     private let lockInterval: TimeInterval = 30
+    /// Minimum gap between EVENT-triggered status posts (network change, foreground). A path that
+    /// flaps — a lift, a tunnel, a Wi-Fi edge — or a child flicking in and out of the app must not
+    /// turn every transition into a request; the `statusInterval` timer covers the device anyway.
+    /// It never throttles the timer itself, nor the backgrounding post in `flushNow()`.
+    private let eventStatusMinimumGap: TimeInterval = 60
     private let maxQueuedFixes = 200
     /// Undelivered panic alerts awaiting retry. See `enqueueUndeliveredSOS`.
     private var pendingSOS: [OilaPendingSOS] = []
@@ -115,6 +132,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         locationManager.distanceFilter = 25
+        // Safe default until the authorization is known; `applyAuthorization` turns it off for
+        // `.authorizedAlways` only (see there for why).
         locationManager.pausesLocationUpdatesAutomatically = true
         // Fail-closed: restore the last-known lock so a force-quit + offline relaunch cannot
         // silently unlock a locked child. refreshLock() corrects it once the server is reachable;
@@ -128,6 +147,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         isRunning = true
         didSignalInvalidation = false
         isConfirmingInvalidation = false
+        didPostResolvedNetworkType = false
         // Restore any backlog persisted before a process kill. A genuinely new pairing is always
         // preceded by stop() (unpair / invalidation), which clears the persisted store — so this
         // can only inherit fixes from a killed-then-relaunched run of the SAME session.
@@ -137,14 +157,32 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
-            let type: String? = path.usesInterfaceType(.wifi) ? "Wifi"
-                : (path.usesInterfaceType(.cellular) ? "Mobile" : nil)
+            let type = Self.networkTypeName(for: path)
             Task { @MainActor [weak self] in
-                self?.networkType = type
+                self?.applyNetworkType(type)
             }
         }
         monitor.start(queue: DispatchQueue(label: "oila.telemetry.path"))
         pathMonitor = monitor
+        // Seed synchronously: the first pathUpdateHandler callback lands on another queue and then
+        // hops back to the main actor, so without this the initial postStatus() below always went
+        // out with networkType == nil and the parent's first reading of a fresh pairing was blank.
+        networkType = Self.networkTypeName(for: monitor.currentPath)
+        // Counts the run's own initial postStatus() below as the first check-in, so the
+        // didBecomeActive that follows a cold launch doesn't duplicate it.
+        lastStatusPostAt = Date()
+
+        // Mirror of `flushNow()`: backgrounding records an exact last-seen, and returning to the
+        // foreground records the next one straight away instead of waiting out the 300s timer that
+        // was suspended for the whole background stretch. Observed here rather than driven from the
+        // scene-phase handler so it holds however the app is brought back.
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.postStatusForEvent() }
+        }
 
         applyAuthorization(locationManager.authorizationStatus)
 
@@ -184,7 +222,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lockTimer?.invalidate(); lockTimer = nil
         pathMonitor?.cancel()
         pathMonitor = nil
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
+            self.foregroundObserver = nil
+        }
         networkType = nil
+        lastStatusPostAt = nil
         isLocked = false
         // stop() runs on unpair / confirmed session invalidation, so drop the per-app state too:
         // re-pairing to a DIFFERENT child must not inherit the previous child's blocked apps or
@@ -292,6 +335,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// Flush the queue immediately (e.g. on backgrounding). Takes a background-task
     /// assertion so the final upload isn't killed by app suspension.
+    ///
+    /// The status post rides the same assertion: backgrounding is the last moment the app is
+    /// guaranteed to run, so it is where an exact last-seen instant is worth the most. Without it
+    /// the newest check-in the server had could be almost 300s old at suspension, which is a large
+    /// slice of any offline threshold.
     func flushNow() {
         guard isRunning else { return }
         var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -303,6 +351,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
         Task {
             await flushLocations()
+            await postStatus()
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
                 backgroundTask = .invalid
@@ -318,11 +367,20 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private func handleLocationUpdatesPaused() {
         guard isRunning else { return }
         locationPauseCount += 1
+        // Now that `pausesLocationUpdatesAutomatically` is false under `.authorizedAlways`, this
+        // count should stay 0 in the field — so any non-zero value is a genuine regression signal
+        // and worth having in a diagnostics report. It rides `reconnectCount` because that is the
+        // geo snapshot's "delivery had to be restarted" counter, which is exactly what a pause is.
+        RuntimeDiagnosticsCenter.shared.updateGeo(
+            status: "paused",
+            reconnectCount: locationPauseCount
+        )
         applyAuthorization(locationManager.authorizationStatus)
     }
 
     private func handleLocationUpdatesResumed() {
         guard isRunning else { return }
+        RuntimeDiagnosticsCenter.shared.updateGeo(status: "active")
         applyAuthorization(locationManager.authorizationStatus)
     }
 
@@ -332,13 +390,24 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         case .authorizedAlways:
             // Info.plist declares UIBackgroundModes=location, so background updates are safe.
             locationManager.allowsBackgroundLocationUpdates = true
+            // Auto-pause is what silences a stationary child. `location` is the ONLY background
+            // mode this app declares, so continuous updates are also what keeps the process
+            // running in the background — and with it the 300s `postStatus` heartbeat. When
+            // CoreLocation pauses updates the app is suspended shortly after, the heartbeat stops,
+            // and the parent sees "offline" for a phone that is charging on a desk and perfectly
+            // fine. (`locationManagerDidPauseLocationUpdates` restarts delivery, but only if the
+            // app is still awake to receive it.) Off under Always only: When-In-Use has no
+            // background execution to preserve, so pausing there is a pure battery win.
+            locationManager.pausesLocationUpdatesAutomatically = false
             locationManager.startUpdatingLocation()
             locationManager.startMonitoringSignificantLocationChanges()
         case .authorizedWhenInUse:
             locationManager.allowsBackgroundLocationUpdates = false
+            locationManager.pausesLocationUpdatesAutomatically = true
             locationManager.startUpdatingLocation()
         default:
             // Location declined in onboarding — telemetry degrades to status-only.
+            locationManager.pausesLocationUpdatesAutomatically = true
             locationManager.stopUpdatingLocation()
         }
     }
@@ -417,11 +486,73 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         persistPendingFixes()
     }
 
+    /// Maps an `NWPath` onto the `networkType` values `POST /device/status` accepts.
+    ///
+    /// `nonisolated` because `NWPathMonitor` delivers its callback on its own queue; the mapping
+    /// touches no instance state, so it can run there and only the assignment hops to the main actor.
+    nonisolated private static func networkTypeName(for path: NWPath) -> String? {
+        path.usesInterfaceType(.wifi) ? "Wifi"
+            : (path.usesInterfaceType(.cellular) ? "Mobile" : nil)
+    }
+
+    /// Maps the CoreLocation authorization onto the `locationAuthorization` values
+    /// `POST /device/status` carries, so the parent can be told WHY location went quiet instead of
+    /// just "offline". `.restricted` reports as "Denied": the vocabulary is deliberately the four
+    /// values the field documents, and restricted is denied from the child's side either way.
+    private static func locationAuthorizationName(for status: CLAuthorizationStatus) -> String {
+        switch status {
+        case .authorizedAlways: return "Always"
+        case .authorizedWhenInUse: return "WhenInUse"
+        case .denied, .restricted: return "Denied"
+        case .notDetermined: return "NotDetermined"
+        @unknown default: return "NotDetermined"
+        }
+    }
+
+    /// Records the current connectivity and, on a real change, checks in immediately.
+    ///
+    /// Android posts `/device/status` on every network change; iOS only had the 300s timer, so a
+    /// Wi-Fi→cellular switch — and the nil→value transition right after launch, before the
+    /// monitor's first callback lands — went unreported for up to five minutes.
+    private func applyNetworkType(_ type: String?) {
+        guard networkType != type else { return }
+        networkType = type
+        // The run's first resolved network is the one reading the parent is actually waiting for,
+        // and it always lands inside the event gap — so it posts unthrottled exactly once. See
+        // `didPostResolvedNetworkType`.
+        if type != nil, !didPostResolvedNetworkType {
+            // Set here, at the decision point, rather than inside postStatus(): both that call and
+            // start()'s initial post are unstructured hops onto the main actor, so deciding and
+            // flagging in one step is what keeps this to exactly one unthrottled post per run.
+            didPostResolvedNetworkType = true
+            Task { await postStatus() }
+        } else {
+            Task { await postStatusForEvent() }
+        }
+    }
+
+    /// `postStatus()` for an out-of-band trigger (network change, foreground), rate-limited by
+    /// `eventStatusMinimumGap`.
+    private func postStatusForEvent() async {
+        guard isRunning else { return }
+        if let last = lastStatusPostAt, Date().timeIntervalSince(last) < eventStatusMinimumGap {
+            return
+        }
+        await postStatus()
+    }
+
     private func postStatus() async {
         guard isRunning else { return }
+        lastStatusPostAt = Date()
+        if networkType != nil { didPostResolvedNetworkType = true }
         let level = UIDevice.current.batteryLevel
         let battery: Int? = level >= 0 ? Int((level * 100).rounded()) : nil
-        let status = OilaDeviceStatus(battery: battery, networkType: networkType, soundMode: nil)
+        let status = OilaDeviceStatus(
+            battery: battery,
+            networkType: networkType,
+            soundMode: nil,
+            locationAuthorization: Self.locationAuthorizationName(for: locationManager.authorizationStatus)
+        )
         do {
             try await service.postDeviceStatus(status)
         } catch let error as OilaAPIError where error.requiresRePair {

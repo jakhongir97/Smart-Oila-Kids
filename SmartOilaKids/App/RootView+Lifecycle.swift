@@ -143,6 +143,9 @@ extension RootView {
                 await DeviceAppLockSyncCoordinator.shared.retryNow()
                 await DeviceApplicationUsageReportCoordinator.shared.retryNow()
                 await ScreenTimeUsageCoordinator.shared.retryNow()
+                // Drains tamper reports that were persisted across an app kill; without this the
+                // queue only moves when a new removal attempt happens to arrive.
+                await DeviceApplicationRemovalAttemptCoordinator.shared.retryNow()
             }
         }
     }

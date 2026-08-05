@@ -20,8 +20,12 @@ This gate is the opposite shape:
   * the minimum count is passed IN by the caller (`--min-endpoints`) rather than read out of the
     data, so narrowing the contract until it passes fails the build instead.
 
+The unit is an OPERATION (`METHOD /path`), not a bare path: `GET /device/files` and
+`POST /device/files` are different contracts, and a path-only comparison passed a call whose verb
+the server does not implement.
+
 Run:
-    python3 scripts/check_child_live_endpoints.py --min-endpoints 19
+    python3 scripts/check_child_live_endpoints.py --min-endpoints 22
 """
 
 from __future__ import annotations
@@ -36,23 +40,31 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "OpenAPI" / "oila360_live_openapi.json"
 DEFAULT_SOURCE = ROOT / "SmartOilaKids"
 
-# `path: "device/chat/messages"` / `path: "device/tasks/\(id)/complete"`
-PATH_LITERAL_RE = re.compile(r'path:\s*"([^"]+)"')
+# `path: "device/chat/messages", method: .get` — the verb always sits next to the literal, on the
+# same line or the next one, in both `requestJSON(...)` and `send(...)` call sites.
+PATH_LITERAL_RE = re.compile(r'path:\s*"([^"]+)"\s*,\s*method:\s*\.([A-Za-z]+)')
 # Swift interpolation segments become the OpenAPI `{param}` placeholder.
 INTERPOLATION_RE = re.compile(r"\\\([^)]*\)")
 
+HTTP_METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
 
-def normalize(raw: str) -> str:
-    """Turn a Swift path literal into a comparable `/api/v1/...` path."""
+
+def normalize(method: str, raw: str) -> str:
+    """Turn a Swift `path:`/`method:` pair into a comparable `METHOD /api/v1/...` operation."""
     path = INTERPOLATION_RE.sub("{}", raw).strip("/")
-    return f"/api/v1/{path}"
+    return f"{method.upper()} /api/v1/{path}"
 
 
-def spec_paths(spec_file: Path) -> set[str]:
+def spec_operations(spec_file: Path) -> set[str]:
     spec = json.loads(spec_file.read_text(encoding="utf-8"))
     # Collapse every named parameter to `{}` so `/device/tasks/{id}/complete` compares equal to the
     # client's interpolated form regardless of what the spec author called the parameter.
-    return {re.sub(r"\{[^}]*\}", "{}", p) for p in spec.get("paths", {})}
+    return {
+        f"{method.upper()} {re.sub(r'{[^}]*}', '{}', path)}"
+        for path, item in spec.get("paths", {}).items()
+        for method in item
+        if method.lower() in HTTP_METHODS
+    }
 
 
 def display_path(path: Path) -> str:
@@ -63,15 +75,15 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-def client_paths(source_root: Path) -> dict[str, list[str]]:
-    """Map each normalized path to the files that call it."""
+def client_operations(source_root: Path) -> dict[str, list[str]]:
+    """Map each normalized `METHOD /path` operation to the files that call it."""
     found: dict[str, list[str]] = {}
     for swift in sorted(source_root.rglob("*.swift")):
         text = swift.read_text(encoding="utf-8", errors="replace")
-        for raw in PATH_LITERAL_RE.findall(text):
+        for raw, method in PATH_LITERAL_RE.findall(text):
             if raw.startswith(("http://", "https://")) or " " in raw:
                 continue
-            found.setdefault(normalize(raw), []).append(display_path(swift))
+            found.setdefault(normalize(method, raw), []).append(display_path(swift))
     return found
 
 
@@ -91,15 +103,15 @@ def main() -> int:
         print(f"Live spec not found: {args.spec}", file=sys.stderr)
         return 1
 
-    available = spec_paths(args.spec)
-    called = client_paths(args.source)
+    available = spec_operations(args.spec)
+    called = client_operations(args.source)
 
     missing = {p: files for p, files in called.items() if p not in available}
 
     print("Child live-endpoint gate")
-    print(f"- Live spec: {display_path(args.spec)} ({len(available)} paths)")
+    print(f"- Live spec: {display_path(args.spec)} ({len(available)} operations)")
     print(f"- Child source: {display_path(args.source)}")
-    print(f"- Endpoints called by the client: {len(called)}")
+    print(f"- Operations called by the client: {len(called)}")
     print(f"- Minimum required (externally pinned): {args.min_endpoints}")
 
     failed = False
@@ -115,7 +127,7 @@ def main() -> int:
     if len(called) < args.min_endpoints:
         failed = True
         print(
-            f"- Endpoint count {len(called)} is below the pinned floor {args.min_endpoints}. "
+            f"- Operation count {len(called)} is below the pinned floor {args.min_endpoints}. "
             "Call sites were removed, or the collector stopped seeing them."
         )
 

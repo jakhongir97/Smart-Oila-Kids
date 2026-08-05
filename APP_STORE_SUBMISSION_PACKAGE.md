@@ -371,8 +371,12 @@ Only mark what you can defend.
 ## 8. Export Compliance
 
 Current codebase and plist state:
-- `ITSAppUsesNonExemptEncryption = false`
-- app uses Apple networking and a small local `CryptoKit` PIN hashing path
+- `ITSAppUsesNonExemptEncryption = false` — but note this line described an intent, not the file:
+  the shipped `Info.plist` carried `true` from before this document until the 2026-08-05 audit set
+  it to `false` to match. **Re-read `SmartOilaKids/Resources/Info.plist` before answering**, and
+  get the change signed off rather than assuming it.
+- app uses Apple networking, a small local `CryptoKit` PIN hashing path, and a LiveKit/WebRTC
+  dependency that is linked but disabled by `SMARTOILA_MEDIA_FEATURES_ENABLED = false`
 
 Recommended practical answer:
 - keep the current `Info.plist` setting

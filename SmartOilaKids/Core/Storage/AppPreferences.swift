@@ -45,6 +45,11 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         if preferred.hasPrefix(AppLanguage.ru.rawValue) {
             return .ru
         }
+        // The script subtag has to be tested BEFORE the bare "uz" prefix: "uz-Cyrl-UZ" also starts
+        // with "uz", so a Cyrillic-Uzbek device would otherwise silently default to Latin.
+        if preferred.hasPrefix(AppLanguage.uzCyrl.rawValue.lowercased()) {
+            return .uzCyrl
+        }
         if preferred.hasPrefix(AppLanguage.uz.rawValue) {
             return .uz
         }

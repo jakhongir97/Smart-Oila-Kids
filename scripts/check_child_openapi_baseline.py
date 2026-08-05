@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""LEGACY-ONLY coverage gate. Read this before quoting any number it prints.
+
+It measures the child against `OpenAPI/rest_openapi.json` / `ws_openapi.json`, which describe the
+**decommissioned** `backend.smart-oila.uz` server — not the live `api.oila360.uz` the app talks to.
+It also derives its own pass threshold from the contract file it measures (`--min-rest` defaults to
+`len(spec_rest)`), so "100.0% PASS" here is a statement about the legacy surface not rotting, and
+is compatible with the live integration being completely broken.
+
+The gate that protects the live integration is `scripts/check_child_live_endpoints.py`.
+"""
 import argparse
 import importlib.util
 from pathlib import Path
@@ -21,6 +31,13 @@ coverage = load_coverage_module()
 RestOperation = Tuple[str, str]
 DEFAULT_CONTRACT_SPEC_RELATIVE = Path("OpenAPI/child_openapi_contract.json")
 DEFAULT_CONTRACT_SPEC = Path(__file__).resolve().parents[1] / DEFAULT_CONTRACT_SPEC_RELATIVE
+
+
+LEGACY_BANNER = (
+    "Child OpenAPI baseline gate — LEGACY spec (backend.smart-oila.uz, decommissioned)\n"
+    "  Threshold defaults to the size of the contract being measured, so this gate cannot fail\n"
+    "  on a live-integration break. See scripts/check_child_live_endpoints.py for that."
+)
 
 
 def load_default_contract_counts() -> Tuple[int, int]:
@@ -62,7 +79,10 @@ def percentage(part: int, total: int) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Fail CI if child OpenAPI coverage drops below baseline."
+        description=(
+            "LEGACY-ONLY: fail CI if child coverage of the DECOMMISSIONED backend spec drops "
+            "below baseline. Proves nothing about api.oila360.uz."
+        )
     )
     parser.add_argument("--rest-spec", type=Path, required=True, help="Path to REST OpenAPI JSON")
     parser.add_argument("--ws-spec", type=Path, required=True, help="Path to WebSocket OpenAPI JSON")
@@ -121,9 +141,9 @@ def main() -> None:
     missing_contract_rest = coverage.find_missing_contract_rest_operations(spec_rest, contract_rest)
     missing_contract_ws = coverage.find_missing_contract_ws_paths(spec_ws, contract_ws)
     if missing_contract_rest or missing_contract_ws:
-        print("Child OpenAPI baseline gate")
+        print(LEGACY_BANNER)
         print(f"- Contract: {contract_spec}")
-        print("Result: FAIL")
+        print("Result: FAIL (legacy spec)")
         if missing_contract_rest:
             print("- Missing REST contract operations in OpenAPI spec:")
             for method, path in missing_contract_rest:
@@ -145,7 +165,7 @@ def main() -> None:
     min_rest = args.min_rest if args.min_rest is not None else len(spec_rest)
     min_ws = args.min_ws if args.min_ws is not None else len(spec_ws)
 
-    print("Child OpenAPI baseline gate")
+    print(LEGACY_BANNER)
     print(f"- Child source: {child_source}")
     print(f"- Contract: {contract_spec}")
     print(f"- REST: {rest_hits}/{len(spec_rest)} ({percentage(rest_hits, len(spec_rest)):.1f}%)")
@@ -159,12 +179,17 @@ def main() -> None:
         failed.append(f"WebSocket coverage regression: {ws_hits} < {min_ws}")
 
     if failed:
-        print("\nResult: FAIL")
+        print("\nResult: FAIL (legacy spec)")
         for item in failed:
             print(f"- {item}")
         raise SystemExit(1)
 
-    print("\nResult: PASS")
+    print("\nResult: PASS (LEGACY SURFACE ONLY)")
+    print(
+        "- This says the child still covers the dead backend.smart-oila.uz contract. It is NOT "
+        "evidence that the live api.oila360.uz integration works."
+    )
+    print("- Live-integration evidence comes from scripts/check_child_live_endpoints.py.")
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@
 "permissions.details.step_2" = "Нажмите разрешить и выберите \"Всегда\" для геолокации.";
 "permissions.details.body_4" = "Микрофон нужен для голосовых и аудио-функций.";
 "permissions.details.step_4" = "Нажмите разрешить, когда iOS запросит доступ к микрофону.";
-"permissions.details.body_5" = "Разрешение Экранного времени позволяет Smart Oila применять нативную блокировку приложений на iPhone, когда родитель блокирует устройство.";
+"permissions.details.body_5" = "Разрешение Экранного времени позволяет Bolajon360 применять нативную блокировку приложений на iPhone, когда родитель блокирует устройство.";
 "permissions.details.step_5" = "Нажмите разрешить и подтвердите доступ к Экранному времени, когда iOS покажет системный диалог.";
 "permissions.details.body_7" = "Уведомления нужны для сообщений от родителя, задач и предупреждений о блокировке.";
 "permissions.details.step_7" = "Разрешите уведомления: баннеры, звук и значки.";
@@ -76,7 +76,7 @@
 "permissions.media_capability_camera_missing" = "Удаленные команды камеры будут недоступны, пока не выдан доступ к камере.";
 "permissions.media_capability_display_title" = "Запись экрана";
 "permissions.media_capability_display_ready" = "Запись экрана через ReplayKit доступна, пока приложение остается активным.";
-"permissions.media_capability_display_inactive" = "Запись экрана работает только пока Smart Oila открыт и активен на экране.";
+"permissions.media_capability_display_inactive" = "Запись экрана работает только пока Bolajon360 открыт и активен на экране.";
 "permissions.media_capability_display_unavailable" = "Запись экрана через ReplayKit сейчас недоступна в текущем состоянии устройства.";
 "permissions.media_capability_badge_ready" = "Готово";
 "permissions.media_capability_badge_action" = "Нужно действие";
@@ -100,7 +100,6 @@
 "settings.control_protection_pin_invalid" = "Введите ровно 4 цифры.";
 "settings.control_protection_pin_mismatch" = "PIN-коды не совпадают.";
 "settings.control_protection_pin_incorrect" = "Неверный PIN-код.";
-"settings.control_protection_auth_reason" = "Подтвердите личность, чтобы открыть защищённые разделы Smart Oila.";
 
 "notifications.device_control.schedule_started_title" = "Расписание блокировки началось";
 "notifications.device_control.schedule_started_body" = "Родительское расписание полной блокировки заблокировало этот iPhone.";
@@ -108,25 +107,25 @@
 "notifications.device_control.schedule_ended_body" = "Родительское расписание полной блокировки завершилось на этом iPhone.";
 "notifications.device_control.app_limit_reached_title" = "%@ заблокировано до завтра";
 "notifications.device_control.app_limit_reached_title_fallback" = "Достигнут лимит приложения";
-"notifications.device_control.app_limit_reached_body" = "Дневной лимит для %@ достигнут, поэтому Smart Oila заблокировал приложение до завтра.";
-"notifications.device_control.app_limit_reached_body_fallback" = "Дневной лимит приложения достигнут, поэтому Smart Oila заблокировал его до завтра.";
+"notifications.device_control.app_limit_reached_body" = "Дневной лимит для %@ достигнут, поэтому Bolajon360 заблокировал приложение до завтра.";
+"notifications.device_control.app_limit_reached_body_fallback" = "Дневной лимит приложения достигнут, поэтому Bolajon360 заблокировал его до завтра.";
 "notifications.device_control.lock_restored_title" = "Родительская блокировка восстановлена";
-"notifications.device_control.lock_restored_body" = "Smart Oila снова применил активные родительские правила блокировки после возврата приложения в онлайн.";
+"notifications.device_control.lock_restored_body" = "Bolajon360 снова применил активные родительские правила блокировки после возврата приложения в онлайн.";
 "notifications.device_control.app_lock_restored_title" = "%@ снова под защитой";
 "notifications.device_control.app_lock_restored_title_fallback" = "Контроль приложений восстановлен";
-"notifications.device_control.app_lock_restored_body" = "Smart Oila снова может применять родительскую блокировку для %@, потому что приложение вернули в контроль Screen Time.";
-"notifications.device_control.app_lock_restored_body_fallback" = "Smart Oila восстановил одну или несколько родительских блокировок после того, как приложения снова добавили в контроль Screen Time.";
+"notifications.device_control.app_lock_restored_body" = "Bolajon360 снова может применять родительскую блокировку для %@, потому что приложение вернули в контроль Screen Time.";
+"notifications.device_control.app_lock_restored_body_fallback" = "Bolajon360 восстановил одну или несколько родительских блокировок после того, как приложения снова добавили в контроль Screen Time.";
 "notifications.device_control.app_lock_restored_count" = "%@ приложений";
 "notifications.device_control.app_limit_restored_title" = "%@ всё ещё заблокировано до завтра";
 "notifications.device_control.app_limit_restored_title_fallback" = "Дневные лимиты восстановлены";
-"notifications.device_control.app_limit_restored_body" = "Smart Oila восстановил дневной лимит для %@ после возврата приложения в онлайн.";
-"notifications.device_control.app_limit_restored_body_fallback" = "Smart Oila восстановил один или несколько дневных лимитов приложений после возврата приложения в онлайн.";
+"notifications.device_control.app_limit_restored_body" = "Bolajon360 восстановил дневной лимит для %@ после возврата приложения в онлайн.";
+"notifications.device_control.app_limit_restored_body_fallback" = "Bolajon360 восстановил один или несколько дневных лимитов приложений после возврата приложения в онлайн.";
 "notifications.device_control.app_targets_removed_title" = "%@ удалено из контроля приложений";
 "notifications.device_control.app_targets_removed_title_plural" = "%@ приложений удалено из контроля";
-"notifications.device_control.app_targets_removed_body" = "Smart Oila больше не может применять родительские правила для %@, пока приложение снова не будет добавлено в контроль приложений.";
-"notifications.device_control.app_targets_removed_body_plural" = "Smart Oila больше не может применять родительские правила для %@ приложений, пока они снова не будут добавлены в контроль приложений.";
+"notifications.device_control.app_targets_removed_body" = "Bolajon360 больше не может применять родительские правила для %@, пока приложение снова не будет добавлено в контроль приложений.";
+"notifications.device_control.app_targets_removed_body_plural" = "Bolajon360 больше не может применять родительские правила для %@ приложений, пока они снова не будут добавлены в контроль приложений.";
 "notifications.device_control.screen_time_revoked_title" = "Доступ к Screen Time отключён";
-"notifications.device_control.screen_time_revoked_body" = "Smart Oila потерял доступ к Screen Time на этом iPhone, поэтому родительский контроль приложений может перестать работать, пока доступ не будет восстановлен.";
+"notifications.device_control.screen_time_revoked_body" = "Bolajon360 потерял доступ к Screen Time на этом iPhone, поэтому родительский контроль приложений может перестать работать, пока доступ не будет восстановлен.";
 "notifications.device_control.remote_lock_unenforceable_title" = "%@ нужно снова добавить в контроль";
 "notifications.device_control.remote_lock_unenforceable_title_plural" = "%@ заблокированных приложений требуют контроля";
 "notifications.device_control.remote_lock_unenforceable_body" = "Родитель заблокировал %@, но этот iPhone ещё не добавил его в Screen Time, поэтому iOS не может применить эту блокировку.";
@@ -237,6 +236,7 @@
 "settings2.permissions_off_count" = "Отключено разрешений: %d";
 "settings2.connection" = "Состояние подключения";
 "settings2.connection_value" = "Подключено к родителю";
+"settings2.language" = "Язык";
 "settings2.about" = "О приложении";
 "settings2.version" = "Bolajon360 · v";
 "settings2.privacy_policy" = "Политика конфиденциальности";
@@ -245,7 +245,7 @@
 "settings2.disconnect_sub" = "Требуется родительский PIN-код";
 "settings2.enable" = "Включить";
 "disconnect2.title" = "Отключить связь";
-"disconnect2.body" = "Это отвяжет устройство от вашей семьи. Введите родительский PIN-код, чтобы продолжить.";
+"disconnect2.body" = "Наблюдение на этом телефоне остановится, и он вернётся к привязке. Чтобы завершить, родителю нужно также удалить устройство в приложении Oila360. Введите родительский PIN-код, чтобы продолжить.";
 "disconnect2.parent_managed_body" = "Отвязать это устройство может только родитель. Попросите родителя удалить его в приложении Oila360.";
 "disconnect2.locked_out" = "Слишком много попыток. Повторите через %d мин.";
 "disconnect2.confirm" = "Отключить";
@@ -299,6 +299,7 @@
 "chat2.status.sending" = "Отправляется…";
 "chat2.status.failed" = "Не отправлено";
 "chat2.status.retry" = "Отправить снова";
+"chat2.too_long" = "Сообщение ограничено %d символами.";
 "chat2.error.dismiss" = "Скрыть";
 "home2.chat.title" = "Чат с родителем";
 "home2.chat.subtitle" = "Напишите семье";

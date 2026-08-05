@@ -151,9 +151,24 @@ final class SecureTokenStoreTests: XCTestCase {
 }
 
 final class DeviceApplicationRemovalAttemptCoordinatorTests: XCTestCase {
+    /// The coordinator now PERSISTS its queue, so on the default `UserDefaults.standard` these
+    /// tests would share the host app's real domain: an entry left pending by one test (or by a
+    /// previous run) would be restored and re-sent by the next, and the recorded calls would no
+    /// longer be the ones the test made. Same isolation the usage-coordinator tests use.
+    private func makeIsolatedDefaults() -> UserDefaults {
+        let suiteName = "DeviceApplicationRemovalAttemptCoordinatorTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock { userDefaults.removePersistentDomain(forName: suiteName) }
+        return userDefaults
+    }
+
     func testEnqueueIgnoresInvalidEntries() async {
         let service = DeviceApplicationRemovalAttemptServiceSpy()
-        let coordinator = DeviceApplicationRemovalAttemptCoordinator(service: service)
+        let coordinator = DeviceApplicationRemovalAttemptCoordinator(
+            service: service,
+            userDefaults: makeIsolatedDefaults()
+        )
 
         await coordinator.enqueue(dsn: "   ", packageName: "com.example.one", appName: "Example")
         await coordinator.enqueue(dsn: "child-1", packageName: "   ", appName: "Example")
@@ -165,7 +180,10 @@ final class DeviceApplicationRemovalAttemptCoordinatorTests: XCTestCase {
 
     func testEnqueueNormalizesValuesAndProcessesImmediately() async {
         let service = DeviceApplicationRemovalAttemptServiceSpy()
-        let coordinator = DeviceApplicationRemovalAttemptCoordinator(service: service)
+        let coordinator = DeviceApplicationRemovalAttemptCoordinator(
+            service: service,
+            userDefaults: makeIsolatedDefaults()
+        )
 
         await coordinator.enqueue(
             dsn: " child-1 ",
@@ -188,7 +206,10 @@ final class DeviceApplicationRemovalAttemptCoordinatorTests: XCTestCase {
 
     func testEnqueueDeduplicatesInFlightEntriesAndProcessesDistinctEntriesInOrder() async {
         let service = DeviceApplicationRemovalAttemptServiceSpy(suspendFirstCall: true)
-        let coordinator = DeviceApplicationRemovalAttemptCoordinator(service: service)
+        let coordinator = DeviceApplicationRemovalAttemptCoordinator(
+            service: service,
+            userDefaults: makeIsolatedDefaults()
+        )
 
         let first = Task {
             await coordinator.enqueue(

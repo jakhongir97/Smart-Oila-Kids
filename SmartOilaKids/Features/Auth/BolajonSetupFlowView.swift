@@ -122,20 +122,6 @@ private struct LanguageStepView: View {
     let onContinue: () -> Void
     @EnvironmentObject private var sessionStore: SessionStore
 
-    private struct Option: Identifiable {
-        let language: AppLanguage
-        let flag: MiniFlag.Kind
-        var id: String { language.rawValue }
-    }
-
-    // Matches the design: Uzbek (Latin), Uzbek (Cyrillic), Russian.
-    // Flags are drawn (not emoji — regional-indicator emoji tofu on the Simulator).
-    private let options: [Option] = [
-        .init(language: .uz, flag: .uz),
-        .init(language: .uzCyrl, flag: .uz),
-        .init(language: .ru, flag: .ru)
-    ]
-
     var body: some View {
         // A1 is the stack root: no back exists, and the native bar stays empty (no title).
         BolajonHeroSheet(intent: .lavender) {
@@ -156,21 +142,46 @@ private struct LanguageStepView: View {
                     .multilineTextAlignment(.center)
                     .padding(.top, 6)
 
-                VStack(spacing: 12) {
-                    ForEach(options) { option in
-                        languageRow(option)
-                    }
-                }
+                BolajonLanguagePicker()
 
                 BolajonPrimaryButton(title: L10n.tr("setup.continue"), action: onContinue)
                     .padding(.top, 4)
                     .padding(.bottom, 6)
             }
         }
-        .onAppear {
-            // Default the Uzbek app to Uzbek Latin when the device locale isn't offered here.
-            if !options.contains(where: { $0.language == sessionStore.appLanguage }) {
-                sessionStore.setLanguage(.uz)
+        // No onAppear language fixup: BolajonLanguagePicker offers every AppLanguage case, so the
+        // stored value is always one of the rows. The old fixup force-set Uzbek on English
+        // devices, which is exactly why testers on English phones could not read the app.
+    }
+}
+
+// MARK: - Language picker (A1 + Settings)
+
+/// The A1 language list. Settings reuses it so the choice stays changeable after onboarding.
+struct BolajonLanguagePicker: View {
+    @EnvironmentObject private var sessionStore: SessionStore
+
+    private struct Option: Identifiable {
+        let language: AppLanguage
+        /// Drawn flag, or nil for the two-letter monogram used where no single country applies.
+        let flag: MiniFlag.Kind?
+        var id: String { language.rawValue }
+    }
+
+    // Matches the design: Uzbek (Latin), Uzbek (Cyrillic), Russian — plus English, which is
+    // fully translated but used to be unreachable from this screen.
+    // Flags are drawn (not emoji — regional-indicator emoji tofu on the Simulator).
+    private let options: [Option] = [
+        .init(language: .uz, flag: .uz),
+        .init(language: .uzCyrl, flag: .uz),
+        .init(language: .ru, flag: .ru),
+        .init(language: .en, flag: nil)
+    ]
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(options) { option in
+                languageRow(option)
             }
         }
     }
@@ -185,7 +196,13 @@ private struct LanguageStepView: View {
                     Circle()
                         .fill(selected ? AppColors.ctaPurple.opacity(0.12) : BolajonPalette.cream)
                         .frame(width: 44, height: 44)
-                    MiniFlag(kind: option.flag, width: 26, height: 18)
+                    if let flag = option.flag {
+                        MiniFlag(kind: flag, width: 26, height: 18)
+                    } else {
+                        Text(option.language.rawValue.uppercased())
+                            .font(AppTypography.bodyStrong(13))
+                            .foregroundStyle(AppColors.inkSecondary)
+                    }
                 }
                 Text(option.language.nativeName)
                     .font(AppTypography.heading(17))

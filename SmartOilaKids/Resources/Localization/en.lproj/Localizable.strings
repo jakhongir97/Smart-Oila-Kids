@@ -53,7 +53,7 @@
 "permissions.details.step_2" = "Tap allow and select \"Always\" for location access.";
 "permissions.details.body_4" = "Microphone is required for voice and audio-related features.";
 "permissions.details.step_4" = "Tap allow when iOS asks for microphone access.";
-"permissions.details.body_5" = "Screen Time authorization lets Smart Oila apply native iPhone app shielding when the parent locks the device.";
+"permissions.details.body_5" = "Screen Time authorization lets Bolajon360 apply native iPhone app shielding when the parent locks the device.";
 "permissions.details.step_5" = "Tap allow and approve the Screen Time access dialog when iOS shows it.";
 "permissions.details.body_7" = "Notifications are needed for parent messages, tasks, and lock alerts.";
 "permissions.details.step_7" = "Allow notifications with alerts, sounds, and badges.";
@@ -76,7 +76,7 @@
 "permissions.media_capability_camera_missing" = "Remote camera commands will fail until camera access is granted.";
 "permissions.media_capability_display_title" = "Screen capture";
 "permissions.media_capability_display_ready" = "ReplayKit screen recording is available while the app stays active.";
-"permissions.media_capability_display_inactive" = "Screen capture only works while Smart Oila stays open and active on screen.";
+"permissions.media_capability_display_inactive" = "Screen capture only works while Bolajon360 stays open and active on screen.";
 "permissions.media_capability_display_unavailable" = "ReplayKit screen capture is currently unavailable on this device state.";
 "permissions.media_capability_badge_ready" = "Ready";
 "permissions.media_capability_badge_action" = "Action needed";
@@ -100,7 +100,6 @@
 "settings.control_protection_pin_invalid" = "Enter exactly 4 digits.";
 "settings.control_protection_pin_mismatch" = "PINs do not match.";
 "settings.control_protection_pin_incorrect" = "Incorrect PIN.";
-"settings.control_protection_auth_reason" = "Authenticate to open protected Smart Oila controls.";
 
 "notifications.device_control.schedule_started_title" = "Screen-time schedule started";
 "notifications.device_control.schedule_started_body" = "A parent full-device schedule locked this iPhone.";
@@ -108,25 +107,25 @@
 "notifications.device_control.schedule_ended_body" = "The parent full-device schedule ended on this iPhone.";
 "notifications.device_control.app_limit_reached_title" = "%@ locked for today";
 "notifications.device_control.app_limit_reached_title_fallback" = "App limit reached";
-"notifications.device_control.app_limit_reached_body" = "The daily limit for %@ was reached, so Smart Oila locked it until tomorrow.";
-"notifications.device_control.app_limit_reached_body_fallback" = "A daily app limit was reached, so Smart Oila locked the app until tomorrow.";
+"notifications.device_control.app_limit_reached_body" = "The daily limit for %@ was reached, so Bolajon360 locked it until tomorrow.";
+"notifications.device_control.app_limit_reached_body_fallback" = "A daily app limit was reached, so Bolajon360 locked the app until tomorrow.";
 "notifications.device_control.lock_restored_title" = "Parent lock restored";
-"notifications.device_control.lock_restored_body" = "Smart Oila restored active parent lock rules after the app came back online.";
+"notifications.device_control.lock_restored_body" = "Bolajon360 restored active parent lock rules after the app came back online.";
 "notifications.device_control.app_lock_restored_title" = "%@ protected again";
 "notifications.device_control.app_lock_restored_title_fallback" = "App controls restored";
-"notifications.device_control.app_lock_restored_body" = "Smart Oila can enforce the parent lock for %@ again because it was added back to Screen Time app controls.";
-"notifications.device_control.app_lock_restored_body_fallback" = "Smart Oila restored one or more parent app locks after the apps were added back to Screen Time app controls.";
+"notifications.device_control.app_lock_restored_body" = "Bolajon360 can enforce the parent lock for %@ again because it was added back to Screen Time app controls.";
+"notifications.device_control.app_lock_restored_body_fallback" = "Bolajon360 restored one or more parent app locks after the apps were added back to Screen Time app controls.";
 "notifications.device_control.app_lock_restored_count" = "%@ apps";
 "notifications.device_control.app_limit_restored_title" = "%@ still locked for today";
 "notifications.device_control.app_limit_restored_title_fallback" = "Daily limits restored";
-"notifications.device_control.app_limit_restored_body" = "Smart Oila restored the daily limit for %@ after the app came back online.";
-"notifications.device_control.app_limit_restored_body_fallback" = "Smart Oila restored one or more daily app limits after the app came back online.";
+"notifications.device_control.app_limit_restored_body" = "Bolajon360 restored the daily limit for %@ after the app came back online.";
+"notifications.device_control.app_limit_restored_body_fallback" = "Bolajon360 restored one or more daily app limits after the app came back online.";
 "notifications.device_control.app_targets_removed_title" = "%@ removed from app controls";
 "notifications.device_control.app_targets_removed_title_plural" = "%@ apps removed from app controls";
-"notifications.device_control.app_targets_removed_body" = "Smart Oila can no longer enforce parent app rules for %@ until it is added back to app controls.";
-"notifications.device_control.app_targets_removed_body_plural" = "Smart Oila can no longer enforce parent app rules for %@ apps until they are added back to app controls.";
+"notifications.device_control.app_targets_removed_body" = "Bolajon360 can no longer enforce parent app rules for %@ until it is added back to app controls.";
+"notifications.device_control.app_targets_removed_body_plural" = "Bolajon360 can no longer enforce parent app rules for %@ apps until they are added back to app controls.";
 "notifications.device_control.screen_time_revoked_title" = "Screen Time access removed";
-"notifications.device_control.screen_time_revoked_body" = "Smart Oila lost Screen Time access on this iPhone, so parent app controls may stop working until access is restored.";
+"notifications.device_control.screen_time_revoked_body" = "Bolajon360 lost Screen Time access on this iPhone, so parent app controls may stop working until access is restored.";
 "notifications.device_control.remote_lock_unenforceable_title" = "%@ needs app controls again";
 "notifications.device_control.remote_lock_unenforceable_title_plural" = "%@ locked apps need app controls";
 "notifications.device_control.remote_lock_unenforceable_body" = "A parent locked %@, but this iPhone has not added it to Screen Time app controls yet, so iOS cannot enforce that lock.";
@@ -237,6 +236,7 @@
 "settings2.permissions_off_count" = "%d permissions off";
 "settings2.connection" = "Connection status";
 "settings2.connection_value" = "Connected to parent";
+"settings2.language" = "Language";
 "settings2.about" = "About";
 "settings2.version" = "Bolajon360 · v";
 "settings2.privacy_policy" = "Privacy Policy";
@@ -245,7 +245,7 @@
 "settings2.disconnect_sub" = "Parent PIN required";
 "settings2.enable" = "Enable";
 "disconnect2.title" = "Disconnect";
-"disconnect2.body" = "This will unlink the device from your family. Enter the parent PIN to continue.";
+"disconnect2.body" = "This stops monitoring on this phone and returns it to pairing. To finish, a parent also removes the device in the Oila360 app. Enter the parent PIN to continue.";
 "disconnect2.parent_managed_body" = "Only a parent can disconnect this device. Ask your parent to remove it in the Oila360 app.";
 "disconnect2.locked_out" = "Too many attempts. Try again in %d min.";
 "disconnect2.confirm" = "Disconnect";
@@ -299,6 +299,7 @@
 "chat2.status.sending" = "Sending…";
 "chat2.status.failed" = "Not sent";
 "chat2.status.retry" = "Send again";
+"chat2.too_long" = "Message is limited to %d characters.";
 "chat2.error.dismiss" = "Dismiss";
 "home2.chat.title" = "Chat with parent";
 "home2.chat.subtitle" = "Message your family";

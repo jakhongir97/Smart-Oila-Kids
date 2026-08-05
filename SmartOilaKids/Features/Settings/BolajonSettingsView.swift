@@ -58,6 +58,8 @@ struct SettingsRootView: View {
 
     /// Non-nil while the parent-PIN sheet is up; the case decides which steps it runs.
     @State private var pinFlowIntent: ParentPINFlowIntent?
+    /// True while the language sheet is up.
+    @State private var isLanguagePickerPresented = false
 
     /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). The
     /// battery/auto-start rows are unreadable on iOS, so they never count as "off".
@@ -114,6 +116,12 @@ struct SettingsRootView: View {
                 }
 
                 section(title: "settings2.section_other") {
+                    // A1 is the only other place the language can be picked, and it is behind a
+                    // completed pairing — so without this row a wrong choice there is permanent.
+                    row(glyph: .symbol("globe"), tint: AppColors.glyphPurple,
+                        title: "settings2.language",
+                        subtitleLiteral: sessionStore.appLanguage.nativeName,
+                        action: { isLanguagePickerPresented = true })
                     row(glyph: .symbol("info.circle.fill"), tint: AppColors.glyphPurple,
                         title: "settings2.about", subtitleLiteral: appVersionText, action: nil)
                     row(glyph: .symbol("hand.raised.fill"), tint: AppColors.glyphPurple,
@@ -132,6 +140,10 @@ struct SettingsRootView: View {
         }
         .sheet(item: $pinFlowIntent) { intent in
             ParentPINFlowSheet(intent: intent)
+        }
+        .sheet(isPresented: $isLanguagePickerPresented) {
+            LanguagePickerSheet()
+                .environmentObject(sessionStore)
         }
     }
 
@@ -285,6 +297,38 @@ struct SettingsRootView: View {
     }
 }
 
+// MARK: - C4 Language
+
+/// Post-onboarding language switch. `SessionStore.setLanguage` swaps the L10n bundle and the
+/// app-level `APP_LANGUAGE` observer re-renders everything, so the sheet applies the choice
+/// immediately and only needs a dismiss button.
+private struct LanguagePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            AppColors.screenBackground.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 20) {
+                    Text(L10n.tr("setup.language.title"))
+                        .font(AppTypography.title(22))
+                        .foregroundStyle(AppColors.inkPrimary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 24)
+
+                    BolajonLanguagePicker()
+
+                    BolajonPrimaryButton(title: L10n.tr("common.done")) { dismiss() }
+                        .padding(.top, 4)
+                }
+                .padding(.horizontal, BolajonMetrics.screenPadding)
+                .padding(.bottom, 24)
+            }
+        }
+    }
+}
+
 // MARK: - C4 Parent PIN provisioning
 //
 // The disconnect gate (C6) only opens against a parent-provisioned PIN, but nothing in the app
@@ -332,56 +376,68 @@ struct ParentPINFlowSheet: View {
     var body: some View {
         ZStack {
             AppColors.screenBackground.ignoresSafeArea()
-            VStack(spacing: 0) {
-                badge
-                    .padding(.top, 20)
-
-                Text(L10n.tr(titleKey))
-                    .font(AppTypography.title(21))
-                    .foregroundStyle(AppColors.inkPrimary)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 14)
-
-                Text(L10n.tr(promptKey))
-                    .font(AppTypography.bodyText(15))
-                    .foregroundStyle(AppColors.inkSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-                    .padding(.horizontal, 6)
-
-                if step != .done {
-                    pinDots.padding(.top, 20)
-                }
-
-                if let errorText {
-                    Text(errorText)
-                        .font(AppTypography.caption(12))
-                        .foregroundStyle(AppColors.sosCoral)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
-                }
-
-                Spacer(minLength: 16)
-
-                if step == .done {
-                    BolajonPrimaryButton(title: L10n.tr("common.done")) { dismiss() }
-                } else {
-                    NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendDigit, onBackspace: removeDigit)
-                        .padding(.bottom, 12)
-                    BolajonPrimaryButton(
-                        title: L10n.tr(primaryTitleKey),
-                        fill: isDestructiveStep ? AppColors.sosCoral : AppColors.ctaPurple,
-                        disabled: pin.count != pinLength
-                    ) {
-                        submit()
-                    }
-                    GhostButton(title: L10n.tr("common.cancel")) { dismiss() }
+            // Badge + copy + dots + error line + keypad + two buttons overflow a short sheet as
+            // soon as an error appears or Dynamic Type grows — which left Save/Cancel off-screen
+            // and untappable. The minHeight keeps the bottom-anchored layout when it does fit.
+            GeometryReader { proxy in
+                ScrollView {
+                    pinContent
+                        .padding(.horizontal, BolajonMetrics.screenPadding)
+                        .padding(.bottom, 8)
+                        .frame(minHeight: proxy.size.height)
                 }
             }
-            .padding(.horizontal, BolajonMetrics.screenPadding)
-            .padding(.bottom, 8)
+        }
+    }
+
+    private var pinContent: some View {
+        VStack(spacing: 0) {
+            badge
+                .padding(.top, 20)
+
+            Text(L10n.tr(titleKey))
+                .font(AppTypography.title(21))
+                .foregroundStyle(AppColors.inkPrimary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 14)
+
+            Text(L10n.tr(promptKey))
+                .font(AppTypography.bodyText(15))
+                .foregroundStyle(AppColors.inkSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+                .padding(.horizontal, 6)
+
+            if step != .done {
+                pinDots.padding(.top, 20)
+            }
+
+            if let errorText {
+                Text(errorText)
+                    .font(AppTypography.caption(12))
+                    .foregroundStyle(AppColors.sosCoral)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+            }
+
+            Spacer(minLength: 16)
+
+            if step == .done {
+                BolajonPrimaryButton(title: L10n.tr("common.done")) { dismiss() }
+            } else {
+                NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendDigit, onBackspace: removeDigit)
+                    .padding(.bottom, 12)
+                BolajonPrimaryButton(
+                    title: L10n.tr(primaryTitleKey),
+                    fill: isDestructiveStep ? AppColors.sosCoral : AppColors.ctaPurple,
+                    disabled: pin.count != pinLength
+                ) {
+                    submit()
+                }
+                GhostButton(title: L10n.tr("common.cancel")) { dismiss() }
+            }
         }
     }
 
@@ -707,47 +763,59 @@ struct SettingsDisconnectScreen: View {
     var body: some View {
         ZStack {
             AppColors.screenBackground.ignoresSafeArea()
-            VStack(spacing: 0) {
-                brokenLinkBadge
-                    .padding(.top, 8)
-
-                // The screen title ("Aloqani uzish") lives in the native navigation bar.
-                Text(bodyText)
-                    .font(AppTypography.bodyText(15))
-                    .foregroundStyle(AppColors.inkSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 18)
-                    .padding(.horizontal, 6)
-
-                if showsPINField {
-                    pinDots.padding(.top, 22)
+            // Same overflow as the parent-PIN sheet: badge + copy + dots + error + keypad + two
+            // buttons run past a short screen, and "Uzish"/"Cancel" end up untappable.
+            GeometryReader { proxy in
+                ScrollView {
+                    disconnectContent
+                        .padding(.horizontal, BolajonMetrics.screenPadding)
+                        .padding(.bottom, 8)
+                        .frame(minHeight: proxy.size.height)
                 }
-
-                if let errorText {
-                    Text(errorText)
-                        .font(AppTypography.caption(12))
-                        .foregroundStyle(AppColors.sosCoral)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 12)
-                }
-
-                Spacer(minLength: 16)
-
-                if showsPINField {
-                    NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendPIN, onBackspace: removePIN)
-                        .disabled(busy)
-                        .padding(.bottom, 12)
-                    uzishButton
-                }
-                GhostButton(title: L10n.tr("disconnect2.cancel"), action: { dismiss() })
             }
-            .padding(.horizontal, BolajonMetrics.screenPadding)
-            .padding(.bottom, 8)
         }
         .navigationTitle(L10n.tr("disconnect2.title"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: resolveMode)
+    }
+
+    private var disconnectContent: some View {
+        VStack(spacing: 0) {
+            brokenLinkBadge
+                .padding(.top, 8)
+
+            // The screen title ("Aloqani uzish") lives in the native navigation bar.
+            Text(bodyText)
+                .font(AppTypography.bodyText(15))
+                .foregroundStyle(AppColors.inkSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 18)
+                .padding(.horizontal, 6)
+
+            if showsPINField {
+                pinDots.padding(.top, 22)
+            }
+
+            if let errorText {
+                Text(errorText)
+                    .font(AppTypography.caption(12))
+                    .foregroundStyle(AppColors.sosCoral)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+            }
+
+            Spacer(minLength: 16)
+
+            if showsPINField {
+                NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendPIN, onBackspace: removePIN)
+                    .disabled(busy)
+                    .padding(.bottom, 12)
+                uzishButton
+            }
+            GhostButton(title: L10n.tr("disconnect2.cancel"), action: { dismiss() })
+        }
     }
 
     private var pinDots: some View {
@@ -853,9 +921,14 @@ struct SettingsDisconnectScreen: View {
         return String(format: L10n.tr("disconnect2.locked_out"), minutes)
     }
 
-    /// Runs only after the parent PIN (or biometric) has been validated. Clearing the session
+    /// Runs only after the parent PIN has been validated. Clearing the session
     /// swaps the app root back to pairing, which tears down this Settings stack. Local by design
     /// (no backend parent-PIN endpoint).
+    ///
+    /// This is a LOCAL disconnect: monitoring stops, credentials and per-child data are wiped from
+    /// the phone, but `logout()` cannot revoke the `deviceToken` server-side — there is no
+    /// device-scoped revoke route (backend ask B1). The server-side link is only cut when a parent
+    /// removes the device in the Oila360 app, which is what `disconnect2.body` now tells the user.
     private func performDisconnect() {
         guard !isDisconnecting else { return }
         isDisconnecting = true

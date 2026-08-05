@@ -18,14 +18,22 @@ protocol DeviceAppLockSyncServicing {
     func syncApplications(_ entries: [DeviceAppLockSyncEntry], dsn: String) async throws
 }
 
+/// Thrown by the parked transport so the coordinator can tell "not wired yet" apart from a real
+/// network failure. A transport that does not exist cannot be fixed by retrying.
+struct DeviceAppLockSyncUnavailableError: LocalizedError {
+    var errorDescription: String? {
+        "App-lock sync is not wired to PUT /device/apps/sync yet"
+    }
+}
+
 /// PARKED transport (legacy backend decommissioned; runs only behind the Screen-Time flag,
-/// off in v1). Reimplement against the oila360 device API (`PUT /device/apps/sync`) when
-/// v1.1 enforcement ships. Throwing routes the coordinator into its retry/backoff path.
+/// off in v1). Reimplement against the oila360 device API (`PUT /device/apps/sync`, which exists
+/// on the server) when v1.1 enforcement ships.
 final class DeviceAppLockSyncService: DeviceAppLockSyncServicing {
     init() {}
 
     func syncApplications(_ entries: [DeviceAppLockSyncEntry], dsn: String) async throws {
-        throw NetworkError.invalidURL
+        throw DeviceAppLockSyncUnavailableError()
     }
 }
 
@@ -62,7 +70,7 @@ actor DeviceAppLockSyncCoordinator {
         let signature = signatureForCurrentState(dsn: dsn)
         guard force || signature != lastSyncedSignature else { return }
 
-        let endpoint = "devices/\(dsn)/applications/sync"
+        let endpoint = "\(AppConfig.oilaAPIBaseURL.absoluteString)/device/apps/sync"
         updateDiagnostics(
             status: retryTask == nil ? "syncing" : "retrying",
             endpoint: endpoint,
@@ -82,6 +90,18 @@ actor DeviceAppLockSyncCoordinator {
                 lastPayload: payloadSummary(),
                 lastError: "-",
                 lastSyncAt: Date()
+            )
+        } catch is DeviceAppLockSyncUnavailableError {
+            // Report the parked state as parked. Scheduling a retry here used to leave the
+            // diagnostics screen cycling "retrying"/"failed: Invalid URL" against an endpoint the
+            // app never attempts to call, which reads as a live transport that is merely broken.
+            cancelRetry()
+            updateDiagnostics(
+                status: "parked",
+                endpoint: endpoint,
+                dsn: dsn,
+                lastPayload: payloadSummary(),
+                lastError: "-"
             )
         } catch {
             updateDiagnostics(

@@ -40,13 +40,6 @@ struct SmartOilaKidsApp: App {
                     applyWindowTheme(AppTheme(rawValue: newValue) ?? .system)
 #endif
                 }
-                .onOpenURL { url in
-                    InviteAttributionStore.shared.captureIfInviteURL(url)
-                }
-                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
-                    guard let url = activity.webpageURL else { return }
-                    InviteAttributionStore.shared.captureIfInviteURL(url)
-                }
         }
     }
 

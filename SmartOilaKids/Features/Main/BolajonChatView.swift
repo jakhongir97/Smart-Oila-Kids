@@ -45,10 +45,18 @@ final class ChatAttachmentStore: ObservableObject {
     /// never round-trips through the attachment endpoint just to render itself.
     @Published private(set) var previews: [String: UIImage] = [:]
 
+    /// How long a signed URL is assumed to stay usable. `GET .../attachment` returns no expiry, so
+    /// this is a deliberately conservative floor for a presigned link: re-minting one costs a
+    /// single cheap authenticated GET, while handing `AsyncImage` an expired URL shows the child a
+    /// broken photo that only recovers if they notice the retry affordance.
+    static let signedURLLifetime: TimeInterval = 4 * 60
+
     private let chat: OilaChatServicing
     /// Message ids with a request in flight, so a re-entrant `load` (LazyVStack re-appearing the
     /// same row while scrolling) can't fire a second signed-URL request.
     private var inFlight: Set<String> = []
+    /// When each `.ready` URL was minted, so an expired one is re-fetched rather than re-served.
+    private var issuedAt: [String: Date] = [:]
 
     init(chat: OilaChatServicing = OilaDeviceClient.shared) {
         self.chat = chat
@@ -63,7 +71,7 @@ final class ChatAttachmentStore: ObservableObject {
         // A locally-previewed photo is already on screen; there is nothing to download.
         guard previews[messageID] == nil else { return }
         guard !inFlight.contains(messageID) else { return }
-        if !force, states[messageID] != nil { return }
+        if !force, !needsRefresh(messageID) { return }
 
         inFlight.insert(messageID)
         states[messageID] = .loading
@@ -72,14 +80,34 @@ final class ChatAttachmentStore: ObservableObject {
             do {
                 let url = try await self.chat.fetchChatAttachmentURL(messageId: messageID)
                 self.states[messageID] = .ready(url)
+                self.issuedAt[messageID] = Date()
             } catch {
                 self.states[messageID] = .failed
+                self.issuedAt[messageID] = nil
             }
             self.inFlight.remove(messageID)
         }
     }
 
     func retry(_ messageID: String) { load(messageID, force: true) }
+
+    /// Re-mints every signed URL that has outlived its lifetime — called when the screen comes
+    /// back to the foreground, so a thread that sat backgrounded past the expiry does not come
+    /// back full of photos that only load again after the child taps each one.
+    func refreshExpired() {
+        for messageID in Array(states.keys) where needsRefresh(messageID) {
+            load(messageID, force: true)
+        }
+    }
+
+    /// True when nothing has been fetched for this message yet, or when the URL that WAS fetched
+    /// has outlived its assumed signature lifetime. A `.failed` state deliberately does not
+    /// expire: that one stays behind tap-to-retry, exactly as before.
+    private func needsRefresh(_ messageID: String) -> Bool {
+        guard let state = states[messageID] else { return true }
+        guard case .ready = state, let issued = issuedAt[messageID] else { return false }
+        return Date().timeIntervalSince(issued) >= Self.signedURLLifetime
+    }
 
     func setPreview(_ image: UIImage, for messageID: String) {
         previews[messageID] = image
@@ -149,7 +177,16 @@ enum ChatDeliveryState: Equatable {
 final class BolajonChatViewModel: ObservableObject {
     /// Chronological (oldest first) for top-to-bottom rendering.
     @Published private(set) var messages: [OilaChatMessage] = []
-    @Published var draft: String = ""
+    @Published var draft: String = "" {
+        didSet {
+            // `SendMessageDto.text` is capped at 4000 characters. Clamp here — a paste that blows
+            // past the cap used to reach the server and come back as a generic failure, with the
+            // child's message already gone from the composer.
+            guard draft.count > Self.maxMessageLength else { return }
+            draft = String(draft.prefix(Self.maxMessageLength))
+            errorMessage = L10n.tr("chat2.too_long", Self.maxMessageLength)
+        }
+    }
     @Published private(set) var isConnected = false
     /// Number of sends currently in flight. Published (rather than a plain Bool) so several
     /// optimistic sends can overlap without one finishing early and clearing the other's state.
@@ -164,6 +201,10 @@ final class BolajonChatViewModel: ObservableObject {
     @Published private(set) var sendingLocalIDs: Set<String> = []
     /// Ids of local echoes whose send failed — these keep their bubble and offer a retry.
     @Published private(set) var failedLocalIDs: Set<String> = []
+    /// True while an older page of history is in flight, so the top loader can't fire twice.
+    @Published private(set) var isLoadingOlder = false
+    /// Whether there is (probably) older history left above what is loaded — drives the top loader.
+    @Published private(set) var canLoadOlder = false
 
     /// Signed-URL cache + local photo previews for this screen. Not `@Published`: views observe
     /// it directly so a single attachment finishing loading doesn't rebuild the whole thread.
@@ -175,6 +216,8 @@ final class BolajonChatViewModel: ObservableObject {
     /// Pending post-auth-expiry reconnect, cancelled when the screen goes away.
     /// Refetch scheduled when the socket comes back up. See `onConnectedChange`.
     private var resyncTask: Task<Void, Never>?
+    /// Explicit keyset cursor from the last page, when the response carried one.
+    private var historyCursor: String?
     /// What each unacknowledged echo was made of, so a failed send can be retried verbatim
     /// instead of asking the child to type (or pick the photo) again.
     private var outbox: [String: OutgoingChatDraft] = [:]
@@ -255,11 +298,15 @@ final class BolajonChatViewModel: ObservableObject {
 #endif
         isLoading = messages.isEmpty
         do {
-            let page = try await chat.fetchChatMessages(limit: 40, before: nil)
+            let page = try await chat.fetchChatMessages(limit: Self.pageSize, before: nil)
             // Merge rather than replace: a local echo whose send is still in flight (or has
             // failed) is not in the server's page, and dropping it would make the child's message
-            // vanish mid-send.
-            messages = sortedDedup(page.messages + unacknowledgedEchoes())
+            // vanish mid-send. Keeping the rest of `messages` matters too now that older pages can
+            // be loaded — replacing wholesale would throw that history away on every resync.
+            // `sortedDedup` keeps the first occurrence, so the fresh server copy still wins.
+            messages = sortedDedup(page.messages + messages)
+            historyCursor = page.nextCursor
+            canLoadOlder = Self.hasMoreHistory(after: page)
             errorMessage = nil
             loadedOnce = true
             await refreshUnreadBoundaryAndMarkRead()
@@ -267,6 +314,43 @@ final class BolajonChatViewModel: ObservableObject {
             errorMessage = NetworkError.userMessage(for: error)
         }
         isLoading = false
+    }
+
+    /// One HTTP catch-up for a thread that is already open. The socket is suspended while the app
+    /// is backgrounded and a chat push arrives without one at all, so anything the parent sent in
+    /// the meantime is only reachable over HTTP — this is the single resync the team agreed on.
+    /// Socket retry timing is deliberately left to the service, exactly as `onAuthExpired` notes.
+    /// `load()` merges and re-flushes the read watermark, so this is safe to repeat.
+    func resync() async {
+        guard loadedOnce else { return }
+        // Any signed attachment URL that expired meanwhile is re-minted here rather than left to
+        // fail inside `AsyncImage`.
+        attachments.refreshExpired()
+        resyncTask?.cancel()
+        let task: Task<Void, Never> = Task { [weak self] in await self?.load() }
+        resyncTask = task
+        await task.value
+    }
+
+    /// Pulls the next OLDER page. History is keyset-paginated newest-first (`before` + the page's
+    /// cursor), but only the newest page was ever fetched — so a thread longer than one page was
+    /// silently truncated at its top with no way to reach the rest.
+    func loadOlder() async {
+        guard loadedOnce, !isLoadingOlder, canLoadOlder, let cursor = olderPageCursor() else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+        do {
+            let page = try await chat.fetchChatMessages(limit: Self.pageSize, before: cursor)
+            messages = sortedDedup(page.messages + messages)
+            historyCursor = page.nextCursor
+            canLoadOlder = Self.hasMoreHistory(after: page)
+            errorMessage = nil
+        } catch {
+            // Stop the top loader re-firing against a failing endpoint; entering the thread again
+            // (or the next resync) re-arms it from a fresh newest page.
+            canLoadOlder = false
+            errorMessage = NetworkError.userMessage(for: error)
+        }
     }
 
     func dismissError() { errorMessage = nil }
@@ -416,9 +500,20 @@ final class BolajonChatViewModel: ObservableObject {
         messages.removeAll { $0.id == localID }
     }
 
-    /// The echoes currently on screen that the server doesn't know about yet.
-    private func unacknowledgedEchoes() -> [OilaChatMessage] {
-        messages.filter { sendingLocalIDs.contains($0.id) || failedLocalIDs.contains($0.id) }
+    /// The `before` value for the next older page. The endpoint documents it as "load messages
+    /// older than this message id (keyset cursor)", so when a response carries no explicit cursor
+    /// — a bare JSON array has nowhere to put paging meta — the oldest server message already
+    /// held is itself a valid cursor. Local echoes are skipped: they have no server identity.
+    private func olderPageCursor() -> String? {
+        if let historyCursor = historyCursor?.trimmedNonEmpty { return historyCursor }
+        return messages.first { !$0.id.hasPrefix(Self.localIDPrefix) }?.id
+    }
+
+    /// A page shorter than the one that was asked for means the head of the thread was reached;
+    /// an explicit cursor means there is definitely more. Nothing else can be known, since the
+    /// response schema is undocumented.
+    private static func hasMoreHistory(after page: OilaChatPage) -> Bool {
+        page.nextCursor?.trimmedNonEmpty != nil || page.messages.count >= pageSize
     }
 
     private func ingest(_ message: OilaChatMessage) {
@@ -486,6 +581,12 @@ final class BolajonChatViewModel: ObservableObject {
     /// Prefix that marks a locally-minted echo id; server ids never carry it.
     private static let localIDPrefix = "local-echo-"
 
+    /// Messages per history request (the endpoint caps `limit` at 100).
+    private static let pageSize = 40
+
+    /// `SendMessageDto.text` is declared 1..4000 in the spec.
+    private static let maxMessageLength = 4000
+
     private static func parseISO(_ any: Any?) -> Date? {
         guard let string = (any as? String)?.trimmedNonEmpty else { return nil }
         return isoParserFractional.date(from: string) ?? isoParser.date(from: string)
@@ -536,9 +637,13 @@ final class BolajonChatViewModel: ObservableObject {
 
 struct BolajonChatView: View {
     @StateObject private var viewModel = BolajonChatViewModel()
+    @Environment(\.scenePhase) private var scenePhase
     @FocusState private var composerFocused: Bool
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var enlargedImage: ChatImagePreviewItem?
+    /// See `olderHistoryLoader`: the paging row is on screen for the first frame of every open,
+    /// and that appearance must not trigger a fetch.
+    @State private var didSkipInitialLoaderAppearance = false
 
     var body: some View {
         ZStack {
@@ -571,6 +676,20 @@ struct BolajonChatView: View {
         }
         .task { await viewModel.appear() }
         .onDisappear { viewModel.disappear() }
+        .onChange(of: scenePhase) { phase in
+            // Back to the foreground: the socket was suspended while backgrounded, so anything the
+            // parent sent meanwhile never reached an open thread. One HTTP resync (which also
+            // re-flushes the read watermark), plus a re-mint of any signed attachment URL that
+            // expired in the background.
+            guard phase == .active else { return }
+            Task { await viewModel.resync() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshChat)) { notification in
+            // A chat push is the one signal that survives a suspended socket, so an open thread
+            // pulls the message in over HTTP rather than waiting for the socket to come back.
+            guard Self.pushMatchesDevice(notification) else { return }
+            Task { await viewModel.resync() }
+        }
         .onChange(of: pickedPhoto) { item in
             guard let item else { return }
             Task {
@@ -590,6 +709,9 @@ struct BolajonChatView: View {
                 LazyVStack(spacing: 10) {
                     if viewModel.messages.isEmpty, !viewModel.isLoading {
                         emptyState
+                    }
+                    if viewModel.canLoadOlder {
+                        olderHistoryLoader(proxy)
                     }
                     ForEach(viewModel.messages) { message in
                         if message.id == viewModel.unreadBoundaryID {
@@ -617,10 +739,53 @@ struct BolajonChatView: View {
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: viewModel.messages.count) { _ in scrollToBottom(proxy) }
+            // Keyed on the NEWEST message rather than the count: loading an older page also
+            // changes the count, and jumping to the bottom would yank the thread out from under
+            // the child the moment their history finished loading.
+            .onChange(of: viewModel.messages.last?.id) { _ in scrollToBottom(proxy) }
             .onChange(of: composerFocused) { focused in if focused { scrollToBottom(proxy) } }
             .task { scrollToBottom(proxy, animated: false) }
         }
+    }
+
+    /// Top-of-thread trigger for keyset paging: it only exists while older history is left, and
+    /// scrolling it into view fetches the next page.
+    ///
+    /// A `ScrollView` lays out from the top, so this row is on screen for the first frame of every
+    /// open — before `scrollToBottom` runs. Fetching on that first appearance would pull an
+    /// unrequested page and re-anchor the child away from the newest message, so the first
+    /// appearance is deliberately skipped and only a genuine scroll back up pages.
+    private func olderHistoryLoader(_ proxy: ScrollViewProxy) -> some View {
+        ProgressView()
+            .progressViewStyle(.circular)
+            .tint(AppColors.inkTertiary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .onAppear {
+                guard didSkipInitialLoaderAppearance else {
+                    didSkipInitialLoaderAppearance = true
+                    return
+                }
+                let anchor = viewModel.messages.first?.id
+                Task {
+                    await viewModel.loadOlder()
+                    // Prepending changes the content height, so re-anchor on the row that used to
+                    // be at the top — otherwise the thread visibly jumps.
+                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                }
+            }
+    }
+
+    /// Only act on a chat push addressed to THIS device (a payload without a DSN is accepted,
+    /// matching `RootView.shouldHandlePush`). `persistedDSN` never mints an identity just by
+    /// being asked, and reading it here keeps the screen usable from the standalone debug route,
+    /// which has no `SessionStore` in its environment.
+    private static func pushMatchesDevice(_ notification: Notification) -> Bool {
+        guard let currentDSN = OilaDeviceIdentity.persistedDSN() else { return false }
+        guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
+            return true
+        }
+        return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
     }
 
     private var composer: some View {

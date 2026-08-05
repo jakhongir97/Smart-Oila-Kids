@@ -209,7 +209,12 @@ actor DeviceApplicationUsageReportCoordinator {
         // Bound the backlog: an extended offline period (or a permanently-wedged head, now guarded
         // below) must not let the queue grow without limit. Oldest batches are the least useful.
         if persistedState.pendingBatches.count > maxPendingBatches {
-            persistedState.pendingBatches.removeFirst(persistedState.pendingBatches.count - maxPendingBatches)
+            let overflow = persistedState.pendingBatches.count - maxPendingBatches
+            let trimmed = Array(persistedState.pendingBatches.prefix(overflow))
+            persistedState.pendingBatches.removeFirst(overflow)
+            for droppedBatch in trimmed {
+                refundAccountedUsage(for: droppedBatch)
+            }
         }
         persistedState.lastPayloadSummary = payloadSummary(for: batch)
         persistedState.lastEndpoint = endpoint(for: batch.dsn)
@@ -365,6 +370,7 @@ actor DeviceApplicationUsageReportCoordinator {
                     // The server will never accept this batch (4xx validation error). Drop it so it
                     // cannot wedge the head of the queue forever, and continue with the rest.
                     persistedState.pendingBatches.removeFirst()
+                    refundAccountedUsage(for: batch)
                     persistState()
                     updateDiagnostics(
                         status: persistedState.pendingBatches.isEmpty ? "synced" : "queued",
@@ -509,12 +515,39 @@ actor DeviceApplicationUsageReportCoordinator {
         )
     }
 
+    /// Drops all queued usage and the persisted copy, for unpair.
+    ///
+    /// `pendingBatches` carry the previous child's package names and seconds, and the upload carries
+    /// no dsn — whatever device Bearer is held when the queue finally flushes is who the server
+    /// attributes it to. Clearing the UserDefaults key alone would not hold: this actor is long-lived,
+    /// so its in-memory state survives the disconnect and `persistState()` writes the key back.
+    func purge() {
+        retryTask?.cancel()
+        retryTask = nil
+        persistedState = PersistedState()
+        userDefaults.removeObject(forKey: Self.storageKey)
+    }
+
     private func persistState() {
         Self.storeState(persistedState, userDefaults: userDefaults, storageKey: Self.storageKey)
     }
 
     private func usageKey(dsn: String, dayKey: String, packageName: String) -> String {
         "\(dsn.lowercased())|\(dayKey)|\(packageName)"
+    }
+
+    /// Gives the deltas of a batch that will never be sent back to the accounting ledger, so the
+    /// seconds it covered are re-counted by the next snapshot instead of being lost forever.
+    /// `accountedUsageByKey` stores the cumulative total already reported, so subtracting the
+    /// batch's delta makes the next snapshot's delta include it again. Applied on both drop paths
+    /// (permanent reject and backlog trim). The server-side half — an idempotency key so a retried
+    /// delta cannot double-count — is backend ask B5.
+    private func refundAccountedUsage(for batch: PendingBatch) {
+        for item in batch.items {
+            let accountedKey = usageKey(dsn: batch.dsn, dayKey: batch.dayKey, packageName: item.packageName)
+            guard let accounted = persistedState.accountedUsageByKey[accountedKey] else { continue }
+            persistedState.accountedUsageByKey[accountedKey] = max(0, accounted - max(0, item.usedSeconds))
+        }
     }
 
     private func pruneAccountedUsage(keepingDSN: String, dayKey: String) {

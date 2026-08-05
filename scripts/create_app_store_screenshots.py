@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import plistlib
@@ -36,18 +37,22 @@ class Shot:
     name: str
     route: str
     delay: float
-    auth_stage: str | None = None
-    permissions_stage: str | None = None
-    open_chat_thread: bool = False
+    setup_step: str | None = None
 
 
+# `route` MUST be a raw value of `DebugRoute` in Core/Config/AppRuntime.swift and `setup_step` a raw
+# value of `DebugSetupStep`; anything else is silently ignored (`DebugRoute(rawValue:)` returns nil)
+# and RootView falls through to the regular root, so every shot captures the same screen. The old
+# `auth`/`main`/`chat`/`tasks`/`permissions`/`settings` values were exactly that -- pre-Bolajon
+# route names that no longer exist. The SHOT_DIGESTS check below is what makes a repeat of that
+# mistake fail loudly instead of shipping six copies of one screen to App Store Connect.
 SHOTS = [
-    Shot(name="01-link-success", route="auth", delay=2.0, auth_stage="success"),
-    Shot(name="02-dashboard", route="main", delay=2.8),
-    Shot(name="03-parent-chat", route="chat", delay=3.2, open_chat_thread=True),
-    Shot(name="04-tasks", route="tasks", delay=2.8),
-    Shot(name="05-permissions", route="permissions", delay=2.0, permissions_stage="checklist"),
-    Shot(name="06-settings", route="settings", delay=2.8),
+    Shot(name="01-link-success", route="setup", delay=2.0, setup_step="success"),
+    Shot(name="02-dashboard", route="home2", delay=2.8),
+    Shot(name="03-parent-chat", route="chat2", delay=3.2),
+    Shot(name="04-tasks", route="tasks2", delay=2.8),
+    Shot(name="05-permissions", route="perm2", delay=2.0),
+    Shot(name="06-settings", route="settings2", delay=2.8),
 ]
 
 
@@ -338,21 +343,19 @@ def seed_defaults(container: Path, bundle_id: str) -> None:
 
 
 def launch_env(shot: Shot) -> dict[str, str]:
+    # Only these four variables are read by the app (`AppRuntime`). SMARTOILA_SCREENSHOT_MODE,
+    # SMARTOILA_DEBUG_AUTH_STAGE, SMARTOILA_DEBUG_PERMISSIONS_STAGE and
+    # SMARTOILA_SCREENSHOT_OPEN_CHAT_THREAD have no reader anywhere in the target and were dropped.
     env = os.environ.copy()
     env.update(
         {
-            "SIMCTL_CHILD_SMARTOILA_SCREENSHOT_MODE": "1",
             "SIMCTL_CHILD_SMARTOILA_DEBUG_DSN": DEMO_DSN,
             "SIMCTL_CHILD_SMARTOILA_DEBUG_PROFILE": DEMO_PROFILE,
             "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE": shot.route,
         }
     )
-    if shot.auth_stage:
-        env["SIMCTL_CHILD_SMARTOILA_DEBUG_AUTH_STAGE"] = shot.auth_stage
-    if shot.permissions_stage:
-        env["SIMCTL_CHILD_SMARTOILA_DEBUG_PERMISSIONS_STAGE"] = shot.permissions_stage
-    if shot.open_chat_thread:
-        env["SIMCTL_CHILD_SMARTOILA_SCREENSHOT_OPEN_CHAT_THREAD"] = "1"
+    if shot.setup_step:
+        env["SIMCTL_CHILD_SMARTOILA_DEBUG_SETUP_STEP"] = shot.setup_step
     return env
 
 
@@ -367,7 +370,7 @@ def launch_and_capture(
     ready_dir: Path,
     shot: Shot,
     ready_size: tuple[int, int],
-) -> None:
+) -> str:
     raw_path = raw_dir / f"{shot.name}.png"
     ready_path = ready_dir / f"{shot.name}.png"
 
@@ -390,6 +393,39 @@ def launch_and_capture(
     time.sleep(shot.delay)
     host(["xcrun", "simctl", "io", udid, "screenshot", str(raw_path)])
     host(["sips", "-z", str(ready_size[1]), str(ready_size[0]), str(raw_path), "--out", str(ready_path)])
+    return hashlib.sha256(raw_path.read_bytes()).hexdigest()
+
+
+def capture_set(
+    udid: str,
+    bundle_id: str,
+    raw_dir: Path,
+    ready_dir: Path,
+    ready_size: tuple[int, int],
+) -> None:
+    """Capture every shot for one device and refuse to return duplicate screens.
+
+    A debug route the app does not recognise produces the regular root instead, so the run still
+    "succeeds" while every PNG is the same screen. Digest-comparing the raw captures turns that
+    into a hard failure at capture time rather than a rejection in App Store Connect.
+    """
+    digests: dict[str, str] = {}
+    for shot in SHOTS:
+        digests[shot.name] = launch_and_capture(
+            udid, bundle_id, raw_dir, ready_dir, shot, ready_size
+        )
+
+    duplicates: dict[str, list[str]] = {}
+    for name, digest in digests.items():
+        duplicates.setdefault(digest, []).append(name)
+    collisions = [names for names in duplicates.values() if len(names) > 1]
+    if collisions:
+        detail = "; ".join(", ".join(names) for names in collisions)
+        raise RuntimeError(
+            f"Identical screenshots captured ({detail}). The debug route almost certainly did not "
+            "take effect -- check that every Shot.route is a DebugRoute raw value and that the "
+            "build is Debug (debugRoute is compiled out of Release)."
+        )
 
 
 def write_manifest() -> None:
@@ -456,26 +492,22 @@ def main() -> int:
             override_status_bar(udid)
 
         print("Capturing iPhone screenshots...")
-        for shot in SHOTS:
-            launch_and_capture(
-                iphone_udid,
-                bundle_id,
-                directories["iphone_raw"],
-                directories["iphone_ready"],
-                shot,
-                IPHONE_READY_SIZE,
-            )
+        capture_set(
+            iphone_udid,
+            bundle_id,
+            directories["iphone_raw"],
+            directories["iphone_ready"],
+            IPHONE_READY_SIZE,
+        )
 
         print("Capturing iPad screenshots...")
-        for shot in SHOTS:
-            launch_and_capture(
-                ipad_udid,
-                bundle_id,
-                directories["ipad_raw"],
-                directories["ipad_ready"],
-                shot,
-                IPAD_READY_SIZE,
-            )
+        capture_set(
+            ipad_udid,
+            bundle_id,
+            directories["ipad_raw"],
+            directories["ipad_ready"],
+            IPAD_READY_SIZE,
+        )
 
         write_manifest()
 

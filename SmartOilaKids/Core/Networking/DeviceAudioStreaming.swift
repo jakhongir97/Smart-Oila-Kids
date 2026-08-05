@@ -241,7 +241,8 @@ final class DeviceAudioStreamManager: ObservableObject {
         case idle
         case connecting
         case live
-        case unsupported          // pre-iOS 17 or SDK not linked
+        case disabled             // SMARTOILA_MEDIA_FEATURES_ENABLED is off
+        case unsupported          // SDK not linked
         case error(String)
     }
 
@@ -301,7 +302,7 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// Entry point (the parent tapped "listen" → an FCM data-push wakes us here). Gated by the
     /// feature flag and a one-time child consent; never opens the mic silently.
     func requestStart() {
-        guard AppRuntime.audioStreamingEnabled else { return }
+        guard AppRuntime.audioStreamingEnabled else { recordStartDroppedByFlag(); return }
         guard state != .live, state != .connecting else { return }
         guard defaults.bool(forKey: consentKey) else {
             needsConsent = true
@@ -322,9 +323,12 @@ final class DeviceAudioStreamManager: ObservableObject {
     }
 
     func start() async {
-        guard AppRuntime.audioStreamingEnabled else { return }
-        guard AudioPublisherFactory.isLiveKitLinked else { state = .unsupported; return }
-        guard #available(iOS 17.0, *) else { state = .unsupported; return }
+        guard AppRuntime.audioStreamingEnabled else { recordStartDroppedByFlag(); return }
+        guard AudioPublisherFactory.isLiveKitLinked else {
+            state = .unsupported
+            recordMedia(status: "unsupported", event: "audio_start_dropped_sdk_missing")
+            return
+        }
         // RE-ENTRANCY GUARD. `start()` had none, and a foreground alert+content-available push is
         // delivered through BOTH didReceiveRemoteNotification and willPresent with no de-duplication
         // by message id — so two calls could proceed while `state` was still .idle. Publisher A was
@@ -339,7 +343,10 @@ final class DeviceAudioStreamManager: ObservableObject {
         let generation = startGeneration
 
         guard await requestMicPermission() else {
-            if generation == startGeneration { state = .error("mic_denied") }
+            if generation == startGeneration {
+                state = .error("mic_denied")
+                recordMedia(status: "error", event: "audio_start_mic_denied")
+            }
             return
         }
         guard generation == startGeneration, state == .connecting else { return }
@@ -361,7 +368,15 @@ final class DeviceAudioStreamManager: ObservableObject {
                 return
             }
             state = .live
+            recordMedia(status: "live", event: "audio_live")
         } catch {
+            // Same ownership check the success path makes. `publisher` here is the PROPERTY, not
+            // this attempt's local, so once a stop() (and then a fresh start()) had landed while
+            // connect() was still awaiting, this block grabbed the NEW session's publisher and
+            // disconnected it — a throw from a superseded attempt killed a live stream and
+            // overwrote its state with an error. The attempt's own publisher is not leaked: only
+            // stop() bumps the generation ahead of a replacement start, and it disconnects it.
+            guard generation == startGeneration else { return }
             // The throw can land AFTER `connect()` already joined the room (the mic-publish step is
             // the second await), and `Room` has no deinit that disconnects — so a half-open session
             // has to be torn down explicitly instead of merely dropped, or the mic keeps capturing.
@@ -370,6 +385,7 @@ final class DeviceAudioStreamManager: ObservableObject {
             failedPublisher?.onEnded = nil
             await failedPublisher?.disconnect()
             state = .error(NetworkError.userMessage(for: error))
+            recordMedia(status: "error", event: "audio_start_failed")
         }
     }
 
@@ -400,7 +416,10 @@ final class DeviceAudioStreamManager: ObservableObject {
         publisher = nil
         endingPublisher?.onEnded = nil
         await endingPublisher?.disconnect()
-        if state == .live || state == .connecting { state = .idle }
+        if state == .live || state == .connecting {
+            state = .idle
+            recordMedia(status: "idle", event: "audio_stopped")
+        }
     }
 
     /// The room ended the session from its side (parent hung up, the SFU dropped us, the network
@@ -413,13 +432,51 @@ final class DeviceAudioStreamManager: ObservableObject {
         await stop()
     }
 
-    @available(iOS 17.0, *)
+    /// `AVAudioApplication` is iOS 17+, and `start()` used to answer a pre-17 device with
+    /// `.unsupported` — which silently killed live audio on the app's own stated minimum
+    /// (`IPHONEOS_DEPLOYMENT_TARGET = 16.0`). The pre-17 API still exists and still works, so the
+    /// permission ask is branched here instead of the whole feature being gated.
     private func requestMicPermission() async -> Bool {
-        if AVAudioApplication.shared.recordPermission == .granted { return true }
+        if #available(iOS 17.0, *) {
+            if AVAudioApplication.shared.recordPermission == .granted { return true }
+            return await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+        return await requestLegacyMicPermission()
+    }
+
+    /// iOS 16 path. Marked deprecated to match the APIs it wraps: Swift suppresses deprecation
+    /// warnings inside a declaration that is itself deprecated, so the legacy calls stay warning-free
+    /// here and this is the single place to delete when the minimum moves to iOS 17.
+    @available(iOS, introduced: 16.0, deprecated: 17.0, message: "Superseded by AVAudioApplication.")
+    private func requestLegacyMicPermission() async -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        if session.recordPermission == .granted { return true }
         return await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
+            session.requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
         }
+    }
+
+    /// A `stream.start` push that lands with the media flag off used to be a bare `return`, while
+    /// `PushCommandRouter` had already recorded the delivery as `routed` with route `audio_start` —
+    /// so diagnostics claimed a command had been handled when nothing had opened. Record the drop
+    /// and park the manager in a state that says why, instead of leaving it indistinguishable
+    /// from `.idle`.
+    private func recordStartDroppedByFlag() {
+        state = .disabled
+        recordMedia(status: "disabled", event: "audio_start_dropped_flag_off")
+    }
+
+    private func recordMedia(status: String, event: String) {
+        RuntimeDiagnosticsCenter.shared.updateMedia(
+            status: status,
+            streamState: status,
+            lastEvent: event
+        )
     }
 }

@@ -130,6 +130,8 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     }
 
     func scheduleLocalNotification(for event: DeviceControlEvent) {
+        applyPreferredLanguage()
+
         let content = UNMutableNotificationContent()
         content.title = localNotificationTitle(for: event)
         content.body = localNotificationBody(for: event)
@@ -147,33 +149,84 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         UNUserNotificationCenter.current().add(request)
     }
 
+    /// The monitor runs in its own process, so nothing has called `L10n.setLanguage` here. Read
+    /// the family's chosen language from the App Group; when it has not been mirrored yet, leave
+    /// L10n on the extension bundle's own localization (which follows the device language).
+    func applyPreferredLanguage() {
+        guard let code = DeviceControlLanguagePreference.storedLanguageCode() else { return }
+        L10n.setLanguage(code)
+    }
+
+    // Same keys as DeviceControlEventBridge, so the system notification and the in-app inbox
+    // entry for one event never disagree.
     func localNotificationTitle(for event: DeviceControlEvent) -> String {
         switch event.kind {
         case .scheduleStarted:
-            return "Device locked by schedule"
+            return L10n.tr("notifications.device_control.schedule_started_title")
         case .scheduleEnded:
-            return "Schedule lock ended"
+            return L10n.tr("notifications.device_control.schedule_ended_title")
         case .appLimitReached:
-            if let appName = event.appName?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !appName.isEmpty {
-                return "\(appName) locked for today"
+            if let appName = normalizedAppName(for: event) {
+                return L10n.tr("notifications.device_control.app_limit_reached_title", appName)
             }
-            return "App limit reached"
+            return L10n.tr("notifications.device_control.app_limit_reached_title_fallback")
         }
     }
 
     func localNotificationBody(for event: DeviceControlEvent) -> String {
         switch event.kind {
         case .scheduleStarted:
-            return "A parent device schedule started and Smart Oila locked this iPhone."
+            return L10n.tr("notifications.device_control.schedule_started_body")
         case .scheduleEnded:
-            return "The parent device schedule ended and Smart Oila unlocked this iPhone."
+            return L10n.tr("notifications.device_control.schedule_ended_body")
         case .appLimitReached:
-            if let appName = event.appName?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !appName.isEmpty {
-                return "The daily limit for \(appName) was reached, so it is locked until tomorrow."
+            if let appName = normalizedAppName(for: event) {
+                return L10n.tr("notifications.device_control.app_limit_reached_body", appName)
             }
-            return "A daily app limit was reached, so the app is locked until tomorrow."
+            return L10n.tr("notifications.device_control.app_limit_reached_body_fallback")
         }
+    }
+
+    func normalizedAppName(for event: DeviceControlEvent) -> String? {
+        guard let appName = event.appName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !appName.isEmpty else {
+            return nil
+        }
+
+        return appName
+    }
+}
+
+/// The app's language choice (`SessionStore` key `APP_LANGUAGE`) mirrored into the App Group so
+/// extension processes can localize the same way the app does.
+private enum DeviceControlLanguagePreference {
+    static let defaultsKey = "APP_LANGUAGE"
+
+    static func storedLanguageCode() -> String? {
+        let value = sharedUserDefaults()?
+            .string(forKey: defaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let value, !value.isEmpty else { return nil }
+
+        return value
+    }
+
+    private static let envKey = "SMARTOILA_APP_GROUP_IDENTIFIER"
+    private static let fallbackIdentifier = "group.3twn5nw4bl.uz.smartoila.kids"
+
+    private static var identifier: String {
+        let rawValue = ProcessInfo.processInfo.environment[envKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let rawValue, !rawValue.isEmpty {
+            return rawValue
+        }
+
+        return fallbackIdentifier
+    }
+
+    private static func sharedUserDefaults() -> UserDefaults? {
+        UserDefaults(suiteName: identifier)
     }
 }

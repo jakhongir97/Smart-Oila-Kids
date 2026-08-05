@@ -809,92 +809,6 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
     }
 }
 
-final class GrowthMetricsStoreTests: XCTestCase {
-    func testTrackNormalizesDSNUpdatesSnapshotAndPostsScopedNotification() {
-        let suiteName = "GrowthMetricsStoreScopedTests.\(UUID().uuidString)"
-        let userDefaults = UserDefaults(suiteName: suiteName)!
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        let store = GrowthMetricsStore(userDefaults: userDefaults)
-        let expectation = expectation(description: "growth metrics change")
-        var notifications: [Notification] = []
-        let token = NotificationCenter.default.addObserver(
-            forName: .growthMetricsDidChange,
-            object: nil,
-            queue: nil
-        ) { notification in
-            notifications.append(notification)
-            if notifications.count == 3 {
-                expectation.fulfill()
-            }
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
-
-        store.track(.inviteShareClicked, dsn: " Child-1 ")
-        store.track(.inviteShareCompleted, dsn: "child-1")
-        store.track(.deviceRenameCompleted, dsn: "CHILD-1")
-
-        wait(for: [expectation], timeout: 1)
-
-        let snapshot = store.snapshot(for: "child-1")
-        XCTAssertEqual(snapshot.inviteShareClickedCount, 1)
-        XCTAssertEqual(snapshot.inviteShareCompletedCount, 1)
-        XCTAssertEqual(snapshot.deviceRenameCompletedCount, 1)
-        XCTAssertEqual(snapshot.inviteShareCompletionRate, 1)
-        XCTAssertNotNil(snapshot.lastInviteShareClickedAt)
-        XCTAssertNotNil(snapshot.lastInviteShareCompletedAt)
-        XCTAssertNotNil(snapshot.lastDeviceRenameCompletedAt)
-        XCTAssertEqual(notifications.compactMap { $0.userInfo?[GrowthMetricsUserInfoKey.dsn] as? String }, ["Child-1", "child-1", "CHILD-1"])
-    }
-
-    func testTrackWithoutDSNUsesGlobalScopeAndNotificationHasNoUserInfo() {
-        let suiteName = "GrowthMetricsStoreGlobalTests.\(UUID().uuidString)"
-        let userDefaults = UserDefaults(suiteName: suiteName)!
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        let store = GrowthMetricsStore(userDefaults: userDefaults)
-        let expectation = expectation(description: "global growth metrics change")
-        var notifications: [Notification] = []
-        let token = NotificationCenter.default.addObserver(
-            forName: .growthMetricsDidChange,
-            object: nil,
-            queue: nil
-        ) { notification in
-            notifications.append(notification)
-            if notifications.count == 2 {
-                expectation.fulfill()
-            }
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
-
-        store.track(.inviteLinkOpened, dsn: nil)
-        store.track(.deviceDeleteCompleted, dsn: "   ")
-
-        wait(for: [expectation], timeout: 1)
-
-        let globalSnapshot = store.snapshot(for: nil)
-        XCTAssertEqual(globalSnapshot.inviteLinkOpenedCount, 1)
-        XCTAssertEqual(globalSnapshot.deviceDeleteCompletedCount, 1)
-        XCTAssertEqual(notifications.count, 2)
-        XCTAssertTrue(notifications.allSatisfy { $0.userInfo == nil })
-    }
-
-    func testSnapshotFallsBackToEmptyForInvalidStoredPayload() {
-        let suiteName = "GrowthMetricsStoreInvalidPayloadTests.\(UUID().uuidString)"
-        let userDefaults = UserDefaults(suiteName: suiteName)!
-        defer { userDefaults.removePersistentDomain(forName: suiteName) }
-
-        userDefaults.set(Data("broken".utf8), forKey: "GROWTH_METRICS_BY_DSN")
-        let store = GrowthMetricsStore(userDefaults: userDefaults)
-
-        let snapshot = store.snapshot(for: "child-1")
-
-        XCTAssertEqual(snapshot.inviteShareClickedCount, GrowthMetricsSnapshot.empty.inviteShareClickedCount)
-        XCTAssertEqual(snapshot.deviceDeleteCompletedCount, GrowthMetricsSnapshot.empty.deviceDeleteCompletedCount)
-        XCTAssertNil(snapshot.lastInviteShareClickedAt)
-    }
-}
-
 final class DeviceControlRecoveryNotifierTests: XCTestCase {
     func testRecordLockRestoredAppendsInboxAndPostsTelemetry() async {
         let suiteName = "DeviceControlRecoveryNotifierLockTests.\(UUID().uuidString)"
@@ -1054,7 +968,12 @@ final class DeviceControlIntegrityNotifierTests: XCTestCase {
         await PushInboxStore.shared.clearAll()
 
         let removalService = DeviceApplicationRemovalAttemptReportingServiceSpy()
-        let removalCoordinator = DeviceApplicationRemovalAttemptCoordinator(service: removalService)
+        // The coordinator persists its queue; keep it on this test's own suite so a pending entry
+        // is never restored from (or left behind in) the host app's real defaults.
+        let removalCoordinator = DeviceApplicationRemovalAttemptCoordinator(
+            service: removalService,
+            userDefaults: userDefaults
+        )
         let notifier = DeviceControlIntegrityNotifier(
             userDefaults: userDefaults,
             removalAttemptCoordinator: removalCoordinator

@@ -6,6 +6,7 @@ on:
       - "SmartOilaKids/Resources/Localization/**"
       - "scripts/check_localization_parity.py"
       - "scripts/check_localization_format_specifiers.py"
+      - "scripts/check_localization_key_resolution.py"
       - "scripts/tests/**"
       - ".github/workflows/localization-parity.yml"
   pull_request:
@@ -13,6 +14,7 @@ on:
       - "SmartOilaKids/Resources/Localization/**"
       - "scripts/check_localization_parity.py"
       - "scripts/check_localization_format_specifiers.py"
+      - "scripts/check_localization_key_resolution.py"
       - "scripts/tests/**"
       - ".github/workflows/localization-parity.yml"
 
@@ -44,3 +46,18 @@ jobs:
             --base-dir SmartOilaKids/Resources/Localization \
             --source-language en \
             --languages en,ru,uz
+
+      - name: Validate localization key resolution
+        # `L10n.tr` returns the key itself when it is undefined, so an undefined key ships as
+        # "settings.title" on screen. This gate has existed (with unit tests) since the key
+        # resolution work but was never invoked by any workflow.
+        run: |
+          python3 scripts/check_localization_key_resolution.py
+
+      - name: Validate localization key resolution (schedule-monitor extension)
+        # The script scans a single source tree, and its default is the app target only. The
+        # DeviceActivity monitor extension calls `L10n.tr("notifications.device_control.*")`
+        # against the same shipped `en.lproj`, so it needs its own pass or those keys go unchecked.
+        run: |
+          python3 scripts/check_localization_key_resolution.py \
+            --source SmartOilaKidsScheduleMonitorExtension

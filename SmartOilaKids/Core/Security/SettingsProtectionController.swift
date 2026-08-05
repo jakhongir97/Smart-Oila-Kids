@@ -151,31 +151,6 @@ final class SettingsProtectionController: ObservableObject {
         pinLockedUntil = nil
     }
 
-    func authenticateIfNeeded() async -> Bool {
-        refreshAvailability()
-
-        guard isEnabled else { return true }
-        guard !hasActiveUnlockSession else { return true }
-        guard isProtectionAvailable else {
-            setEnabled(false)
-            return true
-        }
-
-        if !isDeviceAuthenticationAvailable {
-            guard hasCustomPIN else {
-                setEnabled(false)
-                return true
-            }
-            return await presentPINPrompt(.unlock)
-        }
-
-        let success = await authenticateWithDeviceOwner()
-        guard success else { return false }
-
-        startUnlockSession()
-        return true
-    }
-
     func submitPINPrompt(pin: String, confirmation: String?) -> String? {
         guard let activePINPrompt else { return nil }
 
@@ -262,14 +237,11 @@ final class SettingsProtectionController: ObservableObject {
         return true
     }
 
-    /// Confirms the device owner via Face ID / Touch ID / passcode. Starts an unlock
-    /// session on success. Returns false when authentication is unavailable or cancelled.
-    func confirmDeviceOwner() async -> Bool {
-        guard isDeviceAuthenticationAvailable else { return false }
-        let success = await authenticateWithDeviceOwner()
-        if success { startUnlockSession() }
-        return success
-    }
+    // NOTE: there is deliberately no biometric / device-passcode unlock here. This screen runs on the
+    // CHILD's phone, where Face ID, Touch ID and the passcode all belong to the child — see the note
+    // in `BolajonSettingsView.DisconnectView`. The app therefore never calls
+    // `LAContext.evaluatePolicy`, and `NSFaceIDUsageDescription` has been removed from Info.plist to
+    // match. The `canEvaluatePolicy` probe in `refreshAvailability()` needs no usage description.
 
     // MARK: - Disconnect-PIN brute-force lockout
     //
@@ -366,20 +338,6 @@ final class SettingsProtectionController: ObservableObject {
         activePINPrompt = nil
         pinPromptContinuation?.resume(returning: result)
         pinPromptContinuation = nil
-    }
-
-    private func authenticateWithDeviceOwner() async -> Bool {
-        let context = LAContext()
-        context.localizedCancelTitle = L10n.tr("common.cancel")
-
-        return await withCheckedContinuation { continuation in
-            context.evaluatePolicy(
-                .deviceOwnerAuthentication,
-                localizedReason: L10n.tr("settings.control_protection_auth_reason")
-            ) { didAuthenticate, _ in
-                continuation.resume(returning: didAuthenticate)
-            }
-        }
     }
 
     private func startUnlockSession() {

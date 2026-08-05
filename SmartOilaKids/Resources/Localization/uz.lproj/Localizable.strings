@@ -53,7 +53,7 @@
 "permissions.details.step_2" = "Ruxsat bering va lokatsiya uchun \"Har doim\" ni tanlang.";
 "permissions.details.body_4" = "Mikrofon ovoz va audio funksiyalar uchun kerak.";
 "permissions.details.step_4" = "iOS mikrofon so‘raganda ruxsat bering.";
-"permissions.details.body_5" = "Screen Time ruxsati ota-ona qurilmani bloklaganda Smart Oila'ga iPhone ilovalarini native tarzda cheklash imkonini beradi.";
+"permissions.details.body_5" = "Screen Time ruxsati ota-ona qurilmani bloklaganda Bolajon360 ilovasiga iPhone ilovalarini native tarzda cheklash imkonini beradi.";
 "permissions.details.step_5" = "Ruxsat berish tugmasini bosing va iOS ko‘rsatganida Screen Time tizim oynasini tasdiqlang.";
 "permissions.details.body_7" = "Bildirishnomalar ota-onadan xabarlar, vazifalar va bloklash ogohlantirishlari uchun kerak.";
 "permissions.details.step_7" = "Bildirishnomalarda banner, ovoz va belgilarga ruxsat bering.";
@@ -76,7 +76,7 @@
 "permissions.media_capability_camera_missing" = "Kamera ruxsati berilmaguncha masofaviy kamera buyruqlari ishlamaydi.";
 "permissions.media_capability_display_title" = "Ekran yozuvi";
 "permissions.media_capability_display_ready" = "ReplayKit orqali ekran yozuvi ilova faol turganida mavjud.";
-"permissions.media_capability_display_inactive" = "Ekran yozuvi faqat Smart Oila ekranda ochiq va faol bo'lganda ishlaydi.";
+"permissions.media_capability_display_inactive" = "Ekran yozuvi faqat Bolajon360 ekranda ochiq va faol bo'lganda ishlaydi.";
 "permissions.media_capability_display_unavailable" = "ReplayKit ekran yozuvi hozirgi qurilma holatida mavjud emas.";
 "permissions.media_capability_badge_ready" = "Tayyor";
 "permissions.media_capability_badge_action" = "Harakat kerak";
@@ -100,7 +100,6 @@
 "settings.control_protection_pin_invalid" = "Aniq 4 ta raqam kiriting.";
 "settings.control_protection_pin_mismatch" = "PIN-kodlar mos kelmadi.";
 "settings.control_protection_pin_incorrect" = "PIN-kod noto'g'ri.";
-"settings.control_protection_auth_reason" = "Himoyalangan Smart Oila boshqaruvini ochish uchun tasdiqlang.";
 
 "notifications.device_control.schedule_started_title" = "Bloklash jadvali boshlandi";
 "notifications.device_control.schedule_started_body" = "Ota-ona to'liq qurilma jadvali ushbu iPhone'ni blokladi.";
@@ -108,25 +107,25 @@
 "notifications.device_control.schedule_ended_body" = "Ota-ona to'liq qurilma jadvali ushbu iPhone'da tugadi.";
 "notifications.device_control.app_limit_reached_title" = "%@ bugunga bloklandi";
 "notifications.device_control.app_limit_reached_title_fallback" = "Ilova limiti yetdi";
-"notifications.device_control.app_limit_reached_body" = "%@ uchun kunlik limit tugadi, shuning uchun Smart Oila uni ertagacha blokladi.";
-"notifications.device_control.app_limit_reached_body_fallback" = "Kunlik ilova limiti tugadi, shuning uchun Smart Oila uni ertagacha blokladi.";
+"notifications.device_control.app_limit_reached_body" = "%@ uchun kunlik limit tugadi, shuning uchun Bolajon360 uni ertagacha blokladi.";
+"notifications.device_control.app_limit_reached_body_fallback" = "Kunlik ilova limiti tugadi, shuning uchun Bolajon360 uni ertagacha blokladi.";
 "notifications.device_control.lock_restored_title" = "Ota-ona blokirovkasi tiklandi";
-"notifications.device_control.lock_restored_body" = "Ilova yana onlayn bo'lgach, Smart Oila faol ota-ona bloklash qoidalarini qayta qo'lladi.";
+"notifications.device_control.lock_restored_body" = "Ilova yana onlayn bo'lgach, Bolajon360 faol ota-ona bloklash qoidalarini qayta qo'lladi.";
 "notifications.device_control.app_lock_restored_title" = "%@ yana himoyalandi";
 "notifications.device_control.app_lock_restored_title_fallback" = "Ilova nazorati tiklandi";
-"notifications.device_control.app_lock_restored_body" = "Smart Oila %@ uchun ota-ona blokini yana qo'llay oladi, chunki u Screen Time ilova nazoratiga qayta qo'shildi.";
-"notifications.device_control.app_lock_restored_body_fallback" = "Ilovalar Screen Time nazoratiga qayta qo'shilgach, Smart Oila bir yoki bir nechta ota-ona ilova bloklarini tikladi.";
+"notifications.device_control.app_lock_restored_body" = "Bolajon360 %@ uchun ota-ona blokini yana qo'llay oladi, chunki u Screen Time ilova nazoratiga qayta qo'shildi.";
+"notifications.device_control.app_lock_restored_body_fallback" = "Ilovalar Screen Time nazoratiga qayta qo'shilgach, Bolajon360 bir yoki bir nechta ota-ona ilova bloklarini tikladi.";
 "notifications.device_control.app_lock_restored_count" = "%@ ta ilova";
 "notifications.device_control.app_limit_restored_title" = "%@ bugun hamon bloklangan";
 "notifications.device_control.app_limit_restored_title_fallback" = "Kunlik limitlar tiklandi";
-"notifications.device_control.app_limit_restored_body" = "Ilova yana onlayn bo'lgach, Smart Oila %@ uchun kunlik limitni qayta qo'lladi.";
-"notifications.device_control.app_limit_restored_body_fallback" = "Ilova yana onlayn bo'lgach, Smart Oila bir yoki bir nechta kunlik ilova limitlarini qayta qo'lladi.";
+"notifications.device_control.app_limit_restored_body" = "Ilova yana onlayn bo'lgach, Bolajon360 %@ uchun kunlik limitni qayta qo'lladi.";
+"notifications.device_control.app_limit_restored_body_fallback" = "Ilova yana onlayn bo'lgach, Bolajon360 bir yoki bir nechta kunlik ilova limitlarini qayta qo'lladi.";
 "notifications.device_control.app_targets_removed_title" = "%@ ilova nazoratidan olib tashlandi";
 "notifications.device_control.app_targets_removed_title_plural" = "%@ ta ilova nazoratdan olib tashlandi";
-"notifications.device_control.app_targets_removed_body" = "Smart Oila %@ uchun ota-ona ilova qoidalarini uni nazoratga qayta qo'shmaguncha qo'llay olmaydi.";
-"notifications.device_control.app_targets_removed_body_plural" = "Smart Oila %@ ta ilova uchun ota-ona ilova qoidalarini ular nazoratga qayta qo'shilmaguncha qo'llay olmaydi.";
+"notifications.device_control.app_targets_removed_body" = "Bolajon360 %@ uchun ota-ona ilova qoidalarini uni nazoratga qayta qo'shmaguncha qo'llay olmaydi.";
+"notifications.device_control.app_targets_removed_body_plural" = "Bolajon360 %@ ta ilova uchun ota-ona ilova qoidalarini ular nazoratga qayta qo'shilmaguncha qo'llay olmaydi.";
 "notifications.device_control.screen_time_revoked_title" = "Screen Time ruxsati olib tashlandi";
-"notifications.device_control.screen_time_revoked_body" = "Smart Oila ushbu iPhone'da Screen Time ruxsatini yo'qotdi, shuning uchun ruxsat tiklanmaguncha ota-ona ilova nazorati ishlamasligi mumkin.";
+"notifications.device_control.screen_time_revoked_body" = "Bolajon360 ushbu iPhone'da Screen Time ruxsatini yo'qotdi, shuning uchun ruxsat tiklanmaguncha ota-ona ilova nazorati ishlamasligi mumkin.";
 "notifications.device_control.remote_lock_unenforceable_title" = "%@ ni qayta nazoratga qo'shish kerak";
 "notifications.device_control.remote_lock_unenforceable_title_plural" = "%@ ta bloklangan ilova nazoratni talab qiladi";
 "notifications.device_control.remote_lock_unenforceable_body" = "Ota-ona %@ ni blokladi, lekin bu iPhone uni hali Screen Time nazoratiga qo'shmagan, shuning uchun iOS bu blokni qo'llay olmaydi.";
@@ -237,6 +236,7 @@
 "settings2.permissions_off_count" = "%d ta ruxsat o'chiq";
 "settings2.connection" = "Ulanish holati";
 "settings2.connection_value" = "Ota-ona bilan ulangan";
+"settings2.language" = "Til";
 "settings2.about" = "Ilova haqida";
 "settings2.version" = "Bolajon360 · v";
 "settings2.privacy_policy" = "Maxfiylik siyosati";
@@ -245,7 +245,7 @@
 "settings2.disconnect_sub" = "Ota-ona PIN kodi talab qilinadi";
 "settings2.enable" = "Yoqish";
 "disconnect2.title" = "Aloqani uzish";
-"disconnect2.body" = "Bu qurilmani oilangizdan ajratadi. Davom etish uchun ota-ona PIN kodini kiriting.";
+"disconnect2.body" = "Bu shu telefondagi kuzatuvni to'xtatadi va uni ulanish ekraniga qaytaradi. Yakunlash uchun ota-ona qurilmani Oila360 ilovasidan ham o'chiradi. Davom etish uchun ota-ona PIN kodini kiriting.";
 "disconnect2.parent_managed_body" = "Bu qurilmani faqat ota-ona uzishi mumkin. Ota-onangizdan uni Oila360 ilovasidan o'chirishni so'rang.";
 "disconnect2.locked_out" = "Juda ko'p urinish. %d daqiqadan so'ng qayta urinib ko'ring.";
 "disconnect2.confirm" = "Uzish";
@@ -299,6 +299,7 @@
 "chat2.status.sending" = "Yuborilmoqda…";
 "chat2.status.failed" = "Yuborilmadi";
 "chat2.status.retry" = "Qayta yuborish";
+"chat2.too_long" = "Xabar %d ta belgidan oshmasligi kerak.";
 "chat2.error.dismiss" = "Yashirish";
 "home2.chat.title" = "Ota-ona bilan suhbat";
 "home2.chat.subtitle" = "Oila bilan yozishing";

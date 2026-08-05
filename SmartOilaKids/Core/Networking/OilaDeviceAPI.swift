@@ -44,12 +44,37 @@ struct OilaAPIError: LocalizedError {
 enum OilaDeviceIdentity {
     private static let dsnKey = "OILA_DEVICE_DSN"
 
+    /// Keychain slot the DSN really lives in.
+    ///
+    /// A reinstall wipes UserDefaults but NOT the Keychain, so a UserDefaults-only DSN handed a
+    /// still-paired device a brand-new identity after a reinstall while the device credential
+    /// (also Keychain-backed) kept working: every DSN-scoped local store reset, and pushes
+    /// addressed to the server's — now stale — dsn stopped matching this install. Only the store's
+    /// access slot is used; the refresh slot is never written.
+    private static let dsnStore: SecureTokenStoring = SecureTokenStore(
+        accessTokenAccount: "oila_device_dsn",
+        refreshTokenAccount: "oila_device_dsn_unused"
+    )
+
     /// Generate-once, persist-forever device serial number sent as `dsn`.
     static func deviceDSN(userDefaults: UserDefaults = .standard) -> String {
-        if let existing = userDefaults.string(forKey: dsnKey)?.trimmedNonEmpty {
-            return existing
+        if let stored = dsnStore.accessToken()?.trimmedNonEmpty {
+            // Keep the UserDefaults mirror in sync — it is the pre-first-unlock fallback below.
+            if userDefaults.string(forKey: dsnKey)?.trimmedNonEmpty != stored {
+                userDefaults.set(stored, forKey: dsnKey)
+            }
+            return stored
+        }
+        if let legacy = userDefaults.string(forKey: dsnKey)?.trimmedNonEmpty {
+            // MIGRATION: an already-paired device keeps the identity it was paired with. Minting a
+            // fresh UUID here instead would silently unpair every device already in the field.
+            // Also the pre-first-unlock path: the Keychain read above returns nil while the device
+            // is locked, and promoting the mirror is a no-op once the write finally succeeds.
+            _ = dsnStore.storeAccessToken(legacy)
+            return legacy
         }
         let generated = UUID().uuidString
+        _ = dsnStore.storeAccessToken(generated)
         userDefaults.set(generated, forKey: dsnKey)
         return generated
     }
@@ -59,14 +84,16 @@ enum OilaDeviceIdentity {
     /// `deviceDSN`, which persists a fresh UUID as a side effect and would quietly hand an
     /// unpaired install an identity just by asking the question.
     static func persistedDSN(userDefaults: UserDefaults = .standard) -> String? {
-        userDefaults.string(forKey: dsnKey)?.trimmedNonEmpty
+        dsnStore.accessToken()?.trimmedNonEmpty ?? userDefaults.string(forKey: dsnKey)?.trimmedNonEmpty
     }
 
     /// Clears the persisted device DSN so the next `deviceDSN(...)` call mints a fresh one.
     /// Called on disconnect: because every DSN-scoped local store keys off this value, minting a
     /// new DSN means re-pairing the device to a DIFFERENT child starts from an empty scope and
-    /// cannot inherit the previous child's cached location/tasks/etc.
+    /// cannot inherit the previous child's cached location/tasks/etc. Both copies must go, or the
+    /// Keychain would hand the next child the previous child's scope.
     static func resetDSN(userDefaults: UserDefaults = .standard) {
+        dsnStore.setAccessToken(nil)
         userDefaults.removeObject(forKey: dsnKey)
     }
 
@@ -142,6 +169,26 @@ struct OilaDeviceStatus {
     let battery: Int?
     let networkType: String?   // "Wifi" | "Mobile"
     let soundMode: String?     // "Normal" | "Silent" | "Vibrate" — not readable on iOS, usually nil
+    /// This device's location permission, so the parent app can say WHY a feature is not reporting
+    /// ("Only While Using — cannot report in background") instead of showing a bare "offline".
+    /// Exactly one of "Always" | "WhenInUse" | "Denied" | "NotDetermined", or nil when the caller
+    /// has nothing to report. Undeclared in the DTO, but every field there is optional and the
+    /// backend ignores keys it does not know, so sending it is safe.
+    let locationAuthorization: String?
+
+    /// Explicit init purely so `locationAuthorization` can default: the synthesized memberwise one
+    /// would have forced every existing three-field call site (and its test doubles) to change.
+    init(
+        battery: Int?,
+        networkType: String?,
+        soundMode: String?,
+        locationAuthorization: String? = nil
+    ) {
+        self.battery = battery
+        self.networkType = networkType
+        self.soundMode = soundMode
+        self.locationAuthorization = locationAuthorization
+    }
 }
 
 /// One row of `appLimits[]` in `GET /device/lock/state`: the parent's per-app daily budget plus
@@ -387,6 +434,20 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let pushToken = userDefaults.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty
         if let pushToken {
             body["fcmToken"] = pushToken
+        } else {
+            // Omitting the key is legal, but it is not harmless: the device pairs with NO push
+            // address, so every server→child command (chat.refresh, stream.start, …) is
+            // undeliverable until FirebaseMessaging ships. Record it so the diagnostics screen
+            // shows why nothing arrives instead of a pairing that looks entirely healthy.
+            Task { @MainActor in
+                RuntimeDiagnosticsCenter.shared.updatePushToken(
+                    status: "missing",
+                    endpoint: "device/pair",
+                    dsn: dsn,
+                    lastError: "paired_without_fcm_token"
+                )
+                RuntimeDiagnosticsCenter.shared.updateLifecycle(lastEvent: "paired_without_fcm_token")
+            }
         }
 
         let data = try await requestJSON(path: "device/pair", method: .post, body: body, authorized: false)
@@ -413,14 +474,33 @@ final class OilaDeviceClient: OilaDeviceServicing {
         try persist(tokens)
     }
 
+    /// Ends this device's session. The local credential is ALWAYS cleared (the `defer`); the
+    /// server-side revoke is best-effort.
+    ///
+    /// The refresh token used to gate the whole call, which made it unreachable for a paired child:
+    /// a device holds a single long-lived `deviceToken` and no refresh token, so "Disconnect"
+    /// silently skipped the server entirely. The request is now always attempted — with
+    /// `refreshToken` when one is held, otherwise on the device Bearer alone — and its failure is
+    /// still ignored, because the child must be able to disconnect while offline.
+    ///
+    /// TODO (backend ask B1): there is no device-scoped revoke. `/auth/logout` is a refresh-token
+    /// route, so for a device token this call is expected to be rejected and the `deviceToken`
+    /// stays valid server-side until `POST /device/unpair` exists (or `/auth/logout` accepts the
+    /// device Bearer with no body).
     func logout() async throws {
         defer { secureTokens.clear() }
-        guard let refresh = secureTokens.refreshToken()?.trimmedNonEmpty else { return }
+        var body: [String: Any] = [:]
+        if let refresh = secureTokens.refreshToken()?.trimmedNonEmpty {
+            body["refreshToken"] = refresh
+        }
         _ = try? await requestJSON(
             path: "auth/logout",
             method: .post,
-            body: ["refreshToken": refresh],
-            authorized: true
+            body: body,
+            authorized: true,
+            // A 401 here means the credential is already dead; refreshing it just to log out is
+            // pointless work on a screen the child is leaving.
+            allowRefresh: false
         )
     }
 
@@ -513,7 +593,13 @@ final class OilaDeviceClient: OilaDeviceServicing {
         if let battery = status.battery { body["battery"] = battery }
         if let network = status.networkType { body["networkType"] = network }
         if let sound = status.soundMode { body["soundMode"] = sound }
-        guard !body.isEmpty else { return }
+        if let locationAuthorization = status.locationAuthorization?.trimmedNonEmpty {
+            body["locationAuthorization"] = locationAuthorization
+        }
+        // An empty `{}` is deliberately still POSTed: every field is optional server-side and the
+        // request doubles as this device's liveness ping. Skipping it is what made a charged,
+        // stationary phone on Wi-Fi look offline to the parent — the snapshot is often all-nil on
+        // iOS (soundMode is unreadable, battery/network unchanged) and nothing was ever sent.
         _ = try await requestJSON(path: "device/status", method: .post, body: body, authorized: true)
     }
 
@@ -773,8 +859,9 @@ final class OilaDeviceClient: OilaDeviceServicing {
         )
     }
 
-    /// Body-agnostic transport shared by the JSON helpers and the multipart upload:
-    /// applies the `{ success, data }` envelope, device Bearer, and single-flight 401 refresh.
+    /// Body-agnostic transport shared by the JSON helpers and the multipart upload: applies the
+    /// `{ success, data }` envelope, device Bearer, single-flight 401 refresh, and — for GET only —
+    /// the transient-failure replay in `execute`.
     @discardableResult
     private func send(
         path: String,
@@ -819,10 +906,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw OilaAPIError(statusCode: -1, message: "Invalid response", errorCode: nil, fieldErrors: [])
-        }
+        let (data, http) = try await execute(request, allowRetry: method == .get)
 
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
 
@@ -836,10 +920,26 @@ final class OilaDeviceClient: OilaDeviceServicing {
 
         // 401 → refresh once (single-flight: concurrent 401s share one /auth/refresh),
         // then retry the original request with the freshly stored token.
-        if http.statusCode == 401, authorized, allowRefresh {
-            try await refreshGate.run { [weak self] in
-                guard let self else { return }
-                try await self.refreshSession()
+        //
+        // The server's own error is parsed FIRST and is what surfaces whenever the refresh cannot
+        // help. A paired device holds a long-lived `deviceToken` and no refresh token, so refresh
+        // was attempted unconditionally and failed with a synthetic "No refresh token" —
+        // discarding the real `message`/`errorCode` the backend sent (why the pairing was
+        // rejected) and replacing it with an error about a token this device never had.
+        if http.statusCode == 401, authorized {
+            let serverError = Self.error(from: json, statusCode: http.statusCode)
+            guard allowRefresh, secureTokens.refreshToken()?.trimmedNonEmpty != nil else {
+                throw serverError
+            }
+            do {
+                try await refreshGate.run { [weak self] in
+                    guard let self else { return }
+                    try await self.refreshSession()
+                }
+            } catch {
+                // The refresh failed on its own terms; the caller still needs to know why the
+                // ORIGINAL request was rejected, so the server's 401 wins.
+                throw serverError
             }
             return try await send(
                 path: path, method: method, query: query,
@@ -849,6 +949,53 @@ final class OilaDeviceClient: OilaDeviceServicing {
         }
 
         throw Self.error(from: json, statusCode: http.statusCode)
+    }
+
+    /// At most three attempts per idempotent request, backing off 0.4 s then 0.8 s.
+    private static let idempotentRetryAttempts = 3
+    private static let idempotentRetryBackoff: UInt64 = 400_000_000
+
+    /// Runs one request, replaying it a bounded number of times on a TRANSIENT failure — but only
+    /// when the verb is idempotent, which here means GET and nothing else.
+    ///
+    /// `NetworkError.shouldRetry` / `RetryPolicy` existed with no caller at all while prod was
+    /// answering 503, so a single transient failure surfaced to the child as a hard error. The
+    /// writes deliberately stay single-attempt: `POST /device/apps/usage` carries usage DELTAS, so
+    /// a replay of a write the server already committed double-counts the child's screen time
+    /// (there is no idempotency key — backend ask B5), and the other POST/PUT/PATCH/DELETE routes
+    /// are no safer to repeat.
+    ///
+    /// 401 is excluded from the retryable statuses on purpose: it is the single-flight
+    /// `refreshGate`'s business one level up, and it is returned here untouched so that path still
+    /// sees it. Replaying it instead would hammer `/auth/refresh` with the same dead credential.
+    /// 403 is excluded because a replay cannot change the answer.
+    private func execute(_ request: URLRequest, allowRetry: Bool) async throws -> (Data, HTTPURLResponse) {
+        var attempt = 1
+        while true {
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw OilaAPIError(statusCode: -1, message: "Invalid response", errorCode: nil, fieldErrors: [])
+                }
+                guard allowRetry,
+                      attempt < Self.idempotentRetryAttempts,
+                      Self.isRetryableStatus(http.statusCode) else {
+                    return (data, http)
+                }
+            } catch {
+                guard allowRetry,
+                      attempt < Self.idempotentRetryAttempts,
+                      NetworkError.shouldRetry(error, policy: .queueDelivery) else { throw error }
+            }
+            // A cancelled task must stop here rather than sleep through the cancellation.
+            try await Task.sleep(nanoseconds: Self.idempotentRetryBackoff << (attempt - 1))
+            attempt += 1
+        }
+    }
+
+    private static func isRetryableStatus(_ statusCode: Int) -> Bool {
+        guard statusCode != 401, statusCode != 403 else { return false }
+        return NetworkError.shouldRetry(statusCode: statusCode, policy: .queueDelivery)
     }
 
     // MARK: - Parsing helpers
@@ -1016,6 +1163,19 @@ final class OilaDeviceClient: OilaDeviceServicing {
         return nil
     }
 
+    /// A NUMBER under any of `keys` — for values the backend may send either as a string or as a
+    /// raw number (an epoch timestamp, typically). NSNull is rejected, and so is a JSON boolean:
+    /// `true`/`false` bridge through NSNumber too, and a `false` read as `0` would look like a
+    /// perfectly real value.
+    private static func numberValue(_ dict: [String: Any], _ keys: [String]) -> Double? {
+        for key in keys {
+            guard let number = dict[key] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID() else { continue }
+            return number.doubleValue
+        }
+        return nil
+    }
+
     private static func firstArray(_ dict: [String: Any], _ keys: [String]) -> [[String: Any]]? {
         for key in keys {
             if let value = dict[key] as? [[String: Any]] { return value }
@@ -1133,7 +1293,9 @@ struct OilaChatMessage: Identifiable, Equatable {
 /// One page of chat history (`GET /device/chat/messages`), newest-first as the backend returns it.
 struct OilaChatPage: Equatable {
     let messages: [OilaChatMessage]
-    /// Opaque cursor to pass back as `before` to load the next (older) page; nil at the head of history.
+    /// Cursor to pass back as `before` to load the next (older) page; nil at the head of history.
+    /// Either the cursor the payload's `meta` carried, or — for the array shape, which has nowhere
+    /// to put one — the oldest message id on the page, which `before` accepts just the same.
     let nextCursor: String?
 }
 
@@ -1184,12 +1346,13 @@ protocol OilaStreamServicing {
 
 extension OilaDeviceClient: OilaChatServicing, OilaStreamServicing {
     func fetchChatMessages(limit: Int = 30, before: String? = nil) async throws -> OilaChatPage {
-        var query = [URLQueryItem(name: "limit", value: String(max(1, min(limit, 100))))]
+        let resolvedLimit = max(1, min(limit, 100))
+        var query = [URLQueryItem(name: "limit", value: String(resolvedLimit))]
         if let before, !before.isEmpty {
             query.append(URLQueryItem(name: "before", value: before))
         }
         let data = try await requestJSON(path: "device/chat/messages", method: .get, query: query, authorized: true)
-        return Self.parseChatPage(from: data)
+        return Self.parseChatPage(from: data, requestedLimit: resolvedLimit)
     }
 
     @discardableResult
@@ -1271,7 +1434,10 @@ extension OilaDeviceClient: OilaChatServicing, OilaStreamServicing {
 
     // MARK: Parsing
 
-    static func parseChatPage(from data: Any) -> OilaChatPage {
+    /// Parses one page of chat history. `requestedLimit` is the `limit` the request asked for and
+    /// is used only to decide whether the keyset fallback below applies; nil means "the caller did
+    /// not say", which keeps the fallback enabled.
+    static func parseChatPage(from data: Any, requestedLimit: Int? = nil) -> OilaChatPage {
         let rawItems: [[String: Any]]
         var cursor: String?
         if let array = data as? [[String: Any]] {
@@ -1287,7 +1453,31 @@ extension OilaDeviceClient: OilaChatServicing, OilaStreamServicing {
         } else {
             rawItems = []
         }
-        return OilaChatPage(messages: rawItems.compactMap { parseChatMessage($0) }, nextCursor: cursor)
+        let messages = rawItems.compactMap { parseChatMessage($0) }
+        // KEYSET FALLBACK. A server-sent cursor stays authoritative; this only covers its absence.
+        // The likely shape of this endpoint's `data` is a BARE JSON ARRAY, which has nowhere to
+        // carry paging meta — so the cursor was read out of an object that never existed, every
+        // page reported `nextCursor == nil`, and the thread was permanently capped at its newest
+        // page. `before` is documented as "messages older than this message id", so the oldest
+        // message ON THIS PAGE is itself a valid cursor. Only a FULL page gets one: a short page is
+        // already the head of the thread and a cursor there would only buy an empty extra request.
+        if cursor == nil, requestedLimit.map({ rawItems.count >= $0 }) ?? true {
+            cursor = oldestMessageID(in: messages)
+        }
+        return OilaChatPage(messages: messages, nextCursor: cursor)
+    }
+
+    /// The oldest message on a page — the keyset `before` value for the next request. History comes
+    /// back newest-first, so that is normally the last row, but nothing in the (undocumented)
+    /// schema guarantees the order: when every row carries a timestamp the oldest is resolved by
+    /// date instead, and the positional read is kept only for a page that has none.
+    private static func oldestMessageID(in messages: [OilaChatMessage]) -> String? {
+        guard !messages.isEmpty else { return nil }
+        let dated = messages.compactMap { message in message.createdAt.map { (message.id, $0) } }
+        if dated.count == messages.count, let oldest = dated.min(by: { $0.1 < $1.1 }) {
+            return oldest.0
+        }
+        return messages.last?.id
     }
 
     static func parseChatMessage(fromAny data: Any) -> OilaChatMessage? {
@@ -1313,10 +1503,19 @@ extension OilaDeviceClient: OilaChatServicing, OilaStreamServicing {
         } else {
             sender = .unknown
         }
-        let hasImage = item["imageUrl"] != nil || item["image"] != nil || item["attachment"] != nil
-            || (item["hasImage"] as? Bool == true) || (item["hasAttachment"] as? Bool == true)
-        let readByPeer = item["readAt"] != nil || (item["readByPeer"] as? Bool == true)
-            || (item["isReadByPeer"] as? Bool == true) || (item["read"] as? Bool == true)
+        // `item[key] != nil` is TRUE for an explicit JSON null — it decodes to NSNull, not nil — so
+        // a plain text message carrying `"imageUrl": null, "readAt": null` claimed BOTH an image
+        // attachment and a read receipt. Route both flags through the tolerant helpers, which
+        // reject NSNull (and, for the string keys, an empty string).
+        let hasImage = firstString(item, ["imageUrl", "image", "attachment"]) != nil
+            || firstDictionary(item, ["image", "attachment"]) != nil
+            || (boolValue(item, ["hasImage", "hasAttachment"]) ?? false)
+        // `readAt` is a TIMESTAMP on an undocumented schema, so an epoch number is as likely as an
+        // ISO string. Routing it through `firstString` alone fixed the NSNull bug but made the
+        // numeric spelling read as unread — the child's message would then never show as seen.
+        let readByPeer = firstString(item, ["readAt"]) != nil
+            || (numberValue(item, ["readAt"]) ?? 0) > 0
+            || (boolValue(item, ["readByPeer", "isReadByPeer", "read"]) ?? false)
         return OilaChatMessage(
             id: id,
             text: firstString(item, ["text", "body", "message", "content"]),

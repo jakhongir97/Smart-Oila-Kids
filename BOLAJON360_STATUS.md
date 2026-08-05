@@ -71,7 +71,10 @@ and it is the highest-stakes claim in the repo, so:
 
 ### What the audit fixed on this branch
 
-Plist honesty (FaceID key added, camera/mic strings corrected, export compliance, privacy manifest) ·
+Plist honesty (camera/mic strings corrected, `ITSAppUsesNonExemptEncryption` now **`false`** to match
+both submission docs, privacy manifest; the `NSFaceIDUsageDescription` key added earlier was
+**removed on 2026-08-05** — along with its localized strings — because the app deliberately never
+calls `LAContext.evaluatePolicy` on the child's phone) ·
 **location reporting no longer stops forever the first time the child sits still** ·
 **SOS now has a durable outbox** instead of giving up after ~2.4s · a single transient 401 no longer
 unpairs the device from three separate call sites · the 401 probe now needs 2 confirmations behind a
@@ -140,6 +143,12 @@ Five workflows. Be aware of what they do and do not prove:
 - **Release Readiness Gates**, **Localization Parity**, **Script Tests** — real, but note the
   parent-child gap budget reads `../Smart Oila Parent/Source`, which no runner checks out, so its
   "gap 0" is vacuous.
+
+**Backend contract (2026-08-05).** `https://api.oila360.uz/api/docs-json` now returns **404** —
+Swagger is disabled in prod, so `OpenAPI/oila360_live_openapi.json` can no longer be re-fetched and
+is maintained by hand. Five `/device/*` endpoints the child depends on are missing from the
+backend's published spec but proven live by a 401-vs-404 probe, and the two D-073 stream-control
+paths were added by hand. Read `OpenAPI/README.md` before touching that file or the endpoint gates.
 
 ## Honest readiness verdict
 

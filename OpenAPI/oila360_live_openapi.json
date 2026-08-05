@@ -2704,6 +2704,96 @@
         ]
       }
     },
+    "/api/v1/parent/children/{id}/stream/start": {
+      "post": {
+        "operationId": "ParentStreamingController_startStream",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartStreamDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamStartResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Child not found or not owned by this parent"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start — or renew — the child's live publish (D-073)",
+        "description": "Re-send at ~maxDurationSeconds/2 while the live screen is open: the child treats a repeat as a lease RENEWAL, not a restart. The lease is server-owned — there is no duration field, so a client can never ask for a longer one.",
+        "tags": [
+          "streaming"
+        ]
+      }
+    },
+    "/api/v1/parent/children/{id}/stream/stop": {
+      "post": {
+        "operationId": "ParentStreamingController_stopStream",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamCommandResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Child not found or not owned by this parent"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop the child's live publish (D-073)",
+        "description": "Fast path only — the lease carried by stream/start is what guarantees the camera goes dark. Idempotent: a stop while the child is idle is a no-op.",
+        "tags": [
+          "streaming"
+        ]
+      }
+    },
     "/api/v1/parent/children/{id}/stream/token": {
       "post": {
         "operationId": "ParentStreamingController_createToken",
@@ -3901,6 +3991,87 @@
         },
         "required": [
           "planCode"
+        ]
+      },
+      "StartStreamDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "video"
+            ],
+            "description": "audio = mic only, video = camera + mic"
+          },
+          "cameraType": {
+            "type": "string",
+            "enum": [
+              "Front",
+              "Back"
+            ],
+            "description": "Video only; ignored for audio"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "StreamStartResponseDto": {
+        "type": "object",
+        "properties": {
+          "delivered": {
+            "type": "boolean",
+            "description": "Whether FCM accepted the push. FALSE is a soft failure: stream.* has no poll fallback, so the device will never hear the command — fail fast, do not wait. TRUE does NOT mean the child is publishing yet."
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "poll",
+              "fcm",
+              "ws"
+            ],
+            "description": "Informational only. 'poll' is a lie for stream.* (there is no stream-command poll endpoint) — it is reused because DispatchResult allows only these three. Switch on `delivered` alone."
+          },
+          "room": {
+            "type": "string",
+            "description": "Server-derived LiveKit room. Join this — never re-derive it client-side."
+          },
+          "maxDurationSeconds": {
+            "type": "number",
+            "example": 120,
+            "description": "Server-owned lease. The child stops publishing when it expires; re-POST /stream/start at roughly half this to renew while the live screen is open."
+          }
+        },
+        "required": [
+          "delivered",
+          "transport",
+          "room",
+          "maxDurationSeconds"
+        ]
+      },
+      "StreamCommandResponseDto": {
+        "type": "object",
+        "properties": {
+          "delivered": {
+            "type": "boolean"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "poll",
+              "fcm",
+              "ws"
+            ]
+          },
+          "room": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivered",
+          "transport",
+          "room"
         ]
       },
       "CreateTokenDto": {

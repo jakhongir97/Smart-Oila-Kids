@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="/Users/jakhongirnematov/Desktop/Smart Oila Kids"
+# Resolve the repo from this script's own location; the path used to be hardcoded to one
+# developer's Desktop, so the script could not run on any other machine or in CI.
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHOT_DIR="$PROJECT_DIR/Artifacts/parity-shots"
 DERIVED_DATA="$PROJECT_DIR/.build/parity-derived-data"
 
@@ -71,16 +73,19 @@ BASE_ENV=(
   "SIMCTL_CHILD_SMARTOILA_DEBUG_PROFILE=Пользователь"
 )
 
-shot "01_auth_scan" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=auth" "SIMCTL_CHILD_SMARTOILA_DEBUG_AUTH_STAGE=scan"
-shot "02_auth_failed" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=auth" "SIMCTL_CHILD_SMARTOILA_DEBUG_AUTH_STAGE=failed"
-shot "03_auth_success" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=auth" "SIMCTL_CHILD_SMARTOILA_DEBUG_AUTH_STAGE=success"
-shot "04_permissions_intro" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=permissions" "SIMCTL_CHILD_SMARTOILA_DEBUG_PERMISSIONS_STAGE=intro"
-shot "05_permissions_checklist" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=permissions" "SIMCTL_CHILD_SMARTOILA_DEBUG_PERMISSIONS_STAGE=checklist"
-shot "06_permissions_done" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=permissions" "SIMCTL_CHILD_SMARTOILA_DEBUG_PERMISSIONS_STAGE=done"
-shot "07_main" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=main"
-shot "08_chat_list" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=chat"
-shot "09_settings" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=settings"
-shot "10_tasks" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=tasks"
-shot "11_templates" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=templates"
+# Route/step values must be raw values of DebugRoute / DebugSetupStep in
+# Core/Config/AppRuntime.swift. An unrecognised value makes AppRuntime.debugRoute nil and RootView
+# falls through to the regular root, so every capture is the same screen. The previous
+# auth/permissions/main/chat/settings/tasks/templates values (and the AUTH_STAGE /
+# PERMISSIONS_STAGE variables, which nothing reads) were all in that state.
+shot "01_setup_language" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=setup" "SIMCTL_CHILD_SMARTOILA_DEBUG_SETUP_STEP=language"
+shot "02_setup_welcome" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=setup" "SIMCTL_CHILD_SMARTOILA_DEBUG_SETUP_STEP=welcome"
+shot "03_setup_connect" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=setup" "SIMCTL_CHILD_SMARTOILA_DEBUG_SETUP_STEP=connect"
+shot "04_setup_success" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=setup" "SIMCTL_CHILD_SMARTOILA_DEBUG_SETUP_STEP=success"
+shot "05_permissions" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=perm2"
+shot "06_home" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=home2"
+shot "07_chat" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=chat2"
+shot "08_settings" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=settings2"
+shot "09_tasks" "${BASE_ENV[@]}" "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE=tasks2"
 
 echo "Screenshots saved to $SHOT_DIR"
