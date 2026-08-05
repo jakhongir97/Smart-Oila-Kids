@@ -7,6 +7,10 @@ struct AudioListeningIndicator: View {
     /// audio ⇒ "parent is listening"; video ⇒ "parent is watching". Keeps the disclosure honest
     /// about which hardware is live.
     var mode: StreamMode = .audio
+    /// True when the parent asked for video but the camera never opened (no grant, or the in-place
+    /// swap failed) and only audio is live. Shown so the disclosure explains the mismatch instead of
+    /// silently reading as a plain audio session.
+    var videoUnavailable: Bool = false
     /// Ends the session. The child must be able to stop this themselves — a one-time consent tap
     /// that can never be withdrawn is not consent.
     var onStop: (() -> Void)?
@@ -30,9 +34,16 @@ struct AudioListeningIndicator: View {
             Image(systemName: mode == .video ? "video.fill" : "waveform")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Color.white)
-            Text(label)
-                .font(AppTypography.bodyStrong(13))
-                .foregroundStyle(Color.white)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(AppTypography.bodyStrong(13))
+                    .foregroundStyle(Color.white)
+                if videoUnavailable {
+                    Text(L10n.tr("audio2.camera_unavailable"))
+                        .font(AppTypography.caption(11))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                }
+            }
 
             if let onStop {
                 Button(action: onStop) {
@@ -59,32 +70,45 @@ struct AudioListeningIndicator: View {
             withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { pulse = true }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(L10n.tr("audio2.listening")))
+        // `label`, not the audio string: VoiceOver must say "watching" when the camera is what is
+        // live, exactly as the visible text does.
+        .accessibilityLabel(Text(label))
     }
 }
 
-/// One-time consent shown to the child before the microphone is ever opened. Honest and plain: the
-/// parent can listen to the surroundings and the child will always see the indicator while it's on.
+/// One-time consent shown to the child before the microphone — or, for a video session, the camera —
+/// is ever opened. Honest and plain: what the parent can do, and that the child will always see the
+/// indicator while it's on. The mic and the camera are asked for SEPARATELY: a tap that allowed an
+/// audio check must never be what opens the camera, so `mode` drives the copy and the icon.
 struct AudioConsentSheet: View {
+    var mode: StreamMode = .audio
     let onAllow: () -> Void
     let onDecline: () -> Void
+
+    private var title: String {
+        mode == .video ? L10n.tr("audio2.consent.video.title") : L10n.tr("audio2.consent.title")
+    }
+
+    private var message: String {
+        mode == .video ? L10n.tr("audio2.consent.video.body") : L10n.tr("audio2.consent.body")
+    }
 
     var body: some View {
         VStack(spacing: 20) {
             ZStack {
                 Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 84, height: 84)
-                Image(systemName: "waveform.and.mic")
+                Image(systemName: mode == .video ? "video.fill" : "waveform.and.mic")
                     .font(.system(size: 34, weight: .semibold))
                     .foregroundStyle(AppColors.ctaPurple)
             }
             .padding(.top, 12)
 
             VStack(spacing: 10) {
-                Text(L10n.tr("audio2.consent.title"))
+                Text(title)
                     .font(AppTypography.title(20))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
-                Text(L10n.tr("audio2.consent.body"))
+                Text(message)
                     .font(AppTypography.bodyText(15))
                     .foregroundStyle(AppColors.inkSecondary)
                     .multilineTextAlignment(.center)

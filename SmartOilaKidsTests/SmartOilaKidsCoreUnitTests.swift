@@ -2897,10 +2897,132 @@ final class StreamCommandParsingTests: XCTestCase {
         XCTAssertTrue(cmd.isStaleWake, "a wake past its expiresAt must be dropped")
     }
 
-    func testMissingExpiresAtIsTreatedAsStale() {
-        // Per the contract, a missing/unparseable expiresAt is dropped too — FCM has no TTL.
-        let cmd = StreamCommand(notification: note([PushUserInfoKeys.streamMode: "audio"]))
-        XCTAssertTrue(cmd.isStaleWake)
+    func testMissingExpiresAtFallsBackToTheReceiptTimeLease() {
+        // `expiresAt` is in no version of the D-073 contract, so failing closed on it dropped 100%
+        // of stream.start pushes from a backend that never sends it. A command with no expiry is
+        // NOT stale: its lease simply runs maxDurationSeconds from receipt.
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamMaxDurationSeconds: "90"
+        ]))
+        XCTAssertNil(cmd.expiresAt)
+        XCTAssertFalse(cmd.isStaleWake, "a push with no expiresAt must still be honoured")
+        XCTAssertEqual(cmd.remainingLeaseSeconds, 90, accuracy: 1)
+    }
+
+    func testUnparseableExpiresAtFallsBackToTheReceiptTimeLease() {
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamMaxDurationSeconds: "120",
+            PushUserInfoKeys.streamExpiresAt: "whenever"
+        ]))
+        XCTAssertNil(cmd.expiresAt)
+        XCTAssertFalse(cmd.isStaleWake)
+        XCTAssertEqual(cmd.remainingLeaseSeconds, 120, accuracy: 1)
+    }
+
+    func testExpiresAtAcceptsSecondsAndISO8601AsWellAsMillis() {
+        let future = Date().addingTimeInterval(60)
+        let iso = ISO8601DateFormatter().string(from: future)
+
+        for raw in [
+            String(Int(future.timeIntervalSince1970 * 1000)),   // epoch millis
+            String(Int(future.timeIntervalSince1970)),          // epoch seconds
+            iso                                                  // ISO-8601
+        ] {
+            let cmd = StreamCommand(notification: note([
+                PushUserInfoKeys.streamMode: "audio",
+                PushUserInfoKeys.streamExpiresAt: raw
+            ]))
+            XCTAssertNotNil(cmd.expiresAt, "\(raw) must parse")
+            XCTAssertFalse(cmd.isStaleWake, "\(raw) is 60s in the future")
+            XCTAssertEqual(cmd.expiresAt?.timeIntervalSince1970 ?? 0, future.timeIntervalSince1970, accuracy: 1)
+        }
+    }
+
+    func testLeaseIsArmedFromTheEffectiveDeadlineNotFromReceipt() {
+        // A push held in transit: the server minted a 120s lease that already has 30s left. Arming
+        // from maxDurationSeconds at receipt would hand the session another full 120s of publishing.
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamMaxDurationSeconds: "120",
+            PushUserInfoKeys.streamExpiresAt: String(Int(Date().addingTimeInterval(30).timeIntervalSince1970 * 1000))
+        ]))
+        XCTAssertFalse(cmd.isStaleWake)
+        XCTAssertEqual(cmd.remainingLeaseSeconds, 30, accuracy: 1)
+    }
+
+    /// A backend encoding `expiresAt` as a RELATIVE duration would resolve to 1970 and read as long
+    /// expired — dropping every push, which is the fail-closed bug this parsing exists to remove.
+    func testRelativeDurationExpiresAtFallsBackInsteadOfReadingAsExpired() {
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamMaxDurationSeconds: "120",
+            PushUserInfoKeys.streamExpiresAt: "120"
+        ]))
+
+        XCTAssertFalse(cmd.isStaleWake, "an implausible epoch must fall back, not be treated as expired")
+        XCTAssertEqual(cmd.remainingLeaseSeconds, 120, accuracy: 1)
+    }
+
+    // MARK: Consent split (mic vs camera)
+
+    private func consentDefaults(audio: Bool, video: Bool) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: "AudioConsentTests.\(UUID().uuidString)")!
+        defaults.set(audio, forKey: "OILA_AUDIO_CONSENT_GRANTED")
+        defaults.set(video, forKey: "OILA_VIDEO_CONSENT_GRANTED")
+        return defaults
+    }
+
+    /// `requestStart` is gated by `AppRuntime.audioStreamingEnabled`, which is false in the shipping
+    /// Info.plist (deliberately — the media feature is not released). Without overriding the gate
+    /// every assertion below would pass vacuously against a method that returned at its first guard,
+    /// so the manager exposes an injection seam. (`setenv` does not work here: `ProcessInfo`
+    /// snapshots the environment at process start.)
+    @MainActor
+    private func makeEnabledManager(audio: Bool, video: Bool) -> DeviceAudioStreamManager {
+        let manager = DeviceAudioStreamManager(defaults: consentDefaults(audio: audio, video: video))
+        manager.isFeatureEnabled = { true }
+        return manager
+    }
+
+    /// An existing audio-only grant must keep working without re-prompting — splitting the key must
+    /// not invalidate consent every child in the field has already given.
+    @MainActor
+    func testExistingAudioGrantStillStartsAudioWithoutReprompting() {
+        let manager = makeEnabledManager(audio: true, video: false)
+
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertFalse(manager.needsConsent, "an audio grant already on file must not re-prompt")
+    }
+
+    /// ...and must NOT silently authorize the camera. This is the Guideline 5.1.2 half: a child who
+    /// allowed a microphone check once did not agree to have their camera opened.
+    @MainActor
+    func testExistingAudioGrantDoesNotAuthorizeVideo() {
+        let manager = makeEnabledManager(audio: true, video: false)
+
+        manager.requestStart(command: StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "video",
+            PushUserInfoKeys.streamMaxDurationSeconds: "120"
+        ])))
+
+        XCTAssertTrue(manager.needsConsent, "video needs its own grant")
+        XCTAssertEqual(manager.consentMode, .video, "the sheet must describe the camera, not the mic")
+    }
+
+    /// The consent sheet must never act on a default command: `pendingCommand` is cleared by stop()
+    /// and by start()'s queued-command capture, so a tap arriving after that must be inert rather
+    /// than opening the microphone off a stale sheet.
+    @MainActor
+    func testGrantWithNoPendingCommandDoesNotStartAnything() {
+        let manager = makeEnabledManager(audio: false, video: false)
+
+        manager.grantConsentAndStart()
+
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertFalse(manager.isLive, "a grant with nothing pending must not open hardware")
     }
 
     func testDurationIsClampedToBackendBounds() {

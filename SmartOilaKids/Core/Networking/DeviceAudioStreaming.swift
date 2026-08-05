@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 #if canImport(LiveKit)
 import LiveKit
 #endif
@@ -10,7 +11,8 @@ import LiveKit
 // one-time consent before the mic or camera is ever opened.
 //
 // Implements the D-073 `stream.start` / `stream.stop` contract: a silent FCM data push carries
-// `mode` (audio|video), `cameraType` (Front|Back, video only), `maxDurationSeconds` and `expiresAt`.
+// `mode` (audio|video), `cameraType` (Front|Back, video only), `maxDurationSeconds` and — only
+// sometimes; it is in no version of the published contract — `expiresAt`.
 // The lease is SERVER-OWNED — the child stops publishing when `maxDurationSeconds` elapses, and the
 // parent renews by re-sending `stream.start` at roughly half the lease. A `stream.start` that
 // arrives while already publishing is a RENEWAL: reset the lease timer and swap mode/camera in
@@ -26,38 +28,69 @@ enum StreamMode: String {
 
 /// A parsed `stream.start` command. Values arrive from FCM as strings; this parses them once, at the
 /// boundary between the push layer and the hardware.
-struct StreamCommand {
+struct StreamCommand: Equatable {
     let mode: StreamMode
     /// nil ⇒ no camera (audio-only). The server strips `cameraType` for audio, and per the contract
     /// an absent cameraType means "no camera", never "keep the previous one".
     let cameraPosition: AVCaptureDevice.Position?
     let maxDurationSeconds: Int
-    /// Epoch when the server-minted lease expires. nil when the push omitted it.
+    /// When the server-minted lease expires, if the push declared it. `expiresAt` appears in NO
+    /// version of the D-073 contract (the only lease field the spec defines is `maxDurationSeconds`),
+    /// so it is an optional HINT, never a requirement: nil when the push omitted it or its value
+    /// could not be parsed.
     let expiresAt: Date?
+    /// When this command was parsed. The lease falls back to `receivedAt + maxDurationSeconds`
+    /// whenever `expiresAt` is absent.
+    let receivedAt: Date
 
-    /// A default audio command for the DEBUG on-device test path (no push, no expiry).
-    static let debugAudio = StreamCommand(mode: .audio, cameraPosition: nil, maxDurationSeconds: 120, expiresAt: nil)
-
-    /// True when a PUSH-originated wake must be dropped without opening hardware. Per the contract,
-    /// a missing or unparseable `expiresAt` is treated as stale too ("yo'q/parse bo'lmasa ham —
-    /// tashla"): FCM has no TTL, so Doze can hold a command for hours and light the camera long after
-    /// the parent closed the screen. The DEBUG path builds a command directly and never routes
-    /// through here, so it is unaffected.
-    var isStaleWake: Bool {
-        guard let expiresAt else { return true }
-        return Date() > expiresAt
+    /// A default audio command for the DEBUG on-device test path (no push, no expiry). Computed, so
+    /// each debug start gets a fresh `receivedAt` and therefore a fresh full-length lease.
+    static var debugAudio: StreamCommand {
+        StreamCommand(mode: .audio, cameraPosition: nil, maxDurationSeconds: 120, expiresAt: nil)
     }
 
-    init(mode: StreamMode, cameraPosition: AVCaptureDevice.Position?, maxDurationSeconds: Int, expiresAt: Date?) {
+    /// The instant this lease really ends: the earlier of the server's `expiresAt` and the full
+    /// `maxDurationSeconds` measured from receipt. Taking the earlier of the two is what stops a
+    /// push delayed in transit from arming a lease that outlives the deadline the server minted.
+    var effectiveDeadline: Date {
+        let leaseEnd = receivedAt.addingTimeInterval(TimeInterval(maxDurationSeconds))
+        guard let expiresAt else { return leaseEnd }
+        return min(expiresAt, leaseEnd)
+    }
+
+    /// Seconds still left on the lease as of now — what the auto-stop must be armed from.
+    var remainingLeaseSeconds: Int {
+        max(Int(effectiveDeadline.timeIntervalSinceNow.rounded()), 0)
+    }
+
+    /// True when a PUSH-originated wake must be dropped without opening hardware: FCM has no TTL, so
+    /// Doze can hold a command for hours and light the camera long after the parent closed the
+    /// screen. A MISSING `expiresAt` is not stale — the field is undocumented, so failing closed on
+    /// it dropped 100% of `stream.start` pushes from any backend that does not send it (or sends it
+    /// in another unit); the receipt-time lease covers that case instead. The DEBUG path builds a
+    /// command directly and never routes through here, so it is unaffected either way.
+    var isStaleWake: Bool {
+        Date() > effectiveDeadline
+    }
+
+    init(
+        mode: StreamMode,
+        cameraPosition: AVCaptureDevice.Position?,
+        maxDurationSeconds: Int,
+        expiresAt: Date?,
+        receivedAt: Date = Date()
+    ) {
         self.mode = mode
         self.cameraPosition = cameraPosition
         self.maxDurationSeconds = maxDurationSeconds
         self.expiresAt = expiresAt
+        self.receivedAt = receivedAt
     }
 
     /// Build from the wake notification's userInfo (populated by PushCommandRouter).
-    init(notification: Notification) {
+    init(notification: Notification, receivedAt: Date = Date()) {
         let info = notification.userInfo ?? [:]
+        self.receivedAt = receivedAt
         func str(_ key: String) -> String? {
             (info[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         }
@@ -82,12 +115,39 @@ struct StreamCommand {
             maxDurationSeconds = 120
         }
 
-        if let raw = str(PushUserInfoKeys.streamExpiresAt), let ms = Double(raw), ms > 0 {
-            expiresAt = Date(timeIntervalSince1970: ms / 1000)
-        } else {
-            expiresAt = nil
-        }
+        expiresAt = str(PushUserInfoKeys.streamExpiresAt).flatMap(Self.parseExpiry)
     }
+
+    /// `expiresAt` is undocumented — no spec declares it, let alone its unit — so every plausible
+    /// encoding is accepted rather than assuming milliseconds: epoch millis, epoch seconds (any
+    /// positive value below 10^11, which as millis would be 1973 and as seconds is the year 5138),
+    /// and ISO-8601 with or without fractional seconds. Anything else yields nil and the command
+    /// falls back to the receipt-time lease instead of being dropped.
+    ///
+    /// Numbers are also floored at `minimumPlausibleEpochSeconds`: a backend that encodes a
+    /// RELATIVE duration (`"120"`, entirely plausible for a field no spec declares) would otherwise
+    /// resolve to 1970, read as long expired, and drop every push — reintroducing exactly the
+    /// fail-closed behaviour this parsing exists to remove. Below the floor we return nil so the
+    /// receipt-time lease takes over.
+    private static func parseExpiry(_ raw: String) -> Date? {
+        if let number = Double(raw), number > 0 {
+            let seconds = number < 1e11 ? number : number / 1000
+            guard seconds >= minimumPlausibleEpochSeconds else { return nil }
+            return Date(timeIntervalSince1970: seconds)
+        }
+        if let date = iso8601Fractional.date(from: raw) { return date }
+        return iso8601.date(from: raw)
+    }
+
+    /// 2001-09-09. Any epoch below this is a duration or a bug, not a deadline.
+    private static let minimumPlausibleEpochSeconds: Double = 1_000_000_000
+
+    private static let iso8601: ISO8601DateFormatter = ISO8601DateFormatter()
+    private static let iso8601Fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 }
 
 private extension String {
@@ -386,6 +446,14 @@ final class DeviceAudioStreamManager: ObservableObject {
     @Published private(set) var activeMode: StreamMode = .audio
     /// Drives the one-time consent sheet at the app root.
     @Published var needsConsent = false
+    /// Which hardware the pending consent sheet is asking for — audio (mic) or video (camera + mic).
+    /// The sheet's copy and icon follow this; a mic sheet must never be what opened the camera.
+    @Published private(set) var consentMode: StreamMode = .audio
+    /// Set when a requested audio→video upgrade did NOT happen (no camera consent, no OS grant, or
+    /// the in-place swap threw). The session deliberately stays `.live` — the audio half is still
+    /// valuable — but `activeMode` stays `.audio`, so the indicator keeps saying "listening" instead
+    /// of claiming the parent is watching through a camera that never opened. nil once video is up.
+    @Published private(set) var videoUpgradeFailure: String?
 
     var isLive: Bool { state == .live }
 
@@ -400,7 +468,19 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// The server-owned lease: an outstanding auto-stop scheduled for `maxDurationSeconds` after the
     /// last start/renewal. Cancelled and rescheduled on renewal; fired only by the owning generation.
     private var leaseTask: Task<Void, Never>?
+    /// Consent is per-hardware. ONE key used to cover both, so a child who tapped "Allow" for a
+    /// microphone check had that grant silently reused to open the CAMERA — no sheet, no mention of
+    /// video. `consentKey` now means only "a live audio session is allowed"; `videoConsentKey` is
+    /// the separate camera grant and a video session requires BOTH. Requiring both also means the
+    /// existing sign-out teardown (SessionStore clears `consentKey` on unpair) still revokes
+    /// everything: a leftover video flag on its own grants nothing.
     private let consentKey = "OILA_AUDIO_CONSENT_GRANTED"
+    private let videoConsentKey = "OILA_VIDEO_CONSENT_GRANTED"
+
+    /// Injection seam so tests can exercise the consent gate without the release feature flag,
+    /// which is deliberately false in the shipping Info.plist. Mirrors the `sleeper` seam in
+    /// `OilaTelemetryService`. Production never overrides it.
+    var isFeatureEnabled: () -> Bool = { AppRuntime.audioStreamingEnabled }
 
     init(stream: OilaStreamServicing = StreamTokenSourceFactory.make(), defaults: UserDefaults = .standard) {
         self.stream = stream
@@ -456,7 +536,15 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// the feature flag and a one-time child consent; never opens hardware silently. A request while
     /// already publishing is a RENEWAL — the lease is reset and the mode/camera swapped in place.
     func requestStart(command: StreamCommand) {
-        guard AppRuntime.audioStreamingEnabled else { return }
+        guard isFeatureEnabled() else { return }
+        // Consent first, and per MODE — an audio→video renewal has to pass the camera grant too, so
+        // this gate sits ahead of the live/connecting branches rather than inside the start path.
+        guard hasConsent(for: command.mode) else {
+            pendingCommand = command
+            consentMode = command.mode
+            needsConsent = true
+            return
+        }
         if state == .live {
             Task { await renew(command: command) }
             return
@@ -465,27 +553,59 @@ final class DeviceAudioStreamManager: ObservableObject {
         // and its lease reflect what the parent last asked for.
         pendingCommand = command
         guard state != .connecting else { return }
-        guard defaults.bool(forKey: consentKey) else {
-            needsConsent = true
-            return
-        }
         Task { await start(command: command) }
     }
 
     func grantConsentAndStart() {
-        defaults.set(true, forKey: consentKey)
+        // Never fall back to `.debugAudio` here. `pendingCommand` is cleared by `stop()` and by
+        // `start()`'s queued-command capture, either of which can leave the sheet on screen with no
+        // command behind it — and a default would then open the microphone off a tap the child
+        // aimed at something else.
+        guard let command = pendingCommand else {
+            needsConsent = false
+            consentMode = .audio
+            return
+        }
+        recordConsent(for: command.mode)
         needsConsent = false
-        Task { await start(command: pendingCommand ?? .debugAudio) }
+        // The grant can arrive mid-session (an audio session the parent asked to upgrade to video):
+        // that is a renewal, not a second connect — `start()` would bounce off its re-entrancy guard
+        // and the upgrade would be silently dropped.
+        if state == .live {
+            Task { await renew(command: command) }
+        } else {
+            Task { await start(command: command) }
+        }
     }
 
     func declineConsent() {
         needsConsent = false
         pendingCommand = nil
-        state = .idle
+        // A DECLINED video upgrade must not tear down — or hide the indicator of — the audio session
+        // the child already consented to and that is still publishing.
+        if state != .live { state = .idle }
+    }
+
+    /// Audio needs the audio grant; video needs the audio grant AND the camera grant.
+    private func hasConsent(for mode: StreamMode) -> Bool {
+        guard defaults.bool(forKey: consentKey) else { return false }
+        return mode == .audio || defaults.bool(forKey: videoConsentKey)
+    }
+
+    /// Record what the child actually agreed to. The video sheet names the microphone as well, so a
+    /// video grant covers audio; an audio grant actively CLEARS any older camera flag, so a
+    /// re-consent after a revoke can never resurrect one.
+    private func recordConsent(for mode: StreamMode) {
+        defaults.set(true, forKey: consentKey)
+        if mode == .video {
+            defaults.set(true, forKey: videoConsentKey)
+        } else {
+            defaults.removeObject(forKey: videoConsentKey)
+        }
     }
 
     func start(command: StreamCommand) async {
-        guard AppRuntime.audioStreamingEnabled else { return }
+        guard isFeatureEnabled() else { return }
         guard MediaPublisherFactory.isLiveKitLinked else { state = .unsupported; return }
         guard #available(iOS 17.0, *) else { state = .unsupported; return }
         // RE-ENTRANCY GUARD. `start()` had none, and a foreground alert+content-available push is
@@ -495,8 +615,17 @@ final class DeviceAudioStreamManager: ObservableObject {
         // mic, and `stop()` only ever disconnected B. Room A published indefinitely with the
         // indicator off, endable only by force-quit or reboot.
         guard state != .live, state != .connecting else { return }
+        // Never open the camera on an audio-only grant, even if some other caller reaches start()
+        // directly: the consent gate belongs with the hardware, not only with the push route.
+        guard hasConsent(for: command.mode) else {
+            consentMode = command.mode
+            pendingCommand = command
+            needsConsent = true
+            return
+        }
         state = .connecting
         activeMode = command.mode
+        videoUpgradeFailure = nil
         // Every await below is a point where a concurrent stop() (or a newer start) can take
         // ownership; `generation` lets each resumption check whether it is still the owner.
         startGeneration &+= 1
@@ -509,8 +638,11 @@ final class DeviceAudioStreamManager: ObservableObject {
         // Camera is only opened for a video session, and only after its own permission grant — the
         // mic-consent tap does not silently extend to the camera.
         if command.mode == .video {
-            guard await requestCameraPermission() else {
-                if generation == startGeneration { state = .error("camera_denied") }
+            let outcome = await requestCameraPermission()
+            guard outcome == .granted else {
+                if generation == startGeneration {
+                    state = .error(outcome == .deferred ? "camera_permission_deferred" : "camera_denied")
+                }
                 return
             }
         }
@@ -538,11 +670,21 @@ final class DeviceAudioStreamManager: ObservableObject {
                 return
             }
             state = .live
+            let queued = pendingCommand
             pendingCommand = nil
-            // Arm the server-owned lease: the child stops on its own at maxDurationSeconds unless the
-            // parent renews first. This is the guarantee that the camera/mic go dark even if every
-            // later stop command is lost.
-            scheduleLease(seconds: command.maxDurationSeconds, generation: generation)
+            // Arm the server-owned lease: the child stops on its own when the lease expires unless
+            // the parent renews first. This is the guarantee that the camera/mic go dark even if
+            // every later stop command is lost. Armed from the EFFECTIVE deadline, not from
+            // `maxDurationSeconds` at receipt time — a push that Doze held for a minute must not
+            // buy the session a minute of extra publishing.
+            scheduleLease(seconds: command.remainingLeaseSeconds, generation: generation)
+            // A newer stream.start that landed while this one was still connecting was parked in
+            // `pendingCommand` — and then thrown away here, contradicting the comment that parked
+            // it, so the parent's newer mode/camera never took effect. Apply it now that the room
+            // is up; renewal is exactly the in-place path it needs.
+            if let queued, queued != command {
+                await renew(command: queued)
+            }
         } catch {
             // The throw can land AFTER `connect()` already joined the room (the mic-publish step is
             // the second await), and `Room` has no deinit that disconnects — so a half-open session
@@ -562,18 +704,50 @@ final class DeviceAudioStreamManager: ObservableObject {
     private func renew(command: StreamCommand) async {
         guard state == .live, let publisher else { return }
         let generation = startGeneration
-        activeMode = command.mode
-        do {
-            try await publisher.applyMode(command.mode, cameraPosition: command.cameraPosition)
-        } catch {
-            // Keep streaming; a camera swap that failed shouldn't kill the audio the parent has.
+        // An audio→video upgrade goes through the SAME two gates `start()` applies — the child's
+        // camera consent and the OS camera grant. Neither was checked here, and `activeMode` was
+        // adopted before the swap was even attempted, so a refused or failed upgrade left the
+        // indicator announcing "parent is watching" with no camera publishing at all and the parent
+        // staring at a permanently black frame. Resolve the mode FIRST; adopt it only on success.
+        var mode = command.mode
+        var rejection: String?
+        if mode == .video {
+            if !hasConsent(for: .video) {
+                rejection = "camera_consent_missing"
+            } else {
+                switch await requestCameraPermission() {
+                case .granted: break
+                case .denied: rejection = "camera_denied"
+                case .deferred: rejection = "camera_permission_deferred"
+                }
+            }
+            if rejection != nil { mode = .audio }
         }
         guard generation == startGeneration, state == .live else { return }
-        scheduleLease(seconds: command.maxDurationSeconds, generation: generation)
+        do {
+            try await publisher.applyMode(mode, cameraPosition: mode == .video ? command.cameraPosition : nil)
+            guard generation == startGeneration, state == .live else { return }
+            activeMode = mode
+            videoUpgradeFailure = rejection
+        } catch {
+            guard generation == startGeneration, state == .live else { return }
+            // Keep streaming; a camera swap that failed shouldn't kill the audio the parent has.
+            // A failed UPGRADE means no camera came up, so the indicator must fall back to
+            // "listening". A failed DOWNGRADE is the opposite: the camera may still be publishing,
+            // so `activeMode` is left alone rather than under-claiming what is live.
+            if mode == .video {
+                activeMode = .audio
+                videoUpgradeFailure = "camera_apply_failed"
+            }
+        }
+        guard generation == startGeneration, state == .live else { return }
+        scheduleLease(seconds: command.remainingLeaseSeconds, generation: generation)
     }
 
-    /// (Re)arm the auto-stop. The previous lease is cancelled so a renewal always extends, never
-    /// shortens; the fired task tears down only if it still owns the session.
+    /// (Re)arm the auto-stop from the seconds still left on the command's effective deadline. The
+    /// previous lease is cancelled and replaced, so a renewal is always measured against the deadline
+    /// the SERVER minted rather than against the moment the push happened to be delivered; the fired
+    /// task tears down only if it still owns the session.
     private func scheduleLease(seconds: Int, generation: UInt64) {
         leaseTask?.cancel()
         let deadlineNs = UInt64(max(seconds, 1)) * 1_000_000_000
@@ -597,9 +771,11 @@ final class DeviceAudioStreamManager: ObservableObject {
         Task { await stop() }
     }
 
-    /// Revoke the one-time consent. The next listen request must ask again.
+    /// Revoke the one-time consent — both halves of it. The next listen or watch request must ask
+    /// again, and a camera grant must never outlive the audio grant it was taken alongside.
     func revokeConsent() {
         defaults.removeObject(forKey: consentKey)
+        defaults.removeObject(forKey: videoConsentKey)
         needsConsent = false
         Task { await stop() }
     }
@@ -641,14 +817,34 @@ final class DeviceAudioStreamManager: ObservableObject {
         }
     }
 
-    private func requestCameraPermission() async -> Bool {
+    /// Three-way because "the child said no" and "the child was never asked" need different
+    /// handling: the first is final, the second resolves itself on the next foreground request.
+    enum CameraPermissionOutcome {
+        case granted
+        case denied
+        /// Status is `.notDetermined` and the app is backgrounded, so no prompt can be shown.
+        case deferred
+    }
+
+    private func requestCameraPermission() async -> CameraPermissionOutcome {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            return true
+            return .granted
         case .notDetermined:
-            return await AVCaptureDevice.requestAccess(for: .video)
+            // `requestAccess` can only ASK while the app is on screen. From a push-woken background
+            // session the system alert is never presented and the completion never fires, so
+            // awaiting it here would hang this task — and the renewal behind it — indefinitely.
+            //
+            // This is NOT a refusal: the child has never answered. Reporting it as `.denied` would
+            // both lie to the parent and hide the fact that one foreground video request is all it
+            // takes to resolve. The normal first-video path never lands here — `requestStart` parks
+            // an unconsented command and raises the sheet, which the child can only tap in the
+            // foreground — so this covers the narrow case where in-app video consent is stored but
+            // the OS prompt was dismissed without an answer.
+            guard UIApplication.shared.applicationState != .background else { return .deferred }
+            return await AVCaptureDevice.requestAccess(for: .video) ? .granted : .denied
         default:
-            return false
+            return .denied
         }
     }
 }

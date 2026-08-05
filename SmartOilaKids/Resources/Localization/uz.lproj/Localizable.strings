@@ -306,9 +306,12 @@
 /* Live audio (Bolajon360) */
 "audio2.listening" = "Ota-ona tinglayapti";
 "audio2.watching" = "Ota-ona kuzatyapti";
+"audio2.camera_unavailable" = "Kamera ochilmadi — faqat ovoz";
 "audio2.stop" = "To'xtatish";
 "audio2.consent.title" = "Jonli ovozga ruxsat berasizmi?";
 "audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. U yoniq bo'lganda yuqorida doim qizil belgi ko'rinadi.";
+"audio2.consent.video.title" = "Jonli videoga ruxsat berasizmi?";
+"audio2.consent.video.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizni ko'rishi va eshitishi mumkin. Kamera yoniq bo'lganda yuqorida doim qizil belgi ko'rinadi.";
 "audio2.consent.hint" = "Yoniqligini doim ko'rasiz";
 "audio2.consent.allow" = "Ruxsat berish";
 "audio2.consent.decline" = "Hozir emas";

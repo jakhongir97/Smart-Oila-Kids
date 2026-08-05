@@ -43,7 +43,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID confirms the parent before changing protected settings.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>A parent can start a live audio check. Your child is asked to allow it the first time, and an on-screen indicator appears while the microphone is on.</string>
+	<string>A parent can start a live audio check, or a live video check that also carries sound. Your child is asked to allow it, and an on-screen indicator appears while the microphone is on. The app never records or saves audio.</string>
 	<key>SMARTOILA_CHAT_FEATURES_ENABLED</key>
 	<true/>
 	<key>SMARTOILA_MEDIA_FEATURES_ENABLED</key>
