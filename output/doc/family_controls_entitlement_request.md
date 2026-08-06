@@ -1,6 +1,18 @@
 # Family Controls entitlement — request text and prerequisites
 
-_Prepared 2026-07-30. Verified against the tree at `4690dfc` (main, build 10)._
+_Prepared 2026-07-30. Re-verified 2026-08-06 against the tree at `76d64ae` + the live-A/V work on top
+of it (main, build 10, marketing 1.1)._
+
+**Re-verification result: every finding below still holds.** `FamilyActivityPicker` → 0 hits outside
+`.build`; `PBXCopyFilesBuildPhase` → 0; `PBXTargetDependency` → 1; `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED`
+→ still `false`. Nothing in §4 or §5 has been closed since the request was drafted.
+
+**One thing did change, and it strengthens §5.** The Android child app now ships app blocking for
+real — `AppBlockAccessibilityService` + a `SYSTEM_ALERT_WINDOW` overlay, driven by `lockedPackages`
+from `GET /device/lock/state` and keyed on Android package names throughout. So the parent app's
+app-blocking UI is no longer a design sketch that *might* assume `packageName`; it is a shipped feature
+built on it. The §5 mismatch is therefore a live cross-platform problem to decide, not a
+forward-looking risk — see the handoff note in `output/doc/team_handoff_2026-08-06.md`.
 
 Apple form: <https://developer.apple.com/contact/request/family-controls>
 
