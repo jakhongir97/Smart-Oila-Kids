@@ -402,18 +402,20 @@ struct BolajonPermissionState: Identifiable {
 enum BolajonPermissionChecklist {
     /// Pure mapping from a status snapshot to checklist rows — deterministic and unit-testable.
     static func states(from snapshot: PermissionStatusSnapshot,
-                       screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled) -> [BolajonPermissionState] {
+                       screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled,
+                       mediaEnabled: Bool = AppRuntime.audioStreamingEnabled) -> [BolajonPermissionState] {
         let notifications = [.authorized, .provisional, .ephemeral].contains(snapshot.notificationAuthorizationStatus)
         let location = [.authorizedAlways, .authorizedWhenInUse].contains(snapshot.locationAuthorizationStatus)
         let backgroundLocation = snapshot.locationAuthorizationStatus == .authorizedAlways
         let screenTime = snapshot.screenTimePermissionStatus == .granted
+        let microphone = snapshot.microphonePermission == .granted
+        let camera = snapshot.cameraAuthorizationStatus == .authorized
 
         func live(_ granted: Bool) -> BolajonPermissionState.Availability { granted ? .granted : .notGranted }
 
         // Order matches the design board's B11 summary (and therefore the C5 status list):
-        // notifications, battery, [screen(overlay), usage,] autostart, location, bg-location.
-        // (Microphone + camera rows removed — the app requests neither permission: audio
-        // recording was cut for v1 and there is no camera feature.)
+        // notifications, battery, [screen(overlay), usage,] autostart, location, bg-location,
+        // [microphone, camera].
         var rows: [BolajonPermissionState] = [
             BolajonPermissionState(id: "notifications", icon: "bell.fill", labelKey: "perm2.item.notifications",
                                    descriptionKey: "perm2.notifications.body", availability: live(notifications), requirement: .notifications),
@@ -440,12 +442,25 @@ enum BolajonPermissionChecklist {
             BolajonPermissionState(id: "bglocation", icon: "location.circle.fill", labelKey: "perm2.item.bglocation",
                                    descriptionKey: "perm2.bglocation.body", availability: live(backgroundLocation), requirement: .location)
         ])
+
+        // Microphone + camera only when live audio/video ships (same rule as the Screen Time rows
+        // above: never show a row whose "Enable" button has no feature behind it). With the flag on
+        // these are load-bearing — a denied microphone is the single most likely reason a parent's
+        // listen request does nothing, and without these rows the child had no way to discover or
+        // fix it. The Android child app lists both for the same reason.
+        if mediaEnabled {
+            rows.append(BolajonPermissionState(id: "microphone", icon: "mic.fill", labelKey: "perm2.item.microphone",
+                                               descriptionKey: "perm2.microphone.body", availability: live(microphone), requirement: .microphone))
+            rows.append(BolajonPermissionState(id: "camera", icon: "camera.fill", labelKey: "perm2.item.camera",
+                                               descriptionKey: "perm2.camera.body", availability: live(camera), requirement: .camera))
+        }
         return rows
     }
 
     @MainActor
     static func states(from manager: LocationPermissionManager,
-                       screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled) -> [BolajonPermissionState] {
-        states(from: manager.statusSnapshot(), screenTimeEnabled: screenTimeEnabled)
+                       screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled,
+                       mediaEnabled: Bool = AppRuntime.audioStreamingEnabled) -> [BolajonPermissionState] {
+        states(from: manager.statusSnapshot(), screenTimeEnabled: screenTimeEnabled, mediaEnabled: mediaEnabled)
     }
 }

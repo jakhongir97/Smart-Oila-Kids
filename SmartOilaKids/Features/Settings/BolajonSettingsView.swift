@@ -58,6 +58,7 @@ struct SettingsRootView: View {
 
     /// Non-nil while the parent-PIN sheet is up; the case decides which steps it runs.
     @State private var pinFlowIntent: ParentPINFlowIntent?
+    @State private var isLanguagePickerPresented = false
 
     /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). The
     /// battery/auto-start rows are unreadable on iOS, so they never count as "off".
@@ -114,6 +115,14 @@ struct SettingsRootView: View {
                 }
 
                 section(title: "settings2.section_other") {
+                    // Language is reachable AFTER setup, not only during it. The setup flow's own
+                    // subtitle already promises "you can change this later in settings", and until
+                    // now that promise was false — a child (or a parent testing the app) who picked
+                    // the wrong language at first launch had to reinstall.
+                    row(glyph: .symbol("globe"), tint: AppColors.glyphPurple,
+                        title: "settings2.language",
+                        subtitleLiteral: sessionStore.appLanguage.nativeName,
+                        action: { isLanguagePickerPresented = true })
                     row(glyph: .symbol("info.circle.fill"), tint: AppColors.glyphPurple,
                         title: "settings2.about", subtitleLiteral: appVersionText, action: nil)
                     row(glyph: .symbol("hand.raised.fill"), tint: AppColors.glyphPurple,
@@ -132,6 +141,9 @@ struct SettingsRootView: View {
         }
         .sheet(item: $pinFlowIntent) { intent in
             ParentPINFlowSheet(intent: intent)
+        }
+        .sheet(isPresented: $isLanguagePickerPresented) {
+            SettingsLanguageSheet()
         }
     }
 
@@ -866,5 +878,99 @@ struct SettingsDisconnectScreen: View {
                 isDisconnecting = false
             }
         }
+    }
+}
+
+// MARK: - Language picker
+
+/// Change the app language after setup.
+///
+/// The setup flow (A1) already lets the child pick a language once, and its own subtitle promises
+/// the choice can be changed later in settings — but there was no such control, so the promise was
+/// false and a wrong first tap was only fixable by reinstalling. The Android child app has the same
+/// gap; this closes it here.
+///
+/// Rows are deliberately identical in shape to the A1 picker so the two read as one control.
+struct SettingsLanguageSheet: View {
+    @EnvironmentObject private var sessionStore: SessionStore
+    @Environment(\.dismiss) private var dismiss
+
+    private struct Option: Identifiable {
+        let language: AppLanguage
+        let flag: MiniFlag.Kind
+        var id: String { language.rawValue }
+    }
+
+    private let options: [Option] = [
+        .init(language: .uz, flag: .uz),
+        .init(language: .uzCyrl, flag: .uz),
+        .init(language: .ru, flag: .ru),
+        .init(language: .en, flag: .en)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppColors.screenBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(options) { option in
+                            languageRow(option)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                }
+            }
+            .navigationTitle(L10n.tr("settings2.language"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.tr("common.done")) { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func languageRow(_ option: Option) -> some View {
+        let selected = sessionStore.appLanguage == option.language
+        return Button {
+            sessionStore.setLanguage(option.language)
+            AppHaptics.selection()
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(selected ? AppColors.ctaPurple.opacity(0.12) : BolajonPalette.cream)
+                        .frame(width: 44, height: 44)
+                    MiniFlag(kind: option.flag, width: 26, height: 18)
+                }
+                Text(option.language.nativeName)
+                    .font(AppTypography.heading(17))
+                    .foregroundStyle(AppColors.inkPrimary)
+                Spacer()
+                if selected {
+                    ZStack {
+                        Circle().fill(AppColors.ctaPurple).frame(width: 26, height: 26)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .padding(.vertical, 13)
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(selected ? AppColors.ctaPurple.opacity(0.06) : AppColors.cardWhite)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(selected ? AppColors.ctaPurple : AppColors.hairline,
+                            lineWidth: selected ? 2 : 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

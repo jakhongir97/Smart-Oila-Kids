@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import UIKit
 import UserNotifications
@@ -41,13 +42,51 @@ extension LocationPermissionManager {
             requestScreenTimePermission()
         case .notifications:
             requestNotificationPermission()
-        case .microphone, .camera:
-            // Audio recording and camera capture were cut for v1, so there is no consumer to
-            // request these for. The enum cases remain only for the permission evaluator and
-            // diagnostics; actively requesting access (AVAudioSession.requestRecordPermission /
-            // AVCaptureDevice.requestAccess) with no matching Info.plist purpose string is exactly
-            // what triggers App Store rejection ITMS-90683, so this is intentionally a no-op.
+        case .microphone:
+            requestMicrophonePermission()
+        case .camera:
+            requestCameraPermission()
+        }
+    }
+
+    // Requesting these used to be a deliberate no-op: v1 shipped no audio or camera feature, and
+    // prompting for a permission with no matching Info.plist purpose string is what triggers
+    // ITMS-90683. Live audio/video (D-073) now ships with both purpose strings present, so the
+    // prompt is legitimate — and a no-op here was worse than useless, because the permission screen
+    // renders an "Enable" button for every denied row. Tapping it did nothing at all.
+
+    func requestMicrophonePermission() {
+        guard #available(iOS 17.0, *) else {
+            openAppSettings()
+            return
+        }
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
             break
+        case .undetermined:
+            AVAudioApplication.requestRecordPermission { [weak self] _ in
+                DispatchQueue.main.async { self?.refreshStatuses() }
+            }
+        case .denied:
+            // iOS only ever shows the system prompt once; after a denial the only route is Settings.
+            openAppSettings()
+        @unknown default:
+            openAppSettings()
+        }
+    }
+
+    func requestCameraPermission() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            break
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] _ in
+                DispatchQueue.main.async { self?.refreshStatuses() }
+            }
+        case .denied, .restricted:
+            openAppSettings()
+        @unknown default:
+            openAppSettings()
         }
     }
 }

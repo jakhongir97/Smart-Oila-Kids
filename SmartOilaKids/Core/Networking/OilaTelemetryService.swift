@@ -174,6 +174,16 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         Task { await refreshLock() }
     }
 
+    /// Report status immediately rather than waiting out the remainder of `statusInterval`.
+    ///
+    /// Called when the app returns to the foreground. The backend treats silence as "device
+    /// offline", and the periodic timer can be up to five minutes from its next tick — so without
+    /// this a child who just picked their phone up still reads as offline to the parent for minutes.
+    func postStatusNow() {
+        guard isRunning else { return }
+        Task { await postStatus() }
+    }
+
     func stop() {
         guard isRunning else { return }
         isRunning = false

@@ -57,7 +57,7 @@
 "permissions.details.step_5" = "Нажмите разрешить и подтвердите доступ к Экранному времени, когда iOS покажет системный диалог.";
 "permissions.details.body_7" = "Уведомления нужны для сообщений от родителя, задач и предупреждений о блокировке.";
 "permissions.details.step_7" = "Разрешите уведомления: баннеры, звук и значки.";
-"permissions.details.body_8" = "Доступ к камере нужен для записей с камеры и живой видеотрансляции по запросу родителя.";
+"permissions.details.body_8" = "Доступ к камере нужен, чтобы родитель мог включить живую видеопроверку. Ничего не записывается и не сохраняется.";
 "permissions.details.step_8" = "Нажмите разрешить, когда iOS запросит доступ к камере, или откройте Настройки, если доступ уже был отклонён.";
 "permissions.action_allow_location" = "Разрешить геолокацию";
 "permissions.action_allow_location_always" = "Разрешить геолокацию всегда";
@@ -237,6 +237,7 @@
 "settings2.permissions_off_count" = "Отключено разрешений: %d";
 "settings2.connection" = "Состояние подключения";
 "settings2.connection_value" = "Подключено к родителю";
+"settings2.language" = "Язык";
 "settings2.about" = "О приложении";
 "settings2.version" = "Bolajon360 · v";
 "settings2.privacy_policy" = "Политика конфиденциальности";
@@ -266,6 +267,10 @@
 
 "perm2.item.location" = "Местоположение";
 
+"perm2.item.microphone" = "Микрофон";
+"perm2.microphone.body" = "Позволяет родителю включить живой звук. Пока микрофон включён, вы всегда видите индикатор.";
+"perm2.item.camera" = "Камера";
+"perm2.camera.body" = "Позволяет родителю включить живое видео. Ничего не записывается и не сохраняется.";
 "perm2.item.bglocation" = "Фоновое местоположение";
 
 
@@ -304,6 +309,7 @@
 "home2.chat.subtitle" = "Напишите семье";
 
 /* Live audio (Bolajon360) */
+"audio2.notification.title" = "Прямая связь включена";
 "audio2.listening" = "Родитель слушает";
 "audio2.watching" = "Родитель смотрит";
 "audio2.stop" = "Стоп";

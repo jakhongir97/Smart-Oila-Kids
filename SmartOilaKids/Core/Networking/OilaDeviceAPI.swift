@@ -141,7 +141,14 @@ struct OilaLocationFix: Codable, Equatable {
 struct OilaDeviceStatus {
     let battery: Int?
     let networkType: String?   // "Wifi" | "Mobile"
-    let soundMode: String?     // "Normal" | "Silent" | "Vibrate" — not readable on iOS, usually nil
+    /// "Normal" | "Silent" | "Vibrate" — always nil on iOS, by decision.
+    ///
+    /// iOS exposes no public API for the ring/silent switch. The Android child app fills this in
+    /// because Android does expose it. The only way to read it here is a private Darwin
+    /// notification (`com.apple.springboard.ringerstate`), which is grounds for App Store rejection
+    /// on an app already under extra scrutiny — so this field stays empty rather than being faked.
+    /// A nil field is dropped from the request body and the backend accepts its absence.
+    let soundMode: String?
 }
 
 /// One row of `appLimits[]` in `GET /device/lock/state`: the parent's per-app daily budget plus
@@ -513,7 +520,11 @@ final class OilaDeviceClient: OilaDeviceServicing {
         if let battery = status.battery { body["battery"] = battery }
         if let network = status.networkType { body["networkType"] = network }
         if let sound = status.soundMode { body["soundMode"] = sound }
-        guard !body.isEmpty else { return }
+        // Send even when every field is nil. The backend derives "device offline" from how long it
+        // has been since it last heard from this device, so the REQUEST ITSELF is the liveness
+        // signal and an empty `{}` is explicitly valid (every field in PostDeviceStatusDto is
+        // optional). Skipping the call on an empty body — which is what this did — makes a healthy
+        // device go silent and then show up as offline in the parent app.
         _ = try await requestJSON(path: "device/status", method: .post, body: body, authorized: true)
     }
 

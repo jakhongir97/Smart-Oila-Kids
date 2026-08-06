@@ -57,7 +57,7 @@
 "permissions.details.step_5" = "Tap allow and approve the Screen Time access dialog when iOS shows it.";
 "permissions.details.body_7" = "Notifications are needed for parent messages, tasks, and lock alerts.";
 "permissions.details.step_7" = "Allow notifications with alerts, sounds, and badges.";
-"permissions.details.body_8" = "Camera access is required for parent-requested camera recordings and live video streaming.";
+"permissions.details.body_8" = "Camera access lets a parent start a live video check. Nothing is ever recorded or saved.";
 "permissions.details.step_8" = "Tap allow when iOS asks for camera access, or reopen Settings if it was denied.";
 "permissions.action_allow_location" = "Allow Location";
 "permissions.action_allow_location_always" = "Allow Location Always";
@@ -237,6 +237,7 @@
 "settings2.permissions_off_count" = "%d permissions off";
 "settings2.connection" = "Connection status";
 "settings2.connection_value" = "Connected to parent";
+"settings2.language" = "Language";
 "settings2.about" = "About";
 "settings2.version" = "Bolajon360 · v";
 "settings2.privacy_policy" = "Privacy Policy";
@@ -266,6 +267,10 @@
 
 "perm2.item.location" = "Location";
 
+"perm2.item.microphone" = "Microphone";
+"perm2.microphone.body" = "Lets a parent start a live audio check. You always see an indicator while the microphone is on.";
+"perm2.item.camera" = "Camera";
+"perm2.camera.body" = "Lets a parent start a live video check. Nothing is ever recorded or saved.";
 "perm2.item.bglocation" = "Background location";
 
 
@@ -304,6 +309,7 @@
 "home2.chat.subtitle" = "Message your family";
 
 /* Live audio (Bolajon360) */
+"audio2.notification.title" = "Live check is on";
 "audio2.listening" = "Parent is listening";
 "audio2.watching" = "Parent is watching";
 "audio2.stop" = "Stop";

@@ -128,12 +128,17 @@ private struct LanguageStepView: View {
         var id: String { language.rawValue }
     }
 
-    // Matches the design: Uzbek (Latin), Uzbek (Cyrillic), Russian.
+    // Uzbek (Latin), Uzbek (Cyrillic), Russian, English.
+    // English is listed even though the original design had three rows: en.lproj is complete, and a
+    // parent testing on an English-language phone otherwise cannot read the setup flow at all. The
+    // Android child app ships no English strings, so this is the one place the two apps differ in
+    // the child's favour rather than ours.
     // Flags are drawn (not emoji — regional-indicator emoji tofu on the Simulator).
     private let options: [Option] = [
         .init(language: .uz, flag: .uz),
         .init(language: .uzCyrl, flag: .uz),
-        .init(language: .ru, flag: .ru)
+        .init(language: .ru, flag: .ru),
+        .init(language: .en, flag: .en)
     ]
 
     var body: some View {

@@ -584,12 +584,21 @@ final class SmartOilaKidsAppDelegateTests: XCTestCase {
 final class PermissionRequirementTests: XCTestCase {
     func testComputedKeysMatchCurrentPermissionCatalog() {
         XCTAssertEqual(PermissionRequirement.onboardingCases, [.location])
-        // Microphone/camera are out of the visible catalog: audio recording was cut for v1 and
-        // there is no camera feature, so their toggles would advertise permissions with no
-        // consumer. The enum cases remain for the evaluator + diagnostics.
+        // A requirement is listed only while a shipping feature consumes it, so the catalog is a
+        // function of the feature flags rather than a fixed list.
         XCTAssertEqual(
-            PermissionRequirement.settingsCases,
+            PermissionRequirement.settingsCases(screenTimeEnabled: false, mediaEnabled: false),
             [.location, .notifications]
+        )
+        // Live audio/video on ⇒ microphone + camera become fixable from Settings. Without them a
+        // child who declined the mic prompt has no route back and every listen request fails.
+        XCTAssertEqual(
+            PermissionRequirement.settingsCases(screenTimeEnabled: false, mediaEnabled: true),
+            [.location, .notifications, .microphone, .camera]
+        )
+        XCTAssertEqual(
+            PermissionRequirement.settingsCases(screenTimeEnabled: true, mediaEnabled: false),
+            [.location, .usageStats, .notifications]
         )
 
         XCTAssertEqual(PermissionRequirement.location.id, PermissionRequirement.location.rawValue)
