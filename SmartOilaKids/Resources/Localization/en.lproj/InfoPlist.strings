@@ -3,5 +3,5 @@
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
 "NSLocationAlwaysUsageDescription" = "Location is used so the parent can see the child device location, including while the app is in the background.";
 "NSLocationWhenInUseUsageDescription" = "Location is used so the parent can see the child device location while the app is open.";
-"NSCameraUsageDescription" = "Bolajon360 does not take photos or record video. This permission is listed only because the app links a real-time audio library that also references the camera API.";
+"NSCameraUsageDescription" = "A parent can start a live video check to see your child's surroundings. Your child is asked to allow it, and an on-screen indicator appears while the camera is on. The app never records or saves video.";
 "NSMicrophoneUsageDescription" = "A parent can start a live audio check. Your child is asked to allow it the first time, and an on-screen indicator appears while the microphone is on.";
