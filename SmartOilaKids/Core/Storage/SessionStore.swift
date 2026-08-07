@@ -254,7 +254,11 @@ final class SessionStore: ObservableObject {
         // 4. Clear the one-time microphone consent. It is device-global and not DSN-scoped, so
         //    child A's consent would otherwise authorize listening on child B after a handover —
         //    with no sheet shown, because the grant short-circuits the prompt.
+        //    Both halves go: the camera grant is worthless on its own (a video session needs the
+        //    audio grant too), but leaving it behind means a re-consent for audio alone could be
+        //    read back as covering video by any future code that checks the flags separately.
         userDefaults.removeObject(forKey: "OILA_AUDIO_CONSENT_GRANTED")
+        userDefaults.removeObject(forKey: "OILA_VIDEO_CONSENT_GRANTED")
         // 5. Drop any pending removal-attempt reports. The queue survives relaunches by design, but
         //    `POST /device/apps/removal-attempt` carries no dsn — the server attributes the report to
         //    whichever device Bearer is held when it finally flushes. A report queued for the previous

@@ -321,6 +321,11 @@
 "audio2.consent.hint" = "You always see when it's on";
 "audio2.consent.allow" = "Allow";
 "audio2.consent.decline" = "Not now";
+"audio2.consent.granted_audio" = "Live audio is allowed";
+"audio2.consent.granted_video" = "Live audio and video are allowed";
+"audio2.consent.granted_sub" = "You agreed that your parent may listen. You can take that back at any time — they will have to ask you again.";
+"audio2.consent.revoke_cta" = "Withdraw permission";
+"audio2.consent.revoke_confirm" = "Withdraw permission? Any live session stops now and your parent will have to ask you again.";
 "chat2.system.sos" = "SOS — help requested";
 "chat2.system.generic" = "System message";
 

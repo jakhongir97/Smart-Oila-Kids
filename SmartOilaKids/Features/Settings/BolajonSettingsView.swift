@@ -609,6 +609,9 @@ struct ParentPINFlowSheet: View {
 
 struct SettingsPermissionsScreen: View {
     @StateObject private var manager = LocationPermissionManager()
+    /// Drives the live-session consent card: it only exists while a grant does.
+    @ObservedObject private var streaming = DeviceAudioStreamManager.shared
+    @State private var isConfirmingConsentRevoke = false
 
     // Shared with the B11 onboarding summary so both screens cover the same set + status.
     private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
@@ -627,9 +630,72 @@ struct SettingsPermissionsScreen: View {
                         row(state)
                     }
                 }
+
+                consentCard
             }
         }
-        .onAppear { manager.refreshStatuses() }
+        .onAppear {
+            manager.refreshStatuses()
+            // The grant can be cleared from outside this screen (an unpair wipes it), and the
+            // manager is a long-lived singleton, so re-read rather than trust the last mirror.
+            streaming.refreshConsentState()
+        }
+        .confirmationDialog(
+            L10n.tr("audio2.consent.revoke_confirm"),
+            isPresented: $isConfirmingConsentRevoke,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.tr("audio2.consent.revoke_cta"), role: .destructive) {
+                streaming.revokeConsent()
+                AppHaptics.selection()
+            }
+            Button(L10n.tr("common.cancel"), role: .cancel) {}
+        }
+    }
+
+    /// Withdraw the one-time "you may listen / watch" grant.
+    ///
+    /// The grant is what lets a parent's request open the microphone without asking again, and
+    /// until now nothing in the app could take it back: the Stop button ended a session and left
+    /// the standing permission in place. A grant a child cannot withdraw is not consent. Shown
+    /// only when one exists, so the screen says nothing about live audio on a build where the
+    /// feature is off or on a device where nobody has ever agreed.
+    @ViewBuilder
+    private var consentCard: some View {
+        if let granted = streaming.grantedConsent {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    iconBadge(granted == .video ? "video.fill" : "mic.fill", tint: AppColors.glyphPurple)
+                    Text(L10n.tr(granted == .video ? "audio2.consent.granted_video" : "audio2.consent.granted_audio"))
+                        .font(AppTypography.heading(16))
+                        .foregroundStyle(AppColors.inkPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                }
+                Text(L10n.tr("audio2.consent.granted_sub"))
+                    .font(AppTypography.bodyText(13))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    isConfirmingConsentRevoke = true
+                } label: {
+                    Text(L10n.tr("audio2.consent.revoke_cta"))
+                        .font(AppTypography.buttonLabel(15))
+                        .foregroundStyle(AppColors.sosCoral)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(
+                            Capsule().stroke(AppColors.sosCoral.opacity(0.7), lineWidth: 1.5)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
+                    .fill(AppColors.cardWhite)
+            )
+        }
     }
 
     @ViewBuilder
@@ -659,9 +725,16 @@ struct SettingsPermissionsScreen: View {
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 StatusPill(text: pillText, state: pillState, icon: pillIcon)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppColors.inkTertiary.opacity(0.5))
+                // Only tappable rows get a chevron, and it points the way they actually go.
+                // Granted rows used to draw `chevron.down` — the same accordion glyph the
+                // needs-attention rows use — while doing nothing at all, so one symbol meant both
+                // "expandable" and "inert" on the same screen. This is a status list, not an
+                // accordion: the rows that lead somewhere say so, the rest stay quiet.
+                if onTap != nil {
+                    Image(systemName: "chevron.forward")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColors.inkTertiary.opacity(0.5))
+                }
             }
         }
         if let onTap {
@@ -681,9 +754,8 @@ struct SettingsPermissionsScreen: View {
                     .foregroundStyle(AppColors.inkPrimary)
                 Spacer(minLength: 8)
                 StatusPill(text: L10n.tr("settings2.status_off"), state: .off, icon: "exclamationmark.circle.fill")
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppColors.inkTertiary.opacity(0.5))
+                // No chevron: this card is already showing everything it has, and its action is the
+                // explicit button below. `chevron.up` only ever implied a collapse that never came.
             }
             if let descriptionKey = state.descriptionKey {
                 Text(L10n.tr(descriptionKey))

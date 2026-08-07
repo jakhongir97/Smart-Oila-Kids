@@ -2984,4 +2984,68 @@ final class StreamCommandParsingTests: XCTestCase {
         XCTAssertEqual(payload.streamMaxDurationSeconds, "120")
         XCTAssertEqual(payload.streamExpiresAt, "1900000000000")
     }
+
+    // MARK: Consent is revocable
+
+    /// The published mirror is what the Settings card binds to. UserDefaults is not observable, so
+    /// if this ever stopped tracking the stored flags the card would offer to revoke a grant that
+    /// no longer exists — or, worse, hide one that does.
+    @MainActor
+    func testGrantedConsentMirrorsTheStoredGrant() {
+        XCTAssertNil(makeEnabledManager(audio: false, video: false).grantedConsent,
+                     "no grant on file means nothing to withdraw")
+        XCTAssertEqual(makeEnabledManager(audio: true, video: false).grantedConsent, .audio)
+        XCTAssertEqual(makeEnabledManager(audio: true, video: true).grantedConsent, .video)
+    }
+
+    /// A camera flag without the audio grant it was taken alongside is not a grant. `hasConsent`
+    /// already requires both, and the mirror must agree — otherwise Settings would announce "live
+    /// video is allowed" on a device where a video request still prompts.
+    @MainActor
+    func testOrphanVideoFlagIsNotReportedAsAGrant() {
+        XCTAssertNil(makeEnabledManager(audio: false, video: true).grantedConsent)
+    }
+
+    /// Revoking must clear BOTH halves and leave nothing a later audio-only re-consent could
+    /// inherit as camera permission.
+    @MainActor
+    func testRevokeConsentClearsBothHalves() {
+        let defaults = consentDefaults(audio: true, video: true)
+        let manager = DeviceAudioStreamManager(defaults: defaults)
+        manager.isFeatureEnabled = { true }
+        XCTAssertEqual(manager.grantedConsent, .video)
+
+        manager.revokeConsent()
+
+        XCTAssertNil(manager.grantedConsent)
+        XCTAssertFalse(defaults.bool(forKey: "OILA_AUDIO_CONSENT_GRANTED"))
+        XCTAssertFalse(defaults.bool(forKey: "OILA_VIDEO_CONSENT_GRANTED"))
+
+        // And the gate must actually re-prompt afterwards, not just look revoked in the UI.
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent, "a withdrawn grant must ask again")
+    }
+
+    // MARK: Local notifications are not inbound commands
+
+    /// `willPresent`/`didReceive` route arriving notifications through `PushCommandRouter`. The
+    /// integrity and recovery notifiers post userInfo shaped exactly like a server command, so
+    /// without this classification the app re-ingested its own output as a fresh event.
+    func testLocallyScheduledNotificationsAreRecognised() {
+        XCTAssertTrue(LocalNotificationID.isLocallyScheduled(LocalNotificationID.livePresence))
+        XCTAssertTrue(LocalNotificationID.isLocallyScheduled(
+            LocalNotificationID.integrityPrefix + UUID().uuidString))
+        XCTAssertTrue(LocalNotificationID.isLocallyScheduled(
+            LocalNotificationID.recoveryPrefix + UUID().uuidString))
+    }
+
+    /// The other direction matters more: misclassifying a real push as ours would silently drop the
+    /// parent's command. Anything APNs delivers carries an identifier we did not choose.
+    func testServerDeliveredNotificationsAreNotTreatedAsLocal() {
+        for identifier in ["", "0:1234567890123456%abcdef", "stream.start", "device-control", "oila.live-stream"] {
+            XCTAssertFalse(LocalNotificationID.isLocallyScheduled(identifier),
+                           "\(identifier) is not one of ours and must still be routed")
+        }
+    }
 }
+

@@ -321,6 +321,11 @@
 "audio2.consent.hint" = "Yoniqligini doim ko'rasiz";
 "audio2.consent.allow" = "Ruxsat berish";
 "audio2.consent.decline" = "Hozir emas";
+"audio2.consent.granted_audio" = "Jonli ovozga ruxsat berilgan";
+"audio2.consent.granted_video" = "Jonli ovoz va videoga ruxsat berilgan";
+"audio2.consent.granted_sub" = "Ota-onangiz tinglashiga rozilik bergansiz. Buni istalgan vaqtda qaytarib olsangiz bo'ladi — keyin u yana so'raydi.";
+"audio2.consent.revoke_cta" = "Ruxsatni qaytarib olish";
+"audio2.consent.revoke_confirm" = "Ruxsat qaytarib olinsinmi? Jonli efir darhol to'xtaydi va ota-onangiz yana so'rashi kerak bo'ladi.";
 "chat2.system.sos" = "SOS — yordam so'raldi";
 "chat2.system.generic" = "Tizim xabari";
 

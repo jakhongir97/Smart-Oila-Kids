@@ -321,6 +321,11 @@
 "audio2.consent.hint" = "Вы всегда видите, когда включено";
 "audio2.consent.allow" = "Разрешить";
 "audio2.consent.decline" = "Не сейчас";
+"audio2.consent.granted_audio" = "Прямой звук разрешён";
+"audio2.consent.granted_video" = "Прямой звук и видео разрешены";
+"audio2.consent.granted_sub" = "Ты разрешил родителю слушать. Это можно отменить в любой момент — тогда он спросит снова.";
+"audio2.consent.revoke_cta" = "Отменить разрешение";
+"audio2.consent.revoke_confirm" = "Отменить разрешение? Прямой эфир сразу остановится, и родителю придётся спросить снова.";
 "chat2.system.sos" = "SOS — запрошена помощь";
 "chat2.system.generic" = "Системное сообщение";
 

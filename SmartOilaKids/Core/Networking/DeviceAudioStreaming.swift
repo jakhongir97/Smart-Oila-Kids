@@ -460,6 +460,11 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// valuable — but `activeMode` stays `.audio`, so the indicator keeps saying "listening" instead
     /// of claiming the parent is watching through a camera that never opened. nil once video is up.
     @Published private(set) var videoUpgradeFailure: String?
+    /// The standing grant, or nil when the child has never consented (or has withdrawn it).
+    /// `.video` means both the microphone and the camera are covered; `.audio` means microphone
+    /// only. Published so Settings can offer to withdraw it — the stored flags live in UserDefaults,
+    /// which SwiftUI cannot observe.
+    @Published private(set) var grantedConsent: StreamMode?
 
     var isLive: Bool { state == .live }
 
@@ -491,6 +496,7 @@ final class DeviceAudioStreamManager: ObservableObject {
     init(stream: OilaStreamServicing = StreamTokenSourceFactory.make(), defaults: UserDefaults = .standard) {
         self.stream = stream
         self.defaults = defaults
+        refreshGrantedConsent()
         NotificationCenter.default.addObserver(
             self, selector: #selector(onWakeStart(_:)), name: .pushShouldStartAudioStream, object: nil)
         NotificationCenter.default.addObserver(
@@ -525,7 +531,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         center.add(UNNotificationRequest(identifier: Self.presenceNotificationID, content: content, trigger: nil))
     }
 
-    private static let presenceNotificationID = "oila.live-stream.presence"
+    private static let presenceNotificationID = LocalNotificationID.livePresence
 
     /// Decide what a live session does when the app leaves the screen.
     ///
@@ -670,6 +676,21 @@ final class DeviceAudioStreamManager: ObservableObject {
         } else {
             defaults.removeObject(forKey: videoConsentKey)
         }
+        refreshGrantedConsent()
+    }
+
+    /// Re-read the stored grant. Callable from a screen's `onAppear` because the flags can also be
+    /// cleared from outside this object — `SessionStore` wipes them on unpair — and this object
+    /// outlives that, so its mirror would otherwise still claim a grant that no longer exists.
+    func refreshConsentState() {
+        refreshGrantedConsent()
+    }
+
+    /// Re-read the stored grant into the published mirror. UserDefaults is not observable, so the
+    /// Settings row that offers to withdraw the grant needs something it can watch.
+    private func refreshGrantedConsent() {
+        let audio = defaults.bool(forKey: consentKey)
+        grantedConsent = audio ? (defaults.bool(forKey: videoConsentKey) ? .video : .audio) : nil
     }
 
     func start(command: StreamCommand) async {
@@ -879,6 +900,9 @@ final class DeviceAudioStreamManager: ObservableObject {
         defaults.removeObject(forKey: consentKey)
         defaults.removeObject(forKey: videoConsentKey)
         needsConsent = false
+        refreshGrantedConsent()
+        // Withdrawing consent must also end anything running under it — otherwise "I take it back"
+        // leaves the microphone open until the server lease happens to expire.
         Task { await stop() }
     }
 
