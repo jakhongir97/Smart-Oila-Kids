@@ -156,19 +156,17 @@ Paste this and replace placeholders:
 ```text
 Smart Oila Family Link is the child-side iPhone companion for a parent-managed Smart Oila family safety service.
 
-This app does not use a standard email/password login. Review should use the pairing flow below.
+This app does not use a standard email/password login. It is the child half of a pair: the parent
+generates a 5-digit code in the parent app, and the child enters it here. There is exactly one way in.
 
-Review path A: parent phone + code
+Review path: 5-digit pairing code
 1. Install and launch the app.
-2. Enter review parent phone number: [REVIEW_PARENT_PHONE].
-3. If a confirmation code screen appears, enter: [REVIEW_CONFIRMATION_CODE].
-4. The app links to review DSN [REVIEW_DSN] and opens the main screen.
+2. Choose a language, then continue to the pairing screen.
+3. Enter this pairing code on the numeric keypad: [REVIEW_PAIRING_CODE].
+4. The app links to review child [REVIEW_DSN] and opens the main screen.
 
-Review path B: QR pairing
-1. Install and launch the app.
-2. Open the attached QR code on a second device or Mac.
-3. Scan the QR code from the child app pairing flow.
-4. The app links to review DSN [REVIEW_DSN] and opens the main screen.
+The code above is a QA-scoped, long-lived code bound to one dedicated review child. It can be
+entered repeatedly for the whole review period.
 
 Features available for review on the child device:
 - live location sharing
@@ -261,7 +259,7 @@ Because the shipped target currently supports both iPhone and iPad, App Store Co
 
 | Platform | Minimum practical set |
 | --- | --- |
-| iPhone | One full iPhone set. Safe current size: `1284 x 2778` portrait for 6.5-inch if you are not supplying 6.9-inch screenshots. |
+| iPhone | One full iPhone set at `1290 x 2796` portrait (6.9-inch). This is what `scripts/create_app_store_screenshots.py` now produces. Do not fall back to the 6.5-inch slot: the only 6.5-inch set that exists is the pre-rebrand April one, which shows a weekly-usage chart the app no longer has. |
 | iPad | One full iPad set. Safe current size: `2064 x 2752` portrait for 13-inch. |
 
 Recommended screenshot order:

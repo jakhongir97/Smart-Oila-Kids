@@ -20,10 +20,12 @@ SCHEME = "SmartOilaKids"
 DERIVED_DATA = ROOT / ".build" / "app-store-screenshots-derived-data"
 OUTPUT_ROOT = ROOT / "Artifacts" / "app-store-shots" / f"{date.today().isoformat()}-generated"
 
-IPHONE_SIMULATOR = "iPhone 16 Plus"
+# 6.9" is the only iPhone size App Store Connect still accepts as the primary set; the 6.5"
+# slot is legacy and the live listing's existing 6.5" shots cannot be reused (pre-rebrand).
+IPHONE_SIMULATOR = "iPhone 16 Pro Max"
 IPAD_SIMULATOR = "iPad Pro 13-inch (M4)"
 
-IPHONE_READY_SIZE = (1284, 2778)
+IPHONE_READY_SIZE = (1290, 2796)  # 6.9" portrait
 IPAD_READY_SIZE = (2064, 2752)
 
 DEMO_DSN = "APPSTORE-DEMO-001"
@@ -446,7 +448,7 @@ def write_manifest() -> None:
                 "6. `06-settings.png`",
                 "",
                 "Folders:",
-                f"- iPhone 6.5-ready: `{(OUTPUT_ROOT / 'iphone-6.5-ready').relative_to(ROOT)}`",
+                f"- iPhone 6.9-ready: `{(OUTPUT_ROOT / 'iphone-6.9-ready').relative_to(ROOT)}`",
                 f"- iPad 13-ready: `{(OUTPUT_ROOT / 'ipad-13-ready').relative_to(ROOT)}`",
                 "",
                 "Raw captures are included alongside the upload-sized exports.",
@@ -463,7 +465,7 @@ def prepare_output_dirs() -> dict[str, Path]:
 
     directories = {
         "iphone_raw": OUTPUT_ROOT / "iphone-raw",
-        "iphone_ready": OUTPUT_ROOT / "iphone-6.5-ready",
+        "iphone_ready": OUTPUT_ROOT / "iphone-6.9-ready",
         "ipad_raw": OUTPUT_ROOT / "ipad-raw",
         "ipad_ready": OUTPUT_ROOT / "ipad-13-ready",
     }

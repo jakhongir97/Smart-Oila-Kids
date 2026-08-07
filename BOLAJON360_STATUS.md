@@ -32,7 +32,7 @@ Read from `SmartOilaKids/Resources/Info.plist`:
 | Flag | Value | Consequence |
 |---|---|---|
 | `SMARTOILA_CHAT_FEATURES_ENABLED` | **true** | Chat + its WebSocket are LIVE |
-| `SMARTOILA_MEDIA_FEATURES_ENABLED` | **false** | Live audio cannot start in any build |
+| `SMARTOILA_MEDIA_FEATURES_ENABLED` | **true** | Live audio + video (D-073) can start, behind the child's consent |
 | `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` | **false** | No per-app blocking, limits or schedules |
 
 So the shipping product is: **pairing, location, device status, SOS, tasks, chat, and a soft in-app
@@ -47,9 +47,13 @@ and it is the highest-stakes claim in the repo, so:
 - **Recording: genuinely absent from the iOS client.** `grep -rn "recordings" --include="*.swift"`
   returns zero hits. No `AVCaptureSession`, no `AVAudioRecorder`, no camera capture path.
   `PushCommandRouter.swift` leaves recording-trigger pushes deliberately unrouted.
-- **The camera is never used.** The only camera API in the target is a read-only
-  `AVCaptureDevice.authorizationStatus(for: .video)`.
-- **But the microphone capability DOES ship** (dormant behind the media flag): LiveKit
+- **The camera IS used, for live viewing only — never to record.** A `stream.start` with
+  `mode: video` publishes a LiveKit camera track the parent watches in real time; nothing is
+  written to disk, on the device or on the server. It opens only after the child grants a separate
+  camera consent (the audio grant alone does not cover it), it is visible the whole time through
+  the on-screen indicator and, once backgrounded, a system notification — and iOS suspends camera
+  capture in the background regardless, so video is foreground-only by construction.
+- **The microphone capability ships and is now enabled** (`SMARTOILA_MEDIA_FEATURES_ENABLED=true`): LiveKit
   `client-sdk-swift 2.15.2` + `webrtc-xcframework` are linked into the app target, the publisher code
   path exists, and `Info.plist` declares **both** `NSCameraUsageDescription` and
   `NSMicrophoneUsageDescription`. Both strings have been rewritten to describe what the code actually

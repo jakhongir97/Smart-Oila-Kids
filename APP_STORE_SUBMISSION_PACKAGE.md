@@ -209,13 +209,13 @@ Paste and replace placeholders:
 There is no public username/password onboarding inside the child app. Review requires device linking.
 
 Review instructions:
-1. Launch the app on iPhone.
-2. On the first screen, enter the review parent phone number [REVIEW_PARENT_PHONE] or scan the attached review QR code.
-3. The app links to review DSN [REVIEW_DSN] and opens the main screen.
+1. Launch the app on iPhone and pick a language.
+2. On the pairing screen, enter the 5-digit review pairing code [REVIEW_PAIRING_CODE] on the keypad. (The app has no password and no QR scanner — a pairing code is the only way in.)
+3. The app links to review child [REVIEW_DSN] and opens the main screen.
 4. Features available for review on the child device: live location sharing, SOS, parent-child chat, tasks, notifications, profile, and settings.
 5. Background location is used so the paired parent account can view the linked device location.
 6. Camera, microphone, and screen-related actions require iOS permission prompts and visible system indicators. Some live features may require the app to remain foreground on iPhone due to iOS limitations.
-7. The review backend, test phone number, QR link, and paired parent account will remain active for the full App Review period.
+7. The review backend, the pairing code above, and the paired parent account will remain active for the full App Review period.
 
 Reviewer support:
 Name: [REAL_FIRST_NAME] [REAL_LAST_NAME]
@@ -224,9 +224,8 @@ Phone: [REVIEW_PHONE_CONTACT]`
 
 ### Review attachment
 
-Attach one of:
-- PNG of the review QR code
-- 1-page PDF with the exact review flow
+Attach a 1-page PDF with the exact review flow (a screenshot of the pairing screen with the code
+filled in is enough). Do NOT promise a QR code — the app has no scanner.
 
 ## 5. Age Rating Questionnaire
 
