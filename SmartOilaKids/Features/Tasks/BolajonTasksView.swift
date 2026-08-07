@@ -7,6 +7,7 @@ import SwiftUI
 
 struct BolajonTasksView: View {
     @StateObject private var viewModel = BolajonTasksViewModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         BolajonScreen(intent: .lavender, background: AppColors.screenBackground, title: L10n.tr("tasks2.title")) {
@@ -49,6 +50,16 @@ struct BolajonTasksView: View {
             }
         }
         .task { await viewModel.load() }
+        .refreshable { await viewModel.load() }
+        // `.task` runs once and never again: this screen is never torn down while the app is
+        // merely backgrounded, so a child who left the app open saw yesterday's list — and a task
+        // the parent added in the meantime only appeared after a force-quit. Push covers the case
+        // where FCM is working; foregrounding covers the case where it is not, which on iOS is
+        // most of the time until the Firebase assets land.
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            Task { await viewModel.load() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { _ in
             Task { await viewModel.load() }
         }

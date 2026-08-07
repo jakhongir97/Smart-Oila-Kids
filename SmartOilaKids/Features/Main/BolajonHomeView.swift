@@ -106,7 +106,12 @@ struct BolajonHomeView: View {
             .onChange(of: scenePhase) { phase in
                 // Without push there is nothing to tell Home the parent wrote — coming back to
                 // the foreground is the reliable moment to re-read the unread count.
-                if phase == .active { chatUnreadRefreshToken += 1 }
+                guard phase == .active else { return }
+                chatUnreadRefreshToken += 1
+                // Same reasoning for everything else on this screen. `.task` fires once and the
+                // home stack root never disappears, so the task preview rows and the star badge
+                // kept showing whatever was true when the app was first opened.
+                Task { await viewModel.load() }
             }
             .onChange(of: path) { newPath in
                 let chatOpen = newPath.contains(.chat)
