@@ -148,6 +148,7 @@
 		07FF2F04EB7460062D6EF53B /* PushCommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushCommandRouter.swift; sourceTree = "<group>"; };
 		083AE2B30276D09934C7C631 /* ScreenTimeAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAuthorizationManager.swift; sourceTree = "<group>"; };
 		0C39B2B99B81F60FCF4C0283 /* SmartOilaKids.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKids.entitlements; sourceTree = "<group>"; };
+		0C39B2B99B81F60FCF4C0284 /* SmartOilaKids.debug.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKids.debug.entitlements; sourceTree = "<group>"; };
 		1242F15864F04C95AF65E92C /* LocationPermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPermissionManager.swift; sourceTree = "<group>"; };
 		1842BC9A7B725383EAF19B63 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
 		1A91856886268BFE3E002F1F /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -350,6 +351,7 @@
 				D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */,
 				EDD4594ADF522CD5EB9CC29A /* Info.plist */,
 				0C39B2B99B81F60FCF4C0283 /* SmartOilaKids.entitlements */,
+				0C39B2B99B81F60FCF4C0284 /* SmartOilaKids.debug.entitlements */,
 				8542E50D711B89214486D329 /* Localization */,
 			);
 			path = Resources;
@@ -1054,7 +1056,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
+				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.debug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;

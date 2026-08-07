@@ -126,11 +126,13 @@ private extension LocationPermissionManager {
         case .authorized, .provisional, .ephemeral:
             break
         case .notDetermined:
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
                 DispatchQueue.main.async {
-                    if granted {
-                        UIApplication.shared.registerForRemoteNotifications()
-                    }
+                    // Register regardless of the answer. The token is what makes the device
+                    // reachable by a SILENT push, which needs no alert authorization — gating it
+                    // on `granted` meant declining the banner also, invisibly, opted the child out
+                    // of lock refresh, chat and live-stream commands.
+                    UIApplication.shared.registerForRemoteNotifications()
                     self.refreshStatuses()
                 }
             }

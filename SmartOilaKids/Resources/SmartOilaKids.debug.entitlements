@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Debug counterpart of SmartOilaKids.entitlements. Identical except for aps-environment.
+
+  Both configurations used to share the one file, which hardcodes `production` — so a build run
+  from Xcode registered against the PRODUCTION APNs environment while carrying a sandbox
+  provisioning profile. Device tokens minted that way are rejected by the sandbox gateway, which
+  means the first real-device push bring-up would have failed for a reason unrelated to the code
+  under test.
+-->
+<plist version="1.0">
+<dict>
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.3twn5nw4bl.uz.smartoila.kids</string>
+	</array>
+</dict>
+</plist>

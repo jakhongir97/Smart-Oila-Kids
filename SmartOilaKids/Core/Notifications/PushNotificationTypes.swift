@@ -23,6 +23,29 @@ enum PushUserInfoKeys {
     static let streamExpiresAt = "streamExpiresAt"           // epoch milliseconds
 }
 
+/// Identifiers for the notifications this app schedules itself.
+///
+/// They exist so the delivery callbacks can tell "the server sent us a command" from "we posted
+/// this banner a moment ago". `willPresent` and `didReceive` route every arriving notification
+/// through `PushCommandRouter`, and two of the local ones carry a `dsn` + `event` userInfo — the
+/// exact shape the router parses — so the app was re-ingesting its own output as if it were a
+/// fresh server command: duplicated inbox rows and a badge counting each event twice.
+enum LocalNotificationID {
+    /// The live-session presence banner. A fixed id: re-posting REPLACES it rather than stacking.
+    static let livePresence = "oila.live-stream.presence"
+    /// Prefixes; the schedulers append a UUID so each event gets its own banner.
+    static let integrityPrefix = "device-control.integrity."
+    static let recoveryPrefix = "device-control.recovery."
+
+    /// True when this app scheduled the notification, so the caller must not treat it as an
+    /// inbound command.
+    static func isLocallyScheduled(_ identifier: String) -> Bool {
+        identifier == livePresence
+            || identifier.hasPrefix(integrityPrefix)
+            || identifier.hasPrefix(recoveryPrefix)
+    }
+}
+
 enum PushDeepLinkDestination: String, Codable {
     case chat
     case tasks

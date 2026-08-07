@@ -251,7 +251,7 @@ private extension DeviceControlIntegrityNotifier {
         ]
 
         let request = UNNotificationRequest(
-            identifier: "device-control.integrity.\(UUID().uuidString)",
+            identifier: LocalNotificationID.integrityPrefix + UUID().uuidString,
             content: content,
             trigger: nil
         )

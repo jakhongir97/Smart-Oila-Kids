@@ -181,7 +181,7 @@ private extension DeviceControlRecoveryNotifier {
         ]
 
         let request = UNNotificationRequest(
-            identifier: "device-control.recovery.\(UUID().uuidString)",
+            identifier: LocalNotificationID.recoveryPrefix + UUID().uuidString,
             content: content,
             trigger: nil
         )

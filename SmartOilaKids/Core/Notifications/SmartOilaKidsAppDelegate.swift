@@ -19,16 +19,17 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         DeviceControlEventBridge.shared.start()
         // Do NOT prompt for notifications at launch — the B2 onboarding step owns that prompt so it
         // arrives in context (a launch-time prompt fired over the A1 language screen before pairing).
-        // Only re-register for remote notifications when authorization was already granted, so an
-        // already-onboarded relaunch keeps its push address current without any prompt.
+        //
+        // Registering is NOT prompting. `registerForRemoteNotifications()` shows no UI; it asks
+        // APNs for a device token, which is the address the backend needs to deliver a SILENT
+        // (content-available) push — and silent delivery requires no alert authorization at all.
+        // This used to be gated on `.authorized`, while the notifications onboarding step is
+        // optional, so a child who tapped "Not now" once never minted a token and was unreachable
+        // for lock refresh, chat and stream commands FOREVER, with nothing in the app able to
+        // recover it. The alert grant still governs what the child SEES; it must not govern
+        // whether the device can be reached at all.
         if !AppRuntime.hasDebugRoute {
-            notificationCenter.getNotificationSettings { settings in
-                guard settings.authorizationStatus == .authorized
-                    || settings.authorizationStatus == .provisional else { return }
-                DispatchQueue.main.async {
-                    application.registerForRemoteNotifications()
-                }
-            }
+            application.registerForRemoteNotifications()
         }
 
         if let remoteInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
@@ -139,6 +140,14 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        // Our own banners are not commands. The integrity and recovery notifiers both set a
+        // `dsn` + `event` userInfo — the very shape the router decodes — so routing them here fed
+        // this app's output straight back into its input, duplicating every such event in the
+        // inbox and in the badge count. Present them; do not act on them.
+        guard !LocalNotificationID.isLocallyScheduled(notification.request.identifier) else {
+            completionHandler([.banner, .sound, .badge])
+            return
+        }
         PushCommandRouter.handle(
             userInfo: notification.request.content.userInfo,
             deliveryContext: .foregroundPresentation
@@ -154,11 +163,17 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        PushCommandRouter.handle(
-            userInfo: response.notification.request.content.userInfo,
-            openedFromInteraction: true,
-            deliveryContext: .userResponse
-        )
+        // Same rule as `willPresent`, and it matters more here: `openedFromInteraction: true` arms
+        // a deep-link, so a child tapping one of our own banners could be navigated somewhere the
+        // parent never asked for. The refresh below still runs — opening the app is a fine moment
+        // to re-sync, whoever posted the banner.
+        if !LocalNotificationID.isLocallyScheduled(response.notification.request.identifier) {
+            PushCommandRouter.handle(
+                userInfo: response.notification.request.content.userInfo,
+                openedFromInteraction: true,
+                deliveryContext: .userResponse
+            )
+        }
         Task {
             await DeviceControlEventBridge.shared.syncNow()
         }
@@ -180,7 +195,14 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
 ///
 /// Until the plist ships this type is a compile-clean no-op — the app builds and behaves exactly as
 /// before (no push, no crash) — but `configurationState` reports `.missingPlist` and every push
-/// diagnostic says so out loud. No source change is required to switch it on.
+/// diagnostic says so out loud.
+///
+/// Switching it on needs no SWIFT change, but it is not zero-work: the `.xcodeproj` is
+/// hand-maintained and its Resources phase lists every file individually, so dropping
+/// `GoogleService-Info.plist` into `Resources/` in Finder does NOT bundle it — the app would stay
+/// silently `.missingPlist`. Add it through Xcode, or hand-write the `PBXFileReference`,
+/// `PBXBuildFile` and Resources entry. `remote-notification` also has to join `UIBackgroundModes`
+/// in that same commit, or iOS will not deliver a silent push to a backgrounded app.
 final class FCMPushRegistrar: NSObject {
     static let shared = FCMPushRegistrar()
 
