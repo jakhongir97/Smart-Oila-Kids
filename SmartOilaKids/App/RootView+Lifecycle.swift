@@ -78,16 +78,26 @@ extension RootView {
         if newValue == .background {
             lastBackgroundedAt = now
             persistBackgroundTimestamp(now)
-            // End any live listening session on backgrounding. This handler previously never
-            // referenced audio at all: no `audio` background mode is declared, so iOS will not keep
-            // a capture session running — but the `location` mode keeps the PROCESS alive, so the
-            // room and its published track stayed connected. The parent's UI showed an active
-            // session while receiving silence, `state` never left `.live`, and capture resumed on
-            // foreground with no fresh trigger and no fresh consent. Note the corollary: the
-            // indicator's "always visible" promise is only true while the app is foreground, which
-            // is exactly why the session must not survive backgrounding.
+            // AUDIO survives backgrounding; VIDEO does not.
+            //
+            // The `audio` background mode is now declared, so iOS keeps the capture session running
+            // with the app backgrounded or the screen locked — which is the whole point of the
+            // feature and what the Android child app already does via a microphone foreground
+            // service. Killing an audio session here would mean a parent can only ever listen while
+            // their child happens to be staring at this app.
+            //
+            // Video is different and NOT a policy choice: iOS suspends camera capture for a
+            // backgrounded app no matter what is declared. Letting a video session "continue" would
+            // publish a frozen or black track while the parent's UI insists they are watching, so
+            // the session is torn down instead and the parent sees the tracks drop — an honest
+            // signal they can act on.
+            //
+            // The visibility promise still holds in both directions: the in-app indicator covers the
+            // foreground, and `DeviceAudioStreamManager` posts a persistent system notification for
+            // exactly the window the app is not on screen — and ends the session outright if that
+            // notification cannot be shown. The policy lives next to the notification it depends on.
             if AppRuntime.audioStreamingEnabled {
-                DeviceAudioStreamManager.shared.stopByChild()
+                DeviceAudioStreamManager.shared.handleAppDidEnterBackground()
             }
             OilaTelemetryService.shared.flushNow()
             if shouldRunLocalChildServices,
@@ -118,6 +128,7 @@ extension RootView {
 
         guard newValue == .active else { return }
         OilaTelemetryService.shared.refreshLockNow()
+        OilaTelemetryService.shared.postStatusNow()
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
             scenePhase: phase,
             applicationState: applicationState,

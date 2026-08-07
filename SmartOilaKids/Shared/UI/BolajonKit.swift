@@ -439,7 +439,7 @@ struct BrokenLinkIcon: View {
 
 /// A small drawn flag (no emoji — those tofu on the Simulator and aren't guaranteed).
 struct MiniFlag: View {
-    enum Kind { case uz, ru }
+    enum Kind { case uz, ru, en }
     let kind: Kind
     var width: CGFloat = 28
     var height: CGFloat = 20
@@ -471,6 +471,36 @@ struct MiniFlag: View {
                 Color(red: 40 / 255, green: 70 / 255, blue: 160 / 255)
                 Color(red: 200 / 255, green: 40 / 255, blue: 50 / 255)
             }
+        case .en:
+            // Simplified Union Jack. Drawn rather than an emoji flag for the same reason as the
+            // others, and the diagonals are approximated with rotated bars — at this size the
+            // difference from the true counterchanged saltire is invisible.
+            ZStack {
+                Color(red: 1 / 255, green: 33 / 255, blue: 105 / 255)     // navy field
+                diagonalBar(color: .white, thickness: height * 0.30)
+                diagonalBar(color: Color(red: 200 / 255, green: 16 / 255, blue: 46 / 255),
+                            thickness: height * 0.12)
+                crossBars(color: .white, thickness: height * 0.34)
+                crossBars(color: Color(red: 200 / 255, green: 16 / 255, blue: 46 / 255),
+                          thickness: height * 0.20)
+            }
+        }
+    }
+
+    /// The saltire: one bar mirrored across both diagonals.
+    @ViewBuilder private func diagonalBar(color: Color, thickness: CGFloat) -> some View {
+        let length = sqrt(width * width + height * height)
+        let angle = Angle(radians: atan2(Double(height), Double(width)))
+        ZStack {
+            Rectangle().fill(color).frame(width: length, height: thickness).rotationEffect(angle)
+            Rectangle().fill(color).frame(width: length, height: thickness).rotationEffect(-angle)
+        }
+    }
+
+    @ViewBuilder private func crossBars(color: Color, thickness: CGFloat) -> some View {
+        ZStack {
+            Rectangle().fill(color).frame(height: thickness)
+            Rectangle().fill(color).frame(width: thickness)
         }
     }
 }

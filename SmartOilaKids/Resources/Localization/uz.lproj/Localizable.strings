@@ -57,7 +57,7 @@
 "permissions.details.step_5" = "Ruxsat berish tugmasini bosing va iOS ko‘rsatganida Screen Time tizim oynasini tasdiqlang.";
 "permissions.details.body_7" = "Bildirishnomalar ota-onadan xabarlar, vazifalar va bloklash ogohlantirishlari uchun kerak.";
 "permissions.details.step_7" = "Bildirishnomalarda banner, ovoz va belgilarga ruxsat bering.";
-"permissions.details.body_8" = "Kamera ruxsati ota-ona so'ragan kamera yozuvlari va jonli video oqimi uchun kerak.";
+"permissions.details.body_8" = "Kamera ruxsati ota-ona jonli videoni ko'rishi uchun kerak. Hech narsa yozib olinmaydi va saqlanmaydi.";
 "permissions.details.step_8" = "iOS kamera ruxsatini so'raganda ruxsat bering yoki avval rad etilgan bo'lsa Sozlamalarni qayta oching.";
 "permissions.action_allow_location" = "Lokatsiyaga ruxsat berish";
 "permissions.action_allow_location_always" = "Lokatsiyani doimiy ruxsat qilish";
@@ -266,6 +266,10 @@
 
 "perm2.item.location" = "Joylashuv";
 
+"perm2.item.microphone" = "Mikrofon";
+"perm2.microphone.body" = "Ota-ona jonli ovozni eshitishi uchun. Mikrofon yoniq bo'lganda siz doim belgini ko'rasiz.";
+"perm2.item.camera" = "Kamera";
+"perm2.camera.body" = "Ota-ona jonli videoni ko'rishi uchun. Hech narsa yozib olinmaydi va saqlanmaydi.";
 "perm2.item.bglocation" = "Fon joylashuvi";
 
 
@@ -305,6 +309,7 @@
 "home2.chat.subtitle" = "Oila bilan yozishing";
 
 /* Live audio (Bolajon360) */
+"audio2.notification.title" = "Jonli efir yoqilgan";
 "audio2.listening" = "Ota-ona tinglayapti";
 "audio2.watching" = "Ota-ona kuzatyapti";
 "audio2.camera_unavailable" = "Kamera ochilmadi — faqat ovoz";

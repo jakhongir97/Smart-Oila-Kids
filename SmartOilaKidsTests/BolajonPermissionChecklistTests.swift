@@ -41,15 +41,15 @@ final class BolajonPermissionChecklistTests: XCTestCase {
             microphone: .granted,
             camera: .authorized,
             screenTime: .granted
-        ), screenTimeEnabled: true)
+        ), screenTimeEnabled: true, mediaEnabled: true)
 
         XCTAssertEqual(availability(states, "notifications"), .granted)
         XCTAssertEqual(availability(states, "location"), .granted)
         XCTAssertEqual(availability(states, "bglocation"), .granted)
         XCTAssertEqual(availability(states, "usage"), .granted)
         XCTAssertEqual(availability(states, "screen"), .granted)
-        // Microphone row removed — audio recording was cut for v1, no mic permission is requested.
-        XCTAssertNil(availability(states, "microphone"))
+        XCTAssertEqual(availability(states, "microphone"), .granted)
+        XCTAssertEqual(availability(states, "camera"), .granted)
         // iOS exposes no read for these — always neutral, never "On".
         XCTAssertEqual(availability(states, "battery"), .openSettings)
         XCTAssertEqual(availability(states, "autostart"), .openSettings)
@@ -57,14 +57,15 @@ final class BolajonPermissionChecklistTests: XCTestCase {
 
     func testAllDeniedMarksOSRowsNotGranted() {
         // screenTimeEnabled: true so the screen/usage rows exist and their denied mapping is covered.
-        let states = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: true)
+        let states = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: true, mediaEnabled: true)
 
         XCTAssertEqual(availability(states, "notifications"), .notGranted)
         XCTAssertEqual(availability(states, "location"), .notGranted)
         XCTAssertEqual(availability(states, "bglocation"), .notGranted)
         XCTAssertEqual(availability(states, "usage"), .notGranted)
         XCTAssertEqual(availability(states, "screen"), .notGranted)
-        XCTAssertNil(availability(states, "microphone"))
+        XCTAssertEqual(availability(states, "microphone"), .notGranted)
+        XCTAssertEqual(availability(states, "camera"), .notGranted)
         XCTAssertEqual(availability(states, "battery"), .openSettings)
         XCTAssertEqual(availability(states, "autostart"), .openSettings)
     }
@@ -78,23 +79,50 @@ final class BolajonPermissionChecklistTests: XCTestCase {
 
     func testChecklistShapeIsStableSoBothScreensMatch() {
         // B11 and C5 build from this one ordered list, so the id set keeps them in sync.
-        // With Screen Time enabled the full board (incl. screen/usage) shows, in board order.
-        let enabledIDs = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: true).map(\.id)
+        // With both features enabled the full board shows, in board order.
+        let enabledIDs = BolajonPermissionChecklist
+            .states(from: snapshot(), screenTimeEnabled: true, mediaEnabled: true).map(\.id)
         XCTAssertEqual(enabledIDs, [
             "notifications", "battery", "screen", "usage", "autostart",
-            "location", "bglocation"
+            "location", "bglocation", "microphone", "camera"
         ])
     }
 
     func testScreenTimeRowsAreHiddenWhenFeatureDisabled() {
         // Shipped config (SMARTOILA_SCREEN_TIME_FEATURES_ENABLED=false): the screen/usage rows are
         // dropped so the Settings "N off" badge can reach zero and B11/C5 show no inert Enable rows.
-        let ids = BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false).map(\.id)
-        XCTAssertEqual(ids, [
+        let states = BolajonPermissionChecklist
+            .states(from: snapshot(), screenTimeEnabled: false, mediaEnabled: true)
+        XCTAssertEqual(states.map(\.id), [
             "notifications", "battery", "autostart",
-            "location", "bglocation"
+            "location", "bglocation", "microphone", "camera"
         ])
-        XCTAssertNil(availability(BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false), "screen"))
-        XCTAssertNil(availability(BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: false), "usage"))
+        XCTAssertNil(availability(states, "screen"))
+        XCTAssertNil(availability(states, "usage"))
+    }
+
+    /// Same rule as the Screen Time rows: a permission with no shipping feature behind it must not
+    /// appear, or C5 shows an "Enable" button that grants access nothing will ever use.
+    func testMediaRowsAreHiddenWhenLiveStreamingIsDisabled() {
+        let states = BolajonPermissionChecklist
+            .states(from: snapshot(microphone: .granted, camera: .authorized),
+                    screenTimeEnabled: false, mediaEnabled: false)
+        XCTAssertEqual(states.map(\.id), [
+            "notifications", "battery", "autostart", "location", "bglocation"
+        ])
+        XCTAssertNil(availability(states, "microphone"))
+        XCTAssertNil(availability(states, "camera"))
+    }
+
+    /// Every actionable row must carry the requirement its "Enable" button re-requests — a nil here
+    /// renders a button that does nothing, which is how the microphone row would have shipped.
+    func testActionableRowsCarryTheRequirementTheirEnableButtonNeeds() {
+        let states = BolajonPermissionChecklist
+            .states(from: snapshot(), screenTimeEnabled: true, mediaEnabled: true)
+        for state in states where state.availability == .notGranted {
+            XCTAssertNotNil(state.requirement, "row \(state.id) is actionable but has no requirement")
+        }
+        XCTAssertEqual(states.first { $0.id == "microphone" }?.requirement, .microphone)
+        XCTAssertEqual(states.first { $0.id == "camera" }?.requirement, .camera)
     }
 }

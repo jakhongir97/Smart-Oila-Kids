@@ -168,7 +168,15 @@ struct OilaLocationFix: Codable, Equatable {
 struct OilaDeviceStatus {
     let battery: Int?
     let networkType: String?   // "Wifi" | "Mobile"
-    let soundMode: String?     // "Normal" | "Silent" | "Vibrate" — not readable on iOS, usually nil
+    /// "Normal" | "Silent" | "Vibrate" — always nil on iOS, by decision.
+    ///
+    /// iOS exposes no public API for the ring/silent switch. The Android child app fills this in
+    /// because Android does expose it. The only way to read it here is a private Darwin
+    /// notification (`com.apple.springboard.ringerstate`), which is grounds for App Store rejection
+    /// on an app already under extra scrutiny — so this field stays empty rather than being faked.
+    /// A nil field is dropped from the request body and the backend accepts its absence.
+    let soundMode: String?
+
     /// This device's location permission, so the parent app can say WHY a feature is not reporting
     /// ("Only While Using — cannot report in background") instead of showing a bare "offline".
     /// Exactly one of "Always" | "WhenInUse" | "Denied" | "NotDetermined", or nil when the caller
@@ -596,10 +604,12 @@ final class OilaDeviceClient: OilaDeviceServicing {
         if let locationAuthorization = status.locationAuthorization?.trimmedNonEmpty {
             body["locationAuthorization"] = locationAuthorization
         }
-        // An empty `{}` is deliberately still POSTed: every field is optional server-side and the
-        // request doubles as this device's liveness ping. Skipping it is what made a charged,
-        // stationary phone on Wi-Fi look offline to the parent — the snapshot is often all-nil on
-        // iOS (soundMode is unreadable, battery/network unchanged) and nothing was ever sent.
+        // Send even when every field is nil. The backend derives "device offline" from how long it
+        // has been since it last heard from this device, so the REQUEST ITSELF is the liveness
+        // signal and an empty `{}` is explicitly valid (every field in PostDeviceStatusDto is
+        // optional). Skipping the call on an empty body — which is what this did — made a charged,
+        // stationary phone on Wi-Fi look offline: on iOS the snapshot is often all-nil (soundMode
+        // is unreadable, battery/network unchanged) and so nothing was ever sent.
         _ = try await requestJSON(path: "device/status", method: .post, body: body, authorized: true)
     }
 

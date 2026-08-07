@@ -169,13 +169,14 @@ struct BolajonLanguagePicker: View {
     }
 
     // Matches the design: Uzbek (Latin), Uzbek (Cyrillic), Russian — plus English, which is
-    // fully translated but used to be unreachable from this screen.
+    // fully translated but used to be unreachable from this screen. The Android child app ships
+    // no English strings, so this is the one place the two apps differ in the child's favour.
     // Flags are drawn (not emoji — regional-indicator emoji tofu on the Simulator).
     private let options: [Option] = [
         .init(language: .uz, flag: .uz),
         .init(language: .uzCyrl, flag: .uz),
         .init(language: .ru, flag: .ru),
-        .init(language: .en, flag: nil)
+        .init(language: .en, flag: .en)
     ]
 
     var body: some View {
@@ -190,6 +191,7 @@ struct BolajonLanguagePicker: View {
         let selected = sessionStore.appLanguage == option.language
         return Button {
             sessionStore.setLanguage(option.language)
+            AppHaptics.selection()
         } label: {
             HStack(spacing: 14) {
                 ZStack {

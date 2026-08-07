@@ -116,8 +116,10 @@ struct SettingsRootView: View {
                 }
 
                 section(title: "settings2.section_other") {
-                    // A1 is the only other place the language can be picked, and it is behind a
-                    // completed pairing — so without this row a wrong choice there is permanent.
+                    // Language is reachable AFTER setup, not only during it. A1 is the only
+                    // other place it can be picked and that is behind a completed pairing, so
+                    // without this row a wrong first tap was permanent — while the setup flow's own
+                    // subtitle already promised "you can change this later in settings".
                     row(glyph: .symbol("globe"), tint: AppColors.glyphPurple,
                         title: "settings2.language",
                         subtitleLiteral: sessionStore.appLanguage.nativeName,

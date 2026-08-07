@@ -25,6 +25,7 @@
 		22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */; };
 		22E7F6EB6E023F4549FC91F0 /* PermissionRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 406257A2E792217E0DA9B72A /* PermissionRequirement.swift */; };
 		26DA40009D4D477E9E4B7F98 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = E893646BD59D45E08D43E0B9 /* LiveKit */; };
+		FBA5E1000001C24E1FA0FE01 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = FBA5E1000002C24E1FA0FE02 /* FirebaseMessaging */; };
 		32BC1A012F69914E00B088F7 /* DeviceApplicationsSyncWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32BC1A002F69914E00B088F7 /* DeviceApplicationsSyncWebSocketService.swift */; };
 		34E7EE4BAA5D64256E27662B /* ScreenTimeUsageActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9E55F392A6E47D99AA4BE7 /* ScreenTimeUsageActivitySummary.swift */; };
 		350DE396F3550391AF1F3E17 /* DeviceLockScheduleSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */; };
@@ -273,6 +274,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				26DA40009D4D477E9E4B7F98 /* LiveKit in Frameworks */,
+				FBA5E1000001C24E1FA0FE01 /* FirebaseMessaging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -672,6 +674,7 @@
 			name = SmartOilaKids;
 			packageProductDependencies = (
 				E893646BD59D45E08D43E0B9 /* LiveKit */,
+				FBA5E1000002C24E1FA0FE02 /* FirebaseMessaging */,
 			);
 			productName = SmartOilaKids;
 			productReference = 4D0BC0423D576553D183CB83 /* SmartOilaKids.app */;
@@ -766,6 +769,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				DBB31FF197A647ECB4005341 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
+				FBA5E1000003C24E1FA0FE03 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
@@ -1377,6 +1381,14 @@
 				minimumVersion = 2.0.0;
 			};
 		};
+		FBA5E1000003C24E1FA0FE03 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1384,6 +1396,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DBB31FF197A647ECB4005341 /* XCRemoteSwiftPackageReference "client-sdk-swift" */;
 			productName = LiveKit;
+		};
+		FBA5E1000002C24E1FA0FE02 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FBA5E1000003C24E1FA0FE03 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

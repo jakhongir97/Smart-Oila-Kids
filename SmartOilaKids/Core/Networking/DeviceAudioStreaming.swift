@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import UIKit
+import UserNotifications
 #if canImport(LiveKit)
 import LiveKit
 #endif
@@ -442,9 +443,13 @@ final class DeviceAudioStreamManager: ObservableObject {
         case error(String)
     }
 
-    @Published private(set) var state: State = .idle
+    @Published private(set) var state: State = .idle {
+        didSet { if state != oldValue { syncPresenceNotification() } }
+    }
     /// Whether the current/last session is audio-only or video — drives the indicator's text/icon.
-    @Published private(set) var activeMode: StreamMode = .audio
+    @Published private(set) var activeMode: StreamMode = .audio {
+        didSet { if activeMode != oldValue { syncPresenceNotification() } }
+    }
     /// Drives the one-time consent sheet at the app root.
     @Published var needsConsent = false
     /// Which hardware the pending consent sheet is asking for — audio (mic) or video (camera + mic).
@@ -490,6 +495,60 @@ final class DeviceAudioStreamManager: ObservableObject {
             self, selector: #selector(onWakeStart(_:)), name: .pushShouldStartAudioStream, object: nil)
         NotificationCenter.default.addObserver(
             self, selector: #selector(onWakeStop(_:)), name: .pushShouldStopAudioStream, object: nil)
+    }
+
+    /// Mirror the live session into a system notification.
+    ///
+    /// The in-app `AudioListeningIndicator` can only be seen while this app is on screen, and audio
+    /// now deliberately survives backgrounding — so without this the microphone could be open with
+    /// nothing on the child's device saying so. That is precisely the covert-recording shape App
+    /// Store guideline 5.1.2 prohibits, and it is also what the Android child app avoids with its
+    /// foreground-service notification ("Jonli efir yoqilgan" / "Ota-ona mikrofonni eshitmoqda").
+    ///
+    /// The notification is deliberately not silent and not removable by a swipe alone — it is
+    /// re-posted for the life of the session and withdrawn the moment the session ends.
+    private func syncPresenceNotification() {
+        let center = UNUserNotificationCenter.current()
+        guard state == .live else {
+            center.removePendingNotificationRequests(withIdentifiers: [Self.presenceNotificationID])
+            center.removeDeliveredNotifications(withIdentifiers: [Self.presenceNotificationID])
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = L10n.tr("audio2.notification.title")
+        content.body = L10n.tr(activeMode == .video ? "audio2.watching" : "audio2.listening")
+        content.sound = nil
+        content.interruptionLevel = .timeSensitive
+        // A nil trigger fires immediately; re-using the same identifier REPLACES the existing
+        // banner rather than stacking a second one when the mode changes mid-session.
+        center.add(UNNotificationRequest(identifier: Self.presenceNotificationID, content: content, trigger: nil))
+    }
+
+    private static let presenceNotificationID = "oila.live-stream.presence"
+
+    /// Decide what a live session does when the app leaves the screen.
+    ///
+    /// - Video always stops: iOS suspends camera capture for a backgrounded app regardless of what
+    ///   is declared, so "continuing" would publish a dead track behind a parent UI claiming
+    ///   otherwise.
+    /// - Audio continues *only if* the child will actually be able to see that it is running. The
+    ///   presence notification is the sole indicator once the app is off screen, so if notifications
+    ///   are not authorized there is no honest way to keep the microphone open and the session is
+    ///   ended instead. An open mic with nothing on the device disclosing it is the covert-recording
+    ///   shape we refuse to ship, whatever the parent asked for.
+    func handleAppDidEnterBackground() {
+        guard state == .live else { return }
+        if activeMode == .video {
+            Task { await stop() }
+            return
+        }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let canDisclose = settings.authorizationStatus == .authorized
+                || settings.authorizationStatus == .provisional
+            guard !canDisclose else { return }
+            Task { @MainActor [weak self] in await self?.stop() }
+        }
     }
 
     @objc private func onWakeStart(_ notification: Notification) {

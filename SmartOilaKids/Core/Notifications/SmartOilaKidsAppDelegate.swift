@@ -70,7 +70,20 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // the parent app reports a healthy push channel that silently drops every command. Leave
         // the address EMPTY until FirebaseMessaging is actually linked; empty is the honest value
         // and the backend already tolerates its absence (`fcmToken` is optional at pairing).
-        guard FCMPushRegistrar.shared.isConfigured else { return }
+        guard FCMPushRegistrar.shared.isConfigured else {
+            // APNs handed us an address but Firebase cannot translate it, so this device is not
+            // reachable by any parent command. Record it rather than looking healthy.
+            let state = FCMPushRegistrar.shared.configurationState.rawValue
+            Task { @MainActor in
+                RuntimeDiagnosticsCenter.shared.updatePushToken(
+                    status: "apns_only",
+                    localToken: String(token.prefix(12)) + "…",
+                    remoteToken: "-",
+                    lastError: "push undeliverable: \(state)"
+                )
+            }
+            return
+        }
         if UserDefaults.standard.bool(forKey: "BOLAJON_OILA_PAIRED"),
            let fcmToken = UserDefaults.standard.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty {
             Task { try? await OilaDeviceClient.shared.updateFCMToken(fcmToken) }
@@ -158,24 +171,45 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
 /// command (lock refresh, task deep-link, covert-record trigger, session-invalidate). The backend
 /// is FCM-only and mirrors the Android child app's `FirebaseMessagingService`.
 ///
-/// Drop-in activation (both are team/Firebase-owned artifacts):
-///   1. Add the `FirebaseMessaging` SPM product to the app target
-///      (https://github.com/firebase/firebase-ios-sdk).
-///   2. Add the child app's `GoogleService-Info.plist` to the app target (its bundle id must match
-///      the app's actual bundle id) and upload the APNs auth key (.p8) to that Firebase project's
-///      Cloud Messaging settings (sandbox + production).
+/// Activation status:
+///   1. DONE — the `FirebaseMessaging` SPM product is linked into the app target
+///      (https://github.com/firebase/firebase-ios-sdk, 12.x).
+///   2. PENDING (team/Firebase-owned) — add the child app's `GoogleService-Info.plist` to the app
+///      target (bundle id must be `uz.smartoila.kids`, in the `oila360` Firebase project) and upload
+///      the APNs auth key (.p8) to that project's Cloud Messaging settings (sandbox + production).
 ///
-/// Until both are present this whole type is a compile-clean no-op — the app builds and behaves
-/// exactly as before (no push, no crash). No source change is required to switch it on.
+/// Until the plist ships this type is a compile-clean no-op — the app builds and behaves exactly as
+/// before (no push, no crash) — but `configurationState` reports `.missingPlist` and every push
+/// diagnostic says so out loud. No source change is required to switch it on.
 final class FCMPushRegistrar: NSObject {
     static let shared = FCMPushRegistrar()
 
     /// UserDefaults key holding the latest FCM registration token, read by pairing + token sync.
     static let fcmTokenDefaultsKey = "OILA_FCM_TOKEN"
 
+    /// Why the FCM path is (or is not) live. Recorded into `RuntimeDiagnosticsCenter.pushToken`
+    /// so "this device is not addressable" is a readable fact instead of silence. Every non-`live`
+    /// case means the backend cannot deliver a single parent command to this device.
+    enum ConfigurationState: String {
+        /// The FirebaseMessaging SDK is not linked into the binary at all.
+        case sdkNotLinked = "sdk_not_linked"
+        /// SDK linked, but no `GoogleService-Info.plist` is bundled — Firebase cannot be configured.
+        case missingPlist = "missing_google_service_plist"
+        /// Firebase configured; a real FCM registration token is expected shortly.
+        case live
+    }
+
+    private(set) var configurationState: ConfigurationState = {
+        #if canImport(FirebaseMessaging)
+        return .missingPlist
+        #else
+        return .sdkNotLinked
+        #endif
+    }()
+
     /// True once Firebase has been configured against a bundled `GoogleService-Info.plist`.
     /// Callers use this to decide whether the FCM path is live (vs. the legacy APNs stopgap).
-    private(set) var isConfigured = false
+    var isConfigured: Bool { configurationState == .live }
 
     /// Configure Firebase if the SDK is linked and a `GoogleService-Info.plist` is bundled.
     /// Safe to call unconditionally at launch: a missing SDK or plist is a silent no-op and never
@@ -185,19 +219,47 @@ final class FCMPushRegistrar: NSObject {
         guard !isConfigured else { return }
         guard Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil else {
             // Plist not shipped yet — keep push disabled rather than crashing FirebaseApp.configure().
+            recordState(.missingPlist)
             return
         }
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
         Messaging.messaging().delegate = self
-        isConfigured = true
+        recordState(.live)
         // Prime an initial token fetch; rotations arrive via didReceiveRegistrationToken.
-        Messaging.messaging().token { [weak self] token, _ in
-            guard let self, let token else { return }
+        Messaging.messaging().token { [weak self] token, error in
+            guard let self else { return }
+            guard let token else {
+                self.recordTokenFailure(error)
+                return
+            }
             self.handleFCMToken(token)
         }
+        #else
+        recordState(.sdkNotLinked)
         #endif
+    }
+
+    private func recordState(_ state: ConfigurationState) {
+        configurationState = state
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updatePushToken(
+                status: state.rawValue,
+                endpoint: "device/fcm-token",
+                remoteToken: state == .live ? nil : "-",
+                lastError: state == .live ? "-" : "push undeliverable: \(state.rawValue)"
+            )
+        }
+    }
+
+    private func recordTokenFailure(_ error: Error?) {
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updatePushToken(
+                status: "token_fetch_failed",
+                lastError: error?.localizedDescription ?? "unknown"
+            )
+        }
     }
 
     /// Feed the raw APNs device token to Firebase so it can mint/refresh the FCM token.
@@ -219,10 +281,27 @@ final class FCMPushRegistrar: NSObject {
         let previous = defaults.string(forKey: Self.fcmTokenDefaultsKey)
         defaults.set(trimmed, forKey: Self.fcmTokenDefaultsKey)
 
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updatePushToken(
+                status: "token_ready",
+                localToken: String(trimmed.prefix(12)) + "…",
+                lastError: "-"
+            )
+        }
+
         // Push to the backend when paired and the token is new (rotation-safe).
         guard trimmed != previous, defaults.bool(forKey: "BOLAJON_OILA_PAIRED") else { return }
         Task {
-            try? await OilaDeviceClient.shared.updateFCMToken(trimmed)
+            do {
+                try await OilaDeviceClient.shared.updateFCMToken(trimmed)
+                await MainActor.run {
+                    RuntimeDiagnosticsCenter.shared.updatePushToken(status: "token_uploaded", remoteToken: String(trimmed.prefix(12)) + "…")
+                }
+            } catch {
+                await MainActor.run {
+                    RuntimeDiagnosticsCenter.shared.updatePushToken(status: "token_upload_failed", lastError: error.localizedDescription)
+                }
+            }
         }
     }
 }
