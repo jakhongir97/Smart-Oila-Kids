@@ -92,13 +92,14 @@ CI extension step fixed · RC gate now rejects NO-GO · a new live-endpoint gate
 
 **Engineering**
 
-- [ ] **Push / Firebase.** `FirebaseMessaging` is **not linked** (the app target has exactly one SPM
-      package, LiveKit) and no `GoogleService-Info.plist` exists, so every
-      `#if canImport(FirebaseMessaging)` body compiles out. The notifications onboarding step is now
-      **optional** and the `remote-notification` background mode removed to match; the app no longer
-      uploads a raw APNs token into the backend's FCM-only `fcmToken` field. **Until FCM ships, no
-      push-triggered feature works** — including chat delivery while the child's phone is
-      backgrounded. Re-tighten the onboarding step when it lands.
+- [x] **Push / Firebase.** — **DONE 2026-08-11**, see `output/doc/firebase_activation_2026-08-11.md`.
+      `FirebaseMessaging` is linked via SPM, the correct `GoogleService-Info.plist`
+      (`BUNDLE_ID = uz.smartoila.kids`, project `oila360`) is registered by hand in the pbxproj and
+      verified present inside the built `.app`, and `remote-notification` is back in
+      `UIBackgroundModes`. A new bundle-id guard in `FCMPushRegistrar.configureIfPossible()` refuses
+      to configure Firebase against a plist minted for a different app entry — the first plist the
+      team sent was for `uz.oila24.children` and would have failed invisibly. Remaining, and not
+      ours: confirm a `.p8` APNs Auth Key exists on the `oila360` Firebase project.
 - [ ] **Run the four flows on an iPad simulator.** Width clamps are in; not visually verified.
 - [ ] **Push `main` and `audit-fixes`, get a green CI run.** `git rev-list --count origin/main..main`
       was 3 before this branch: the chat, LiveKit and build-9/10 work exists only on this machine.

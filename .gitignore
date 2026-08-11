@@ -23,3 +23,8 @@ __pycache__/
 
 # xcodebuild default output dir (extension standalone builds)
 build/
+
+# Firebase config — holds the project API key. This repo is PUBLIC; keep the plist out of it.
+# Obtain from the Firebase console (project oila360, iOS app uz.smartoila.kids) and drop into
+# SmartOilaKids/Resources/. Already registered in project.pbxproj, so no Xcode step is needed.
+SmartOilaKids/Resources/GoogleService-Info.plist

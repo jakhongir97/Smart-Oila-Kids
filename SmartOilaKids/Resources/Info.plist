@@ -32,14 +32,14 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>A parent can start a live video check to see your child's surroundings. Your child is asked to allow it, and an on-screen indicator appears while the camera is on. The app never records or saves video.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Location is used so the parent can see the child device location, including while the app is in the background.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Location is used so the parent can see the child device location, including while the app is in the background.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used so the parent can see the child device location while the app is open.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>A parent can start a live video check to see your child's surroundings. Your child is asked to allow it, and an on-screen indicator appears while the camera is on. The app never records or saves video.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>A parent can start a live audio check, or a live video check that also carries sound. Your child is asked to allow it, and an on-screen indicator appears while the microphone is on. The app never records or saves audio.</string>
 	<key>SMARTOILA_CHAT_FEATURES_ENABLED</key>
@@ -59,6 +59,7 @@
 	<array>
 		<string>audio</string>
 		<string>location</string>
+		<string>remote-notification</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

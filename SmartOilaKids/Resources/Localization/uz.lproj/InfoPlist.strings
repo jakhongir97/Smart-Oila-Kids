@@ -3,4 +3,4 @@
 "NSLocationAlwaysUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini, ilova fonda ishlaganda ham, ko'ra olishi uchun ishlatiladi.";
 "NSLocationWhenInUseUsageDescription" = "Joylashuv ota-ona bola qurilmasining manzilini ilova ochiq paytda ko'ra olishi uchun ishlatiladi.";
 "NSCameraUsageDescription" = "Ota-ona bolaning atrofini ko'rish uchun jonli video tekshiruvni boshlashi mumkin. Boladan ruxsat so'raladi va kamera yoniq bo'lganda ekranda belgi ko'rinadi. Ilova hech qachon video yozmaydi va saqlamaydi.";
-"NSMicrophoneUsageDescription" = "Ota-ona jonli audio tekshiruvni boshlashi mumkin. Birinchi marta boladan ruxsat so'raladi va mikrofon yoniq bo'lganda ekranda belgi ko'rinadi.";
+"NSMicrophoneUsageDescription" = "Ota-ona jonli audio tekshiruvni yoki ovozni ham uzatadigan jonli video tekshiruvni boshlashi mumkin. Boladan ruxsat so'raladi va mikrofon yoniq bo'lganda ekranda belgi ko'rinadi. Ilova hech qachon audio yozmaydi va saqlamaydi.";

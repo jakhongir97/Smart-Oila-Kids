@@ -127,6 +127,7 @@
 		F8D5039166D5E3FFDFA908D5 /* LoadPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = D616AA2DBAE5C7A3E9BBC183 /* LoadPhase.swift */; };
 		FEA4706D43796BAF3BF44289 /* DeviceApplicationLockPayloadParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9548B0248BF51FB0A4C40A /* DeviceApplicationLockPayloadParser.swift */; };
 		FF806ACDBEC29C4B36E57780 /* BolajonSetupFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46F7A500D8401E5F9A6077D1 /* BolajonSetupFlowView.swift */; };
+		A17C0FE500000000000000F2 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A17C0FE500000000000000F1 /* GoogleService-Info.plist */; };
 		FF95F66EA06BAC5CB2DD5F18 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
@@ -235,6 +236,7 @@
 		D596D524F29FB461CB2E47DE /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		D616AA2DBAE5C7A3E9BBC183 /* LoadPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadPhase.swift; sourceTree = "<group>"; };
 		D67CB8ABD9F08930576D52B8 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
+		A17C0FE500000000000000F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E35F67AF2A306DA50B1B2381 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E381C1C47BEBF468020D9CF3 /* PushInboxStore+Mutations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushInboxStore+Mutations.swift"; sourceTree = "<group>"; };
@@ -349,6 +351,7 @@
 			children = (
 				E35F67AF2A306DA50B1B2381 /* Assets.xcassets */,
 				D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */,
+				A17C0FE500000000000000F1 /* GoogleService-Info.plist */,
 				EDD4594ADF522CD5EB9CC29A /* Info.plist */,
 				0C39B2B99B81F60FCF4C0283 /* SmartOilaKids.entitlements */,
 				0C39B2B99B81F60FCF4C0284 /* SmartOilaKids.debug.entitlements */,
@@ -800,6 +803,7 @@
 			files = (
 				033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */,
 				FF95F66EA06BAC5CB2DD5F18 /* PrivacyInfo.xcprivacy in Resources */,
+				A17C0FE500000000000000F2 /* GoogleService-Info.plist in Resources */,
 				A40E9E9756993DEA0DB04A4D /* InfoPlist.strings in Resources */,
 				1369F7E2A3CC99F3D2B4F0BF /* Localizable.strings in Resources */,
 			);

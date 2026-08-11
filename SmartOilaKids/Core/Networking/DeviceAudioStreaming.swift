@@ -155,6 +155,116 @@ private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
+// MARK: - Wake addressing
+//
+// Kept as a pure, internal decision — like `PushCommandRouter.audioRoute(forCommand:)` — because it
+// is the gate in front of a child's microphone and therefore has to be directly unit-testable. The
+// manager only gathers the inputs; every rule about who a command belongs to lives here.
+
+// MARK: - Disclosure policy
+//
+// The rule that makes this feature non-covert: a live session may only run while the child can SEE
+// that it is running. There are exactly two disclosure channels, and which one applies depends on
+// whether the app is on screen — the in-app `AudioListeningIndicator` (foreground only, it needs a
+// rendered view) and the persistent presence notification (which needs notification authorization).
+//
+// This used to be enforced ONLY in `handleAppDidEnterBackground()`, i.e. only on a foreground →
+// background scene transition. That covered a session started on screen and then backgrounded, and
+// nothing else — so a session STARTED while the app was already off screen never ran the check at
+// all. It was unreachable before, because every push-woken start was being dropped upstream; making
+// those wakes work is exactly what makes this reachable, so the policy has to become a property of
+// the SESSION rather than of one lifecycle transition.
+
+enum LiveSessionDisclosure {
+    /// Where the child would learn that the microphone or camera is on.
+    enum Channel: Equatable {
+        /// The app is on screen: the in-app indicator is rendered and is disclosure enough.
+        case onScreenIndicator
+        /// The app is off screen: only the presence notification can disclose the session.
+        case presenceNotification
+    }
+
+    enum Verdict: Equatable {
+        case allowed(Channel)
+        /// Off screen and notifications cannot be shown — there is no honest way to run audio.
+        case refusedNoDisclosureChannel
+        /// Off screen and the request is for video. iOS suspends camera capture for a backgrounded
+        /// app whatever is declared, so this would publish a dead track behind a UI claiming
+        /// otherwise. `handleAppDidEnterBackground` already stops video on the transition; refusing
+        /// it at the start keeps the two directions consistent.
+        case refusedVideoOffScreen
+
+        var isAllowed: Bool {
+            if case .allowed = self { return true }
+            return false
+        }
+
+        /// Suffix for the diagnostics event, so a refusal says which rule refused it.
+        var diagnosticSuffix: String {
+            switch self {
+            case .allowed: return "allowed"
+            case .refusedNoDisclosureChannel: return "no_disclosure_channel"
+            case .refusedVideoOffScreen: return "video_off_screen"
+            }
+        }
+    }
+
+    /// - Parameters:
+    ///   - isForeground: whether the app is currently on screen. A background LAUNCH connects no UI
+    ///     scene at all, so this is false there too — which is the case that matters most.
+    ///   - notificationsAuthorized: `.authorized` or `.provisional`. Provisional counts: a quiet
+    ///     banner still appears in Notification Centre, which is a real disclosure channel.
+    static func verdict(
+        mode: StreamMode,
+        isForeground: Bool,
+        notificationsAuthorized: Bool
+    ) -> Verdict {
+        if isForeground { return .allowed(.onScreenIndicator) }
+        if mode == .video { return .refusedVideoOffScreen }
+        return notificationsAuthorized ? .allowed(.presenceNotification) : .refusedNoDisclosureChannel
+    }
+}
+
+enum StreamWakeAddressing {
+    enum Decision: Equatable {
+        /// This command is for us.
+        case accept
+        /// No `dsn` in the payload, and the caller did not permit an unaddressed command.
+        case dropUnaddressed
+        /// The payload named a device, but this install has no identity to compare it against.
+        case dropNoLocalDSN
+        /// The payload named a DIFFERENT device — a sibling child on the same family account.
+        case dropOtherDevice
+
+        /// Suffix for the `stream_<route>_dropped_<reason>` diagnostics event.
+        var diagnosticSuffix: String {
+            switch self {
+            case .accept: return "accepted"
+            case .dropUnaddressed: return "unaddressed"
+            case .dropNoLocalDSN: return "no_local_dsn"
+            case .dropOtherDevice: return "other_device"
+            }
+        }
+    }
+
+    /// Decide whether a `stream.*` wake belongs to this install.
+    ///
+    /// - Parameter allowUnaddressed: whether a payload carrying no `dsn` at all may be acted on.
+    ///   The two directions are NOT symmetric, so callers pass different values: a start wrongly
+    ///   accepted opens a microphone, while a stop wrongly dropped leaves one open. Starts
+    ///   therefore permit an unaddressed command only on a paired install; stops permit it always.
+    ///
+    /// A payload that NAMES a device is always judged on that name, whatever `allowUnaddressed`
+    /// says — that is the sibling-device protection, and it is not negotiable in either direction.
+    static func decide(pushedDSN: String?, localDSN: String?, allowUnaddressed: Bool) -> Decision {
+        guard let pushedDSN = pushedDSN?.trimmedNonEmpty else {
+            return allowUnaddressed ? .accept : .dropUnaddressed
+        }
+        guard let localDSN = localDSN?.trimmedNonEmpty else { return .dropNoLocalDSN }
+        return pushedDSN.caseInsensitiveCompare(localDSN) == .orderedSame ? .accept : .dropOtherDevice
+    }
+}
+
 // MARK: - Publisher seam
 //
 // A transport-agnostic seam so the app compiles WITH or WITHOUT the LiveKit SPM package. The real
@@ -545,20 +655,45 @@ final class DeviceAudioStreamManager: ObservableObject {
     ///   shape we refuse to ship, whatever the parent asked for.
     func handleAppDidEnterBackground() {
         guard state == .live else { return }
-        if activeMode == .video {
-            Task { await stop() }
-            return
-        }
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let canDisclose = settings.authorizationStatus == .authorized
-                || settings.authorizationStatus == .provisional
-            guard !canDisclose else { return }
-            Task { @MainActor [weak self] in await self?.stop() }
+        Task { @MainActor [weak self] in
+            guard let self, self.state == .live else { return }
+            // Same rule the session had to pass to START — evaluated for the state we are moving
+            // INTO, so a session that was disclosed by the on-screen indicator is re-judged against
+            // the presence notification. Sharing `LiveSessionDisclosure` is what stops the two
+            // directions from drifting apart again.
+            let verdict = LiveSessionDisclosure.verdict(
+                mode: self.activeMode,
+                isForeground: false,
+                notificationsAuthorized: await Self.notificationsAuthorized()
+            )
+            guard !verdict.isAllowed, self.state == .live else { return }
+            self.recordMedia(status: "idle", event: "\(self.activeMode.rawValue)_stopped_\(verdict.diagnosticSuffix)")
+            await self.stop()
         }
     }
 
+    /// Whether the child would actually see a presence notification if one were posted. Provisional
+    /// counts — a quiet banner still lands in Notification Centre.
+    private static func notificationsAuthorized() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        return settings.authorizationStatus == .authorized
+            || settings.authorizationStatus == .provisional
+    }
+
+    /// True when the app has a rendered UI, so the in-app indicator is on screen and is disclosure
+    /// enough. A background LAUNCH connects no UI scene at all, which `.applicationState` reports as
+    /// `.background` — the case that matters most here.
+    ///
+    /// `.inactive` counts as foreground on purpose: the app is still on screen (app switcher, a call
+    /// banner, Control Centre pulled down) and the indicator is still rendered, so requiring
+    /// `.active` would refuse sessions that are in fact perfectly well disclosed.
+    private static var isForeground: Bool {
+        UIApplication.shared.applicationState != .background
+    }
+
     @objc private func onWakeStart(_ notification: Notification) {
-        guard pushMatchesThisDevice(notification) else { return }
+        // An UNADDRESSED start is honoured only on a paired install — see `pushIsForThisDevice`.
+        guard pushIsForThisDevice(notification, allowUnaddressed: isPairedInstall, route: "start") else { return }
         let command = StreamCommand(notification: notification)
         // FCM has no TTL and Doze can hold a data message for hours; a stale wake would light the
         // camera/mic long after the parent closed the screen. Drop it. A live-session renewal that
@@ -568,28 +703,61 @@ final class DeviceAudioStreamManager: ObservableObject {
     }
 
     @objc private func onWakeStop(_ notification: Notification) {
-        guard pushMatchesThisDevice(notification) else { return }
+        // A stop is honoured even when UNADDRESSED and even on an unpaired install. The two
+        // directions are not symmetric: a start wrongly accepted opens a microphone, while a stop
+        // wrongly DROPPED leaves one open. Only a stop that names a different device is refused.
+        guard pushIsForThisDevice(notification, allowUnaddressed: true, route: "stop") else { return }
         Task { await stop() }
     }
 
     /// Every other push route is DSN-gated by the view layer (`RootView.shouldHandlePush`), but the
     /// audio routes are observed directly here — so without this gate a push addressed to a SIBLING
-    /// device opened THIS child's microphone.
+    /// device would open THIS child's microphone. That refusal is the part worth keeping, and it is
+    /// unchanged: a command that NAMES a device other than ours is always refused.
     ///
-    /// This route FAILS CLOSED, unlike `shouldHandlePush`. The shared policy accepts a payload that
-    /// carries no DSN at all, which is a defensible default for a lock refresh or a deep link — but
-    /// this is the one route that opens hardware on a child's device, and there a single broadcast
-    /// or malformed payload would have opened the microphone on EVERY paired install at once. An
-    /// unaddressed audio command is refused; the sender must name the device it means.
-    private func pushMatchesThisDevice(_ notification: Notification) -> Bool {
-        guard let pushedDSN = (notification.userInfo?[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty else {
-            return false
-        }
-        // `persistedDSN`, not `deviceDSN`: the latter MINTS and stores a UUID when none exists, so
-        // merely asking "is this push mine?" on a never-paired install would hand it an identity.
-        // No local DSN means nothing can match a push that named one — which is the right answer.
-        guard let currentDSN = OilaDeviceIdentity.persistedDSN(userDefaults: defaults) else { return false }
-        return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
+    /// What changed is the unaddressed case. This used to refuse a payload with no `dsn` at all, on
+    /// the reasoning that a broadcast could otherwise open every paired install's microphone at
+    /// once. The reasoning was sound; the premise was not. The backend addresses a child by its FCM
+    /// registration token and puts NO `dsn` in a `stream.*` data message — the Android child app,
+    /// which is the reference implementation of this contract, reads only `type`, `mode`,
+    /// `cameraType`, `maxDurationSeconds` and `expiresAt`, and never looks for a device id. So this
+    /// gate did not harden the wake path, it deleted it: every `stream.start` and `stream.stop` ever
+    /// sent to an iOS child was discarded here, while `PushCommandRouter` had already recorded the
+    /// delivery as `routed` and the rest of the push surface (chat, lock, tasks) kept working —
+    /// which is why push looked healthy end to end.
+    ///
+    /// The install must still be PAIRED for an unaddressed start to be honoured, so a stray push to
+    /// a fresh or disconnected install cannot open anything. Everything downstream of here is also
+    /// unchanged: the child's one-time consent, the OS permission prompt, the on-screen indicator,
+    /// the disclosure notification and the server-owned lease all still apply, so the worst case is
+    /// a visible, consented, self-expiring session — not a covert one.
+    private func pushIsForThisDevice(
+        _ notification: Notification,
+        allowUnaddressed: Bool,
+        route: String
+    ) -> Bool {
+        let decision = StreamWakeAddressing.decide(
+            pushedDSN: notification.userInfo?[PushUserInfoKeys.dsn] as? String,
+            // `persistedDSN`, not `deviceDSN`: the latter MINTS and stores a UUID when none exists,
+            // so merely asking "is this push mine?" on a never-paired install would hand it an
+            // identity.
+            localDSN: OilaDeviceIdentity.persistedDSN(userDefaults: defaults),
+            allowUnaddressed: allowUnaddressed
+        )
+        guard decision != .accept else { return true }
+        // A refusal is a real outcome, and the unaddressed one is the evidence behind the backend
+        // ask for a `dsn` field — record it rather than returning silence.
+        recordMedia(status: "dropped", event: "stream_\(route)_dropped_\(decision.diagnosticSuffix)")
+        return false
+    }
+
+    /// True when this install has completed `POST /device/pair` — it holds a DSN and the pairing
+    /// flag the rest of the app keys off (`OilaDeviceClient.pair`, `SmartOilaKidsAppDelegate`).
+    /// An unaddressed wake is honoured only here, so a never-paired or disconnected install is
+    /// unreachable by a stray broadcast.
+    private var isPairedInstall: Bool {
+        OilaDeviceIdentity.persistedDSN(userDefaults: defaults) != nil
+            && defaults.bool(forKey: "BOLAJON_OILA_PAIRED")
     }
 
     /// DEBUG on-device convenience: start an audio session with no push/lease. Used by the
@@ -634,6 +802,22 @@ final class DeviceAudioStreamManager: ObservableObject {
         guard let command = pendingCommand else {
             needsConsent = false
             consentMode = .audio
+            return
+        }
+        // The lease is re-checked HERE, not only at `onWakeStart`. A consent sheet can sit on a
+        // child's screen for hours — it is raised by a push and dismissed by a seven-year-old
+        // whenever they next look at the phone — and the command parked behind it keeps the
+        // deadline it was minted with. Without this, tapping Allow long after the parent stopped
+        // listening opened the microphone for the one second `scheduleLease` clamps an expired
+        // lease to: brief, but it is still hardware opening on a request nobody is waiting for.
+        // The consent itself IS recorded: the child answered the question, and re-asking on the
+        // next request would punish them for a stale push.
+        guard !command.isStaleWake else {
+            recordConsent(for: command.mode)
+            needsConsent = false
+            pendingCommand = nil
+            consentMode = .audio
+            recordMedia(status: "idle", event: Self.event(command.mode, "consent_granted_after_lease_expiry"))
             return
         }
         recordConsent(for: command.mode)
@@ -728,6 +912,39 @@ final class DeviceAudioStreamManager: ObservableObject {
         startGeneration &+= 1
         let generation = startGeneration
 
+        // DISCLOSURE GATE — refuse a session the child could not see running.
+        //
+        // This has to happen at START, not only on the background transition. A push-woken session
+        // begins while the app is already off screen (or on a background launch with no UI scene at
+        // all), so it never makes a foreground → background transition and
+        // `handleAppDidEnterBackground` never runs: the mic would open with no indicator rendered
+        // and — if notifications were declined, which onboarding explicitly allows — no presence
+        // notification either, since `UNUserNotificationCenter.add` is discarded without one. That
+        // is the covert-recording shape this module refuses to ship, and it is reachable precisely
+        // because push wakes now work.
+        //
+        // Deliberately placed AFTER `state = .connecting`: it awaits, and every suspension point in
+        // this method must sit inside the window the re-entrancy guard above protects. Ahead of the
+        // flip, two deliveries of the same push (foreground alert + content-available arrive through
+        // both `didReceiveRemoteNotification` and `willPresent`) could both pass the guard while
+        // still `.idle` and open two publishers.
+        let disclosure = LiveSessionDisclosure.verdict(
+            mode: command.mode,
+            isForeground: Self.isForeground,
+            notificationsAuthorized: await Self.notificationsAuthorized()
+        )
+        guard disclosure.isAllowed else {
+            if generation == startGeneration {
+                state = .error(disclosure.diagnosticSuffix)
+                recordMedia(
+                    status: "error",
+                    event: Self.event(command.mode, "start_refused_\(disclosure.diagnosticSuffix)")
+                )
+            }
+            return
+        }
+
+        guard generation == startGeneration, state == .connecting else { return }
         guard await requestMicPermission() else {
             if generation == startGeneration {
                 state = .error("mic_denied")

@@ -48,10 +48,9 @@ struct RootView: View {
             // Drop the session so the root routes back to pairing (setupCompleted + oilaPaired go
             // false) instead of stranding the child on Home with silently-dead telemetry.
             guard sessionStore.oilaPaired || sessionStore.setupCompleted else { return }
-            // Tear the live audio session down FIRST. clearSession() only dropped local credentials,
-            // so a publish in flight survived a parent-initiated unpair until the SFU token expired
-            // -- the microphone outliving the authorization to use it.
-            audioStream.stopByChild()
+            // The live A/V teardown that used to sit here now lives inside `clearSession()`, so the
+            // child-initiated Disconnect in Settings — which calls it directly and never passed
+            // through this handler — gets it too. One mechanism, both ways out of a session.
             sessionStore.clearSession()
         }
         // Device-lock takeover as a NATIVE full-screen presentation. The binding ignores

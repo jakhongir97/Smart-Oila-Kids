@@ -3049,3 +3049,195 @@ final class StreamCommandParsingTests: XCTestCase {
     }
 }
 
+
+// MARK: - Live-media wake addressing (F2)
+//
+// The gate in front of the child's microphone. It used to refuse any `stream.*` push that carried
+// no `dsn` — and the backend addresses a child by FCM registration token and puts no `dsn` in the
+// payload at all (the Android child app, the reference implementation of this contract, reads only
+// type/mode/cameraType/maxDurationSeconds/expiresAt). So the gate discarded 100% of real wake
+// commands while diagnostics recorded them as routed. These pin both halves: unaddressed commands
+// are honoured under the stated conditions, and a command naming another device never is.
+
+final class StreamWakeAddressingTests: XCTestCase {
+
+    private let ours = "11111111-2222-3333-4444-555555555555"
+    private let sibling = "99999999-8888-7777-6666-555555555555"
+
+    // MARK: The regression itself
+
+    func testUnaddressedStartIsAcceptedWhenAllowed() {
+        // The whole point: this is the shape the backend actually sends.
+        XCTAssertEqual(
+            StreamWakeAddressing.decide(pushedDSN: nil, localDSN: ours, allowUnaddressed: true),
+            .accept,
+            "the backend sends no dsn in stream.*; refusing that shape drops every real wake"
+        )
+    }
+
+    func testUnaddressedStartIsRefusedWhenNotAllowed() {
+        // An unpaired install passes allowUnaddressed: false, so a stray broadcast opens nothing.
+        XCTAssertEqual(
+            StreamWakeAddressing.decide(pushedDSN: nil, localDSN: nil, allowUnaddressed: false),
+            .dropUnaddressed
+        )
+    }
+
+    func testEmptyDSNCountsAsUnaddressed() {
+        // PushCommandRouter posts `dsn: ""` when the payload had none, so blank must not be read as
+        // "a device named the empty string" and fall through to the mismatch branch.
+        XCTAssertEqual(
+            StreamWakeAddressing.decide(pushedDSN: "   ", localDSN: ours, allowUnaddressed: true),
+            .accept
+        )
+        XCTAssertEqual(
+            StreamWakeAddressing.decide(pushedDSN: "", localDSN: ours, allowUnaddressed: false),
+            .dropUnaddressed
+        )
+    }
+
+    // MARK: The protection that must survive the fix
+
+    func testCommandForAnotherDeviceIsAlwaysRefused() {
+        // A sibling child on the same family account. `allowUnaddressed` must not relax this.
+        for allowUnaddressed in [true, false] {
+            XCTAssertEqual(
+                StreamWakeAddressing.decide(
+                    pushedDSN: sibling, localDSN: ours, allowUnaddressed: allowUnaddressed
+                ),
+                .dropOtherDevice,
+                "an addressed command is judged on its address, whatever unaddressed policy applies"
+            )
+        }
+    }
+
+    func testAddressedCommandForUsIsAccepted() {
+        XCTAssertEqual(
+            StreamWakeAddressing.decide(pushedDSN: ours, localDSN: ours, allowUnaddressed: false),
+            .accept
+        )
+    }
+
+    func testAddressingIsCaseInsensitive() {
+        XCTAssertEqual(
+            StreamWakeAddressing.decide(
+                pushedDSN: ours.uppercased(), localDSN: ours.lowercased(), allowUnaddressed: false
+            ),
+            .accept,
+            "DSNs are UUIDs and the server's casing is not guaranteed to match ours"
+        )
+    }
+
+    func testAddressedCommandWithNoLocalIdentityIsRefused() {
+        // Nothing to compare against — and asking must never mint an identity, which is why the
+        // manager reads persistedDSN rather than deviceDSN.
+        XCTAssertEqual(
+            StreamWakeAddressing.decide(pushedDSN: sibling, localDSN: nil, allowUnaddressed: true),
+            .dropNoLocalDSN,
+            "a named command with no local DSN cannot match, even when unaddressed ones are allowed"
+        )
+    }
+
+    func testEveryDecisionHasADistinctDiagnosticSuffix() {
+        let suffixes = [
+            StreamWakeAddressing.Decision.accept,
+            .dropUnaddressed,
+            .dropNoLocalDSN,
+            .dropOtherDevice
+        ].map(\.diagnosticSuffix)
+        XCTAssertEqual(Set(suffixes).count, suffixes.count, "a drop reason must be tellable apart")
+    }
+}
+
+// MARK: - Live-session disclosure policy
+//
+// The rule that keeps this feature non-covert: a session may only run while the child can SEE it
+// running. It used to be enforced only on a foreground->background scene transition, which a
+// push-woken session never makes — so once wake commands actually started working, a session begun
+// off screen could open the microphone with no indicator rendered and no presence notification.
+
+final class LiveSessionDisclosureTests: XCTestCase {
+
+    func testForegroundIsAlwaysDisclosedByTheOnScreenIndicator() {
+        for mode in [StreamMode.audio, .video] {
+            // Notifications are irrelevant on screen: the in-app indicator is the channel.
+            XCTAssertEqual(
+                LiveSessionDisclosure.verdict(mode: mode, isForeground: true, notificationsAuthorized: false),
+                .allowed(.onScreenIndicator)
+            )
+        }
+    }
+
+    func testBackgroundAudioNeedsTheNotificationChannel() {
+        XCTAssertEqual(
+            LiveSessionDisclosure.verdict(mode: .audio, isForeground: false, notificationsAuthorized: true),
+            .allowed(.presenceNotification)
+        )
+    }
+
+    /// The finding this whole type exists for.
+    func testBackgroundAudioIsRefusedWithNoWayToDiscloseIt() {
+        XCTAssertEqual(
+            LiveSessionDisclosure.verdict(mode: .audio, isForeground: false, notificationsAuthorized: false),
+            .refusedNoDisclosureChannel,
+            "an open mic with nothing on the device disclosing it is the shape we refuse to ship"
+        )
+    }
+
+    /// iOS suspends camera capture for a backgrounded app whatever is declared, so a background
+    /// video session publishes a dead track behind a parent UI insisting they are watching.
+    /// `handleAppDidEnterBackground` already stops video on the transition; starting must match.
+    func testBackgroundVideoIsRefusedEvenWhenNotificationsAreAuthorized() {
+        XCTAssertEqual(
+            LiveSessionDisclosure.verdict(mode: .video, isForeground: false, notificationsAuthorized: true),
+            .refusedVideoOffScreen
+        )
+    }
+
+    func testOnlyAllowedVerdictsReportAsAllowed() {
+        XCTAssertTrue(LiveSessionDisclosure.Verdict.allowed(.onScreenIndicator).isAllowed)
+        XCTAssertTrue(LiveSessionDisclosure.Verdict.allowed(.presenceNotification).isAllowed)
+        XCTAssertFalse(LiveSessionDisclosure.Verdict.refusedNoDisclosureChannel.isAllowed)
+        XCTAssertFalse(LiveSessionDisclosure.Verdict.refusedVideoOffScreen.isAllowed)
+    }
+
+    func testEveryVerdictHasADistinctDiagnosticSuffix() {
+        let suffixes: [LiveSessionDisclosure.Verdict] = [
+            .allowed(.onScreenIndicator), .refusedNoDisclosureChannel, .refusedVideoOffScreen
+        ].map { $0 }
+        XCTAssertEqual(Set(suffixes.map(\.diagnosticSuffix)).count, 3)
+    }
+}
+
+// MARK: - Stale parked-consent commands
+
+extension StreamCommandParsingTests {
+
+    /// A consent sheet raised by a push can sit unanswered for hours. The command parked behind it
+    /// keeps the deadline it was minted with, so the staleness check that guards `onWakeStart` has
+    /// to be applied again when consent finally arrives — otherwise Allow opens the microphone for
+    /// the one second an expired lease clamps to, long after the parent stopped listening.
+    func testAParkedCommandIsStillJudgedStaleWhenConsentArrivesLate() {
+        let parked = StreamCommand(
+            mode: .audio,
+            cameraPosition: nil,
+            maxDurationSeconds: 120,
+            expiresAt: nil,
+            receivedAt: Date().addingTimeInterval(-3600)   // pushed an hour ago
+        )
+        XCTAssertTrue(parked.isStaleWake, "an hour-old 120s lease is long gone")
+        XCTAssertEqual(parked.remainingLeaseSeconds, 0, "and has no time left to run")
+    }
+
+    func testAFreshlyParkedCommandIsStillActionable() {
+        let parked = StreamCommand(
+            mode: .audio,
+            cameraPosition: nil,
+            maxDurationSeconds: 120,
+            expiresAt: nil,
+            receivedAt: Date().addingTimeInterval(-5)
+        )
+        XCTAssertFalse(parked.isStaleWake, "a child who taps Allow promptly must still be heard")
+        XCTAssertGreaterThan(parked.remainingLeaseSeconds, 100)
+    }
+}

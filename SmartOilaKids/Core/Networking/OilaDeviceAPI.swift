@@ -180,8 +180,15 @@ struct OilaDeviceStatus {
     /// This device's location permission, so the parent app can say WHY a feature is not reporting
     /// ("Only While Using — cannot report in background") instead of showing a bare "offline".
     /// Exactly one of "Always" | "WhenInUse" | "Denied" | "NotDetermined", or nil when the caller
-    /// has nothing to report. Undeclared in the DTO, but every field there is optional and the
-    /// backend ignores keys it does not know, so sending it is safe.
+    /// has nothing to report.
+    ///
+    /// **NOT SENT — deliberately held back.** `PostDeviceStatusDto` declares only
+    /// `{battery, networkType, soundMode}`, and this backend rejects undeclared properties
+    /// (`forbidNonWhitelisted`) rather than ignoring them, so putting this on the wire 400s the
+    /// whole request. The value is still computed and carried here because the field is a live
+    /// backend ask; `postDeviceStatus` is the single place to re-enable it, and it must not be
+    /// re-enabled until the DTO declares it. The earlier comment here — "the backend ignores keys
+    /// it does not know" — was an assumption, and it was wrong.
     let locationAuthorization: String?
 
     /// Explicit init purely so `locationAuthorization` can default: the synthesized memberwise one
@@ -597,13 +604,22 @@ final class OilaDeviceClient: OilaDeviceServicing {
     }
 
     func postDeviceStatus(_ status: OilaDeviceStatus) async throws {
+        // ONLY the three fields `PostDeviceStatusDto` declares. This is not stylistic tidiness — the
+        // backend runs its NestJS ValidationPipe with `forbidNonWhitelisted`, so an undeclared
+        // property is a hard 400, not an ignored extra:
+        //
+        //     {"errorCode":"VALIDATION_FAILED",
+        //      "errors":[{"field":"x","message":"property x should not exist"}]}
+        //
+        // `locationAuthorization` used to be appended here, and because it is never nil that
+        // rejected EVERY status post — silently, since the only catch below that inspects the error
+        // is the re-pair one. The request itself is the liveness signal, so losing it made the child
+        // read as offline to the parent forever: the exact symptom the field was added to explain.
+        // Re-add it (see `OilaDeviceStatus.locationAuthorization`) only once the backend declares it.
         var body: [String: Any] = [:]
         if let battery = status.battery { body["battery"] = battery }
         if let network = status.networkType { body["networkType"] = network }
         if let sound = status.soundMode { body["soundMode"] = sound }
-        if let locationAuthorization = status.locationAuthorization?.trimmedNonEmpty {
-            body["locationAuthorization"] = locationAuthorization
-        }
         // Send even when every field is nil. The backend derives "device offline" from how long it
         // has been since it last heard from this device, so the REQUEST ITSELF is the liveness
         // signal and an empty `{}` is explicitly valid (every field in PostDeviceStatusDto is

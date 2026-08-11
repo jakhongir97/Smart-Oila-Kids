@@ -214,6 +214,15 @@ final class SessionStore: ObservableObject {
     }
 
     func clearSession() {
+        // End any live microphone/camera session FIRST, whoever asked for the disconnect.
+        //
+        // This used to live at one call site only — `RootView`'s `.oilaSessionInvalidated` handler,
+        // i.e. the PARENT-initiated unpair. The child-initiated Disconnect in Settings (behind the
+        // parent PIN) called `clearSession()` directly and tore down nothing, so the LiveKit room
+        // kept publishing on a token that had already been minted: a microphone outliving the
+        // authorization to use it, until the server lease happened to expire. Teardown belongs to
+        // the session ending, not to one of the two ways of ending it.
+        Task { @MainActor in DeviceAudioStreamManager.shared.stopByChild() }
         setDSN(nil)
         setAPIAccessToken(nil)
         setAPIRefreshToken(nil)

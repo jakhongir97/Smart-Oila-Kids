@@ -44,11 +44,18 @@ survivor.
 Nothing on this list is unblocked by more iOS work. Each is owned by someone else and should be
 started now, in this order of lead time.
 
-**1. Firebase + APNs (longest lead, blocks everything push).** Register an iOS app for bundle id
-`uz.smartoila.kids` in the `oila360` Firebase project (sender `118316439286`), download
-`GoogleService-Info.plist`, upload one `.p8` APNs Auth Key. Verified still absent: 0 `GoogleService`
-references in the pbxproj, no plist anywhere in the tree. Until it lands `FCMPushRegistrar` reports
-`.missingPlist`, no token is uploaded, and the backend holds no push address for any iOS install.
+**1. Firebase + APNs (longest lead, blocks everything push).** — **CLOSED 2026-08-11 on the iOS
+side. See `firebase_activation_2026-08-11.md`.** The correct plist (`BUNDLE_ID = uz.smartoila.kids`,
+project `oila360`) is installed, registered by hand in the pbxproj, and verified present inside the
+built `.app`; `remote-notification` was added to `UIBackgroundModes`; and a new bundle-id guard makes
+a wrong plist fail loudly instead of silently. The only part still owned by someone else is
+confirming a `.p8` APNs Auth Key exists on the `oila360` project. Original text follows.
+
+> Register an iOS app for bundle id
+> `uz.smartoila.kids` in the `oila360` Firebase project (sender `118316439286`), download
+> `GoogleService-Info.plist`, upload one `.p8` APNs Auth Key. Verified still absent: 0 `GoogleService`
+> references in the pbxproj, no plist anywhere in the tree. Until it lands `FCMPushRegistrar` reports
+> `.missingPlist`, no token is uploaded, and the backend holds no push address for any iOS install.
 
 > The `.p8` is **environment-agnostic** — Firebase takes exactly one and it serves sandbox and
 > production both. The "upload for both" step only applied to legacy `.p12`.

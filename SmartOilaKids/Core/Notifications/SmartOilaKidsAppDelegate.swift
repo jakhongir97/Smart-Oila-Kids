@@ -14,6 +14,19 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // Configure Firebase Cloud Messaging as early as possible so APNs registration below can
         // hand its token to Firebase and mint a real FCM token. No-op until the SDK + plist ship.
         FCMPushRegistrar.shared.configureIfPossible()
+        // Build the live-media manager HERE, before anything can route a wake command.
+        //
+        // It registers its `pushShouldStart/StopAudioStream` observers in `init`, and its only other
+        // references are inside SwiftUI views — `RootView`'s `@StateObject`, whose default is an
+        // @autoclosure evaluated on the first BODY RENDER, not when `RootView()` is constructed.
+        // When iOS background-launches a terminated app for a silent push it connects no UI scene,
+        // so no body is ever rendered: the observers did not exist, and the `stream.start` posted a
+        // few lines below (or through `didReceiveRemoteNotification`) reached nobody while
+        // diagnostics recorded it as `routed`. That is precisely the case the feature exists for —
+        // a parent listening while the child's phone is in a pocket and the app was long evicted.
+        // Touching the singleton makes observer registration a launch-time fact instead of a
+        // side effect of rendering. It is cheap: no hardware is opened until a command arrives.
+        _ = DeviceAudioStreamManager.shared
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
@@ -131,9 +144,51 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        // Resolve the route BEFORE handling, so the decision to hold the completion handler is made
+        // from the same structured event the router will act on.
+        let isLiveMediaWake = PushCommandRouter
+            .audioRoute(forCommand: PushCommandRouter.parsePayload(from: userInfo).commandHaystack) == .start
+
         PushCommandRouter.handle(userInfo: userInfo, deliveryContext: .backgroundFetch)
-        completionHandler(.newData)
+
+        guard isLiveMediaWake else {
+            completionHandler(.newData)
+            return
+        }
+
+        // Calling the completion handler is a declaration that this push is finished with, and iOS
+        // is free to suspend the process the moment it lands. For a `stream.start` that is far too
+        // early: the router posts asynchronously, then the manager has a consent check, a mic
+        // permission check, a token mint and a LiveKit connect to get through. Reporting "done"
+        // ahead of all that invites suspension mid-connect, which the parent sees as a stream that
+        // never arrives. Hold the handler until the room is actually up (or the attempt has clearly
+        // failed), bounded well inside the ~30s iOS allows.
+        Task { @MainActor in
+            let startedAt = Date()
+            while Date().timeIntervalSince(startedAt) < Self.liveMediaWakeHoldSeconds {
+                let state = DeviceAudioStreamManager.shared.state
+                if state == .live { break }
+                // `.connecting` is the only state worth waiting on. Anything else after a short
+                // grace period — still idle because the command was dropped, `.disabled`,
+                // `.unsupported`, an error, or a consent sheet nobody is there to tap — will not
+                // resolve itself by waiting, so release the process instead of burning its budget.
+                if Date().timeIntervalSince(startedAt) >= Self.liveMediaWakeGraceSeconds,
+                   state != .connecting {
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            completionHandler(.newData)
+        }
     }
+
+    /// Longest a `stream.start` may keep the process awake before its background push is reported
+    /// complete. iOS allows roughly 30s; staying well inside it leaves room for the teardown.
+    private static let liveMediaWakeHoldSeconds: TimeInterval = 20
+    /// How long to wait before concluding that a non-`.connecting` manager is never going to start.
+    /// The router posts its notification through an unstructured main-actor hop, so the manager can
+    /// legitimately still be `.idle` for a moment after this method returns.
+    private static let liveMediaWakeGraceSeconds: TimeInterval = 2
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -217,6 +272,9 @@ final class FCMPushRegistrar: NSObject {
         case sdkNotLinked = "sdk_not_linked"
         /// SDK linked, but no `GoogleService-Info.plist` is bundled — Firebase cannot be configured.
         case missingPlist = "missing_google_service_plist"
+        /// A plist IS bundled, but it was minted for a different Firebase app entry than this
+        /// binary's bundle id. Configuring against it would look healthy and deliver nothing.
+        case bundleMismatch = "google_service_plist_bundle_mismatch"
         /// Firebase configured; a real FCM registration token is expected shortly.
         case live
     }
@@ -239,9 +297,22 @@ final class FCMPushRegistrar: NSObject {
     func configureIfPossible() {
         #if canImport(FirebaseMessaging)
         guard !isConfigured else { return }
-        guard Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil else {
+        guard let plistPath = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") else {
             // Plist not shipped yet — keep push disabled rather than crashing FirebaseApp.configure().
             recordState(.missingPlist)
+            return
+        }
+        // A plist minted for a DIFFERENT app entry configures Firebase without complaint and mints a
+        // token we would happily upload — but FCM addresses APNs by the registered app's bundle id,
+        // so every push comes back DeviceTokenNotForTopic. Nothing about that is visible on the
+        // device, which is exactly the "paired and healthy, yet unreachable" state the omitted
+        // `fcmToken` at pairing exists to prevent. Refuse the plist instead of trusting it.
+        let declaredBundleID = NSDictionary(contentsOfFile: plistPath)?["BUNDLE_ID"] as? String
+        guard declaredBundleID == Bundle.main.bundleIdentifier else {
+            recordState(
+                .bundleMismatch,
+                detail: "plist \(declaredBundleID ?? "nil") != app \(Bundle.main.bundleIdentifier ?? "nil")"
+            )
             return
         }
         if FirebaseApp.app() == nil {
@@ -263,14 +334,18 @@ final class FCMPushRegistrar: NSObject {
         #endif
     }
 
-    private func recordState(_ state: ConfigurationState) {
+    private func recordState(_ state: ConfigurationState, detail: String? = nil) {
         configurationState = state
         Task { @MainActor in
             RuntimeDiagnosticsCenter.shared.updatePushToken(
                 status: state.rawValue,
                 endpoint: "device/fcm-token",
                 remoteToken: state == .live ? nil : "-",
-                lastError: state == .live ? "-" : "push undeliverable: \(state.rawValue)"
+                lastError: state == .live
+                    ? "-"
+                    : ["push undeliverable: \(state.rawValue)", detail]
+                        .compactMap { $0 }
+                        .joined(separator: " — ")
             )
         }
     }

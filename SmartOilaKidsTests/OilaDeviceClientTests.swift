@@ -272,6 +272,52 @@ final class OilaDeviceClientTests: XCTestCase {
         XCTAssertNil(json["soundMode"])
     }
 
+    /// The status body must carry ONLY what `PostDeviceStatusDto` declares.
+    ///
+    /// This backend runs its NestJS ValidationPipe with `forbidNonWhitelisted`, so an undeclared
+    /// property is answered `400 {"field":"x","message":"property x should not exist"}` — the whole
+    /// request, not just the stray field. `locationAuthorization` was being appended here, and
+    /// because it is never nil that rejected EVERY status post. Nothing surfaced it: the only
+    /// catch that inspects the error is the re-pair one, so the failure was swallowed and the child
+    /// simply stopped checking in — reading as permanently offline to the parent.
+    ///
+    /// The three existing status tests all passed throughout, because every one of them constructed
+    /// the three-field initializer and asserted on the fields it DID send. This one asserts on the
+    /// shape of the whole body instead, which is the only way this class of bug is visible.
+    func testDeviceStatusSendsNoFieldTheBackendDoesNotDeclare() async throws {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "TOKEN"))
+        TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, #"{"success":true,"data":{}}"#) }
+
+        // Every field populated, including the one that must be held back.
+        try await client.postDeviceStatus(
+            OilaDeviceStatus(
+                battery: 77,
+                networkType: "Mobile",
+                soundMode: "Silent",
+                locationAuthorization: "Always"
+            )
+        )
+
+        let request = try XCTUnwrap(TestHTTPURLProtocol.recordedRequests.first { $0.url?.path.contains("device/status") == true })
+        let body = try XCTUnwrap(TestHTTPURLProtocol.bodyData(for: request))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        // The allowlist IS the DTO. Widen it only when the backend widens `PostDeviceStatusDto`.
+        let declaredByBackend: Set<String> = ["battery", "networkType", "soundMode"]
+        XCTAssertTrue(
+            Set(json.keys).isSubset(of: declaredByBackend),
+            "undeclared keys \(Set(json.keys).subtracting(declaredByBackend)) would 400 the whole request"
+        )
+        XCTAssertNil(
+            json["locationAuthorization"],
+            "held back until PostDeviceStatusDto declares it — see OilaDeviceStatus.locationAuthorization"
+        )
+        // The declared fields must still go, or the fix would have traded one silent loss for another.
+        XCTAssertEqual(json["battery"] as? Int, 77)
+        XCTAssertEqual(json["networkType"] as? String, "Mobile")
+        XCTAssertEqual(json["soundMode"] as? String, "Silent")
+    }
+
     func testDeviceStatusStillSendsThePopulatedFields() async throws {
         let client = makeClient(tokens: InMemoryTokenStore(access: "TOKEN"))
         TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, #"{"success":true,"data":{}}"#) }
