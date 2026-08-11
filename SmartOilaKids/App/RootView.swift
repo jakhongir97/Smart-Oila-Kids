@@ -11,6 +11,33 @@ struct RootView: View {
     @State var didHandleInitialAppear = false
 
     var body: some View {
+        // The live-session banner is a SIBLING of the app, above it in a stack, not an overlay on
+        // top of it. As an overlay it floated over whatever was already at the top of the screen —
+        // on Home that is the header, so the child's name and the "Connected" chip sat unreadable
+        // underneath it for the whole session, and the one piece of UI that has to be unmistakable
+        // was the one hiding something. `safeAreaInset` does not work here either: every screen is
+        // wrapped in a `NavigationStack`, which installs its own safe area and ignores an inset
+        // applied from outside it. Giving the banner its own row is the only placement that cannot
+        // cover anything.
+        VStack(spacing: 0) {
+            liveSessionDisclosure
+            appContent
+        }
+        .background(AppColors.screenBackground.ignoresSafeArea())
+    }
+
+    @ViewBuilder
+    private var liveSessionDisclosure: some View {
+        if AppRuntime.audioStreamingEnabled, audioStream.isLive || debugDrawsLiveIndicator {
+            AudioListeningIndicator(
+                mode: audioStream.activeMode,
+                videoUnavailable: audioStream.videoUpgradeFailure != nil,
+                onStop: { audioStream.stopByChild() }
+            )
+        }
+    }
+
+    private var appContent: some View {
         Group {
             if let route = AppRuntime.debugRoute {
                 debugScreen(route)
@@ -74,16 +101,6 @@ struct RootView: View {
                 ScreenTimeUsageReportBridgeView(dsn: sessionStore.dsn)
             }
         }
-        // Non-covert live-audio surfaces, mounted app-wide so they show over any screen.
-        .overlay(alignment: .top) {
-            if AppRuntime.audioStreamingEnabled, audioStream.isLive {
-                AudioListeningIndicator(
-                    mode: audioStream.activeMode,
-                    videoUnavailable: audioStream.videoUpgradeFailure != nil,
-                    onStop: { audioStream.stopByChild() }
-                )
-            }
-        }
         .sheet(isPresented: audioConsentPresented) {
             AudioConsentSheet(
                 // Mic and camera are consented to separately; the sheet must describe the hardware
@@ -97,6 +114,19 @@ struct RootView: View {
 }
 
 private extension RootView {
+    /// Draws the live-session disclosure banner without a session, so the App Store capture can
+    /// lead with it (`scripts/create_app_store_screenshots.py`). It only adds a view: no token is
+    /// minted, no room is joined, no hardware opens, and `DeviceAudioStreamManager` is untouched —
+    /// so this can never make a real session appear stopped or a stopped one appear live. DEBUG
+    /// only, like every other capture hook.
+    var debugDrawsLiveIndicator: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_INDICATOR"] == "1"
+#else
+        false
+#endif
+    }
+
     /// Presents the device-lock takeover. Driven by GET /device/lock/state, polled by
     /// OilaTelemetryService (parent manual-lock + schedules). The setter is intentionally
     /// a no-op: only the lock state may hide the cover.
