@@ -109,3 +109,30 @@ final class SettingsProtectionControllerTests: XCTestCase {
         XCTAssertNotEqual(storeA.load(), storeB.load())
     }
 }
+
+/// Pairing is when authority over the device transfers. Anything the previous family left behind has
+/// to go with it -- the unpair path clears the verifier, but deleting and reinstalling the app does
+/// not: UserDefaults is wiped and the Keychain is not.
+@MainActor
+final class PairingClearsPreviousFamilyPINTests: XCTestCase {
+    func testPairingWipesAPINVerifierLeftBehindByAPreviousInstall() {
+        let suiteName = "PairingClearsPIN.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        // A previous family's verifier, exactly as a reinstall would leave it: Keychain-resident,
+        // with a persisted lockout in the defaults the new install would then inherit.
+        let store = KeychainPINCredentialStore()
+        store.save(Data("previous-family-verifier".utf8))
+        defaults.set(3, forKey: SettingsProtectionController.pinFailCountKey)
+        XCTAssertNotNil(store.load(), "precondition: the stale verifier is present")
+
+        SessionStore(userDefaults: defaults).setOilaPaired(true)
+
+        XCTAssertNil(store.load(), "the previous family's PIN must not survive a new pairing")
+        XCTAssertNil(
+            defaults.object(forKey: SettingsProtectionController.pinFailCountKey),
+            "nor its lockout, which would rate-limit the new family out of their own device"
+        )
+    }
+}

@@ -124,6 +124,10 @@ final class SettingsProtectionController: ObservableObject {
     /// owner effectively retained on-device disconnect authority over another family's child.
     ///
     /// Unconditional (no `hasCustomPIN` guard) so a Keychain read failure cannot skip the wipe.
+    ///
+    /// The main-actor counterpart to `wipePersistedPINState`, for callers that hold a live controller
+    /// and need `hasCustomPIN` refreshed in the same breath. The pairing path itself uses the static
+    /// version, because `SessionStore` is not main-actor isolated.
     func resetForNewPairing() {
         pinStore.delete()
         clearLockoutState()

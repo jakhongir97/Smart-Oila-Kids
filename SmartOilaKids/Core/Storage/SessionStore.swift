@@ -210,6 +210,19 @@ final class SessionStore: ObservableObject {
             // user who is no longer a freshly-migrated install.
             migratedFromLegacy = false
             userDefaults.set(false, forKey: Keys.migratedFromLegacy)
+
+            // Wipe any parent-PIN verifier left over from a PREVIOUS pairing of this device.
+            //
+            // The unpair path already clears it (purgeChildScopedData → wipePersistedPINState), but
+            // that only runs when this install performs the disconnect. Deleting and reinstalling
+            // the app does NOT: UserDefaults goes, the Keychain stays, and the verifier is written
+            // `AfterFirstUnlockThisDeviceOnly`. So a handed-down or resold phone reached a fresh
+            // pairing with `hasCustomPIN` already true, and the new family was offered only "change
+            // PIN" and "remove PIN" — both of which demand the PREVIOUS family's secret — while the
+            // disconnect screen verified against that stale verifier, complete with its persisted
+            // lockout. Pairing is precisely the moment that authority transfers, so it is where the
+            // old secret has to go.
+            SettingsProtectionController.wipePersistedPINState(userDefaults: userDefaults)
         }
     }
 

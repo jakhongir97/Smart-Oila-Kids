@@ -484,7 +484,16 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             try await service.uploadLocationBatch(batch)
             lastUploadAt = Date()
         } catch let error as OilaAPIError where error.requiresRePair {
-            // Credentials are gone (revoked/unpaired) — signal re-pair instead of 401-looping.
+            // The 401 is UNCONFIRMED here. `requiresRePair` is true for any 401, and
+            // `handleAuthorizationLoss()` deliberately refuses to believe the first one — it probes
+            // independently before destroying the pairing. Dropping the batch contradicted that
+            // caution: the app was not yet willing to say the credentials were gone, but had already
+            // thrown away the child's queued location history, which on a route with no signal is
+            // the only record of where they were. Re-queued on the same bounded rule as any other
+            // failure; if the pairing really is dead, teardown clears the queue anyway.
+            if isRunning {
+                pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
+            }
             handleAuthorizationLoss()
         } catch {
             // Re-queue on failure (bounded) so fixes survive transient offline periods —
