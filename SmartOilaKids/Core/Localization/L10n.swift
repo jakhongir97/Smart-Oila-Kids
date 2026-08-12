@@ -59,10 +59,11 @@ enum UzbekCyrillic {
         }
         cacheLock.unlock()
 
-        // Protect printf-style format specifiers (%d, %@, %1$@, %%, …) so their conversion letter
-        // isn't transliterated (e.g. %d → %д), which would break a String(format:) applied later
-        // and silently drop the value.
-        let (protectedInput, specifiers) = protectFormatSpecifiers(input)
+        // Protect two things the map must not touch: printf-style format specifiers (%d, %@, %1$@,
+        // %%, …), whose conversion letter would otherwise transliterate (%d → %д) and break a later
+        // String(format:), silently dropping the value; and proper nouns, which have no Cyrillic
+        // spelling at all.
+        let (protectedInput, specifiers) = protectUntranslatable(input)
 
         var s = protectedInput
         // Word-initial "e" is "э" in Uzbek Cyrillic (elsewhere "е"). Apply before the general map.
@@ -85,12 +86,41 @@ enum UzbekCyrillic {
     /// the transliteration map untouched, so the token survives to be restored afterwards.
     private static func token(_ index: Int) -> String { "\u{E000}\(index)\u{E001}" }
 
-    private static let formatSpecifierRegex = try? NSRegularExpression(
-        pattern: "%(?:\\d+\\$)?[-+ 0#]?\\d*(?:\\.\\d+)?[@%a-zA-Z]"
-    )
+    /// Names that are the same in every script and must survive transliteration verbatim.
+    ///
+    /// The map is a letter-for-letter substitution with no concept of a word it should leave alone,
+    /// so a Cyrillic-Uzbek family was being told to open "Оила360", read "иОС" and "Ссреен Тиме" in
+    /// onboarding, and saw "Болажон360 · в1.0" in Settings. None of those are words — they are the
+    /// product's own name and Apple's, and rendering them phonetically makes the app look broken in
+    /// the one locale it was translated into most carefully.
+    ///
+    /// Deliberately narrow: only proper nouns and Latin-only technical terms. Ordinary Uzbek words
+    /// must still transliterate, so nothing goes in here to "look nicer".
+    ///
+    /// Longest first — the alternation is tried left to right, so "Oila360" has to precede "Oila"
+    /// and "iPhone" has to precede "iPad" would-be prefixes.
+    private static let protectedTerms = [
+        "Bolajon360", "Smart Oila", "Oila360", "Oila 360",
+        "App Store", "Screen Time", "Face ID", "Touch ID", "LiveKit",
+        "iPhone", "iPad", "Apple", "Wi-Fi", "WiFi", "iOS", "GPS", "SOS", "PIN", "QR"
+    ]
 
-    private static func protectFormatSpecifiers(_ input: String) -> (String, [String]) {
-        guard let regex = formatSpecifierRegex else { return (input, []) }
+    private static let untranslatableRegex: NSRegularExpression? = {
+        let specifier = "%(?:\\d+\\$)?[-+ 0#]?\\d*(?:\\.\\d+)?[@%a-zA-Z]"
+        // Version markers: the "v" of "v1.1" is a label, not a letter, and became "в1.1". Matching
+        // the whole "v1.1" is not enough — the number is appended at runtime, so the string that
+        // reaches here is `"Bolajon360 · v"` with the digits nowhere in sight. A lookahead covers
+        // both shapes: a `v` before a digit, before a format specifier, or at the very end of the
+        // string, which is exactly the `settings2.version` case.
+        let version = "\\b[vV](?=[\\d%]|$)"
+        let terms = protectedTerms
+            .map { NSRegularExpression.escapedPattern(for: $0) }
+            .joined(separator: "|")
+        return try? NSRegularExpression(pattern: "\(specifier)|\(version)|\(terms)")
+    }()
+
+    private static func protectUntranslatable(_ input: String) -> (String, [String]) {
+        guard let regex = untranslatableRegex else { return (input, []) }
         let ns = input as NSString
         let matches = regex.matches(in: input, range: NSRange(location: 0, length: ns.length))
         guard !matches.isEmpty else { return (input, []) }

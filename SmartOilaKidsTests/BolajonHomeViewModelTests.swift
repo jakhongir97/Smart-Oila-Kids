@@ -197,6 +197,35 @@ final class BolajonTasksViewModelTests: XCTestCase {
 /// Uzbek Latin → Cyrillic transliteration (used for the `uz-cyrl` language). The result is
 /// memoized, so this also guards that caching stays correct and deterministic.
 final class UzbekCyrillicTransliterationTests: XCTestCase {
+    /// Proper nouns have no Cyrillic spelling. Before this, a Cyrillic-Uzbek family read "Оила360",
+    /// "иОС" and "Болажон360 · в1.0" -- the product's own name, phonetically mangled.
+    func testProperNounsSurviveTransliteration() {
+        let cases = [
+            "Oila360": "Oila360",
+            "Bolajon360 \u{00B7} v1.1": "Bolajon360 \u{00B7} v1.1",
+            // The real string: the number is appended at runtime, so the "v" is trailing.
+            "Bolajon360 \u{00B7} v": "Bolajon360 \u{00B7} v",
+            "iOS": "iOS",
+            "iPhone": "iPhone",
+            "Screen Time": "Screen Time",
+            "App Store": "App Store",
+            "Wi-Fi": "Wi-Fi",
+            "SOS": "SOS",
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(UzbekCyrillic.transliterate(input), expected, "\(input) must not be transliterated")
+        }
+    }
+
+    /// The protection must stay narrow: ordinary Uzbek still has to convert, including a sentence
+    /// that CONTAINS a protected name.
+    func testOrdinaryWordsStillTransliterateAroundAProtectedName() {
+        let result = UzbekCyrillic.transliterate("Oila360 ilovasini oching")
+        XCTAssertTrue(result.hasPrefix("Oila360 "), "the name is verbatim: \(result)")
+        XCTAssertTrue(result.contains("илова"), "the Uzbek around it still converts: \(result)")
+        XCTAssertFalse(result.contains("ilovasini"), "no Latin left over: \(result)")
+    }
+
     func testTransliteratesLatinToCyrillic() {
         XCTAssertEqual(UzbekCyrillic.transliterate("salom"), "салом")
         // Digraphs and the o'/g' pairs resolve before single letters.
