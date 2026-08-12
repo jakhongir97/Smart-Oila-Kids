@@ -75,6 +75,11 @@ final class LocationPermissionManager: NSObject, ObservableObject {
         locationManager.requestWhenInUseAuthorization()
     }
 
+    /// Raw CoreLocation escalation. NOTE: this only prompts from `.notDetermined` or
+    /// `.authorizedWhenInUse` — from `.denied`/`.restricted` iOS ignores it silently. Call it
+    /// directly only when the status is known to be promptable; UI should go through
+    /// `performAction(for: .location)`, whose `requestLocationPermission()` branches on the real
+    /// status and falls through to Settings when the prompt can no longer be shown.
     func requestAlwaysLocationAuthorization() {
         locationManager.requestAlwaysAuthorization()
     }

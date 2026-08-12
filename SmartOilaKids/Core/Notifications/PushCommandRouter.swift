@@ -80,6 +80,17 @@ private extension PushCommandRouter {
     }
 
     static func persistInboxItem(_ payload: PushCommandPayload, openedFromInteraction: Bool) {
+        // A SILENT command push has nothing for a human to read. `stream.start`, `stream.stop`,
+        // `lock.refresh`, `chat.refresh` and `status.report` all arrive with no title and no body,
+        // and every one of them was writing an unread row. Nothing in the app can render that list
+        // or mark it read (`markRead`/`markAllRead` have no production callers), so the child's
+        // app-icon badge climbed with every parent action and pointed at a screen that does not
+        // exist — unclearable short of deleting the app.
+        //
+        // Keep the diagnostics trail (recorded by the caller) and drop only the inbox row.
+        let title = payload.title?.trimmedNonEmpty
+        let body = payload.body?.trimmedNonEmpty
+        guard title != nil || body != nil else { return }
         Task {
             await PushInboxStore.shared.append(
                 title: payload.title ?? "",

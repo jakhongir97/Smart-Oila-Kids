@@ -3543,3 +3543,73 @@ final class StreamWakeObserverTests: XCTestCase {
         XCTAssertEqual(publisher.disconnectCount, 1)
     }
 }
+
+// MARK: - First-PIN provisioning window
+
+/// The disconnect PIN is the control that keeps a monitored child linked, and the window that
+/// allows the FIRST one to be set used to be a bare wall-clock comparison on a device whose Date &
+/// Time panel the child controls. These pin the tamper resistance, not the arithmetic.
+final class FirstPINProvisioningTests: XCTestCase {
+    private let paired = Date(timeIntervalSince1970: 1_700_000_000)
+
+    func testAllowedInsideTheWindow() {
+        let decision = FirstPINProvisioning.decide(
+            pairedAt: paired, now: paired.addingTimeInterval(60), latched: false
+        )
+        XCTAssertEqual(decision, .allowed)
+        XCTAssertFalse(decision.shouldLatch)
+    }
+
+    func testClosedOnceTheWindowElapses() {
+        let decision = FirstPINProvisioning.decide(
+            pairedAt: paired, now: paired.addingTimeInterval(FirstPINProvisioning.window + 1), latched: false
+        )
+        XCTAssertEqual(decision, .closedElapsed)
+        XCTAssertTrue(decision.shouldLatch, "an elapsed window must latch, or the clock can reopen it")
+    }
+
+    /// The exploit a sign check does NOT close: the child sets the clock to just after pairing, so
+    /// the interval is positive AND inside the window. Only the latch stops this.
+    func testClockRolledForwardIntoTheWindowIsRefusedOnceLatched() {
+        let daysLater = paired.addingTimeInterval(3 * 24 * 3600)
+        let elapsedDecision = FirstPINProvisioning.decide(pairedAt: paired, now: daysLater, latched: false)
+        XCTAssertTrue(elapsedDecision.shouldLatch)
+
+        // Child now rewinds the clock to pairedAt + 5 minutes: a positive, in-window elapsed.
+        let rewound = paired.addingTimeInterval(300)
+        XCTAssertEqual(
+            FirstPINProvisioning.decide(pairedAt: paired, now: rewound, latched: false),
+            .allowed,
+            "without the latch this is exactly the hole — kept as a test so the latch cannot be dropped"
+        )
+        XCTAssertEqual(
+            FirstPINProvisioning.decide(pairedAt: paired, now: rewound, latched: true),
+            .closedLatched
+        )
+    }
+
+    func testClockMovedWellBeforePairingIsRefusedAndLatches() {
+        let decision = FirstPINProvisioning.decide(
+            pairedAt: paired, now: paired.addingTimeInterval(-3600), latched: false
+        )
+        XCTAssertEqual(decision, .closedClockMovedBack)
+        XCTAssertTrue(decision.shouldLatch)
+    }
+
+    /// A routine NTP correction inside the legitimate window must NOT burn the parent's only
+    /// provisioning opportunity — the sole way to reopen it is a re-pair, which needs the parent app.
+    func testSmallBackwardsClockCorrectionStillAllowsProvisioning() {
+        let decision = FirstPINProvisioning.decide(
+            pairedAt: paired, now: paired.addingTimeInterval(-2), latched: false
+        )
+        XCTAssertEqual(decision, .allowed)
+        XCTAssertFalse(decision.shouldLatch)
+    }
+
+    func testNeverPairedIsRefused() {
+        XCTAssertEqual(
+            FirstPINProvisioning.decide(pairedAt: nil, now: paired, latched: false),
+            .closedNoPairing
+        )
+    }
+}

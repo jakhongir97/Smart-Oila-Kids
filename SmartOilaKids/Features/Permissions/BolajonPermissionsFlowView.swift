@@ -149,7 +149,16 @@ struct BolajonPermissionsFlowView: View {
         case .location:
             manager.performAction(for: .location)
         case .backgroundLocation:
-            manager.requestAlwaysLocationAuthorization()
+            // NOT `requestAlwaysLocationAuthorization()` directly. CoreLocation ignores that call
+            // from `.denied`/`.restricted`, so for a child who declined the B4 prompt this button
+            // did nothing whatsoever — no prompt, no Settings, no feedback — and the step advanced
+            // as though it had worked. That is deterministic rather than rare: `clearSession()`
+            // replays B1–B11 after every unpair while the iOS authorization survives, so any
+            // re-onboarding on a device that once said no lands exactly there.
+            //
+            // `requestLocationPermission()` behind this branches on the real status: escalate when
+            // the prompt can still be shown, otherwise open Settings, which is the only remedy left.
+            manager.performAction(for: .location)
         case .usage, .appLimits:
             manager.performAction(for: .usageStats)
         case .microphone:

@@ -11,6 +11,60 @@ enum SettingsProtectionPINPrompt: String, Identifiable {
     var id: String { rawValue }
 }
 
+/// Whether the parent may still set the FIRST disconnect PIN.
+///
+/// The window exists because first-PIN provisioning is the one step with no existing secret to
+/// check, and it must not be gated on device-owner authentication — Face ID and the passcode on a
+/// child's phone belong to the CHILD, so that gate would hand the monitored user the key. The one
+/// moment a parent is provably present is just after pairing.
+///
+/// The comparison it used to make — `Date().timeIntervalSince(pairedAt) <= 900` — trusted the wall
+/// clock on a device whose Date & Time settings the child controls, and no Screen Time restriction
+/// covers that panel (only supervised MDM does). Turning off "Set Automatically" and moving the
+/// clock to just after `pairedAt` reopened the window days later, letting the child mint the
+/// disconnect PIN and then unpair — defeating the app's strongest control on exactly the devices
+/// where Screen Time blocks deleting the app.
+///
+/// A sign check alone does NOT close that: `pairedAt + 5 minutes` is a positive, in-window elapsed.
+/// The load-bearing half is the one-way latch — once the window has been observed closed it never
+/// reopens without a genuine re-pairing, whatever the clock later says.
+enum FirstPINProvisioning {
+    static let window: TimeInterval = 15 * 60
+    /// How far the clock may appear to run backwards before we treat it as tampering rather than a
+    /// routine correction. An NTP sync of a second or two inside the legitimate window must not
+    /// latch the gate shut: the parent's only other route to provisioning is a full re-pair, which
+    /// itself needs the parent app, so a false latch is expensive.
+    static let backwardsTolerance: TimeInterval = -300
+
+    enum Decision: Equatable {
+        case allowed
+        /// Never paired — nothing to measure from.
+        case closedNoPairing
+        /// The latch is already set; the window is gone for good until a re-pairing clears it.
+        case closedLatched
+        /// Legitimately past the window. Caller should latch.
+        case closedElapsed
+        /// The clock reads meaningfully BEFORE pairing, which the passage of time cannot produce.
+        /// Caller should latch: the only way to reach it is by moving the clock.
+        case closedClockMovedBack
+
+        var isAllowed: Bool { self == .allowed }
+        /// Whether observing this decision should permanently close the window.
+        var shouldLatch: Bool { self == .closedElapsed || self == .closedClockMovedBack }
+    }
+
+    static func decide(pairedAt: Date?, now: Date, latched: Bool) -> Decision {
+        guard let pairedAt else { return .closedNoPairing }
+        if latched { return .closedLatched }
+        let elapsed = now.timeIntervalSince(pairedAt)
+        if elapsed < backwardsTolerance { return .closedClockMovedBack }
+        // A small negative elapsed is a clock correction, not time travel — treat it as "just
+        // paired" rather than refusing the parent who is standing there holding the phone.
+        if elapsed > window { return .closedElapsed }
+        return .allowed
+    }
+}
+
 @MainActor
 final class SettingsProtectionController: ObservableObject {
     static let shared = SettingsProtectionController()
@@ -131,7 +185,30 @@ final class SettingsProtectionController: ObservableObject {
     func resetForNewPairing() {
         pinStore.delete()
         clearLockoutState()
+        userDefaults.removeObject(forKey: Self.firstPINWindowLatchKey)
         refreshAvailability()
+    }
+
+    /// Whether the first-PIN window has been permanently closed on this install.
+    var isFirstPINWindowLatched: Bool {
+        userDefaults.bool(forKey: Self.firstPINWindowLatchKey)
+    }
+
+    /// Evaluate the window and persist the latch when it has closed.
+    ///
+    /// Call this from `.onAppear`, never from a view body: it WRITES, and `SettingsProtectionController`
+    /// is an `ObservableObject` read during rendering.
+    @discardableResult
+    func evaluateFirstPINWindow(pairedAt: Date?, now: Date = Date()) -> FirstPINProvisioning.Decision {
+        let decision = FirstPINProvisioning.decide(
+            pairedAt: pairedAt,
+            now: now,
+            latched: isFirstPINWindowLatched
+        )
+        if decision.shouldLatch {
+            userDefaults.set(true, forKey: Self.firstPINWindowLatchKey)
+        }
+        return decision
     }
 
     /// Synchronous, nonisolated wipe of the PERSISTED PIN + lockout.
@@ -146,7 +223,13 @@ final class SettingsProtectionController: ObservableObject {
         userDefaults.removeObject(forKey: pinFailCountKey)
         userDefaults.removeObject(forKey: pinLockUntilKey)
         userDefaults.removeObject(forKey: pinLockoutTierKey)
+        // A genuine re-pairing is the documented way to reopen first-PIN provisioning, so the latch
+        // has to clear here too — otherwise a family that missed the window once could never set a
+        // disconnect PIN again, even after re-linking from the parent app.
+        userDefaults.removeObject(forKey: firstPINWindowLatchKey)
     }
+
+    nonisolated static let firstPINWindowLatchKey = "SETTINGS_PROTECTION_FIRST_PIN_WINDOW_CLOSED"
 
     private func clearLockoutState() {
         userDefaults.removeObject(forKey: pinFailCountKey)
@@ -267,6 +350,12 @@ final class SettingsProtectionController: ObservableObject {
         if success {
             userDefaults.removeObject(forKey: pinFailCountKey)
             userDefaults.removeObject(forKey: pinLockUntilKey)
+            // The TIER has to reset too. It persists on purpose so a relaunch cannot walk the
+            // ladder back down, but leaving it standing after a CORRECT entry meant a parent who
+            // once fumbled the PIN into a lockout carried the top tier forever: the child could
+            // then re-arm a 24-hour lockout of the parent's own disconnect controls with five taps,
+            // any time, indefinitely. A proven-correct PIN is the one event that should clear it.
+            userDefaults.removeObject(forKey: pinLockoutTierKey)
             pinLockedUntil = nil
             return nil
         }

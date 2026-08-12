@@ -360,19 +360,31 @@ final class LiveKitMediaPublisher: LiveMediaPublishing {
             }
         case .video:
             let target = cameraPosition ?? .front
-            if let capturer = currentCameraCapturer() {
-                // A camera is already publishing. `setCamera(enabled:true)` on an existing
-                // publication only UNMUTES and ignores new capture options (2.15.2), so a
-                // front→back switch MUST go through the capturer — otherwise the position silently
-                // never changes (the exact bug the Android client hit).
-                if capturer.position != target {
-                    _ = try await capturer.set(cameraPosition: target)
-                }
-            } else {
-                try await room.localParticipant.setCamera(
-                    enabled: true,
-                    captureOptions: CameraCaptureOptions(position: target)
-                )
+            // Drive the participant API FIRST, unconditionally. It is the only call that reaches
+            // `unmute()`, and it is idempotent when the camera is already publishing.
+            //
+            // The previous shape asked `currentCameraCapturer() != nil` and treated that as "a
+            // camera is already publishing", which is false after the `.audio` arm above ran.
+            // Verified against the pinned client-sdk-swift 2.15.2:
+            // `LocalParticipant.set(source:enabled:)` MUTES rather than unpublishes on disable, and
+            // `Track._mute()` leaves the publication in `localVideoTracks`. So a video→audio→video
+            // toggle inside one lease found a capturer for a muted, disabled, stopped track, skipped
+            // the branch that would have revived it, and — when the position happened to match —
+            // did nothing at all. The parent then watched a black frame for the rest of the lease
+            // while the child's banner said "parent is watching" and diagnostics logged
+            // `video_renewed`. Every later renewal re-entered the same no-op, so it never self-healed.
+            //
+            // `_unmute()` is itself guarded on `isMuted`, so this is a no-op on a healthy session.
+            try await room.localParticipant.setCamera(
+                enabled: true,
+                captureOptions: CameraCaptureOptions(position: target)
+            )
+            // Position SECOND, and only through the capturer: `set(source:enabled:)` returns early
+            // after `unmute()` on an existing publication and ignores the capture options passed
+            // above, so a front→back switch can only be applied here (the exact bug the Android
+            // client hit).
+            if let capturer = currentCameraCapturer(), capturer.position != target {
+                _ = try await capturer.set(cameraPosition: target)
             }
         }
     }
@@ -745,7 +757,16 @@ final class DeviceAudioStreamManager: ObservableObject {
         // FCM has no TTL and Doze can hold a data message for hours; a stale wake would light the
         // camera/mic long after the parent closed the screen. Drop it. A live-session renewal that
         // is itself stale is likewise dropped, so the lease simply expires on its own.
-        guard !command.isStaleWake else { return }
+        //
+        // Recorded, unlike before: this was the ONLY refusal on the whole live-session start path
+        // that logged nothing (addressing, flag, consent, post-expiry consent and decline all
+        // record). A device whose clock disagrees with the server drops every parent check, and
+        // without this event that is indistinguishable in the field from a push that never
+        // arrived — the single most expensive ambiguity this subsystem can produce.
+        guard !command.isStaleWake else {
+            recordMedia(status: "idle", event: Self.event(command.mode, "start_dropped_stale"))
+            return
+        }
         requestStart(command: command)
     }
 
@@ -864,6 +885,23 @@ final class DeviceAudioStreamManager: ObservableObject {
             needsConsent = false
             pendingCommand = nil
             consentMode = .audio
+            // TAKE THE OS GRANT WHILE THE CHILD IS DEMONSTRABLY ON SCREEN.
+            //
+            // Onboarding ships no microphone step, so this tap is usually the first and only moment
+            // the app can present the system prompt: the child is in the foreground, by definition,
+            // because they just tapped Allow. Returning without asking left the install in the worst
+            // available state — audio consent RECORDED but the microphone still `.undetermined` —
+            // and because leases are short this stale branch is the COMMON path, not a rare one.
+            // Every later parent check then reached `requestMicPermission()` from the background,
+            // where iOS cannot present an alert, and died on the 45s watchdog.
+            //
+            // Fire-and-forget: no session is started (the lease really has expired), only the grant
+            // is banked so the next check can connect immediately.
+            Task { [weak self] in
+                guard let self else { return }
+                _ = await self.requestMicPermission()
+                if command.mode == .video { _ = await self.requestCameraPermission() }
+            }
             recordMedia(status: "idle", event: Self.event(command.mode, "consent_granted_after_lease_expiry"))
             return
         }
@@ -1160,7 +1198,23 @@ final class DeviceAudioStreamManager: ObservableObject {
         var mode = command.mode
         var rejection: String?
         if mode == .video {
-            if !hasConsent(for: .video) {
+            // DISCLOSURE GATE. `renew()` was the one entry point into a live session that never
+            // consulted `LiveSessionDisclosure`, so the `refusedVideoOffScreen` rule `start()`
+            // enforces did not apply here. A backgrounded audio session could therefore adopt
+            // `.video` — and because iOS suspends camera capture for a backgrounded app whatever
+            // is declared, the result was the banner and the presence notification both claiming
+            // "parent is watching" behind a camera that publishes nothing.
+            //
+            // Reusing the same rejection machinery as the consent/permission failures below keeps
+            // the session alive on audio (which the parent still gets) instead of tearing it down.
+            let disclosure = LiveSessionDisclosure.verdict(
+                mode: .video,
+                isForeground: isForeground(),
+                notificationsAuthorized: await notificationsAuthorized()
+            )
+            if !disclosure.isAllowed {
+                rejection = disclosure.diagnosticSuffix
+            } else if !hasConsent(for: .video) {
                 rejection = "camera_consent_missing"
             } else {
                 switch await requestCameraPermission() {
@@ -1285,6 +1339,18 @@ final class DeviceAudioStreamManager: ObservableObject {
     private static func systemRequestMicPermission() async -> Bool {
         if #available(iOS 17.0, *) {
             if AVAudioApplication.shared.recordPermission == .granted { return true }
+            // Same reasoning — and the same failure — as `requestCameraPermission`'s `.deferred`
+            // branch, which the microphone path was missing. iOS presents no permission alert to a
+            // backgrounded app, so from a push-woken session the completion handler never fires and
+            // this continuation never resumes. That left `start()` suspended on a task the 45s
+            // `connectWatchdog` was the only thing able to end, and because `start()` bounces every
+            // new command off `guard state != .connecting`, the device was deaf to the parent for
+            // that whole window — for each retry.
+            //
+            // Fail fast instead. `false` here surfaces as `audio_start_mic_denied`, and the grant is
+            // taken the next time the child is on screen (see `grantConsentAndStart`).
+            guard await MainActor.run(body: { UIApplication.shared.applicationState != .background })
+            else { return false }
             return await withCheckedContinuation { continuation in
                 AVAudioApplication.requestRecordPermission { granted in
                     continuation.resume(returning: granted)
@@ -1301,6 +1367,10 @@ final class DeviceAudioStreamManager: ObservableObject {
     private static func requestLegacyMicPermission() async -> Bool {
         let session = AVAudioSession.sharedInstance()
         if session.recordPermission == .granted { return true }
+        // Same background guard as the iOS 17 path above — `requestRecordPermission` is equally
+        // unable to present an alert from the background, and equally never calls back.
+        guard await MainActor.run(body: { UIApplication.shared.applicationState != .background })
+        else { return false }
         return await withCheckedContinuation { continuation in
             session.requestRecordPermission { granted in
                 continuation.resume(returning: granted)

@@ -139,6 +139,10 @@ struct SettingsRootView: View {
             permissionManager.refreshStatuses()
             // Re-reads the Keychain, so the rows are right even if the PIN changed elsewhere.
             protection.refreshAvailability()
+            // Latch the first-PIN window the moment it is observed closed. Done here rather than in
+            // the body because it WRITES, and this controller is observed during rendering. Once
+            // latched, moving the device clock back cannot reopen provisioning.
+            protection.evaluateFirstPINWindow(pairedAt: sessionStore.pairedAt)
         }
         .sheet(item: $pinFlowIntent) { intent in
             ParentPINFlowSheet(intent: intent)
@@ -188,12 +192,16 @@ struct SettingsRootView: View {
     /// first-PIN provisioning is allowed only inside that window; afterwards the parent re-links
     /// from their own app, which reopens it. Change and remove keep their own gate — the current
     /// PIN, rate-limited by the shared lockout.
+    /// Read-only in the view body — the decision, including the one-way latch that makes it
+    /// tamper-resistant, lives in `FirstPINProvisioning`. The latch is WRITTEN from `.onAppear`
+    /// (see `firstPINWindowState`), never from here.
     private var canProvisionFirstPIN: Bool {
-        guard let pairedAt = sessionStore.pairedAt else { return false }
-        return Date().timeIntervalSince(pairedAt) <= Self.firstPINProvisioningWindow
+        FirstPINProvisioning.decide(
+            pairedAt: sessionStore.pairedAt,
+            now: Date(),
+            latched: protection.isFirstPINWindowLatched
+        ).isAllowed
     }
-
-    private static let firstPINProvisioningWindow: TimeInterval = 15 * 60
 
     private func startPINFlow(_ intent: ParentPINFlowIntent) {
         if intent == .set, !canProvisionFirstPIN { return }
