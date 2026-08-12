@@ -204,17 +204,25 @@ final class DeviceChatWebSocketService {
 
     private func startPinging(generation: UInt64) {
         pingTask?.cancel()
+        // The interval is read BEFORE the task, and `self` is re-acquired inside the loop rather
+        // than held across it. The old shape — `[weak self]` immediately followed by a `guard let
+        // self` outside the loop — promoted the reference to strong for the task's whole life, and
+        // the task lives forever by construction. So the service could never deallocate, which made
+        // the `deinit` that exists as the last-resort socket teardown unreachable: a chat screen the
+        // child closed left its socket open, pinging, for the rest of the process. Re-acquiring per
+        // iteration keeps the reference alive only while a tick is actually running.
+        let interval = pingInterval
         pingTask = Task { @MainActor [weak self] in
-            guard let self else { return }
             // Ping IMMEDIATELY. The first completion is the earliest honest evidence the transport
             // is up, and it is what flips `isConnected` — so a quiet socket still reports online.
             var isFirstTick = true
             while !Task.isCancelled {
                 if !isFirstTick {
-                    try? await Task.sleep(nanoseconds: UInt64(self.pingInterval * 1_000_000_000))
+                    try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                     if Task.isCancelled { return }
                 }
                 isFirstTick = false
+                guard let self else { return }
                 // Stop the moment this heartbeat's socket is gone: without the generation check a
                 // ping armed for the previous connection could report a failure against the new one.
                 guard generation == self.generation, let task = self.task else { return }

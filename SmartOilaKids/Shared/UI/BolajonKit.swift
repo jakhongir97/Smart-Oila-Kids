@@ -615,7 +615,10 @@ struct PermissionProgressBar: View {
         .frame(height: 8)
         .animation(.easeInOut(duration: 0.25), value: current)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: "\(current)/\(total)"))
+        // VoiceOver read the raw "1/5" as a fraction. Onboarding progress is the one place a
+        // child is told how much further they have to go, so it says it in words, in their
+        // language — `verbatim` also meant it was never localized at all.
+        .accessibilityLabel(Text(L10n.tr("a11y.step_progress", current, total)))
     }
 
     @ViewBuilder

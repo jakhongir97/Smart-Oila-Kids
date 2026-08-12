@@ -771,7 +771,7 @@ struct SettingsPermissionsScreen: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
-                    .background(Capsule().fill(AppColors.glyphOrange))
+                    .background(Capsule().fill(AppColors.ctaOrange))
             }
             .buttonStyle(.plain)
         }

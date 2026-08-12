@@ -49,21 +49,29 @@ struct AudioListeningIndicator: View {
                 Button(action: onStop) {
                     Text(L10n.tr("audio2.stop"))
                         .font(AppTypography.bodyStrong(13))
-                        .foregroundStyle(AppColors.sosCoral)
+                        // The same problem inverted: coral on the white capsule measured 3.11:1,
+                        // under the 4.5:1 that 13pt bold needs. Matches the banner's fill too.
+                        .foregroundStyle(AppColors.livePresenceCoral)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(Color.white))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(L10n.tr("audio2.stop")))
-                // Comfortably past the 44pt minimum once the capsule padding is counted.
-                .frame(minHeight: 32)
+                // 44pt, and the comment that used to sit here claimed it already was. It was 32:
+                // 13pt of text plus 5pt of padding each side is ~26pt of drawn capsule, and the
+                // `minHeight` was the only thing extending it. This is the child's ONLY way to end a
+                // session they can see running, on a banner deliberately sized to be unobtrusive —
+                // the one control in the app that must not be fiddly. `contentShape` makes the whole
+                // frame tappable rather than just the capsule inside it.
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
-        .background(Capsule().fill(AppColors.sosCoral))
-        .shadow(color: AppColors.sosCoral.opacity(0.45), radius: 12, x: 0, y: 5)
+        .background(Capsule().fill(AppColors.livePresenceCoral))
+        .shadow(color: AppColors.livePresenceCoral.opacity(0.45), radius: 12, x: 0, y: 5)
         .padding(.top, 6)
         .onAppear {
             guard !UIAccessibility.isReduceMotionEnabled else { return }

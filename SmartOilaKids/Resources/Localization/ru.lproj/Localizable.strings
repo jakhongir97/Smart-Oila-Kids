@@ -345,3 +345,4 @@
 "settings2.parent_pin_removed" = "Родительский PIN удалён. Теперь отвязать устройство можно только в приложении Oila360.";
 "settings2.parent_pin_locked_out" = "Слишком много попыток. Повторите позже.";
 "settings2.parent_pin_set_unavailable" = "PIN можно задать только сразу после привязки. Привяжите устройство заново в приложении Oila360.";
+"a11y.step_progress" = "Шаг %1$d из %2$d";

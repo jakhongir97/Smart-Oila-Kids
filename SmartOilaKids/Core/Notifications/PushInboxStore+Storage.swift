@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import UIKit
 
@@ -49,7 +50,11 @@ extension PushInboxStore {
         event: String,
         dsn: String?
     ) -> String {
-        "\(event.lowercased())|\((dsn ?? "").lowercased())|\(title.lowercased())|\(body.lowercased())"
+        // HASHED, not the text itself. This value is persisted on the item, so a plaintext
+        // fingerprint put the parent's message body on disk just as surely as storing it did.
+        // A digest dedupes exactly as well and reads back as nothing.
+        let material = "\(event.lowercased())|\((dsn ?? "").lowercased())|\(title.lowercased())|\(body.lowercased())"
+        return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     func updateDiagnostics(items: [PushInboxItem], dsn: String?, status: String) {

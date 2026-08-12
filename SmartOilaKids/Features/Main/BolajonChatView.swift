@@ -1038,7 +1038,13 @@ private struct ChatBubble: View {
 
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm"
+        // `.short` rather than a hardcoded "HH:mm": a 24-hour clock was being shown to every reader
+        // regardless of their region setting, so a family on a 12-hour clock read 19:05 for 7:05 PM
+        // in the one screen that is a conversation. `autoupdatingCurrent` keeps it right if the
+        // region changes while the app is alive.
+        f.locale = .autoupdatingCurrent
+        f.dateStyle = .none
+        f.timeStyle = .short
         return f
     }()
 

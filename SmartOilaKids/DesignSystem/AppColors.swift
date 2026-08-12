@@ -65,6 +65,20 @@ enum AppColors {
     /// SOS / danger (confirm, disconnect).
     static let sosCoral = dynamic(rgb(240, 96, 90), rgb(255, 110, 104))     // #F0605A
 
+    // MARK: Fills that carry WHITE label text
+    //
+    // The tints above are drawn as glyphs on light grounds, where they read fine. Used as the FILL
+    // behind white text they do not: white on `glyphOrange` measures 2.58:1 and white on `sosCoral`
+    // 3.11:1, so both failed even the 3:1 large-text floor. Rather than repaint the glyph tints —
+    // which are correct in their own role and used all over the icon badges — these are darker
+    // siblings for the two places a white label sits on a coloured fill.
+
+    /// Filled CTA on peach cards ("Enable"). White on this measures 4.80:1 light / 4.43:1 dark.
+    static let ctaOrange = dynamic(rgb(189, 82, 15), rgb(198, 86, 16))      // #BD520F
+    /// The live-session disclosure banner. White on this measures 4.60:1, and this is the one
+    /// element in the app whose whole job is to be unmistakable while a microphone is open.
+    static let livePresenceCoral = dynamic(rgb(232, 23, 23), rgb(214, 28, 28)) // #E81717
+
     /// Purple-biased near-black ink for headings/body on tinted grounds.
     static let inkPrimary = dynamic(rgb(42, 37, 64), rgb(242, 242, 247))    // #2A2540
     static let inkSecondary = dynamic(rgb(91, 84, 112), rgb(190, 186, 205)) // #5B5470

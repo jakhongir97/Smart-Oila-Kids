@@ -1999,7 +1999,11 @@ final class PushInboxStoreMutationTests: XCTestCase {
 
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.title, "Hello")
-        XCTAssertEqual(items.first?.body, "World")
+        // `message_new` is a person-authored push, so its body is the parent's actual message and is
+        // deliberately NOT retained: nothing in the app renders it, and up to 200 of them would
+        // otherwise sit in the app container on a child's device. Dedupe still works — this item was
+        // recognised as a duplicate of the first append, which is what `count == 1` above proves.
+        XCTAssertEqual(items.first?.body, "", "a parent's message must not be kept at rest")
         XCTAssertEqual(items.first?.event, "message_new")
         XCTAssertTrue(items.first?.isRead == true)
         XCTAssertEqual(diagnostics.dsn, "child-1")
