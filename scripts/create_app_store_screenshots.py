@@ -29,11 +29,15 @@ OUTPUT_ROOT = ROOT / "Artifacts" / "app-store-shots" / f"{date.today().isoformat
 # slot is legacy and the live listing's existing 6.5" shots cannot be reused (pre-rebrand).
 IPHONE_SIMULATOR = "iPhone 16 Pro Max"
 
-IPHONE_READY_SIZE = (1290, 2796)  # 6.9" portrait
+IPAD_SIMULATOR = "iPad Pro 13-inch (M4)"
 
-# No iPad set: `TARGETED_DEVICE_FAMILY` is 1 (iPhone only), so the build will not even install on an
-# iPad simulator and App Store Connect no longer asks for the 13" slot. If iPad support is ever added
-# back, the second capture pass comes back with it.
+IPHONE_READY_SIZE = (1290, 2796)  # 6.9" portrait
+IPAD_READY_SIZE = (2064, 2752)
+
+# The iPad pass is NOT optional. v1.0 shipped `TARGETED_DEVICE_FAMILY = "1,2"`, and an update may not
+# drop a device family the published version supported -- App Store Connect rejects the upload
+# outright ("This bundle does not support one or more of the devices supported by the previous app
+# version", QA1623). So iPad stays, and App Store Connect requires its 13" screenshot slot filled.
 
 DEMO_DSN = "APPSTORE-DEMO-001"
 DEMO_PROFILE = "Alex"
@@ -474,11 +478,12 @@ def write_manifest() -> None:
                 "Upload order:",
                 *(f"{index}. `{shot.name}.png`" for index, shot in enumerate(SHOTS, start=1)),
                 "",
-                "iPhone only — the app is `TARGETED_DEVICE_FAMILY = 1`, so App Store Connect asks",
-                "for no iPad set.",
+                "Both sets are required: the app is `TARGETED_DEVICE_FAMILY = \"1,2\"` and cannot drop",
+                "iPad, so App Store Connect demands the 13\" slot as well as the 6.9\" one.",
                 "",
                 "Folders:",
                 f"- iPhone 6.9-ready: `{(OUTPUT_ROOT / 'iphone-6.9-ready').relative_to(ROOT)}`",
+                f"- iPad 13-ready: `{(OUTPUT_ROOT / 'ipad-13-ready').relative_to(ROOT)}`",
                 "",
                 "Raw captures are included alongside the upload-sized exports.",
             ]
@@ -495,6 +500,8 @@ def prepare_output_dirs() -> dict[str, Path]:
     directories = {
         "iphone_raw": OUTPUT_ROOT / "iphone-raw",
         "iphone_ready": OUTPUT_ROOT / "iphone-6.9-ready",
+        "ipad_raw": OUTPUT_ROOT / "ipad-raw",
+        "ipad_ready": OUTPUT_ROOT / "ipad-13-ready",
     }
     for directory in directories.values():
         directory.mkdir(parents=True, exist_ok=True)
@@ -506,16 +513,19 @@ def main() -> int:
         directories = prepare_output_dirs()
 
         iphone_udid = simulator_udid(IPHONE_SIMULATOR)
+        ipad_udid = simulator_udid(IPAD_SIMULATOR)
 
-        print(f"Booting {IPHONE_SIMULATOR}...")
+        print(f"Booting {IPHONE_SIMULATOR} and {IPAD_SIMULATOR}...")
         boot_simulator(iphone_udid)
+        boot_simulator(ipad_udid)
         run(["open", "-a", "Simulator"], check=False)
 
         app_path, bundle_id = build_app(iphone_udid)
 
-        uninstall_and_install(iphone_udid, bundle_id, app_path)
-        seed_defaults(app_data_container(iphone_udid, bundle_id), bundle_id)
-        override_status_bar(iphone_udid)
+        for udid in (iphone_udid, ipad_udid):
+            uninstall_and_install(udid, bundle_id, app_path)
+            seed_defaults(app_data_container(udid, bundle_id), bundle_id)
+            override_status_bar(udid)
 
         print("Capturing iPhone screenshots...")
         capture_set(
@@ -524,6 +534,15 @@ def main() -> int:
             directories["iphone_raw"],
             directories["iphone_ready"],
             IPHONE_READY_SIZE,
+        )
+
+        print("Capturing iPad screenshots...")
+        capture_set(
+            ipad_udid,
+            bundle_id,
+            directories["ipad_raw"],
+            directories["ipad_ready"],
+            IPAD_READY_SIZE,
         )
 
         write_manifest()

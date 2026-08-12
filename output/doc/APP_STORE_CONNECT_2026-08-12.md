@@ -16,10 +16,10 @@ cannot change.
 | Bundle ID | `uz.smartoila.kids` | pbxproj, both configs |
 | Display name | `Bolajon360` | `CFBundleDisplayName` |
 | Marketing version | `1.1` | `MARKETING_VERSION` |
-| Build | `11` | `CURRENT_PROJECT_VERSION` — bumped from 10 for this submission |
+| Build | `12` | `CURRENT_PROJECT_VERSION` — 11 was rejected at upload, see §7 |
 | Minimum iOS | `16.0` | `IPHONEOS_DEPLOYMENT_TARGET` |
 | Localizations | `en`, `ru`, `uz` (plus uz-Cyrl rendered at runtime) | `CFBundleLocalizations` |
-| Device families | iPhone only | `TARGETED_DEVICE_FAMILY = 1` on all targets — decided, see §7 |
+| Device families | iPhone **and iPad** | `TARGETED_DEVICE_FAMILY = "1,2"` — cannot be narrowed, see §7 |
 | Background modes | `audio`, `location`, `remote-notification` | `UIBackgroundModes` |
 | Export compliance | `ITSAppUsesNonExemptEncryption = false` | verified in plist |
 | App group | `group.3twn5nw4bl.uz.smartoila.kids` | entitlements |
@@ -310,17 +310,23 @@ Expected result: **4+**.
 
 ## 7. Screenshots
 
-**iPad was dropped for this release** (decided 2026-08-12). `TARGETED_DEVICE_FAMILY` is `1` on the app,
-both extensions and the project defaults, and the now-dead `UISupportedInterfaceOrientations~ipad` key
-is gone from `Info.plist`. Nothing here was designed for iPad, so keeping it meant a second full
-capture pass and a second unpolished surface for a reviewer to find bugs on. Narrowing device support
-on an update is allowed; the one real cost is that an existing iPad installation stops receiving
-updates — unlikely to exist at all for a child device that must be paired from a parent's phone. iPad
-can come back deliberately later, and the capture script gets its second pass back with it.
+**iPad stays, and this is not a choice.** Dropping it was tried on 2026-08-12 and App Store Connect
+rejected the upload of build 11 at validation:
+
+> This bundle does not support one or more of the devices supported by the previous app version. Your
+> app update must continue to support all devices previously supported. (QA1623)
+
+v1.0 shipped `TARGETED_DEVICE_FAMILY = "1,2"`, so every future update must too. The setting is back to
+`"1,2"` on all ten configurations and `UISupportedInterfaceOrientations~ipad` is back in `Info.plist`.
+The only way out of iPad is a brand-new app record, which would forfeit App Store ID `6761430412` and
+its existing listing — not worth it. **Budget an iPad layout pass**: a reviewer can and will open this
+on a 13" iPad, so the screens have to hold up there, and App Store Connect will not let the submission
+through without the iPad screenshot set.
 
 | Platform | Required | Size |
 |---|---|---|
 | iPhone 6.9" | Yes | `1290 × 2796` portrait — what `scripts/create_app_store_screenshots.py` produces |
+| iPad 13" | Yes | `2064 × 2752` portrait — same script, second pass |
 
 Do **not** reuse the 6.5" set: the only one that exists is the April pre-rebrand capture, and it shows
 a weekly-usage chart this app no longer has.
@@ -349,11 +355,13 @@ session, mints no token, opens no hardware and never touches `DeviceAudioStreamM
 
 ## 8. Pre-upload checklist
 
-- [x] Bump `CURRENT_PROJECT_VERSION` past `10` — now `11` on all eight configs
-- [x] Decide iPad — dropped, `TARGETED_DEVICE_FAMILY = 1` (§7)
-- [x] Capture the 6.9" iPhone set — `Artifacts/app-store-shots/2026-08-12-generated/iphone-6.9-ready`,
+- [x] Bump `CURRENT_PROJECT_VERSION` — now `12` on all eight configs (11 failed validation)
+- [x] iPad — **settled by Apple, not by us**: `TARGETED_DEVICE_FAMILY = "1,2"` stays (§7)
+- [x] Capture both sets — `Artifacts/app-store-shots/2026-08-12-generated/{iphone-6.9-ready,ipad-13-ready}`,
       English. Re-run the script under `-AppleLanguages (ru)` / `(uz)` if localized sets are wanted;
       ASC accepts the English set for all locales.
+- [ ] **iPad layout pass** — the screens were only ever designed for iPhone and a reviewer can open
+      them on a 13" iPad
 - [x] Re-read `Info.plist` **and** all three `InfoPlist.strings` — verified 2026-08-12: camera and mic
       strings agree with the base file in en/ru/uz and all five promise no recording. Localized purpose
       strings override the base file in every locale, and that has bitten this project twice.
