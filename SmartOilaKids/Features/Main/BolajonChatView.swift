@@ -1374,8 +1374,30 @@ struct ChatHomeCard: View {
 
 @MainActor
 private final class ChatHomeCardModel: ObservableObject {
+    /// What the card has to say, as a KIND rather than as finished text.
+    ///
+    /// `subtitle` used to be a stored string seeded with `L10n.tr(...)` in its property initializer,
+    /// which snapshots the translation at the moment the model is constructed. The child can change
+    /// language from Settings without the Home card being rebuilt, so the placeholder — and the
+    /// "Photo" preview, which is also a translated string — stayed in the previous language until
+    /// something else forced a reload. Keeping the kind and translating at read time means the text
+    /// follows the language rather than the object's lifetime.
+    enum Preview: Equatable {
+        case none
+        case text(String)
+        case photo
+    }
+
     @Published var unreadCount = 0
-    @Published var subtitle = L10n.tr("home2.chat.subtitle")
+    @Published private(set) var preview: Preview = .none
+
+    var subtitle: String {
+        switch preview {
+        case .none: return L10n.tr("home2.chat.subtitle")
+        case .photo: return L10n.tr("chat2.photo")
+        case .text(let text): return text
+        }
+    }
 
     private let chat: OilaChatServicing
 
@@ -1388,9 +1410,9 @@ private final class ChatHomeCardModel: ObservableObject {
         if let page = try? await chat.fetchChatMessages(limit: 1, before: nil),
            let last = page.messages.first {
             if let text = last.text, !text.isEmpty {
-                subtitle = text
+                preview = .text(text)
             } else if last.hasImage {
-                subtitle = L10n.tr("chat2.photo")
+                preview = .photo
             }
         }
     }

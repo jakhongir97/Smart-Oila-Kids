@@ -3476,3 +3476,70 @@ final class LiveSessionConsentRaceTests: XCTestCase {
         XCTAssertFalse(manager.needsConsent)
     }
 }
+
+/// The wake observers are the seam a `stream.start` push crosses to reach the microphone. They were
+/// the gate that dropped 100% of real commands before the addressing fix, and nothing tested that a
+/// posted notification reaches the manager at all.
+@MainActor
+final class StreamWakeObserverTests: XCTestCase {
+    private func makeManager(_ publisher: FakeMediaPublisher, defaults: UserDefaults) -> DeviceAudioStreamManager {
+        defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED")
+        let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
+        manager.isFeatureEnabled = { true }
+        manager.makePublisher = { publisher }
+        manager.isForeground = { true }
+        manager.notificationsAuthorized = { true }
+        manager.requestMicPermission = { true }
+        return manager
+    }
+
+    /// An unaddressed `stream.start` — which is what the backend actually sends, as the Android
+    /// client proved — must reach the hardware on a paired install.
+    func testAPostedWakeStartsASessionOnAPairedInstall() async {
+        let suiteName = "StreamWakeObserverTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // `pushMatchesThisDevice` accepts an unaddressed start only on a paired install, and reads
+        // the manager's OWN defaults — setting this on `.standard` is not enough.
+        defaults.set(true, forKey: "BOLAJON_OILA_PAIRED")
+        _ = OilaDeviceIdentity.deviceDSN()
+
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher, defaults: defaults)
+
+        NotificationCenter.default.post(
+            name: .pushShouldStartAudioStream,
+            object: nil,
+            userInfo: [
+                PushUserInfoKeys.streamMode: "audio",
+                PushUserInfoKeys.streamMaxDurationSeconds: "120"
+            ]
+        )
+        // The observer hops through a Task; give the main queue a turn to drain it.
+        for _ in 0 ..< 40 where !manager.isLive {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertTrue(manager.isLive, "a posted stream.start must actually open the microphone")
+        XCTAssertEqual(publisher.connectCount, 1)
+    }
+
+    /// And a stop must tear it down, unaddressed or not — a dropped stop leaves a microphone open.
+    func testAPostedStopEndsTheSession() async {
+        let suiteName = "StreamWakeObserverTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher, defaults: defaults)
+        await manager.start(command: .debugAudio)
+        XCTAssertTrue(manager.isLive)
+
+        NotificationCenter.default.post(name: .pushShouldStopAudioStream, object: nil, userInfo: [:])
+        for _ in 0 ..< 40 where manager.isLive {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertFalse(manager.isLive, "a stop must be honoured — a dropped one leaves the mic open")
+        XCTAssertEqual(publisher.disconnectCount, 1)
+    }
+}
