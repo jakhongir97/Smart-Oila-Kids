@@ -1239,7 +1239,13 @@ final class DeviceAudioStreamManager: ObservableObject {
         await endingPublisher?.disconnect()
         if state == .live || state == .connecting {
             state = .idle
-            recordMedia(status: "idle", event: "audio_stopped")
+            // Named after the hardware that was actually live. This was hardcoded to "audio_stopped",
+            // so a video session — camera and microphone both open — reported its teardown as an audio
+            // one. Caught on a real device: a trace reading `video_live` … `video_renewed` …
+            // `audio_stopped` is the single event that says how a camera session ended, and it was
+            // naming the wrong hardware. Every other event in this file already goes through
+            // `Self.event`, which is why the inconsistency survived.
+            recordMedia(status: "idle", event: Self.event(activeMode, "stopped"))
         }
     }
 
