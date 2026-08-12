@@ -112,6 +112,31 @@ should already be ticked. It must be, or Xcode could not have signed a build car
 
 ---
 
+### Status: the key exists and is verified (2026-08-12)
+
+Created and tested the same day. **Key ID `LM7QD5RP9H`**, team `3TWN5NW4BL`. The `.p8` is not in this
+repo and never will be — it is a signing credential that can push to every app in the team.
+
+Verified by talking to APNs directly, with no Firebase involved, using `scripts/apns_probe.sh`:
+
+| Host | Result | What it proves |
+|---|---|---|
+| `api.sandbox.push.apple.com` | **HTTP/2 200** + `apns-id` | key valid, topic `uz.smartoila.kids` correct, device token good, background push accepted |
+| `api.push.apple.com` | `400 BadDeviceToken` | the key **authenticated against production**; only the token is sandbox-scoped, because the phone runs a Debug build |
+
+That second row is the one worth understanding. A key restricted to sandbox would have failed
+authentication with `403 InvalidProviderToken` or `BadEnvironmentKeyIdInToken`. Getting as far as
+"your token is for the other environment" means the key itself was accepted — so **this key covers
+both environments**, which is what the App Store build needs.
+
+Re-run either probe at any time:
+
+```bash
+scripts/apns_probe.sh ~/Downloads/AuthKey_LM7QD5RP9H.p8 LM7QD5RP9H 3TWN5NW4BL <device-token> sandbox
+```
+
+---
+
 ## 3. Upload it to Firebase
 
 Firebase console → project **oila360** → gear → **Project settings** → **Cloud Messaging** tab →
