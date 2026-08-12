@@ -25,7 +25,6 @@
 		22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */; };
 		22E7F6EB6E023F4549FC91F0 /* PermissionRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 406257A2E792217E0DA9B72A /* PermissionRequirement.swift */; };
 		26DA40009D4D477E9E4B7F98 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = E893646BD59D45E08D43E0B9 /* LiveKit */; };
-		FBA5E1000001C24E1FA0FE01 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = FBA5E1000002C24E1FA0FE02 /* FirebaseMessaging */; };
 		32BC1A012F69914E00B088F7 /* DeviceApplicationsSyncWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32BC1A002F69914E00B088F7 /* DeviceApplicationsSyncWebSocketService.swift */; };
 		34E7EE4BAA5D64256E27662B /* ScreenTimeUsageActivitySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9E55F392A6E47D99AA4BE7 /* ScreenTimeUsageActivitySummary.swift */; };
 		350DE396F3550391AF1F3E17 /* DeviceLockScheduleSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */; };
@@ -70,6 +69,7 @@
 		9C7A2A347700F00EB29AED4D /* ScreenTimeUsageSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */; };
 		A0F60B1A41788C79F4ED1A0B /* GrowthMetricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBD506491C43954D10DF0D6 /* GrowthMetricsStore.swift */; };
 		A151511ADA32FE25E7DF70A8 /* ScreenTimeUsageAppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B23147D0A5327CED850D5FA /* ScreenTimeUsageAppGroup.swift */; };
+		A17C0FE500000000000000F2 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A17C0FE500000000000000F1 /* GoogleService-Info.plist */; };
 		A1BB0EC03DC37ED6656C144B /* RuntimeDiagnosticsCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA203AA13030A6560B31897 /* RuntimeDiagnosticsCenter.swift */; };
 		A2C1636FFCFC84422D8EAD71 /* PushInboxStore+Read.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1622297DBE6E8EBC5D18CF /* PushInboxStore+Read.swift */; };
 		A40E9E9756993DEA0DB04A4D /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 773C5143FC368E6B3FA28423 /* InfoPlist.strings */; };
@@ -125,9 +125,9 @@
 		F1A0B1C2D3E4F50617283A01 /* OilaDeviceClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */; };
 		F616424CC01DE567EE1A1EBE /* HTTPMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C8610E862B6B9260CC2085 /* HTTPMethod.swift */; };
 		F8D5039166D5E3FFDFA908D5 /* LoadPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = D616AA2DBAE5C7A3E9BBC183 /* LoadPhase.swift */; };
+		FBA5E1000001C24E1FA0FE01 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = FBA5E1000002C24E1FA0FE02 /* FirebaseMessaging */; };
 		FEA4706D43796BAF3BF44289 /* DeviceApplicationLockPayloadParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9548B0248BF51FB0A4C40A /* DeviceApplicationLockPayloadParser.swift */; };
 		FF806ACDBEC29C4B36E57780 /* BolajonSetupFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46F7A500D8401E5F9A6077D1 /* BolajonSetupFlowView.swift */; };
-		A17C0FE500000000000000F2 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A17C0FE500000000000000F1 /* GoogleService-Info.plist */; };
 		FF95F66EA06BAC5CB2DD5F18 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
@@ -211,6 +211,7 @@
 		98D120F82B2D862255E144CE /* DeviceLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockService.swift; sourceTree = "<group>"; };
 		9B35C83F2A4F548512EB20FB /* ChildChromeBranding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChildChromeBranding.swift; sourceTree = "<group>"; };
 		9BE5577AC7D949BB8D31E0B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A17C0FE500000000000000F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		A3B3AE1E539B44AAA4E9A234 /* BolajonChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonChatView.swift; sourceTree = "<group>"; };
 		A8CB88E59DE6518D215B75D0 /* RootView+PushHandling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RootView+PushHandling.swift"; sourceTree = "<group>"; };
 		A9330607ECABFAFCD014BA56 /* PushInboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushInboxStore.swift; sourceTree = "<group>"; };
@@ -236,7 +237,6 @@
 		D596D524F29FB461CB2E47DE /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		D616AA2DBAE5C7A3E9BBC183 /* LoadPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadPhase.swift; sourceTree = "<group>"; };
 		D67CB8ABD9F08930576D52B8 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
-		A17C0FE500000000000000F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		D8B09FD21FF4C58F2F63BA40 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E35F67AF2A306DA50B1B2381 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E381C1C47BEBF468020D9CF3 /* PushInboxStore+Mutations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushInboxStore+Mutations.swift"; sourceTree = "<group>"; };
@@ -1008,7 +1008,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1035,7 +1035,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1062,7 +1062,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.debug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bolajon360;
@@ -1085,7 +1085,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1112,7 +1112,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bolajon360;
@@ -1198,7 +1198,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1224,7 +1224,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1251,7 +1251,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

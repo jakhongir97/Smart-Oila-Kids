@@ -16,7 +16,7 @@ cannot change.
 | Bundle ID | `uz.smartoila.kids` | pbxproj, both configs |
 | Display name | `Bolajon360` | `CFBundleDisplayName` |
 | Marketing version | `1.1` | `MARKETING_VERSION` |
-| Build | `12` | `CURRENT_PROJECT_VERSION` — 11 was rejected at upload, see §7 |
+| Build | `11` | `CURRENT_PROJECT_VERSION` — reused; the first 11 never reached ASC, see §7 |
 | Minimum iOS | `16.0` | `IPHONEOS_DEPLOYMENT_TARGET` |
 | Localizations | `en`, `ru`, `uz` (plus uz-Cyrl rendered at runtime) | `CFBundleLocalizations` |
 | Device families | iPhone **and iPad** | `TARGETED_DEVICE_FAMILY = "1,2"` — cannot be narrowed, see §7 |
@@ -323,6 +323,9 @@ its existing listing — not worth it. **Budget an iPad layout pass**: a reviewe
 on a 13" iPad, so the screens have to hold up there, and App Store Connect will not let the submission
 through without the iPad screenshot set.
 
+That rejection happened during *validation*, before the binary was ingested, so build **11 was never
+consumed** and the corrected archive reuses the number rather than skipping one.
+
 | Platform | Required | Size |
 |---|---|---|
 | iPhone 6.9" | Yes | `1290 × 2796` portrait — what `scripts/create_app_store_screenshots.py` produces |
@@ -355,7 +358,9 @@ session, mints no token, opens no hardware and never touches `DeviceAudioStreamM
 
 ## 8. Pre-upload checklist
 
-- [x] Bump `CURRENT_PROJECT_VERSION` — now `12` on all eight configs (11 failed validation)
+- [x] `CURRENT_PROJECT_VERSION` — `11` on all eight configs. The first attempt at 11 failed
+      *validation*, so it was never ingested and the number is still free; if App Store Connect ever
+      does claim it is taken, bump and re-archive.
 - [x] iPad — **settled by Apple, not by us**: `TARGETED_DEVICE_FAMILY = "1,2"` stays (§7)
 - [x] Capture both sets — `Artifacts/app-store-shots/2026-08-12-generated/{iphone-6.9-ready,ipad-13-ready}`,
       English. Re-run the script under `-AppleLanguages (ru)` / `(uz)` if localized sets are wanted;
