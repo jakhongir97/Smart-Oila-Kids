@@ -369,6 +369,13 @@ private struct PermissionSummaryView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 6)
             }
+            // The row count here is not fixed — it follows the feature flags, and turning the media
+            // flag on added a microphone row and a camera row to a list that already filled the
+            // sheet. `BolajonHeroSheet` does not scroll its sheet content, so the overflow lands on
+            // whatever is last, which is the "Finish" button: the ONLY way out of onboarding. A child
+            // who cannot reach it cannot finish setup at all. Cyrillic Uzbek and larger Dynamic Type
+            // both make it likelier, and this is the screen every new child sees.
+            .scrollableIfNeeded()
         }
         .onAppear { manager.refreshStatuses() }
     }

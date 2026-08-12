@@ -80,10 +80,21 @@ struct AudioListeningIndicator: View {
 /// is ever opened. Honest and plain: what the parent can do, and that the child will always see the
 /// indicator while it's on. The mic and the camera are asked for SEPARATELY: a tap that allowed an
 /// audio check must never be what opens the camera, so `mode` drives the copy and the icon.
+/// Carries the consent sheet's own content height up to the detent that presents it.
+private struct ConsentSheetHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct AudioConsentSheet: View {
     var mode: StreamMode = .audio
     let onAllow: () -> Void
     let onDecline: () -> Void
+
+    /// Resting sheet height, measured from the content rather than assumed. See the detent below.
+    @State private var restingHeight: CGFloat = 440
 
     private var title: String {
         mode == .video ? L10n.tr("audio2.consent.video.title") : L10n.tr("audio2.consent.title")
@@ -147,7 +158,34 @@ struct AudioConsentSheet: View {
             }
         }
         .padding(24)
-        .presentationDetents([.height(440)])
+        // Same treatment the SOS sheet already got, and for the same reason — this sheet was simply
+        // missed. Its height is not fixed: the title, the body and the hint are all translated into
+        // three languages (Cyrillic Uzbek runs materially longer than Latin), the video wording is
+        // longer than the audio wording, and the child's Dynamic Type setting scales every line of
+        // it. Against a fixed 440pt detent with no scroll, the `Spacer(minLength: 0)` above the
+        // buttons collapses first and then Allow / Not now slide off the bottom edge.
+        //
+        // This is the one sheet where that is unrecoverable rather than annoying. It is the gate in
+        // front of the microphone: a child who cannot reach "Allow" cannot consent, so no live
+        // session can ever start and the parent simply sees a device that never answers. A paired
+        // iPhone in this exact state — uz-Cyrl, consent never granted — is what sent us looking.
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: ConsentSheetHeightKey.self, value: proxy.size.height)
+            }
+        )
+        .onPreferenceChange(ConsentSheetHeightKey.self) { measured in
+            // The sheet is as tall as its content instead of a number someone measured once in
+            // English at default text. 440pt stays the floor so the design is unchanged where it
+            // already fitted; the cap keeps it a sheet rather than a full-screen takeover.
+            restingHeight = min(max(measured, 440), 700)
+        }
+        .scrollableIfNeeded()
+        // Measured resting height, plus `.large` to drag to. The scroll guarantees every control is
+        // REACHABLE even at the largest accessibility sizes; the measured detent is what stops a
+        // child having to discover that by scrolling a sheet that looks finished. The drag indicator
+        // was already visible and, until now, lied — there was nowhere to drag to.
+        .presentationDetents([.height(restingHeight), .large])
         .presentationDragIndicator(.visible)
     }
 }
