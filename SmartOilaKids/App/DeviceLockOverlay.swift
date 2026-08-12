@@ -71,6 +71,11 @@ struct DeviceLockOverlay: View {
                 .accessibilityLabel(L10n.tr("sos2.title"))
             }
             .padding(.horizontal, 22)
+            // iPad content clamp: without it this screen ran full-bleed on a 13" iPad while
+            // every scaffolded screen sat in a centred 640pt column, so the width visibly snapped
+            // as the child moved between them.
+            .frame(maxWidth: BolajonMetrics.contentMaxWidth)
+            .frame(maxWidth: .infinity)
         }
         .allowsHitTesting(true)
         .sheet(isPresented: $sos.showConfirm, onDismiss: { sos.reset() }) {

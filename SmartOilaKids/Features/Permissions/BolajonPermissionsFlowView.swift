@@ -229,74 +229,55 @@ private struct PermissionStepView: View {
 
     private var isIntro: Bool { step.kind == .intro }
 
+    // Uses the shared `BolajonHeroSheet` rather than a hand-rolled copy of it.
+    //
+    // This screen previously reimplemented the scaffold — same hero-over-sheet ZStack, same
+    // TopRoundedRectangle, same toolbar — to get one deviation: evenly balanced spacers around the
+    // icon instead of the downward bias the scaffold used to apply. The scaffold does exactly that
+    // now, so the copy bought nothing and cost two things: it never received the 640pt iPad content
+    // clamp, and it never received the scroll fallback, which is what let content run off the
+    // bottom of a 375x667pt screen with no way to reach it.
     var body: some View {
-        ZStack(alignment: .top) {
-            HeroBackground(intent: step.intent, deep: isIntro)
-                .ignoresSafeArea()
+        BolajonHeroSheet(
+            intent: step.intent,
+            deepHero: isIntro,
+            blocksBack: isIntro,
+            progress: progress,
+            mandatoryCount: 2
+        ) {
+            if isIntro {
+                BolajonBrandBadge(diameter: 140)
+            } else {
+                IconBadge(systemName: step.icon, intent: step.intent, diameter: 140)
+            }
+        } sheet: {
+            VStack(spacing: 14) {
+                Text(L10n.tr(step.titleKey))
+                    .font(AppTypography.title(23))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+                Text(L10n.tr(step.bodyKey))
+                    .font(AppTypography.bodyText(14))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 0) {
-                // Even spacers above/below the icon keep it in the upper area (per the design)
-                // instead of biased down against the card.
-                Spacer(minLength: 24)
-                if isIntro {
-                    BolajonBrandBadge(diameter: 140)
-                } else {
-                    IconBadge(systemName: step.icon, intent: step.intent, diameter: 140)
-                }
-                Spacer(minLength: 24)
-
-                // Rounded-top white card with the copy + CTAs (design's bottom sheet panel).
-                VStack(spacing: 14) {
-                    Text(L10n.tr(step.titleKey))
-                        .font(AppTypography.title(23))
-                        .foregroundStyle(AppColors.inkPrimary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
-                    Text(L10n.tr(step.bodyKey))
-                        .font(AppTypography.bodyText(14))
-                        .foregroundStyle(AppColors.inkSecondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(spacing: 10) {
-                        if step.showsDecline {
-                            OutlineButton(title: L10n.tr(step.declineKey)) {
-                                AppHaptics.selection()
-                                onDecline()
-                            }
-                        }
-                        BolajonPrimaryButton(title: L10n.tr(step.primaryKey)) {
-                            AppHaptics.tap()
-                            onPrimary()
+                VStack(spacing: 10) {
+                    if step.showsDecline {
+                        OutlineButton(title: L10n.tr(step.declineKey)) {
+                            AppHaptics.selection()
+                            onDecline()
                         }
                     }
-                    .padding(.top, 12)
-                    .padding(.bottom, 6)
+                    BolajonPrimaryButton(title: L10n.tr(step.primaryKey)) {
+                        AppHaptics.tap()
+                        onPrimary()
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
-                .padding(.horizontal, BolajonMetrics.screenPadding)
-                .padding(.top, 28)
-                .padding(.bottom, 10)
-                .background(
-                    TopRoundedRectangle(radius: 38)
-                        .fill(AppColors.cardWhite)
-                        .shadow(color: Color.black.opacity(0.05), radius: 14, x: 0, y: -4)
-                        .ignoresSafeArea(edges: .bottom)
-                )
-            }
-        }
-        // Empty title → the next pushed step derives a bare "‹" back chevron (per the design),
-        // not the default "‹ Back" label.
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(isIntro)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbar {
-            if let progress {
-                ToolbarItem(placement: .principal) {
-                    PermissionProgressBar(current: progress.current, total: progress.total, mandatoryCount: 2)
-                }
+                .padding(.top, 12)
+                .padding(.bottom, 6)
             }
         }
     }
