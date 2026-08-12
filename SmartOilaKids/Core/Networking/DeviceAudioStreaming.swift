@@ -1308,6 +1308,9 @@ final class DeviceAudioStreamManager: ObservableObject {
         // path observable with `log stream --predicate 'subsystem == "uz.smartoila.kids"'`.
         // No payload, tokens or identifiers: `status` and `event` are fixed vocabularies.
         Self.log.notice("media \(status, privacy: .public) \(event, privacy: .public)")
+#if DEBUG
+        print("[oila] media \(status) \(event)")
+#endif
     }
 
     static let log = Logger(subsystem: "uz.smartoila.kids", category: "media")

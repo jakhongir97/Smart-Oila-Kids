@@ -212,8 +212,29 @@ private extension RootView {
         // addressable while every parent command was silently dropped. No token is the honest
         // state until FirebaseMessaging is linked.
         guard let token = UserDefaults.standard
-            .string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty else { return }
-        try? await OilaDeviceClient.shared.updateFCMToken(token)
+            .string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty else {
+            PushCommandRouter.log.notice("fcm_token_upload skipped=no_local_token")
+#if DEBUG
+            print("[oila] fcm_token_upload skipped=no_local_token")
+#endif
+            return
+        }
+        // The result of this call was thrown away by `try?`, which made a real field failure
+        // indistinguishable from a healthy device: if the backend is holding a stale token it pushes
+        // into the void, and the child looks perfectly registered from the inside. Logging only
+        // whether it succeeded — never the token itself, which is a delivery credential.
+        do {
+            try await OilaDeviceClient.shared.updateFCMToken(token)
+            PushCommandRouter.log.notice("fcm_token_upload ok")
+#if DEBUG
+            print("[oila] fcm_token_upload ok")
+#endif
+        } catch {
+            PushCommandRouter.log.error("fcm_token_upload failed=\(String(describing: error), privacy: .public)")
+#if DEBUG
+            print("[oila] fcm_token_upload failed=\(error)")
+#endif
+        }
     }
 
     var localServiceDSN: String? {

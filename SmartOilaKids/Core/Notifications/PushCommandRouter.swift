@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum PushDeliveryContext: String {
     case direct = "direct"
@@ -15,6 +16,19 @@ enum PushCommandRouter {
         deliveryContext: PushDeliveryContext = .direct
     ) {
         let payload = parsePayload(from: userInfo)
+        // The single question a field failure always turns on: did a push arrive at all? Nothing
+        // answered it before -- diagnostics went only to an in-memory object no screen reads, so
+        // "the parent pressed listen and nothing happened" was indistinguishable from a push that
+        // never left Firebase. The event name and delivery context are enough to tell those apart
+        // and are not user data; no payload, token or body is logged.
+        log.notice(
+            "push \(deliveryContext.rawValue, privacy: .public) event=\(payload.event.isEmpty ? "-" : payload.event, privacy: .public) dsn=\(payload.dsn == nil ? "absent" : "present", privacy: .public)"
+        )
+#if DEBUG
+        // Also to stdout, so an on-device test driven from a Mac can watch it live over
+        // `devicectl device process launch --console`, which captures stdout but not os_log.
+        print("[oila] push \(deliveryContext.rawValue) event=\(payload.event)")
+#endif
         updateDiagnostics(
             status: openedFromInteraction ? "opened" : "received",
             dsn: payload.dsn ?? "-",
@@ -29,6 +43,8 @@ enum PushCommandRouter {
             deliveryContext: deliveryContext
         )
     }
+
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "push")
 }
 
 private extension PushCommandRouter {
