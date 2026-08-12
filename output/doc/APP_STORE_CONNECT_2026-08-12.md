@@ -373,6 +373,12 @@ session, mints no token, opens no hardware and never touches `DeviceAudioStreamM
 - [x] Confirm `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` is still `false` and that no metadata mentions
       app blocking or screen-time limits — flag verified `false`; no copy in this file mentions either
 - [ ] **Backend: long-lived QA pairing code**, then paste into §4 — the one hard blocker
+- [ ] **Enable "Time Sensitive Notifications" on the `uz.smartoila.kids` App ID**, then add
+      `com.apple.developer.usernotifications.time-sensitive` to both entitlements files. The live-session
+      presence banner already asks for `.timeSensitive`, and without the entitlement iOS silently
+      downgrades it — so when the app is off screen, any Focus mode suppresses the only disclosure that
+      a microphone is open. Capability first: adding the entitlement alone fails signing with a
+      provisioning error. Certificates, Identifiers & Profiles → Identifiers → the app → Edit.
 - [ ] Publish the support URL and fill it in
 - [ ] Confirm the `.p8` APNs key is on the Firebase project (push is now declared in ASC). Blocked
       2026-08-12: `console.firebase.google.com` refuses the signed-in account until 2SV is enabled on

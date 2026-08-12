@@ -630,6 +630,15 @@ final class DeviceAudioStreamManager: ObservableObject {
         self.stream = stream
         self.defaults = defaults
         refreshGrantedConsent()
+        // Clear any presence banner left over from a previous process.
+        //
+        // The banner is only removed by `syncPresenceNotification`, which runs off a `state` change.
+        // A process that dies while live -- force-quit, a crash, the system reclaiming memory --
+        // never makes that transition, so "Ota-ona tinglayapti" stayed in Notification Centre
+        // indefinitely with nothing behind it. That is a false disclosure in the alarming direction:
+        // a child told the microphone is open when it is not, and no way to make it go away. State is
+        // `.idle` here by construction, so this is exactly the same removal the transition performs.
+        syncPresenceNotification()
         NotificationCenter.default.addObserver(
             self, selector: #selector(onWakeStart(_:)), name: .pushShouldStartAudioStream, object: nil)
         NotificationCenter.default.addObserver(
@@ -658,6 +667,16 @@ final class DeviceAudioStreamManager: ObservableObject {
         content.title = L10n.tr("audio2.notification.title")
         content.body = L10n.tr(activeMode == .video ? "audio2.watching" : "audio2.listening")
         content.sound = nil
+        // Asks to break through Focus, and today does not: `.timeSensitive` is honoured only with
+        // the `com.apple.developer.usernotifications.time-sensitive` entitlement, which neither
+        // entitlements file declares, so iOS silently downgrades it. That matters more here than in
+        // most apps -- when the app is off screen this banner is the ONLY disclosure that a
+        // microphone is open, and any Focus mode currently suppresses it.
+        //
+        // Left requesting the level rather than removing it: the request is inert without the
+        // entitlement and correct the moment it lands. Adding the entitlement is NOT a code change
+        // alone -- the App ID needs the Time Sensitive Notifications capability enabled first, or
+        // every signed build fails with a provisioning error. Tracked in the submission doc.
         content.interruptionLevel = .timeSensitive
         // A nil trigger fires immediately; re-using the same identifier REPLACES the existing
         // banner rather than stacking a second one when the mode changes mid-session.
