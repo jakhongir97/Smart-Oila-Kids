@@ -55,9 +55,36 @@ extension LocationPermissionManager {
     // prompt is legitimate — and a no-op here was worse than useless, because the permission screen
     // renders an "Enable" button for every denied row. Tapping it did nothing at all.
 
+    /// iOS 16 microphone request. Marked deprecated to match the APIs it wraps — Swift suppresses
+    /// deprecation warnings inside a declaration that is itself deprecated, so the legacy calls stay
+    /// warning-free and this is the single place to delete when the minimum moves to iOS 17.
+    @available(iOS, introduced: 16.0, deprecated: 17.0, message: "Superseded by AVAudioApplication.")
+    private func requestLegacyMicrophonePermission() {
+        let session = AVAudioSession.sharedInstance()
+        switch session.recordPermission {
+        case .granted:
+            break
+        case .undetermined:
+            session.requestRecordPermission { [weak self] _ in
+                DispatchQueue.main.async { self?.refreshStatuses() }
+            }
+        case .denied:
+            // Once denied, iOS never shows the prompt again — and by now the Settings row exists.
+            openAppSettings()
+        @unknown default:
+            openAppSettings()
+        }
+    }
+
     func requestMicrophonePermission() {
         guard #available(iOS 17.0, *) else {
-            openAppSettings()
+            // iOS 16 gets the same branching through the pre-`AVAudioApplication` API rather than
+            // being sent straight to Settings. That shortcut was a dead end: iOS does not list a
+            // Microphone row for an app that has never requested the permission, so a child on iOS
+            // 16 — the app's own stated minimum — tapped "Enable" and arrived at a Settings page
+            // with nothing on it to turn on. Asking first is both the working path and the one that
+            // creates the row for the Settings fallback to point at.
+            requestLegacyMicrophonePermission()
             return
         }
         switch AVAudioApplication.shared.recordPermission {

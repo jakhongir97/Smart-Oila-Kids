@@ -90,10 +90,21 @@ struct RootView: View {
             // lock-state payload carries `deviceLocalTime` and the schedule window, and the overlay
             // already knows how to render them. They come from the telemetry service now, which
             // mirrors the last applied GET /device/lock/state.
-            DeviceLockOverlay(
-                localTime: oilaTelemetry.deviceLocalTime,
-                scheduleRange: oilaTelemetry.scheduleRangeText
-            )
+            // The banner rides ABOVE the lock takeover, not behind it.
+            //
+            // A full-screen cover is presented over the whole window, so the disclosure sitting in
+            // the root VStack was completely hidden while the cover was up — and this is reachable
+            // in the shipping build: `refreshLock()` is not gated on the Screen Time flag, so a
+            // parent can lock the device today. That produced the one combination this module exists
+            // to prevent: a microphone open, the child staring at a lock screen, and nothing on it
+            // saying so. Same view, same state, drawn where it can actually be seen.
+            VStack(spacing: 0) {
+                liveSessionDisclosure
+                DeviceLockOverlay(
+                    localTime: oilaTelemetry.deviceLocalTime,
+                    scheduleRange: oilaTelemetry.scheduleRangeText
+                )
+            }
         }
         .background(alignment: .topLeading) {
             if shouldRunLocalChildServices,

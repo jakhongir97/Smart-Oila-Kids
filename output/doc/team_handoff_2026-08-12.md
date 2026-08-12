@@ -175,6 +175,25 @@ is easy to re-introduce:
 
 ---
 
+## 6b. BACKEND — accept the chat socket's token as a header, then stop accepting it in the URL
+
+`wss://api.oila360.uz/ws/chat?token=<deviceToken>` puts a bearer credential in a query string, where
+it lands in server access logs, proxy logs and crash reports as plaintext. This particular token is
+the worst candidate for that: a paired device holds **no refresh token**, so a leaked one cannot be
+rotated — the only remedy is re-pairing the child.
+
+The iOS client now sends the same credential **both ways**: still in the query, and additionally as
+`Authorization: Bearer <deviceToken>` on the upgrade request. Sending both is deliberate, so the
+switch needs no coordinated release:
+
+1. Gateway starts accepting the `Authorization` header (it can ignore it today — clients already send it).
+2. Once Android and web send it too, the gateway stops accepting `?token=` and starts rejecting it.
+3. Clients drop the query parameter.
+
+Step 1 is the only one that needs doing now, and it breaks nothing.
+
+---
+
 ## 7. Ready to paste into the group (Uzbek)
 
 > Salom. iOS audit natijalari, muhim narsalar:

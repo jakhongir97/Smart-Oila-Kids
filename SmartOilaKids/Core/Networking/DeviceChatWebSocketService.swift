@@ -113,7 +113,20 @@ final class DeviceChatWebSocketService {
             // No token yet — the caller will retry once paired.
             return
         }
-        let task = session.webSocketTask(with: url)
+        // The credential also travels as an `Authorization` header, not only in the query string.
+        //
+        // A URL's query is the worst place for a bearer: it lands in server access logs, proxy logs
+        // and crash reports as plaintext, and this particular token cannot be rotated — a paired
+        // device holds no refresh token, so the only remedy for a leaked one is re-pairing the child.
+        // The query parameter stays for now because the gateway authenticates on it and dropping it
+        // unilaterally would disconnect every child; sending both lets the backend switch to the
+        // header and then stop accepting the query, with no client release in between. Tracked as an
+        // ask in the team handoff.
+        var request = URLRequest(url: url)
+        if let token = tokens.accessToken()?.trimmedNonEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let task = session.webSocketTask(with: request)
         self.task = task
         openedAt = Date()
         pingOutstanding = false

@@ -261,3 +261,36 @@ final class UzbekCyrillicTransliterationTests: XCTestCase {
     }
 }
 
+
+/// The two chat read-receipt predicates. Each has already shipped a bug once, and neither had a test.
+@MainActor
+final class ChatReadReceiptPredicateTests: XCTestCase {
+    /// A plain `contains("read")` also fires on "unread" and "thread", so `chat.unread_count` and
+    /// `thread.updated` were treated as read receipts — and, combined with the parse bug below,
+    /// marked the child's entire thread as read by the parent.
+    func testOnlyGenuineReadEventsCount() {
+        for event in ["chat.read", "chat:read", "message_read", "READ", "chat read"] {
+            XCTAssertTrue(BolajonChatViewModel.isReadReceiptEvent(event), "\(event) is a read receipt")
+        }
+        for event in ["chat.unread_count", "thread.updated", "unread", "thread", "chat.readiness"] {
+            XCTAssertFalse(BolajonChatViewModel.isReadReceiptEvent(event), "\(event) is NOT a read receipt")
+        }
+    }
+
+    /// The backend emits fractional-second timestamps. A default ISO8601DateFormatter rejects those,
+    /// which made every `readAt` fall through to "now" — the whole thread instantly ✓✓.
+    func testFractionalAndPlainTimestampsBothParse() {
+        XCTAssertNotNil(BolajonChatViewModel.parseISO("2026-07-26T09:15:02.418Z"),
+                        "fractional seconds are what the backend actually sends")
+        XCTAssertNotNil(BolajonChatViewModel.parseISO("2026-07-26T09:15:02Z"),
+                        "and payloads that omit milliseconds must still parse")
+        XCTAssertNil(BolajonChatViewModel.parseISO("not a date"))
+        XCTAssertNil(BolajonChatViewModel.parseISO(nil))
+        XCTAssertNil(BolajonChatViewModel.parseISO("  "))
+        XCTAssertEqual(
+            BolajonChatViewModel.parseISO("2026-07-26T09:15:02.418Z"),
+            BolajonChatViewModel.parseISO("2026-07-26T09:15:02.418Z"),
+            "and it is deterministic — the two formatters are separate immutable instances on purpose"
+        )
+    }
+}

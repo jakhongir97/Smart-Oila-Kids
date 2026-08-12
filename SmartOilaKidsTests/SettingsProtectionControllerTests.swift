@@ -136,3 +136,44 @@ final class PairingClearsPreviousFamilyPINTests: XCTestCase {
         )
     }
 }
+
+/// `clearSession()` is what a disconnect actually means. Its unglamorous half — revoking the device
+/// credential and the PIN, and resetting the DSN so a re-pair cannot surface the previous child's
+/// data — had no assertions at all: the existing coverage exercised the flags around it.
+@MainActor
+final class ClearSessionRevokesAuthorityTests: XCTestCase {
+    func testDisconnectRevokesTheDeviceCredentialAndEveryChildScopedArtifact() {
+        let suiteName = "ClearSessionRevokes.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        // A device mid-session: paired, onboarded, with a PIN and cached child data.
+        let store = SessionStore(userDefaults: defaults)
+        store.setOilaPaired(true)
+        store.setSetupCompleted(true)
+        store.setOnboardingCompleted(true)
+        defaults.set("Joxon", forKey: "SETTINGS_CACHE_PROFILE_NAME")
+        defaults.set("[]", forKey: "SETTINGS_CACHE_CONNECTED_DEVICES")
+        KeychainPINCredentialStore().save(Data("family-pin".utf8))
+        defaults.set(2, forKey: SettingsProtectionController.pinFailCountKey)
+        let dsnBefore = OilaDeviceIdentity.deviceDSN(userDefaults: defaults)
+
+        store.clearSession()
+
+        XCTAssertFalse(store.oilaPaired, "the child is no longer paired")
+        XCTAssertFalse(store.setupCompleted, "and is returned to the setup flow")
+        XCTAssertNil(
+            KeychainPINCredentialStore().load(),
+            "the PIN verifier is device-global in the Keychain — leaving it hands the next family a secret only the previous parent knows"
+        )
+        XCTAssertNil(defaults.object(forKey: SettingsProtectionController.pinFailCountKey))
+        XCTAssertNil(defaults.object(forKey: "SETTINGS_CACHE_PROFILE_NAME"),
+                     "the previous child's name must not survive into the next pairing")
+        XCTAssertNil(defaults.object(forKey: "SETTINGS_CACHE_CONNECTED_DEVICES"))
+        XCTAssertNotEqual(
+            OilaDeviceIdentity.deviceDSN(userDefaults: defaults),
+            dsnBefore,
+            "the DSN is regenerated, which is what makes every DSN-scoped store start empty on re-pair"
+        )
+    }
+}

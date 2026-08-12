@@ -559,7 +559,9 @@ final class BolajonChatViewModel: ObservableObject {
     /// fallback above and marked the entire thread as read by the parent. Matching "read" as a
     /// whole separator-delimited token keeps `chat:read` / `chat.read` / `message_read` working
     /// while excluding both impostors.
-    private static func isReadReceiptEvent(_ event: String) -> Bool {
+    // Internal, not private, so the two predicates that have each shipped a bug can be pinned
+    // by tests. Both are pure functions of their input.
+    static func isReadReceiptEvent(_ event: String) -> Bool {
         event.lowercased()
             .split { !$0.isLetter && !$0.isNumber }
             .contains { $0 == "read" }
@@ -587,7 +589,7 @@ final class BolajonChatViewModel: ObservableObject {
     /// `SendMessageDto.text` is declared 1..4000 in the spec.
     private static let maxMessageLength = 4000
 
-    private static func parseISO(_ any: Any?) -> Date? {
+    static func parseISO(_ any: Any?) -> Date? {
         guard let string = (any as? String)?.trimmedNonEmpty else { return nil }
         return isoParserFractional.date(from: string) ?? isoParser.date(from: string)
     }
