@@ -233,7 +233,7 @@
 "settings2.section_other" = "Other";
 "settings2.permissions" = "Permissions status";
 "settings2.permissions_sub" = "View and manage permissions";
-"settings2.permissions_off_count" = "%d permissions off";
+"settings2.permissions_off_count" = "Permissions off: %d";
 "settings2.connection" = "Connection status";
 "settings2.connection_value" = "Connected to parent";
 "settings2.language" = "Language";
