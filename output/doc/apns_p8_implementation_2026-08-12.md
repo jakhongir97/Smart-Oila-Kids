@@ -264,6 +264,42 @@ moot, which is exactly why §2 step 5 says to choose it.
 
 ---
 
+## 5a. MEASURED END TO END, 2026-08-12 — and the latency problem is real
+
+With the new key, a background push sent straight to APNs (no Firebase, no backend) produced this on
+the real device:
+
+```
+[oila] push background_fetch event=stream.start     ← the silent push arrived
+[oila] media live audio_live                        ← mic opened, publishing to LiveKit
+[oila] media idle audio_stopped                     ← the server lease closed it
+```
+
+The entire wake path works. Push → route → consent → microphone → LiveKit → lease teardown, on a real
+iPhone, with nothing mocked. Whatever remains broken from the parent app is upstream of the device.
+
+**But it took minutes, not seconds.** The push was accepted by APNs immediately (HTTP 200) and did not
+reach the app for several minutes. An *alert* push sent afterwards at priority 10 arrived in under ten
+seconds. That is not a bug — it is Apple behaving exactly as documented, treating background
+notifications as low priority and delivering them when it considers it power-efficient.
+
+**A parent pressing "listen now" cannot wait minutes.** So this is a product decision, not a tuning
+exercise, and there are two honest options:
+
+1. **Make the wake an alert push.** A notification-type push at priority 10 is delivered immediately,
+   and it can carry `content-available: 1` in the same `aps` dictionary, so it both shows a banner and
+   wakes the app for background work. For this app that is arguably *better* than silent: the child
+   seeing "your parent is checking in" is disclosure, which is the posture the whole live-session
+   design already takes. It also sidesteps background throttling entirely.
+2. **Use the device socket for commands.** The backend's `transport` enum already contains `ws`. A
+   command channel that does not depend on APNs scheduling is the durable answer; push then only has
+   to wake a *terminated* app, which is the one job it is genuinely good at.
+
+Silent background push alone is the one option that does not work for this feature, and now we have
+the measurement to say so rather than the theory.
+
+---
+
 ## 6. What still will not be reliable, and why it is not your fault
 
 Silent background push is the correct transport for "refresh your data". It is a **poor** transport
