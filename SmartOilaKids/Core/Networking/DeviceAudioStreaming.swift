@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import os
 import UIKit
 import UserNotifications
 #if canImport(LiveKit)
@@ -603,6 +604,28 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// `OilaTelemetryService`. Production never overrides it.
     var isFeatureEnabled: () -> Bool = { AppRuntime.audioStreamingEnabled }
 
+    // MARK: Orchestration seams
+    //
+    // `start()` reached the microphone, the notification centre, the app's own scene state and
+    // LiveKit through statics, so no test could drive a session past the first of them: everything
+    // downstream — the ownership guards, the disclosure re-check, the lease, the teardown ordering —
+    // was unreachable, and the only tested parts of this file were the pure decision functions that
+    // sit in front of it. The decisions were verified; the machine that obeys them was not. Each
+    // default below is exactly the production call that used to be inlined, so the shipping path is
+    // unchanged and only tests ever assign to these.
+
+    /// Builds the transport. Production hands back the LiveKit publisher; a test hands back a fake
+    /// and can then drive a session all the way to `.live`.
+    var makePublisher: () -> LiveMediaPublishing = { MediaPublisherFactory.make() }
+    /// Whether the app is on screen. See `systemIsForeground`.
+    var isForeground: () -> Bool = { DeviceAudioStreamManager.systemIsForeground }
+    /// Whether a presence notification would actually be seen. See `systemNotificationsAuthorized`.
+    var notificationsAuthorized: () async -> Bool = {
+        await DeviceAudioStreamManager.systemNotificationsAuthorized()
+    }
+    /// The microphone grant. Production prompts; a test answers without a device.
+    var requestMicPermission: () async -> Bool = { await DeviceAudioStreamManager.systemRequestMicPermission() }
+
     init(stream: OilaStreamServicing = StreamTokenSourceFactory.make(), defaults: UserDefaults = .standard) {
         self.stream = stream
         self.defaults = defaults
@@ -654,9 +677,14 @@ final class DeviceAudioStreamManager: ObservableObject {
     ///   ended instead. An open mic with nothing on the device disclosing it is the covert-recording
     ///   shape we refuse to ship, whatever the parent asked for.
     func handleAppDidEnterBackground() {
-        guard state == .live else { return }
+        // `.connecting` counts, not only `.live`. A session whose connect is still in flight when the
+        // screen goes away used to be ignored here and then flip to `.live` off screen a moment
+        // later, which is the exact window the second disclosure reading in `start()` now closes;
+        // stopping it on the transition as well means the session dies at whichever of the two
+        // arrives first instead of depending on the race.
+        guard state == .live || state == .connecting else { return }
         Task { @MainActor [weak self] in
-            guard let self, self.state == .live else { return }
+            guard let self, self.state == .live || self.state == .connecting else { return }
             // Same rule the session had to pass to START — evaluated for the state we are moving
             // INTO, so a session that was disclosed by the on-screen indicator is re-judged against
             // the presence notification. Sharing `LiveSessionDisclosure` is what stops the two
@@ -664,9 +692,9 @@ final class DeviceAudioStreamManager: ObservableObject {
             let verdict = LiveSessionDisclosure.verdict(
                 mode: self.activeMode,
                 isForeground: false,
-                notificationsAuthorized: await Self.notificationsAuthorized()
+                notificationsAuthorized: await self.notificationsAuthorized()
             )
-            guard !verdict.isAllowed, self.state == .live else { return }
+            guard !verdict.isAllowed, self.state == .live || self.state == .connecting else { return }
             self.recordMedia(status: "idle", event: "\(self.activeMode.rawValue)_stopped_\(verdict.diagnosticSuffix)")
             await self.stop()
         }
@@ -674,7 +702,7 @@ final class DeviceAudioStreamManager: ObservableObject {
 
     /// Whether the child would actually see a presence notification if one were posted. Provisional
     /// counts — a quiet banner still lands in Notification Centre.
-    private static func notificationsAuthorized() async -> Bool {
+    private static func systemNotificationsAuthorized() async -> Bool {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         return settings.authorizationStatus == .authorized
             || settings.authorizationStatus == .provisional
@@ -687,7 +715,7 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// `.inactive` counts as foreground on purpose: the app is still on screen (app switcher, a call
     /// banner, Control Centre pulled down) and the indicator is still rendered, so requiring
     /// `.active` would refuse sessions that are in fact perfectly well disclosed.
-    private static var isForeground: Bool {
+    private static var systemIsForeground: Bool {
         UIApplication.shared.applicationState != .background
     }
 
@@ -930,8 +958,8 @@ final class DeviceAudioStreamManager: ObservableObject {
         // still `.idle` and open two publishers.
         let disclosure = LiveSessionDisclosure.verdict(
             mode: command.mode,
-            isForeground: Self.isForeground,
-            notificationsAuthorized: await Self.notificationsAuthorized()
+            isForeground: isForeground(),
+            notificationsAuthorized: await notificationsAuthorized()
         )
         guard disclosure.isAllowed else {
             if generation == startGeneration {
@@ -971,7 +999,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         do {
             let token = try await stream.mintStreamToken()
             guard generation == startGeneration, state == .connecting else { return }
-            let publisher = MediaPublisherFactory.make()
+            let publisher = makePublisher()
             publisher.onEnded = { [weak self] in
                 Task { @MainActor in await self?.handleSessionEndedByRoom() }
             }
@@ -988,6 +1016,38 @@ final class DeviceAudioStreamManager: ObservableObject {
             guard generation == startGeneration, self.publisher === publisher else {
                 publisher.onEnded = nil
                 await publisher.disconnect()
+                return
+            }
+
+            // DISCLOSURE GATE, SECOND READING. The verdict above was taken before three awaits — the
+            // microphone grant, the token mint and the LiveKit connect — which together are seconds,
+            // not milliseconds. A child who locked the screen or switched apps inside that window
+            // reached here with a verdict describing a screen that is no longer showing anything, and
+            // nothing re-judged it: `handleAppDidEnterBackground` used to return early on `.connecting`,
+            // and a session that only becomes live AFTER the transition never makes one to observe.
+            // The result was an open microphone with no indicator rendered and, for a child who
+            // declined notifications, no presence banner either. Re-reading the verdict here is what
+            // makes the rule a property of the SESSION rather than of the instant it was requested.
+            let liveDisclosure = LiveSessionDisclosure.verdict(
+                mode: command.mode,
+                isForeground: isForeground(),
+                notificationsAuthorized: await notificationsAuthorized()
+            )
+            // Ownership can change across that await too, so it is re-checked before either branch.
+            guard generation == startGeneration, self.publisher === publisher else {
+                publisher.onEnded = nil
+                await publisher.disconnect()
+                return
+            }
+            guard liveDisclosure.isAllowed else {
+                publisher.onEnded = nil
+                self.publisher = nil
+                await publisher.disconnect()
+                state = .error(liveDisclosure.diagnosticSuffix)
+                recordMedia(
+                    status: "error",
+                    event: Self.event(command.mode, "start_refused_\(liveDisclosure.diagnosticSuffix)")
+                )
                 return
             }
             state = .live
@@ -1157,7 +1217,7 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// `.unsupported` — which silently killed live audio on the app's own stated minimum
     /// (`IPHONEOS_DEPLOYMENT_TARGET = 16.0`). The pre-17 API still exists and still works, so the
     /// permission ask is branched here instead of the whole feature being gated.
-    private func requestMicPermission() async -> Bool {
+    private static func systemRequestMicPermission() async -> Bool {
         if #available(iOS 17.0, *) {
             if AVAudioApplication.shared.recordPermission == .granted { return true }
             return await withCheckedContinuation { continuation in
@@ -1173,7 +1233,7 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// warnings inside a declaration that is itself deprecated, so the legacy calls stay warning-free
     /// here and this is the single place to delete when the minimum moves to iOS 17.
     @available(iOS, introduced: 16.0, deprecated: 17.0, message: "Superseded by AVAudioApplication.")
-    private func requestLegacyMicPermission() async -> Bool {
+    private static func requestLegacyMicPermission() async -> Bool {
         let session = AVAudioSession.sharedInstance()
         if session.recordPermission == .granted { return true }
         return await withCheckedContinuation { continuation in
@@ -1241,5 +1301,14 @@ final class DeviceAudioStreamManager: ObservableObject {
             streamState: status,
             lastEvent: event
         )
+        // Also to the unified log. `RuntimeDiagnosticsCenter` is in-memory and no shipping screen
+        // reads it, so on a real device every one of these events was invisible — "the parent pressed
+        // listen and nothing happened" could not be told apart from "the push never arrived" without
+        // attaching a debugger. Every media event funnels through here, so one line makes the whole
+        // path observable with `log stream --predicate 'subsystem == "uz.smartoila.kids"'`.
+        // No payload, tokens or identifiers: `status` and `event` are fixed vocabularies.
+        Self.log.notice("media \(status, privacy: .public) \(event, privacy: .public)")
     }
+
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "media")
 }

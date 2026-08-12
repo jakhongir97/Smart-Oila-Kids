@@ -1,6 +1,7 @@
 import AVFAudio
 import AVFoundation
 import CoreLocation
+import os
 import UIKit
 import UserNotifications
 import XCTest
@@ -3239,5 +3240,179 @@ extension StreamCommandParsingTests {
         )
         XCTAssertFalse(parked.isStaleWake, "a child who taps Allow promptly must still be heard")
         XCTAssertGreaterThan(parked.remainingLeaseSeconds, 100)
+    }
+}
+
+// MARK: - Live session lifecycle
+//
+// Everything below drives a REAL `DeviceAudioStreamManager` through a whole session. None of it was
+// reachable before: `start()` built its publisher from a static factory and asked the microphone, the
+// notification centre and `UIApplication` for the truth directly, so the first of those ended any
+// test. The pure decision functions in front of it were well covered and the machine that obeys them
+// was not covered at all -- which is why a disclosure gate could be walked past without a single test
+// going red.
+
+/// Records what the session did to the transport, and lets a test stall `connect()` at will so the
+/// window between "gate passed" and "publishing" can be reasoned about.
+private final class FakeMediaPublisher: LiveMediaPublishing, @unchecked Sendable {
+    var onEnded: (() -> Void)?
+    private(set) var connectCount = 0
+    private(set) var disconnectCount = 0
+    private(set) var connectedMode: StreamMode?
+    /// Awaited inside `connect()`, so a test can act while the connect is in flight.
+    var beforeConnectReturns: (@Sendable () async -> Void)?
+
+    func connect(
+        url: String,
+        token: String,
+        mode: StreamMode,
+        cameraPosition: AVCaptureDevice.Position?
+    ) async throws {
+        connectCount += 1
+        connectedMode = mode
+        await beforeConnectReturns?()
+    }
+
+    func applyMode(_ mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws {
+        connectedMode = mode
+    }
+
+    func disconnect() async { disconnectCount += 1 }
+}
+
+private struct FakeStreamTokenSource: OilaStreamServicing {
+    func mintStreamToken() async throws -> OilaStreamToken {
+        OilaStreamToken(token: "t", url: "wss://example.invalid", room: "r", identity: "device-1")
+    }
+}
+
+@MainActor
+final class LiveSessionLifecycleTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+
+    override func setUp() async throws {
+        suiteName = "LiveSessionLifecycleTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+    }
+
+    override func tearDown() async throws {
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    /// A manager wired to fakes, with consent already granted for `mode`.
+    private func makeManager(
+        publisher: FakeMediaPublisher,
+        foreground: Bool = true,
+        notificationsAuthorized: Bool = true,
+        micGranted: Bool = true,
+        consentFor mode: StreamMode = .audio
+    ) -> DeviceAudioStreamManager {
+        defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED")
+        if mode == .video { defaults.set(true, forKey: "OILA_VIDEO_CONSENT_GRANTED") }
+        let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
+        manager.isFeatureEnabled = { true }
+        manager.makePublisher = { publisher }
+        manager.isForeground = { foreground }
+        manager.notificationsAuthorized = { notificationsAuthorized }
+        manager.requestMicPermission = { micGranted }
+        return manager
+    }
+
+    func testAConsentedForegroundSessionReachesLive() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertTrue(manager.isLive, "a granted, disclosed, foreground session must actually publish")
+        XCTAssertEqual(publisher.connectCount, 1)
+        XCTAssertEqual(publisher.connectedMode, .audio)
+        XCTAssertEqual(publisher.disconnectCount, 0)
+    }
+
+    func testStopTearsTheTransportDownAndLeavesNoLiveState() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+        await manager.start(command: .debugAudio)
+        XCTAssertTrue(manager.isLive)
+
+        await manager.stop()
+
+        XCTAssertFalse(manager.isLive)
+        XCTAssertEqual(publisher.disconnectCount, 1, "the room must be left, not just forgotten")
+        XCTAssertNil(publisher.onEnded, "the room delegate must be detached before teardown")
+    }
+
+    /// THE REGRESSION. The child locks the screen while the token mint and the LiveKit connect are in
+    /// flight, and has declined notifications. Before the second disclosure reading, this ended with
+    /// `state == .live`: a microphone open with no indicator rendered and no banner available to post.
+    func testBackgroundingDuringConnectRefusesTheSessionInsteadOfPublishingUnseen() async {
+        let publisher = FakeMediaPublisher()
+        // Foreground at the moment the parent asks, off screen by the time the room is up.
+        let onScreen = OSAllocatedUnfairLock(initialState: true)
+        let manager = makeManager(publisher: publisher, notificationsAuthorized: false)
+        manager.isForeground = { onScreen.withLock { $0 } }
+        publisher.beforeConnectReturns = { onScreen.withLock { $0 = false } }
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertFalse(manager.isLive, "a session the child cannot see must not go live")
+        XCTAssertEqual(manager.state, .error("no_disclosure_channel"))
+        XCTAssertEqual(publisher.disconnectCount, 1, "and the room it already joined must be left")
+    }
+
+    /// The same race, but the child DID authorize notifications, so the presence banner is a real
+    /// disclosure channel and the session is allowed to continue off screen. This is the half that
+    /// must not regress into refusing everything.
+    func testBackgroundingDuringConnectIsAllowedWhenTheBannerCanBeShown() async {
+        let publisher = FakeMediaPublisher()
+        let onScreen = OSAllocatedUnfairLock(initialState: true)
+        let manager = makeManager(publisher: publisher, notificationsAuthorized: true)
+        manager.isForeground = { onScreen.withLock { $0 } }
+        publisher.beforeConnectReturns = { onScreen.withLock { $0 = false } }
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertTrue(manager.isLive, "audio off screen is honest when the presence banner can be posted")
+        XCTAssertEqual(publisher.disconnectCount, 0)
+    }
+
+    /// Video is refused off screen whatever the notification state: iOS suspends camera capture for a
+    /// backgrounded app, so the parent would watch a frozen frame while the UI claimed otherwise.
+    func testBackgroundingDuringConnectAlwaysRefusesVideo() async {
+        let publisher = FakeMediaPublisher()
+        let onScreen = OSAllocatedUnfairLock(initialState: true)
+        let manager = makeManager(publisher: publisher, notificationsAuthorized: true, consentFor: .video)
+        manager.isForeground = { onScreen.withLock { $0 } }
+        publisher.beforeConnectReturns = { onScreen.withLock { $0 = false } }
+
+        await manager.start(
+            command: StreamCommand(mode: .video, cameraPosition: .front, maxDurationSeconds: 120, expiresAt: nil)
+        )
+
+        XCTAssertFalse(manager.isLive)
+        XCTAssertEqual(manager.state, .error("video_off_screen"))
+        XCTAssertEqual(publisher.disconnectCount, 1)
+    }
+
+    func testASessionRefusedBeforeConnectingNeverTouchesTheTransport() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher, foreground: false, notificationsAuthorized: false)
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertFalse(manager.isLive)
+        XCTAssertEqual(publisher.connectCount, 0, "the first reading still refuses before any hardware")
+    }
+
+    func testADeniedMicrophoneNeverReachesTheTransport() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher, micGranted: false)
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertEqual(manager.state, .error("mic_denied"))
+        XCTAssertEqual(publisher.connectCount, 0)
     }
 }
