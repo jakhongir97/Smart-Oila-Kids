@@ -52,6 +52,7 @@ actor DeviceControlIntegrityNotifier {
             event: DeviceControlIntegrityEvent.appTargetsRemoved.rawValue,
             dsn: normalizedDSN,
             isRead: false,
+            remoteOrigin: false,
             receivedAt: now
         )
 
@@ -94,6 +95,7 @@ actor DeviceControlIntegrityNotifier {
             event: DeviceControlIntegrityEvent.screenTimeRevoked.rawValue,
             dsn: normalizedDSN,
             isRead: false,
+            remoteOrigin: false,
             receivedAt: now
         )
 
@@ -144,6 +146,7 @@ actor DeviceControlIntegrityNotifier {
             event: DeviceControlIntegrityEvent.remoteLocksUnenforceable.rawValue,
             dsn: normalizedDSN,
             isRead: false,
+            remoteOrigin: false,
             receivedAt: now
         )
 

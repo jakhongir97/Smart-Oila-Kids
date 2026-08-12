@@ -113,6 +113,7 @@ private extension DeviceControlRecoveryNotifier {
             event: event.rawValue,
             dsn: normalizedDSN,
             isRead: false,
+            remoteOrigin: false,
             receivedAt: now
         )
 

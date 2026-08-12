@@ -50,7 +50,11 @@ struct BolajonTasksView: View {
             }
         }
         .task { await viewModel.load() }
-        .refreshable { await viewModel.load() }
+        // No `.refreshable` here: `BolajonScreen` wraps this content in its own ScrollView, and
+        // SwiftUI only wires pull-to-refresh into the scroll container the modifier is applied to.
+        // Applied from outside it, the action was published into the environment and never
+        // consumed — a gesture the child could perform and that silently did nothing. Foreground
+        // reload and push cover the refresh case instead.
         // `.task` runs once and never again: this screen is never torn down while the app is
         // merely backgrounded, so a child who left the app open saw yesterday's list — and a task
         // the parent added in the meantime only appeared after a force-quit. Push covers the case

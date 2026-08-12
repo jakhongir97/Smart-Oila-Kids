@@ -35,6 +35,7 @@ final class DeviceControlEventBridge {
                 event: event.kind.rawValue,
                 dsn: event.dsn,
                 isRead: false,
+                remoteOrigin: false,
                 receivedAt: event.createdAt
             )
         }

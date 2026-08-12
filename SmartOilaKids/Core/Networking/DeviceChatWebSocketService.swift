@@ -1,5 +1,34 @@
 import Foundation
 
+/// Classifies chat event NAMES. One implementation, shared by the socket's frame filter and the
+/// view model's receipt handler.
+///
+/// Both used to carry their own copy, and both copies matched substrings: `contains("read")` also
+/// fires on "unread" and "thread", so `chat.unread_count` and `thread.updated` were read as
+/// receipts. The view model's copy was fixed to match whole separator-delimited tokens; the
+/// socket's was not, and the two silently disagreed about what a receipt is.
+///
+/// Pure functions of their input, so they are directly testable.
+enum ChatEventClassifier {
+    private static func tokens(_ event: String) -> [Substring] {
+        event.lowercased().split { !$0.isLetter && !$0.isNumber }
+    }
+
+    /// A genuine read receipt: `chat:read`, `chat.read`, `message_read` — but never "unread"
+    /// or "thread".
+    static func isReadReceipt(_ event: String) -> Bool {
+        tokens(event).contains { $0 == "read" }
+    }
+
+    /// Any frame that acknowledges or annotates a message rather than being one. Used to stop a
+    /// receipt (which carries `messageId`) from being parsed as a content-less phantom message
+    /// that overwrites the message it acknowledges.
+    static func isNonMessageSignal(_ event: String) -> Bool {
+        let names: Set<Substring> = ["read", "receipt", "delivered", "typing"]
+        return tokens(event).contains { names.contains($0) }
+    }
+}
+
 /// Realtime receive channel for the parent↔child chat thread.
 ///
 /// Connects to `wss://<api-host>/ws/chat?token=<deviceToken>` (the same gateway the parent web
@@ -186,13 +215,13 @@ final class DeviceChatWebSocketService {
         // A receipt is NOT a message. Inferring "message" from the mere presence of an id meant a
         // `chat.read` frame — which carries `messageId` — parsed as a message with no text and no
         // sender, overwriting the very message it acknowledged with a content-less phantom.
-        let isReceiptEvent = event.map { name in
-            let lowered = name.lowercased()
-            return lowered.contains("read")
-                || lowered.contains("receipt")
-                || lowered.contains("delivered")
-                || lowered.contains("typing")
-        } ?? false
+        //
+        // Whole-token matching, via the shared classifier: this used to be a raw
+        // `lowered.contains("read")`, which also fires on "unread" and "thread". So a
+        // `chat.unread_count` or `thread.updated` frame was classified as a receipt here — the
+        // exact bug that was fixed in the view model's own predicate and then left standing in this
+        // copy. One implementation now serves both, so they cannot drift again.
+        let isReceiptEvent = event.map { ChatEventClassifier.isNonMessageSignal($0) } ?? false
 
         let looksLikeMessage = !isReceiptEvent
             && ((event?.localizedCaseInsensitiveContains("message") ?? false)

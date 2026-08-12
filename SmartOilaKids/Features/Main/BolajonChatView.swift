@@ -623,9 +623,9 @@ final class BolajonChatViewModel: ObservableObject {
     // Internal, not private, so the two predicates that have each shipped a bug can be pinned
     // by tests. Both are pure functions of their input.
     static func isReadReceiptEvent(_ event: String) -> Bool {
-        event.lowercased()
-            .split { !$0.isLetter && !$0.isNumber }
-            .contains { $0 == "read" }
+        // Delegates to the shared classifier so this rule and the socket's frame filter cannot
+        // drift apart again — they were two copies, and only this one had been fixed.
+        ChatEventClassifier.isReadReceipt(event)
     }
 
     // The backend emits fractional-second ISO timestamps ("2026-07-26T09:15:02.418Z"), and a
@@ -724,6 +724,12 @@ struct BolajonChatView: View {
                 }
                 composer
             }
+            // Chat was the one primary screen with no content clamp, so on a 13" iPad it ran
+            // full-bleed while every other screen sat in a centred 640pt column — bubbles pinned to
+            // opposite edges of a 1366pt canvas, and a composer stretched across the whole width.
+            // It is also a required App Store screenshot, next to seven centred ones.
+            .frame(maxWidth: BolajonMetrics.contentMaxWidth)
+            .frame(maxWidth: .infinity)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

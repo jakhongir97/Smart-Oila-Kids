@@ -2,10 +2,27 @@ import Foundation
 import UIKit
 
 extension PushInboxStore {
-    /// True for pushes whose body is written by a person rather than by this app.
-    static func carriesPrivateContent(event: String) -> Bool {
-        let lowered = event.lowercased()
-        return ["chat", "message", "sms"].contains { lowered.contains($0) }
+    /// True for text written by a PERSON rather than by this app, which must not be persisted to
+    /// disk on a child's device.
+    ///
+    /// Provenance is a property of the CALLER, not of the event name. This used to be inferred from
+    /// an allowlist of three stems (`chat`/`message`/`sms`) tested against the event, which returned
+    /// `false` — keep the body — for any unrecognised or EMPTY event. A chat push whose event the
+    /// backend spelled differently, or omitted, therefore wrote the parent's message text to disk
+    /// verbatim, defeating the guard it is.
+    ///
+    /// `remoteOrigin` is now passed explicitly and defaults to the safe answer: anything arriving
+    /// from the backend is treated as potentially human-authored, while the app's OWN device-control
+    /// notices (which it composes itself, from localized templates) keep their text.
+    static func carriesPrivateContent(event: String, remoteOrigin: Bool = true) -> Bool {
+        guard remoteOrigin else { return false }
+        // Machine-authored remote commands carry no human text at all. They are already dropped
+        // before reaching the inbox for having neither title nor body; this keeps the rule honest
+        // for any that do arrive with a label.
+        let tokens = Set(event.lowercased().split { !$0.isLetter && !$0.isNumber })
+        let machineAuthored: Set<Substring> = ["lock", "stream", "status", "sync", "refresh", "ping"]
+        if !tokens.isEmpty, tokens.contains(where: { machineAuthored.contains($0) }) { return false }
+        return true
     }
 
     func append(
@@ -14,6 +31,9 @@ extension PushInboxStore {
         event: String,
         dsn: String?,
         isRead: Bool,
+        /// False for entries this app composes itself (device-control notices), whose body is a
+        /// localized template rather than anything a person typed.
+        remoteOrigin: Bool = true,
         receivedAt: Date = Date()
     ) {
         var items = storedItems()
@@ -52,7 +72,7 @@ extension PushInboxStore {
         let item = PushInboxItem(
             id: UUID().uuidString,
             title: normalizedTitle,
-            body: Self.carriesPrivateContent(event: normalizedEvent) ? "" : normalizedBody,
+            body: Self.carriesPrivateContent(event: normalizedEvent, remoteOrigin: remoteOrigin) ? "" : normalizedBody,
             event: normalizedEvent,
             dsn: normalizedDSN,
             receivedAt: receivedAt,

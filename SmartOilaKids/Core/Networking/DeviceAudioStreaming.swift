@@ -602,6 +602,8 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// The server-owned lease: an outstanding auto-stop scheduled for `maxDurationSeconds` after the
     /// last start/renewal. Cancelled and rescheduled on renewal; fired only by the owning generation.
     private var leaseTask: Task<Void, Never>?
+    /// Keeps the presence banner alive for the life of a session — see `syncPresenceNotification`.
+    private var repostTask: Task<Void, Never>?
     /// Consent is per-hardware. ONE key used to cover both, so a child who tapped "Allow" for a
     /// microphone check had that grant silently reused to open the CAMERA — no sheet, no mention of
     /// video. `consentKey` now means only "a live audio session is allowed"; `videoConsentKey` is
@@ -670,6 +672,8 @@ final class DeviceAudioStreamManager: ObservableObject {
     private func syncPresenceNotification() {
         let center = UNUserNotificationCenter.current()
         guard state == .live else {
+            repostTask?.cancel()
+            repostTask = nil
             center.removePendingNotificationRequests(withIdentifiers: [Self.presenceNotificationID])
             center.removeDeliveredNotifications(withIdentifiers: [Self.presenceNotificationID])
             return
@@ -693,7 +697,35 @@ final class DeviceAudioStreamManager: ObservableObject {
         // A nil trigger fires immediately; re-using the same identifier REPLACES the existing
         // banner rather than stacking a second one when the mode changes mid-session.
         center.add(UNNotificationRequest(identifier: Self.presenceNotificationID, content: content, trigger: nil))
+        // ...and keep re-posting it for the life of the session.
+        //
+        // The comment on this method has always said the banner is "re-posted for the life of the
+        // session", but it was only ever posted on a `state`/`activeMode` TRANSITION — so it fired
+        // once and then decayed into Notification Centre. Off screen that banner is the ONLY thing
+        // telling a child their microphone is open, and a lease can run for minutes. A single
+        // transient banner at the start is not a disclosure that lasts as long as the capture does.
+        repostTask?.cancel()
+        repostTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.presenceRepostInterval * 1_000_000_000))
+                guard !Task.isCancelled, let self, self.state == .live else { return }
+                let refreshed = UNMutableNotificationContent()
+                refreshed.title = L10n.tr("audio2.notification.title")
+                refreshed.body = L10n.tr(self.activeMode == .video ? "audio2.watching" : "audio2.listening")
+                refreshed.sound = nil
+                refreshed.interruptionLevel = .timeSensitive
+                // `try? await`: in an async context this resolves to the throwing overload, and a
+                // failed re-post must not end the loop — the next tick tries again.
+                try? await UNUserNotificationCenter.current().add(
+                    UNNotificationRequest(identifier: Self.presenceNotificationID, content: refreshed, trigger: nil)
+                )
+            }
+        }
     }
+
+    /// How often the presence banner is re-posted while a session runs. Long enough not to be a
+    /// nuisance, short enough that the disclosure is never stale for most of a lease.
+    private static let presenceRepostInterval: TimeInterval = 30
 
     private static let presenceNotificationID = LocalNotificationID.livePresence
 

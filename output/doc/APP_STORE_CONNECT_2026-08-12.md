@@ -118,7 +118,7 @@ session is running, the child's screen shows a clear indicator, and if the app i
 device shows a persistent notification instead. The child can end any session themselves, and if the
 device cannot show that notification, the session does not start at all.
 
-The child can disconnect the device from Settings with the parent's PIN. Removing the device from the
+When a parent has set a disconnect PIN, the child can unlink the device from Settings by entering it. Removing the device from the
 parent account ends all monitoring immediately.
 
 Requires an Oila360 parent account.
@@ -149,7 +149,7 @@ Bolajon360 никогда не записывает и не сохраняет �
 экране — на устройстве показывается постоянное уведомление. Ребёнок может сам завершить любой сеанс, а
 если устройство не может показать такое уведомление, сеанс вообще не начнётся.
 
-Ребёнок может отвязать устройство в настройках, введя родительский PIN. Удаление устройства из
+Если родитель задал PIN отвязки, ребёнок может отвязать устройство в настройках, введя этот PIN. Удаление устройства из
 родительского аккаунта сразу прекращает наблюдение.
 
 Требуется родительский аккаунт Oila360.
@@ -178,7 +178,7 @@ mumkin. Seans davomida bolaning ekranida aniq belgi ko'rinadi, ilova ekranda bo'
 bildirishnoma chiqadi. Bola istalgan seansni o'zi tugatishi mumkin, agar qurilma bunday bildirishnomani
 ko'rsata olmasa, seans umuman boshlanmaydi.
 
-Bola sozlamalardan ota-ona PIN kodi bilan qurilmani uzishi mumkin. Qurilmani ota-ona akkauntidan
+Agar ota-ona uzish PIN kodini o'rnatgan bo'lsa, bola sozlamalardan shu PIN kodi bilan qurilmani uzishi mumkin. Qurilmani ota-ona akkauntidan
 o'chirish kuzatuvni darhol to'xtatadi.
 
 Oila360 ota-ona akkaunti talab qilinadi.
@@ -230,11 +230,13 @@ times as needed for the whole review period.
 
 What you can exercise on the device:
 - Home, live location, device status
+- Pause: a parent can pause this app on the child device from the parent app. While paused the
+  child sees a full-screen notice instead of the app, and SOS still works.
 - SOS
 - Parent-child chat, including a photo attachment
 - Tasks
 - Settings, permission status, language switching (English, Russian, Uzbek)
-- Disconnecting the device
+- Disconnecting the device (only once a parent has set a disconnect PIN — see the note below)
 
 About background location:
 Location is used so the paired parent can see where the child device is. This is the core purpose of
@@ -251,6 +253,14 @@ there is no recording feature and nothing is written to disk or uploaded. Specif
 - the child can end any session from the indicator, and can withdraw consent at any time in
   Settings > Permissions;
 - sessions are limited by a server-issued lease and stop on their own.
+
+About disconnecting:
+On-device disconnect is protected by a PIN that only a parent can set, and only within 15 minutes of
+pairing. A disconnect PIN has already been set on the review child account and is included below, so
+the Settings > Disconnect flow can be exercised. Without it the row correctly reports that
+disconnection is managed from the parent app.
+
+Reviewer disconnect PIN: [REVIEW_DISCONNECT_PIN]
 
 If you would like to see a live check during review, please contact us at the address below and we
 will start one from the parent side while you have the device open.
