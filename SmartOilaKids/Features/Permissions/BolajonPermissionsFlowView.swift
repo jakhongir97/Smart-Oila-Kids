@@ -369,13 +369,17 @@ private struct PermissionSummaryView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 6)
             }
-            // The row count here is not fixed — it follows the feature flags, and turning the media
-            // flag on added a microphone row and a camera row to a list that already filled the
-            // sheet. `BolajonHeroSheet` does not scroll its sheet content, so the overflow lands on
-            // whatever is last, which is the "Finish" button: the ONLY way out of onboarding. A child
-            // who cannot reach it cannot finish setup at all. Cyrillic Uzbek and larger Dynamic Type
-            // both make it likelier, and this is the screen every new child sees.
-            .scrollableIfNeeded()
+            // The overflow this screen used to hit — the row count follows the feature flags, and
+            // turning the media flag on added a microphone row and a camera row to a list that
+            // already filled the sheet, pushing "Finish" (the ONLY way out of onboarding) off the
+            // bottom — is now handled by `BolajonHeroSheet` itself.
+            //
+            // The `.scrollableIfNeeded()` that used to sit here is deliberately gone. Despite its
+            // name it is an UNCONDITIONAL `ScrollView`, which made this sheet a second flexible
+            // child of the scaffold's VStack; two equally-greedy children split the canvas evenly,
+            // so the sheet was pinned to half the screen on EVERY device and "Finish" fell below
+            // the fold even where it had always fitted. Fixing the scaffold is what makes this
+            // call site unnecessary — and leaving it would nest a scroll view inside one.
         }
         .onAppear { manager.refreshStatuses() }
     }

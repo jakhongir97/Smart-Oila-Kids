@@ -191,30 +191,25 @@ struct BolajonHeroSheet<Hero: View, SheetContent: View>: View {
             HeroBackground(intent: intent, deep: deepHero)
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Hero fills the remaining top space with the icon balanced (even space above and
-                // below) so it sits in the upper area per the design — on tall iPhones the old
-                // downward bias let the icon float low with a large empty void above it, which read
-                // as cross-platform.
-                VStack(spacing: 0) {
-                    Spacer(minLength: 8)
-                    hero()
-                    Spacer(minLength: 8)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                sheet()
-                    .frame(maxWidth: BolajonMetrics.contentMaxWidth, alignment: .top)
-                    .frame(maxWidth: .infinity, alignment: .top)
-                    .padding(.horizontal, BolajonMetrics.screenPadding)
-                    .padding(.top, 28)
-                    .padding(.bottom, 10)
-                    .background(
-                        TopRoundedRectangle(radius: sheetRadius)
-                            .fill(AppColors.cardWhite)
-                            .shadow(color: Color.black.opacity(0.05), radius: 14, x: 0, y: -4)
-                            .ignoresSafeArea(edges: .bottom)
-                    )
+            // OVERFLOW FALLBACK. `zones` is rigid-sheet-over-greedy-hero, which is right whenever
+            // it fits — and on a 375x667pt phone (iPhone SE 2/SE 3, iPhone 8) several screens do
+            // not fit, with no way to reach what hangs off the bottom. A3's keypad lost its "0"
+            // and backspace row, so 41% of pairing codes could not be typed at all; A1 after a
+            // v1.0 upgrade lost "Continue" entirely, on the NavigationStack root where there is no
+            // back button either — that family could never re-link.
+            //
+            // `ViewThatFits` measures candidate 1 at its IDEAL height, so on every device where
+            // the screen already fits the pixel layout is byte-identical to before and the greedy
+            // hero still absorbs the slack. Only when it genuinely overflows does the scrolling
+            // candidate take over.
+            //
+            // The fallback must wrap the WHOLE stack, not just `sheet()`. Wrapping only the sheet
+            // makes it a second flexible child of the VStack, and two equally-greedy children get
+            // an even split — pinning the sheet to half the canvas on EVERY device instead of
+            // fixing anything. That is exactly what `.scrollableIfNeeded()` did to B11.
+            ViewThatFits(in: .vertical) {
+                zones
+                scrollingZones
             }
         }
         .navigationTitle(title ?? "")
@@ -229,6 +224,54 @@ struct BolajonHeroSheet<Hero: View, SheetContent: View>: View {
                                           mandatoryCount: mandatoryCount)
                 }
             }
+        }
+    }
+
+    /// The layout as it has always been: a content-sized sheet anchored to the bottom under a hero
+    /// that fills every remaining point. `ViewThatFits` measures this candidate at its IDEAL height
+    /// (hero content + sheet content), so whenever that fits it is chosen and then laid out against
+    /// the full proposal — which is what lets the hero expand exactly as before.
+    private var zones: some View { zoneStack(heroFillsSlack: true) }
+
+    /// The same two zones with the hero no longer claiming the slack, inside a scroll view. Only
+    /// reached when the ideal layout genuinely does not fit, so the hero collapses to its content
+    /// (the two `Spacer`s fall back to their 8pt minimum in an unbounded container) and every point
+    /// of the sheet becomes reachable.
+    private var scrollingZones: some View {
+        ScrollView(.vertical) { zoneStack(heroFillsSlack: false) }
+    }
+
+    @ViewBuilder
+    private func zoneStack(heroFillsSlack: Bool) -> some View {
+        VStack(spacing: 0) {
+            // Hero fills the remaining top space with the icon balanced (even space above and
+            // below) so it sits in the upper area per the design — on tall iPhones the old
+            // downward bias let the icon float low with a large empty void above it, which read
+            // as cross-platform.
+            VStack(spacing: 0) {
+                Spacer(minLength: 8)
+                hero()
+                Spacer(minLength: 8)
+            }
+            .frame(maxWidth: .infinity)
+            // Deliberately NOT `.infinity` in the scrolling candidate: a scroll view proposes an
+            // unbounded height, and a greedy child answering it would stretch the hero to that
+            // proposal and push the sheet off the bottom again — reproducing the very bug this
+            // fallback exists to fix.
+            .frame(maxHeight: heroFillsSlack ? .infinity : nil)
+
+            sheet()
+                .frame(maxWidth: BolajonMetrics.contentMaxWidth, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.horizontal, BolajonMetrics.screenPadding)
+                .padding(.top, 28)
+                .padding(.bottom, 10)
+                .background(
+                    TopRoundedRectangle(radius: sheetRadius)
+                        .fill(AppColors.cardWhite)
+                        .shadow(color: Color.black.opacity(0.05), radius: 14, x: 0, y: -4)
+                        .ignoresSafeArea(edges: .bottom)
+                )
         }
     }
 }
@@ -770,7 +813,9 @@ struct CodeEntryField: View {
     var onComplete: ((String) -> Void)?
 
     var body: some View {
-        VStack(spacing: 26) {
+        // 26 → 16: part of the vertical budget that keeps the keypad's "0"/backspace row on a
+        // 375x667pt screen without scrolling. See `NumericKeypad.keyHeight`.
+        VStack(spacing: 16) {
             if dotStyle { dots } else { boxes }
             if showKeypad {
                 NumericKeypad(
@@ -819,7 +864,9 @@ struct CodeEntryField: View {
                     // Intrinsic width, not "whatever the container gives me". These were unwidthed,
                     // so on a 1366pt iPad each of the five boxes rendered ~256pt across -- on the
                     // pairing screen, which is the first thing an App Review tester touches.
-                    .frame(width: 56, height: 58)
+                    // Height 58 → 52 for the same reason `NumericKeypad.keyHeight` shrank: A3 has
+                    // to fit a 375x667pt phone without needing the scaffold's scroll fallback.
+                    .frame(width: 56, height: 52)
             }
         }
         .frame(maxWidth: .infinity)
@@ -865,23 +912,28 @@ struct NumericKeypad: View {
     let onDigit: (String) -> Void
     let onBackspace: () -> Void
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
     /// Three `.flexible()` columns with nothing bounding them made each key ~433pt wide on iPad.
     private let maxKeypadWidth: CGFloat = 320
+    /// 56 → 44 buys back 48pt across the four rows. The scaffold can scroll now, but a child who
+    /// has to scroll a KEYPAD is one flick away from losing the "0" row again, so this screen is
+    /// kept inside a 375x667pt phone by its own metrics rather than relying on the fallback.
+    /// 44pt is exactly Apple's minimum tap target — do not go below it to buy more room.
+    private static let keyHeight: CGFloat = 44
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
+        LazyVGrid(columns: columns, spacing: 10) {
             ForEach(1 ... 9, id: \.self) { number in
                 key(String(number)) { onDigit(String(number)) }
             }
-            Color.clear.frame(height: 56)
+            Color.clear.frame(height: Self.keyHeight)
             key("0") { onDigit("0") }
             Button(action: onBackspace) {
                 Image(systemName: "delete.left")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(AppColors.inkSecondary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 56)
+                    .frame(height: Self.keyHeight)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -897,7 +949,7 @@ struct NumericKeypad: View {
                 .font(AppTypography.heading(24))
                 .foregroundStyle(AppColors.inkPrimary)
                 .frame(maxWidth: .infinity)
-                .frame(height: 56)
+                .frame(height: Self.keyHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(keyFill)

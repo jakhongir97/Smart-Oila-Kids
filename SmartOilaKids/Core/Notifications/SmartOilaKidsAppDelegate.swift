@@ -27,6 +27,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // Touching the singleton makes observer registration a launch-time fact instead of a
         // side effect of rendering. It is cheap: no hardware is opened until a command arrives.
         _ = DeviceAudioStreamManager.shared
+        armTelemetryIfPaired()
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
@@ -66,6 +67,37 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         }
 
         return true
+    }
+
+    /// Start REST telemetry at LAUNCH rather than waiting for a rendered `RootView`.
+    ///
+    /// `OilaTelemetryService.shared.start()` had exactly one call site — `syncGeoService`, reached
+    /// only from `RootView`'s `.onAppear`. A background launch (silent push, or the location
+    /// relaunch this app's `location` background mode exists for) connects no UI scene, so no body
+    /// renders and that call never happens. After any reboot, jetsam or force-quit the child's
+    /// device therefore reported NOTHING — no location, no `POST /device/status` — until a human
+    /// happened to open the app, while the parent's screen showed a stale position with no error.
+    ///
+    /// The safety half is worse and is why this is not a nice-to-have: `start()` is also the only
+    /// caller of `restorePendingSOS()`, so a panic alert queued while offline was never retried on
+    /// any background wake and was then discarded as older than `sosMaxAge`.
+    ///
+    /// Same reasoning as `_ = DeviceAudioStreamManager.shared` above: make it a launch-time fact
+    /// instead of a side effect of rendering. `start()` is `guard !isRunning`-idempotent, so the
+    /// `.onAppear` path stays correct and simply finds it already running.
+    private func armTelemetryIfPaired() {
+        // Gate on exactly what `syncGeoService` gates on, plus a real credential. Telemetry before
+        // onboarding completes would fire an OS permission prompt mid-setup, and telemetry without
+        // tokens would 401 every upload with no recovery path. The token check also closes the
+        // migration window where a just-updated legacy install still reads `oilaPaired == true`.
+        let defaults = UserDefaults.standard
+        guard !AppRuntime.hasDebugRoute,
+              defaults.string(forKey: "DSN")?.trimmedNonEmpty != nil,
+              defaults.bool(forKey: "BOLAJON_ONBOARDING_COMPLETED"),
+              defaults.bool(forKey: "BOLAJON_OILA_PAIRED"),
+              SecureTokenStore.oila.accessToken()?.trimmedNonEmpty != nil
+        else { return }
+        Task { @MainActor in OilaTelemetryService.shared.start() }
     }
 
     func application(

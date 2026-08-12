@@ -304,21 +304,30 @@ private struct ConnectStepView: View {
     let onPaired: (OilaPairResult) -> Void
 
     var body: some View {
+        // A3 is the ONE screen that must never rely on the scaffold's scroll fallback: it carries a
+        // keypad, and a child who has to scroll a keypad is one flick away from losing the "0" and
+        // backspace row again — which is precisely the bug that made 41% of pairing codes untypable
+        // on a 375x667pt phone (iPhone SE 2/SE 3, iPhone 8). Pairing is the only way into this app,
+        // so it has to fit on the smallest supported screen by its own metrics.
+        //
+        // Budget on that device: 667 − 20 status − 44 nav = 603pt. The badge and the three spacings
+        // below are trimmed so hero + sheet land inside it with room to spare; `NumericKeypad`
+        // (48pt keys) and `CodeEntryField` (52pt boxes) carry the rest of the saving.
         BolajonHeroSheet(intent: .lavender) {
-            IconBadge(systemName: "person.2.fill", intent: .lavender, diameter: 124)
+            IconBadge(systemName: "person.2.fill", intent: .lavender, diameter: 92)
         } sheet: {
-            VStack(spacing: 18) {
+            VStack(spacing: 14) {
                 Text(L10n.tr("setup.connect.title"))
                     .font(AppTypography.title(22))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
 
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
                     stepRow(1, "setup.connect.step1")
                     stepRow(2, "setup.connect.step2")
                     stepRow(3, "setup.connect.step3")
                 }
-                .padding(16)
+                .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
