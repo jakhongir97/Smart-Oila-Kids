@@ -66,22 +66,6 @@
 "permissions.action_allow_camera" = "Разрешить камеру";
 "permissions.action_allow_screen_time" = "Разрешить Экранное время";
 "permissions.action_open_settings" = "Открыть Настройки";
-"permissions.media_readiness_ready" = "Микрофон, камера и запись экрана готовы. Родительские команды записи звука, камеры и экрана смогут работать на этом iPhone, пока приложение остается активным.";
-"permissions.media_readiness_attention" = "Проверьте статусы ниже. Любой пункт со статусом \"Нужно действие\", \"Только когда активно\" или \"Недоступно\" может заблокировать удаленные медиа-команды на этом iPhone.";
-"permissions.media_capability_microphone_title" = "Микрофон";
-"permissions.media_capability_microphone_ready" = "Запись окружения и аудиострим могут использовать микрофон.";
-"permissions.media_capability_microphone_missing" = "Удаленные аудиокоманды будут недоступны, пока не выдан доступ к микрофону.";
-"permissions.media_capability_camera_title" = "Камера";
-"permissions.media_capability_camera_ready" = "Запись с камеры и видеострим могут использовать камеру.";
-"permissions.media_capability_camera_missing" = "Удаленные команды камеры будут недоступны, пока не выдан доступ к камере.";
-"permissions.media_capability_display_title" = "Запись экрана";
-"permissions.media_capability_display_ready" = "Запись экрана через ReplayKit доступна, пока приложение остается активным.";
-"permissions.media_capability_display_inactive" = "Запись экрана работает только пока Bolajon360 открыт и активен на экране.";
-"permissions.media_capability_display_unavailable" = "Запись экрана через ReplayKit сейчас недоступна в текущем состоянии устройства.";
-"permissions.media_capability_badge_ready" = "Готово";
-"permissions.media_capability_badge_action" = "Нужно действие";
-"permissions.media_capability_badge_inactive" = "Только когда активно";
-"permissions.media_capability_badge_unavailable" = "Недоступно";
 
 
 
@@ -289,6 +273,8 @@
 "chat2.placeholder" = "Сообщение…";
 "chat2.empty" = "Пока нет сообщений";
 "chat2.empty_hint" = "Напишите родителю";
+"chat2.load_failed" = "Не удалось загрузить сообщения";
+"chat2.retry" = "Повторить";
 "chat2.unread" = "Непрочитанные сообщения";
 "chat2.photo" = "Фото";
 "chat2.send" = "Отправить";

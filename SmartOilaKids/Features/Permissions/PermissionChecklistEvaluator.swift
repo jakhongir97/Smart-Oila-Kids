@@ -180,25 +180,8 @@ enum PermissionChecklistEvaluator {
             .allSatisfy { isOnboardingSatisfied($0, in: snapshot) }
     }
 
-    static func mediaReadinessSatisfied(in snapshot: PermissionStatusSnapshot) -> Bool {
-        isSatisfied(.microphone, in: snapshot)
-            && isSatisfied(.camera, in: snapshot)
-            && snapshot.displayCaptureAvailabilityStatus == .ready
-    }
 
-    static func mediaReadinessMessage(in snapshot: PermissionStatusSnapshot) -> String {
-        if mediaReadinessSatisfied(in: snapshot) {
-            return L10n.tr("permissions.media_readiness_ready")
-        }
 
-        return L10n.tr("permissions.media_readiness_attention")
-    }
-
-    static func mediaCapabilityStatuses(in snapshot: PermissionStatusSnapshot) -> [MediaCapabilityStatus] {
-        MediaCapabilityKind.allCases.map { capability in
-            mediaCapabilityStatus(for: capability, in: snapshot)
-        }
-    }
 
     private static func isLocationSatisfied(_ status: CLAuthorizationStatus) -> Bool {
         status == .authorizedAlways
@@ -226,64 +209,4 @@ enum PermissionChecklistEvaluator {
         }
     }
 
-    private static func mediaCapabilityStatus(
-        for capability: MediaCapabilityKind,
-        in snapshot: PermissionStatusSnapshot
-    ) -> MediaCapabilityStatus {
-        switch capability {
-        case .microphone:
-            let isReady = isSatisfied(.microphone, in: snapshot)
-            return MediaCapabilityStatus(
-                kind: capability,
-                title: L10n.tr("permissions.media_capability_microphone_title"),
-                detail: isReady
-                    ? L10n.tr("permissions.media_capability_microphone_ready")
-                    : L10n.tr("permissions.media_capability_microphone_missing"),
-                badgeText: isReady
-                    ? L10n.tr("permissions.media_capability_badge_ready")
-                    : L10n.tr("permissions.media_capability_badge_action"),
-                state: isReady ? .ready : .actionNeeded
-            )
-        case .camera:
-            let isReady = isSatisfied(.camera, in: snapshot)
-            return MediaCapabilityStatus(
-                kind: capability,
-                title: L10n.tr("permissions.media_capability_camera_title"),
-                detail: isReady
-                    ? L10n.tr("permissions.media_capability_camera_ready")
-                    : L10n.tr("permissions.media_capability_camera_missing"),
-                badgeText: isReady
-                    ? L10n.tr("permissions.media_capability_badge_ready")
-                    : L10n.tr("permissions.media_capability_badge_action"),
-                state: isReady ? .ready : .actionNeeded
-            )
-        case .displayCapture:
-            switch snapshot.displayCaptureAvailabilityStatus {
-            case .ready:
-                return MediaCapabilityStatus(
-                    kind: capability,
-                    title: L10n.tr("permissions.media_capability_display_title"),
-                    detail: L10n.tr("permissions.media_capability_display_ready"),
-                    badgeText: L10n.tr("permissions.media_capability_badge_ready"),
-                    state: .ready
-                )
-            case .inactive:
-                return MediaCapabilityStatus(
-                    kind: capability,
-                    title: L10n.tr("permissions.media_capability_display_title"),
-                    detail: L10n.tr("permissions.media_capability_display_inactive"),
-                    badgeText: L10n.tr("permissions.media_capability_badge_inactive"),
-                    state: .inactive
-                )
-            case .unavailable:
-                return MediaCapabilityStatus(
-                    kind: capability,
-                    title: L10n.tr("permissions.media_capability_display_title"),
-                    detail: L10n.tr("permissions.media_capability_display_unavailable"),
-                    badgeText: L10n.tr("permissions.media_capability_badge_unavailable"),
-                    state: .unavailable
-                )
-            }
-        }
-    }
 }

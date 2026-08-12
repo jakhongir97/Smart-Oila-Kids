@@ -75,9 +75,23 @@ enum AppColors {
 
     /// Filled CTA on peach cards ("Enable"). White on this measures 4.80:1 light / 4.43:1 dark.
     static let ctaOrange = dynamic(rgb(189, 82, 15), rgb(198, 86, 16))      // #BD520F
-    /// The live-session disclosure banner. White on this measures 4.60:1, and this is the one
-    /// element in the app whose whole job is to be unmistakable while a microphone is open.
+    /// Red FILL wherever a white label sits on it — the live-session disclosure banner (the one
+    /// element whose whole job is to be unmistakable while a microphone is open), the SOS button on
+    /// the lock takeover, and the destructive disconnect CTA. White measures 4.60:1 light / 5.20:1
+    /// dark here, against 3.22:1 / 2.73:1 on `sosCoral`, which fails even the 3:1 large-text floor.
     static let livePresenceCoral = dynamic(rgb(232, 23, 23), rgb(214, 28, 28)) // #E81717
+
+    // MARK: Inks that sit on a 14%-alpha tint of themselves
+    //
+    // `StatusPill` drew its label in the SAME hue as its own pale fill, which measured 1.92:1
+    // (granted) and 2.75:1 (off) in light mode — on the C5 permission list and every on/off
+    // indicator in the app. Dark mode already passed (6.22:1 / 4.78:1) because the fill composites
+    // over a near-black card, so only the light values move here.
+
+    /// Label on `successGreen.opacity(0.14)`. 5.83:1 light, 6.22:1 dark.
+    static let pillGreenInk = dynamic(rgb(27, 107, 69), rgb(54, 208, 143))  // #1B6B45
+    /// Label on `sosCoral.opacity(0.14)`. 5.59:1 light, 4.78:1 dark.
+    static let pillCoralInk = dynamic(rgb(179, 38, 30), rgb(255, 110, 104)) // #B3261E
 
     /// Purple-biased near-black ink for headings/body on tinted grounds.
     static let inkPrimary = dynamic(rgb(42, 37, 64), rgb(242, 242, 247))    // #2A2540

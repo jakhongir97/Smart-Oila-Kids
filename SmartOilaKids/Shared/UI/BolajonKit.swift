@@ -704,8 +704,10 @@ struct StatusPill: View {
 
     private var foreground: Color {
         switch state {
-        case .granted: return AppColors.successGreen
-        case .off: return AppColors.sosCoral
+        // NOT `successGreen`/`sosCoral`: those are the same hues as the 14%-alpha fills below, and
+        // drawing a label in its own fill colour measured 1.92:1 and 2.75:1 in light mode.
+        case .granted: return AppColors.pillGreenInk
+        case .off: return AppColors.pillCoralInk
         case .neutral: return AppColors.inkSecondary
         }
     }

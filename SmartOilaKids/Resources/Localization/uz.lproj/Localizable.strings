@@ -66,22 +66,6 @@
 "permissions.action_allow_camera" = "Kameraga ruxsat berish";
 "permissions.action_allow_screen_time" = "Screen Time'ga ruxsat berish";
 "permissions.action_open_settings" = "Sozlamalarni ochish";
-"permissions.media_readiness_ready" = "Mikrofon, kamera va ekran yozuvi tayyor. Ilova faol tursa, bu iPhone'da ota-ona yuborgan audio, kamera va ekran yozuvi buyruqlari ishlashi mumkin.";
-"permissions.media_readiness_attention" = "Quyidagi holatlarni tekshiring. \"Harakat kerak\", \"Faqat faol holatda\" yoki \"Mavjud emas\" deb belgilangan bandlar ota-ona yuborgan media buyruqlarini bloklashi mumkin.";
-"permissions.media_capability_microphone_title" = "Mikrofon";
-"permissions.media_capability_microphone_ready" = "Atrof audio yozuvi va jonli audio oqimi mikrofonni ishlata oladi.";
-"permissions.media_capability_microphone_missing" = "Mikrofon ruxsati berilmaguncha masofaviy audio buyruqlari ishlamaydi.";
-"permissions.media_capability_camera_title" = "Kamera";
-"permissions.media_capability_camera_ready" = "Kamera yozuvi va jonli video oqimi kamerani ishlata oladi.";
-"permissions.media_capability_camera_missing" = "Kamera ruxsati berilmaguncha masofaviy kamera buyruqlari ishlamaydi.";
-"permissions.media_capability_display_title" = "Ekran yozuvi";
-"permissions.media_capability_display_ready" = "ReplayKit orqali ekran yozuvi ilova faol turganida mavjud.";
-"permissions.media_capability_display_inactive" = "Ekran yozuvi faqat Bolajon360 ekranda ochiq va faol bo'lganda ishlaydi.";
-"permissions.media_capability_display_unavailable" = "ReplayKit ekran yozuvi hozirgi qurilma holatida mavjud emas.";
-"permissions.media_capability_badge_ready" = "Tayyor";
-"permissions.media_capability_badge_action" = "Harakat kerak";
-"permissions.media_capability_badge_inactive" = "Faqat faol holatda";
-"permissions.media_capability_badge_unavailable" = "Mavjud emas";
 
 
 
@@ -289,6 +273,8 @@
 "chat2.placeholder" = "Xabar yozing…";
 "chat2.empty" = "Hozircha xabar yo'q";
 "chat2.empty_hint" = "Ota-onangizga yozing";
+"chat2.load_failed" = "Xabarlarni yuklab bo'lmadi";
+"chat2.retry" = "Qayta urinish";
 "chat2.unread" = "O'qilmagan xabarlar";
 "chat2.photo" = "Rasm";
 "chat2.send" = "Yuborish";

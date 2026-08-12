@@ -74,7 +74,20 @@ final class ChatAttachmentStore: ObservableObject {
         if !force, !needsRefresh(messageID) { return }
 
         inFlight.insert(messageID)
-        states[messageID] = .loading
+        // Hold the photo that is already on screen while a replacement URL is fetched.
+        //
+        // This used to demote unconditionally to `.loading`, and `refreshExpired()` force-loads
+        // EVERY attachment older than the signed-URL lifetime on every foreground. So returning to
+        // a thread turned every parent photo back into a spinner before any replacement existed,
+        // re-downloaded all of them, and — if that foreground happened offline — left the whole
+        // thread as broken-image failures. The old URL usually still renders, and a stale photo is
+        // strictly better than a spinner where a photo was.
+        let existing = states[messageID]
+        let isRefreshingReadyImage: Bool
+        if case .ready = existing { isRefreshingReadyImage = true } else { isRefreshingReadyImage = false }
+        if !isRefreshingReadyImage {
+            states[messageID] = .loading
+        }
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -82,8 +95,14 @@ final class ChatAttachmentStore: ObservableObject {
                 self.states[messageID] = .ready(url)
                 self.issuedAt[messageID] = Date()
             } catch {
-                self.states[messageID] = .failed
-                self.issuedAt[messageID] = nil
+                // Only surface a failure when there was nothing to fall back to. A refresh that
+                // fails leaves the previously-working URL in place rather than blanking the thread.
+                if isRefreshingReadyImage, let existing {
+                    self.states[messageID] = existing
+                } else {
+                    self.states[messageID] = .failed
+                    self.issuedAt[messageID] = nil
+                }
             }
             self.inFlight.remove(messageID)
         }
@@ -193,6 +212,9 @@ final class BolajonChatViewModel: ObservableObject {
     @Published private(set) var inFlightSendCount = 0
     @Published private(set) var isPreparingImage = false
     @Published private(set) var isLoading = false
+    /// The last history load failed and the thread is still empty. Distinguishes "your parent has
+    /// not written yet" from "we could not fetch the thread", which the empty state used to conflate.
+    @Published private(set) var loadFailed = false
     @Published private(set) var pendingImage: PendingChatImage?
     @Published var errorMessage: String?
     /// The id of the first unread inbound message — the "unread" divider renders just above it.
@@ -297,6 +319,13 @@ final class BolajonChatViewModel: ObservableObject {
         }
 #endif
         isLoading = messages.isEmpty
+        // `loadedOnce` means "this screen has completed its first load ATTEMPT", not "the first
+        // attempt succeeded". It used to be set only on the success path, and `resync()` guards on
+        // it — so a first open with no network disarmed ALL THREE catch-up paths (foreground
+        // return, chat push, socket reconnect) for the lifetime of the screen. The thread then sat
+        // empty, under a green "online" badge, until the child happened to navigate away and back.
+        // That is almost certainly the recurring "chat looks broken" report.
+        defer { loadedOnce = true }
         do {
             let page = try await chat.fetchChatMessages(limit: Self.pageSize, before: nil)
             // Merge rather than replace: a local echo whose send is still in flight (or has
@@ -305,15 +334,29 @@ final class BolajonChatViewModel: ObservableObject {
             // be loaded — replacing wholesale would throw that history away on every resync.
             // `sortedDedup` keeps the first occurrence, so the fresh server copy still wins.
             messages = sortedDedup(page.messages + messages)
-            historyCursor = page.nextCursor
-            canLoadOlder = Self.hasMoreHistory(after: page)
+            // Only adopt the newest page's cursor on the FIRST successful load. A resync re-fetches
+            // page 1, so assigning unconditionally rewound the paging position to the newest page
+            // every time the app came forward or a chat push landed — re-arming "load older" and
+            // re-fetching pages already on screen, which `sortedDedup` then silently discarded.
+            // Once older history has been paged in, the cursor belongs to the oldest page held.
+            if !loadedOnce {
+                historyCursor = page.nextCursor
+                canLoadOlder = Self.hasMoreHistory(after: page)
+            }
             errorMessage = nil
-            loadedOnce = true
+            loadFailed = false
             await refreshUnreadBoundaryAndMarkRead()
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
+            loadFailed = true
         }
         isLoading = false
+    }
+
+    /// Explicit retry for a failed first load, from the button the empty area now offers.
+    func retryLoad() async {
+        errorMessage = nil
+        await load()
     }
 
     /// One HTTP catch-up for a thread that is already open. The socket is suspended while the app
@@ -523,10 +566,28 @@ final class BolajonChatViewModel: ObservableObject {
         }
         messages.append(message)
         messages.sort { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
-        if message.sender == .parent {
-            // Arrived while the thread is open → immediately read.
+        if message.sender == .parent, isForeground() {
+            // Arrived while the thread is open AND on screen → genuinely read.
+            //
+            // "The thread is open" is not sufficient on its own. The view — and with it the socket
+            // — survives backgrounding; nothing suspends either, and this app deliberately keeps
+            // its process alive with continuous background location. So a child who opened chat and
+            // pressed Home still received frames, and every one of them was marked read: the parent
+            // saw a ✓✓ on a message displayed to a locked phone in a pocket. In a product whose
+            // whole value is a parent knowing their child got the message, a false read receipt is
+            // worse than a missing one.
+            //
+            // Deliberately gated on foreground rather than on socket state: the same false receipt
+            // is reachable through `resync()` from a chat push, so gating the socket alone would
+            // leave the other path open.
             Task { [weak self] in try? await self?.chat.markChatRead(lastMessageId: message.id) }
         }
+    }
+
+    /// Whether the app is actually on screen. `.inactive` counts — the thread is still rendered
+    /// behind a control-centre pull or an incoming call banner.
+    private func isForeground() -> Bool {
+        UIApplication.shared.applicationState != .background
     }
 
     /// Realtime read receipt (`chat:read`): the parent read our messages — flip ✓✓ on our own sent
@@ -602,6 +663,12 @@ final class BolajonChatViewModel: ObservableObject {
         } else {
             unreadBoundaryID = nil
         }
+        // Same rule as `ingest`: only claim the child read the thread while it is actually on
+        // screen. This is the SECOND path to a false receipt — a chat push wakes `resync()`, which
+        // calls `load()`, which lands here — so gating the socket alone would not have closed it.
+        // The unread BOUNDARY above is still recomputed either way, so coming forward shows the
+        // divider in the right place.
+        guard isForeground() else { return }
         if let newest = messages.last(where: { !sendingLocalIDs.contains($0.id) && !failedLocalIDs.contains($0.id) })?.id {
             try? await chat.markChatRead(lastMessageId: newest)
         }
@@ -709,8 +776,17 @@ struct BolajonChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
+                    // "No messages yet" is only true when the thread really is empty. A thread whose
+                    // history failed to load is not empty — it is unknown — and telling a child
+                    // their parent has never written to them because the network blipped is both
+                    // wrong and, in a family-safety app, upsetting. `loadFailed` distinguishes them
+                    // and offers the retry that the load path itself no longer performs.
                     if viewModel.messages.isEmpty, !viewModel.isLoading {
-                        emptyState
+                        if viewModel.loadFailed {
+                            historyLoadFailure
+                        } else {
+                            emptyState
+                        }
                     }
                     if viewModel.canLoadOlder {
                         olderHistoryLoader(proxy)
@@ -895,6 +971,32 @@ struct BolajonChatView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
+    }
+
+    /// Shown instead of `emptyState` when the history fetch failed, so the child is told the truth
+    /// and given a way out. Without this the only recovery was to leave the screen and come back.
+    private var historyLoadFailure: some View {
+        VStack(spacing: 10) {
+            Text(L10n.tr("chat2.load_failed"))
+                .font(AppTypography.bodyStrong(15))
+                .foregroundStyle(AppColors.inkSecondary)
+                .multilineTextAlignment(.center)
+            Button {
+                Task { await viewModel.retryLoad() }
+            } label: {
+                Text(L10n.tr("chat2.retry"))
+                    .font(AppTypography.bodyStrong(14))
+                    .foregroundStyle(AppColors.ctaPurple)
+                    .padding(.horizontal, 18)
+                    .frame(height: 44)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.tr("chat2.retry")))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+        .padding(.horizontal, 24)
     }
 
     private func send() {

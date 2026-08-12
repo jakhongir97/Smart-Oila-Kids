@@ -1,7 +1,6 @@
 import AVFAudio
 import AVFoundation
 import Foundation
-@preconcurrency import ReplayKit
 import UIKit
 import UserNotifications
 
@@ -10,10 +9,8 @@ extension LocationPermissionManager {
         setLocationAuthorizationStatus(currentLocationAuthorizationStatus())
         let currentMicrophonePermission = AVAudioSession.sharedInstance().recordPermission
         let currentCameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        let currentDisplayCaptureAvailabilityStatus = currentDisplayCaptureAvailabilityStatus()
         setMicrophonePermission(currentMicrophonePermission)
         setCameraAuthorizationStatus(currentCameraAuthorizationStatus)
-        setDisplayCaptureAvailabilityStatus(currentDisplayCaptureAvailabilityStatus)
         ScreenTimeAuthorizationManager.shared.refreshStatus()
         setScreenTimePermissionStatus(ScreenTimeAuthorizationManager.shared.status)
         setBackgroundRefreshStatus(UIApplication.shared.backgroundRefreshStatus)
@@ -61,28 +58,11 @@ extension LocationPermissionManager {
         PermissionChecklistEvaluator.primaryActionTitle(for: requirement, in: statusSnapshot())
     }
 
-    var mediaReadinessSatisfied: Bool {
-        PermissionChecklistEvaluator.mediaReadinessSatisfied(in: statusSnapshot())
-    }
 
-    func mediaReadinessMessage() -> String {
-        PermissionChecklistEvaluator.mediaReadinessMessage(in: statusSnapshot())
-    }
 
-    var mediaCapabilityStatuses: [MediaCapabilityStatus] {
-        PermissionChecklistEvaluator.mediaCapabilityStatuses(in: statusSnapshot())
-    }
 }
 
 private extension LocationPermissionManager {
-    func currentDisplayCaptureAvailabilityStatus() -> DisplayCaptureAvailabilityStatus {
-        guard UIApplication.shared.applicationState == .active else {
-            return .inactive
-        }
-
-        return RPScreenRecorder.shared().isAvailable ? .ready : .unavailable
-    }
-
     func refreshLocationChecklistState() {
         setLocationIsNotGranted(!PermissionChecklistEvaluator.isSatisfied(.location, in: statusSnapshot()))
     }

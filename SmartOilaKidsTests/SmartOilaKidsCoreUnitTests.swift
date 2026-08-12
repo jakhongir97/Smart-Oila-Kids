@@ -768,55 +768,7 @@ final class PermissionChecklistEvaluatorTests: XCTestCase {
         )
     }
 
-    func testAllChecklistSatisfiedAndMediaReadinessIgnoreUsageStatsButRespectDisplayCapture() {
-        let satisfiedExceptUsageStats = makePermissionSnapshot(displayCapture: .ready, screenTime: .denied)
 
-        XCTAssertTrue(PermissionChecklistEvaluator.allChecklistSatisfied(in: satisfiedExceptUsageStats))
-        XCTAssertTrue(
-            PermissionChecklistEvaluator.onboardingChecklistSatisfied(
-                in: makePermissionSnapshot(location: .authorizedWhenInUse, displayCapture: .ready, screenTime: .denied)
-            )
-        )
-        XCTAssertTrue(PermissionChecklistEvaluator.mediaReadinessSatisfied(in: satisfiedExceptUsageStats))
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.mediaReadinessMessage(in: satisfiedExceptUsageStats),
-            L10n.tr("permissions.media_readiness_ready")
-        )
-
-        let displayInactive = makePermissionSnapshot(displayCapture: .inactive)
-        XCTAssertFalse(PermissionChecklistEvaluator.mediaReadinessSatisfied(in: displayInactive))
-        XCTAssertEqual(
-            PermissionChecklistEvaluator.mediaReadinessMessage(in: displayInactive),
-            L10n.tr("permissions.media_readiness_attention")
-        )
-    }
-
-    func testMediaCapabilityStatusesExposeReadyInactiveUnavailableAndActionStates() {
-        let readyStatuses = PermissionChecklistEvaluator.mediaCapabilityStatuses(in: makePermissionSnapshot())
-        XCTAssertEqual(readyStatuses.map(\.kind), [.microphone, .camera, .displayCapture])
-        XCTAssertEqual(readyStatuses.map(\.state), [.ready, .ready, .ready])
-        XCTAssertTrue(readyStatuses[0].isReady)
-        XCTAssertEqual(readyStatuses[0].id, MediaCapabilityKind.microphone.id)
-        XCTAssertEqual(readyStatuses[2].badgeText, L10n.tr("permissions.media_capability_badge_ready"))
-
-        let mixedStatuses = PermissionChecklistEvaluator.mediaCapabilityStatuses(
-            in: makePermissionSnapshot(
-                microphone: .denied,
-                camera: .notDetermined,
-                displayCapture: .inactive
-            )
-        )
-        XCTAssertEqual(mixedStatuses.map(\.state), [.actionNeeded, .actionNeeded, .inactive])
-        XCTAssertEqual(mixedStatuses[0].badgeText, L10n.tr("permissions.media_capability_badge_action"))
-        XCTAssertEqual(mixedStatuses[1].badgeText, L10n.tr("permissions.media_capability_badge_action"))
-        XCTAssertEqual(mixedStatuses[2].badgeText, L10n.tr("permissions.media_capability_badge_inactive"))
-
-        let unavailableDisplay = PermissionChecklistEvaluator.mediaCapabilityStatuses(
-            in: makePermissionSnapshot(displayCapture: .unavailable)
-        )
-        XCTAssertEqual(unavailableDisplay[2].state, .unavailable)
-        XCTAssertEqual(unavailableDisplay[2].badgeText, L10n.tr("permissions.media_capability_badge_unavailable"))
-    }
 }
 
 final class DeviceControlRecoveryNotifierTests: XCTestCase {
@@ -2607,7 +2559,6 @@ private func makePermissionSnapshot(
     notification: UNAuthorizationStatus = .authorized,
     microphone: AVAudioSession.RecordPermission = .granted,
     camera: AVAuthorizationStatus = .authorized,
-    displayCapture: DisplayCaptureAvailabilityStatus = .ready,
     screenTime: ScreenTimePermissionStatus = .granted,
     backgroundRefresh: UIBackgroundRefreshStatus = .available,
     isLowPowerModeEnabled: Bool = false
@@ -2617,7 +2568,6 @@ private func makePermissionSnapshot(
         notificationAuthorizationStatus: notification,
         microphonePermission: microphone,
         cameraAuthorizationStatus: camera,
-        displayCaptureAvailabilityStatus: displayCapture,
         screenTimePermissionStatus: screenTime,
         backgroundRefreshStatus: backgroundRefresh,
         isLowPowerModeEnabled: isLowPowerModeEnabled

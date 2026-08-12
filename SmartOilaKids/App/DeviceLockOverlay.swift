@@ -62,7 +62,10 @@ struct DeviceLockOverlay: View {
                     .padding(.vertical, 15)
                     .background(
                         RoundedRectangle(cornerRadius: BolajonMetrics.cardRadiusLarge, style: .continuous)
-                            .fill(AppColors.sosCoral)
+                            // White label on a red fill: `sosCoral` measures 3.22:1 light / 2.73:1
+                            // dark and fails even the large-text floor. This is the SOS button on a
+                            // lock takeover — the one control a paused child must be able to find.
+                            .fill(AppColors.livePresenceCoral)
                     )
                 }
                 .accessibilityLabel(L10n.tr("sos2.title"))

@@ -441,7 +441,8 @@ struct ParentPINFlowSheet: View {
                     .padding(.bottom, 12)
                 BolajonPrimaryButton(
                     title: L10n.tr(primaryTitleKey),
-                    fill: isDestructiveStep ? AppColors.sosCoral : AppColors.ctaPurple,
+                    // White on `sosCoral` is 3.22:1; the darker sibling carries a white label properly.
+                    fill: isDestructiveStep ? AppColors.livePresenceCoral : AppColors.ctaPurple,
                     disabled: pin.count != pinLength
                 ) {
                     submit()
@@ -730,7 +731,14 @@ struct SettingsPermissionsScreen: View {
                 Text(L10n.tr(state.labelKey))
                     .font(AppTypography.heading(16))
                     .foregroundStyle(AppColors.inkPrimary)
-                    .lineLimit(1)
+                    // Russian and Uzbek permission names are materially longer than the English
+                    // ones, and `lineLimit(1)` with no scaling truncated every row on every iPhone
+                    // width — the child could not read which permission was off. Two lines plus a
+                    // modest scale keeps the row compact without hiding its subject. (B11's 0.78
+                    // was tuned to B11's geometry; copying that number here still truncated.)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 StatusPill(text: pillText, state: pillState, icon: pillIcon)
                 // Only tappable rows get a chevron, and it points the way they actually go.

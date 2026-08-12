@@ -12,7 +12,6 @@ final class LocationPermissionManager: NSObject, ObservableObject {
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var microphonePermission: AVAudioSession.RecordPermission = .undetermined
     @Published private(set) var cameraAuthorizationStatus: AVAuthorizationStatus = .notDetermined
-    @Published private(set) var displayCaptureAvailabilityStatus: DisplayCaptureAvailabilityStatus = .inactive
     @Published private(set) var screenTimePermissionStatus: ScreenTimePermissionStatus = .notDetermined
     @Published private(set) var backgroundRefreshStatus: UIBackgroundRefreshStatus = .available
     @Published private(set) var isLowPowerModeEnabled = false
@@ -51,9 +50,6 @@ final class LocationPermissionManager: NSObject, ObservableObject {
         cameraAuthorizationStatus = value
     }
 
-    func setDisplayCaptureAvailabilityStatus(_ value: DisplayCaptureAvailabilityStatus) {
-        displayCaptureAvailabilityStatus = value
-    }
 
     func setScreenTimePermissionStatus(_ value: ScreenTimePermissionStatus) {
         screenTimePermissionStatus = value
@@ -94,7 +90,6 @@ final class LocationPermissionManager: NSObject, ObservableObject {
             notificationAuthorizationStatus: notificationAuthorizationStatus,
             microphonePermission: microphonePermission,
             cameraAuthorizationStatus: cameraAuthorizationStatus,
-            displayCaptureAvailabilityStatus: displayCaptureAvailabilityStatus,
             screenTimePermissionStatus: screenTimePermissionStatus,
             backgroundRefreshStatus: backgroundRefreshStatus,
             isLowPowerModeEnabled: isLowPowerModeEnabled

@@ -66,22 +66,6 @@
 "permissions.action_allow_camera" = "Allow Camera";
 "permissions.action_allow_screen_time" = "Allow Screen Time";
 "permissions.action_open_settings" = "Open Settings";
-"permissions.media_readiness_ready" = "Microphone, camera, and screen capture are ready. Parent audio, camera, and display recording commands can run on this iPhone while the app stays active.";
-"permissions.media_readiness_attention" = "Review the capability statuses below. Any item marked action needed, active only, or unavailable can block parent media commands on this iPhone.";
-"permissions.media_capability_microphone_title" = "Microphone";
-"permissions.media_capability_microphone_ready" = "Environment recordings and live audio streaming can use the microphone.";
-"permissions.media_capability_microphone_missing" = "Remote audio commands will fail until microphone access is granted.";
-"permissions.media_capability_camera_title" = "Camera";
-"permissions.media_capability_camera_ready" = "Camera recordings and live video streaming can use the camera.";
-"permissions.media_capability_camera_missing" = "Remote camera commands will fail until camera access is granted.";
-"permissions.media_capability_display_title" = "Screen capture";
-"permissions.media_capability_display_ready" = "ReplayKit screen recording is available while the app stays active.";
-"permissions.media_capability_display_inactive" = "Screen capture only works while Bolajon360 stays open and active on screen.";
-"permissions.media_capability_display_unavailable" = "ReplayKit screen capture is currently unavailable on this device state.";
-"permissions.media_capability_badge_ready" = "Ready";
-"permissions.media_capability_badge_action" = "Action needed";
-"permissions.media_capability_badge_inactive" = "Active only";
-"permissions.media_capability_badge_unavailable" = "Unavailable";
 
 
 
@@ -289,6 +273,8 @@
 "chat2.placeholder" = "Message…";
 "chat2.empty" = "No messages yet";
 "chat2.empty_hint" = "Write to your parent";
+"chat2.load_failed" = "Messages could not be loaded";
+"chat2.retry" = "Try again";
 "chat2.unread" = "Unread messages";
 "chat2.photo" = "Photo";
 "chat2.send" = "Send";

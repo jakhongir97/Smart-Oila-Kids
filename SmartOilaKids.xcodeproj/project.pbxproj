@@ -34,7 +34,6 @@
 		4B4E1FF589C595FD088F8B62 /* DeviceApplicationStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C45ED121A102053D74358C91 /* DeviceApplicationStateService.swift */; };
 		4D835BC4403A3627B4CD5564 /* DeviceAppLimitMonitorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611DF2DB1B84CE6845E61F65 /* DeviceAppLimitMonitorController.swift */; };
 		4E0C31E83F3E48D0964937D2 /* SmartOilaUsageReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6A7F416F8F47B5A633F74E /* SmartOilaUsageReport.swift */; };
-		50B88251B0431D3F098B7EF5 /* ActivityShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A477DC58268B911BE8094F /* ActivityShareSheet.swift */; };
 		526DDB581801D3C763C6AFE0 /* DeviceLockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6299D7514F1C609FFA8BCAB /* DeviceLockModels.swift */; };
 		531DBA02ECAF66E56CDD03D3 /* DeviceAppLimitSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F30C4E774EB78FB3C02B179 /* DeviceAppLimitSharedStore.swift */; };
 		547C9284661457BD92FD3966 /* PushDeepLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1E438381115ACFD35C54E19 /* PushDeepLinkStore.swift */; };
@@ -251,7 +250,6 @@
 		F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaDeviceClientTests.swift; sourceTree = "<group>"; };
 		F3642A198E04D3C7E8388312 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		F3856E652D5D319DC95A00A3 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
-		F3A477DC58268B911BE8094F /* ActivityShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityShareSheet.swift; sourceTree = "<group>"; };
 		F3AE0F8316C44BC78E962C07 /* SmartOilaKidsUsageReportExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartOilaKidsUsageReportExtension.swift; sourceTree = "<group>"; };
 		F3EC448F6E28C731606F52D2 /* DeviceApplicationRemovalAttemptCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceApplicationRemovalAttemptCoordinator.swift; sourceTree = "<group>"; };
 		F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaDeviceAPI.swift; sourceTree = "<group>"; };
@@ -636,7 +634,6 @@
 		FABE38EC3F4AF9CDC4E8200A /* UI */ = {
 			isa = PBXGroup;
 			children = (
-				F3A477DC58268B911BE8094F /* ActivityShareSheet.swift */,
 				2425C8628135185130E301B7 /* AppHaptics.swift */,
 				59E627ECB6EBB0A790D11AF5 /* BolajonKit.swift */,
 			);
@@ -841,7 +838,6 @@
 				D92FB27F658843A99A64703B /* DeviceAudioStreaming.swift in Sources */,
 				1B19EA5F7FAA404FA265E868 /* DeviceChatWebSocketService.swift in Sources */,
 				069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */,
-				50B88251B0431D3F098B7EF5 /* ActivityShareSheet.swift in Sources */,
 				1802E26A36C0451F1831F065 /* AppColors.swift in Sources */,
 				BD96FDE910D0B24E8DF6AD59 /* AppConfig.swift in Sources */,
 				156A236D65155CD1D4381BC4 /* AppHaptics.swift in Sources */,

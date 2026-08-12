@@ -112,6 +112,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private let maxQueuedFixes = 200
     /// Undelivered panic alerts awaiting retry. See `enqueueUndeliveredSOS`.
     private var pendingSOS: [OilaPendingSOS] = []
+    /// Guards `flushPendingSOS` against overlapping runs — see the note there.
+    private var isFlushingSOS = false
+    private var sosFlushRequestedAgain = false
     private let maxQueuedSOS = 20
     /// An SOS older than this is dropped rather than delivered — a stale panic alert misinforms the
     /// parent about where and when their child needed help.
@@ -277,6 +280,29 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     var hasUndeliveredSOS: Bool { !pendingSOS.isEmpty }
 
     private func flushPendingSOS() async {
+        guard isRunning, !pendingSOS.isEmpty else { return }
+        // RE-ENTRANCY GUARD. The queue is drained only AFTER the awaits below, so an enqueue-driven
+        // flush still inside `sendSOS` could be overlapped by the 60s timer tick — both read the
+        // same `pendingSOS`, and both POSTed it. The parent got the same panic alert twice, which
+        // in an emergency feature is a real cost: it makes a duplicate indistinguishable from the
+        // child pressing SOS a second time.
+        //
+        // A re-run flag rather than a bare early return: a genuinely NEW SOS enqueued while a flush
+        // is in flight must not wait out the next 60s tick, so the loop repeats instead of dropping
+        // the request.
+        guard !isFlushingSOS else {
+            sosFlushRequestedAgain = true
+            return
+        }
+        isFlushingSOS = true
+        defer { isFlushingSOS = false }
+        repeat {
+            sosFlushRequestedAgain = false
+            await flushPendingSOSOnce()
+        } while sosFlushRequestedAgain && isRunning && !pendingSOS.isEmpty
+    }
+
+    private func flushPendingSOSOnce() async {
         guard isRunning, !pendingSOS.isEmpty else { return }
         let batch = pendingSOS
         var delivered = Set<UUID>()

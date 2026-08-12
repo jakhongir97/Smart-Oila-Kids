@@ -22,7 +22,6 @@ final class BolajonPermissionChecklistTests: XCTestCase {
             notificationAuthorizationStatus: notifications,
             microphonePermission: microphone,
             cameraAuthorizationStatus: camera,
-            displayCaptureAvailabilityStatus: .inactive,
             screenTimePermissionStatus: screenTime,
             backgroundRefreshStatus: .available,
             isLowPowerModeEnabled: false
