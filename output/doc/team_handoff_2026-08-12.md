@@ -36,6 +36,41 @@ it is a pure liveness ping from three different client versions.
 
 ---
 
+## 2a. MEASURED ON THE PAIRED IPHONE (2026-08-12) — the wake push never arrives
+
+This is no longer a hypothesis. Everything below was read off the real child device (iPhone 17e,
+iOS 26.6, child "Joxon") while the parent app tried to start a live session.
+
+| Link in the chain | How it was checked | Result |
+|---|---|---|
+| Child holds an FCM registration token | `OILA_FCM_TOKEN` read out of the app container | present |
+| Backend holds **that** token | `PATCH /device/fcm-token` logged its result — `fcm_token_upload ok` | accepted |
+| Child can open the mic and publish | debug start with no push at all → `media live audio_live` over LiveKit | works |
+| Child app paired, foreground, unlocked | `BOLAJON_OILA_PAIRED true`, console attached | yes |
+| **`stream.start` reaches the device** | every push is logged the moment it enters the router | **never arrived** |
+
+So the device is registered, addressable, awake, in the foreground, and demonstrably able to publish
+audio — and no push has ever been delivered to it. Nothing in the iOS app can produce that: the app
+cannot drop a message it was never handed.
+
+**The remaining link is FCM → APNs, which needs an APNs Auth Key (`.p8`) on the Firebase project.**
+Firebase will happily mint a registration token for an iOS app with no key configured — the key is
+only consulted at delivery time — which is exactly why this looks healthy from every side except the
+one that matters.
+
+**Ask (5 minutes, console-side):** in the Firebase console → Project settings → Cloud Messaging →
+the iOS app `uz.smartoila.kids`, confirm an **APNs Auth Key** is uploaded (Key ID + Team ID
+`3TWN5NW4BL`). One `.p8` is environment-agnostic — it covers development and production; the
+"upload one for each" rule applied only to the legacy `.p12` certificates.
+
+**Faster still:** send a test message to this child's FCM token via the FCM v1 API and read the error
+code. `THIRD_PARTY_AUTH_ERROR` means *no valid APNs key* and settles it outright; `UNREGISTERED`
+would mean the token is stale; `SENDER_ID_MISMATCH` would mean the token belongs to another Firebase
+project. The token is a delivery credential, so it is deliberately **not** written into this repo —
+ask for it directly and it will be sent over a private channel.
+
+---
+
 ## 2. BACKEND — does the `stream.start` FCM payload set `content-available` for iOS?
 
 Android receives `stream.start` as a plain FCM data message and it works. For the same message to
@@ -158,9 +193,20 @@ is easy to re-introduce:
 > `PostDeviceStatusDto` ga `locationAuthorization` (Always/WhenInUse/Denied/NotDetermined) va ruxsatlar
 > holati uchun maydon qo'shsangiz — 2-avgustdagi so'rovni ham shu yopadi.
 >
-> **2) Akramjon —** `stream.start` push'ida iOS uchun `content-available: 1` (apns bo'limida) qo'yilganmi?
-> Bo'lmasa iOS fon rejimida push'ni umuman olmaydi va kod tomondan hech narsa yordam bermaydi. Bu hozir
-> iOS jonli efir uchun eng muhim savol.
+> **2) Akramjon — JONLI EFIR: sabab topildi.** Bugun haqiqiy iPhone'da (bola "Joxon") to'liq tekshirdim:
+> qurilmada FCM token bor, backend o'sha tokenni qabul qildi (`PATCH /device/fcm-token` → OK), ilova
+> oldinda ochiq turibdi va push'siz test'da mikrofon LiveKit'ga **muvaffaqiyatli ulandi** (`audio_live`).
+> Lekin `stream.start` push'i qurilmaga **umuman kelmadi** — ikki urinishda ham. Ya'ni muammo iOS
+> ilovasida emas.
+>
+> Iltimos Firebase konsolida (`oila360` → Project settings → Cloud Messaging → iOS ilova
+> `uz.smartoila.kids`) **APNs Auth Key (.p8)** yuklanganini tekshiring (Team ID `3TWN5NW4BL`). Bitta
+> `.p8` dev va prod uchun ham yetarli. Tezroq yo'li: FCM v1 orqali shu qurilma tokeniga test xabar
+> yuboring va xato kodini qarang — `THIRD_PARTY_AUTH_ERROR` = APNs kaliti yo'q/noto'g'ri. Tokenni
+> shaxsiy yozaman (u yetkazib berish kaliti, ochiq repoga qo'ymadim).
+>
+> Yana: `stream.start` push'ida iOS uchun `content-available: 1` (apns bo'limida) qo'yilganmi? Kalit
+> muammosi hal bo'lgach, fon rejimi uchun bu ham kerak bo'ladi.
 >
 > **3) Javohir —** tarqatilayotgan APK **debug build**: `android:debuggable="true"`, Chucker ichida,
 > `allowBackup="true"`. Play bunday APK ni qabul qilmaydi, va Chucker bolaning telefonida barcha
