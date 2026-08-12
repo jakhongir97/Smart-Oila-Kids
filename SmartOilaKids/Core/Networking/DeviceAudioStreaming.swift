@@ -865,11 +865,46 @@ final class DeviceAudioStreamManager: ObservableObject {
         needsConsent = false
         pendingCommand = nil
         // A DECLINED video upgrade must not tear down — or hide the indicator of — the audio session
-        // the child already consented to and that is still publishing.
-        if state != .live { state = .idle }
+        // the child already consented to and that is still publishing. `.connecting` counts for the
+        // same reason `.live` does: the sheet the child is refusing is not necessarily about the
+        // session that is coming up. A parent can ask to upgrade an audio session to video while the
+        // audio connect is still in flight, and tapping "Not now" on the camera would then reset the
+        // state out from under it — every later guard in `start()` reads `state == .connecting`, so
+        // the audio session the child already agreed to died silently on the next resumption.
+        if state != .live, state != .connecting { state = .idle }
         // Symmetric with the awaiting-consent event: a routed command that the child refused is a
         // real outcome, not the absence of one.
         recordMedia(status: state == .live ? "live" : "idle", event: Self.event(declinedMode, "start_consent_declined"))
+    }
+
+    /// Ceiling on how long a session may sit in `.connecting`.
+    ///
+    /// Nothing bounded it. Every path into `start()` bounces off `guard state != .connecting`, so a
+    /// single stuck attempt made the device deaf to every later wake for the rest of the process —
+    /// no error, no indicator, and the parent seeing a child that simply never answers. It is easy to
+    /// get stuck: a permission prompt the child never answers, or one iOS defers because the app is
+    /// not on screen, leaves its continuation suspended forever. This is the backstop for all of
+    /// them, generation-scoped exactly like the lease so it can only ever end the attempt it was
+    /// armed for.
+    private static let connectTimeout: UInt64 = 45
+    private var connectWatchdog: Task<Void, Never>?
+
+    private func armConnectWatchdog(generation: UInt64) {
+        connectWatchdog?.cancel()
+        connectWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.connectTimeout * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            let timedOut = await MainActor.run { () -> Bool in
+                guard let self, self.startGeneration == generation, self.state == .connecting else { return false }
+                self.state = .error("connect_timeout")
+                self.recordMedia(status: "error", event: Self.event(self.activeMode, "start_timed_out"))
+                return true
+            }
+            // Only tear down the attempt this watchdog was armed for. Calling stop() unconditionally
+            // would let a stale timer kill a healthy session that started after it.
+            guard timedOut else { return }
+            await self?.stop()
+        }
     }
 
     /// Audio needs the audio grant; video needs the audio grant AND the camera grant.
@@ -939,6 +974,9 @@ final class DeviceAudioStreamManager: ObservableObject {
         // ownership; `generation` lets each resumption check whether it is still the owner.
         startGeneration &+= 1
         let generation = startGeneration
+        // Bounded from here: every exit below either reaches `.live` (which disarms it) or
+        // leaves `.connecting` behind, and the watchdog is what makes the latter recoverable.
+        armConnectWatchdog(generation: generation)
 
         // DISCLOSURE GATE — refuse a session the child could not see running.
         //
@@ -1050,6 +1088,7 @@ final class DeviceAudioStreamManager: ObservableObject {
                 )
                 return
             }
+            connectWatchdog?.cancel()
             state = .live
             recordMedia(status: "live", event: Self.event(command.mode, "live"))
             let queued = pendingCommand
@@ -1188,6 +1227,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         // and so a pending lease task sees it no longer owns the session.
         startGeneration &+= 1
         leaseTask?.cancel()
+        connectWatchdog?.cancel()
         leaseTask = nil
         pendingCommand = nil
         // Detach `onEnded` and drop the reference BEFORE disconnecting: the publisher now also

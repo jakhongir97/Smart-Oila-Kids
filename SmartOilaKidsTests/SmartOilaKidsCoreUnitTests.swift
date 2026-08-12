@@ -3416,3 +3416,59 @@ final class LiveSessionLifecycleTests: XCTestCase {
         XCTAssertEqual(publisher.connectCount, 0)
     }
 }
+
+@MainActor
+final class LiveSessionConsentRaceTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+
+    override func setUp() async throws {
+        suiteName = "LiveSessionConsentRaceTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED")
+    }
+
+    override func tearDown() async throws {
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    private func makeManager(_ publisher: FakeMediaPublisher) -> DeviceAudioStreamManager {
+        let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
+        manager.isFeatureEnabled = { true }
+        manager.makePublisher = { publisher }
+        manager.isForeground = { true }
+        manager.notificationsAuthorized = { true }
+        manager.requestMicPermission = { true }
+        return manager
+    }
+
+    /// Declining a camera-upgrade sheet must not kill the audio session it is layered over. Before,
+    /// `declineConsent()` reset the state whenever it was not `.live` -- which included `.connecting`,
+    /// so a decline landing while the audio connect was still in flight silently aborted it at the
+    /// next `state == .connecting` guard.
+    func testDecliningConsentDoesNotAbortAConnectAlreadyInFlight() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher)
+        // The decline has to land BEFORE the guards that read `state == .connecting`, which is where
+        // the damage was done -- the microphone grant is the first await in `start()`, so a sheet
+        // dismissed while iOS is showing that prompt is exactly the real-world shape.
+        manager.requestMicPermission = { [weak manager] in
+            await MainActor.run { manager?.declineConsent() }
+            return true
+        }
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertTrue(manager.isLive, "the audio session the child already consented to must survive")
+        XCTAssertEqual(publisher.connectCount, 1)
+        XCTAssertEqual(publisher.disconnectCount, 0)
+    }
+
+    /// A decline with nothing in flight still returns the manager to idle, so the sheet is not sticky.
+    func testDecliningConsentWithNoSessionReturnsToIdle() async {
+        let manager = makeManager(FakeMediaPublisher())
+        manager.declineConsent()
+        XCTAssertEqual(manager.state, .idle)
+        XCTAssertFalse(manager.needsConsent)
+    }
+}
