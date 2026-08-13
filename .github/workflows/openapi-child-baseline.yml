@@ -48,4 +48,4 @@ jobs:
         # until it passes has to fail the build instead. Raise it when call sites are added.
         # The unit is METHOD+path, so the 19 distinct paths the client calls are 22 operations.
         run: |
-          python3 scripts/check_child_live_endpoints.py --min-endpoints 22
+          python3 scripts/check_child_live_endpoints.py --min-endpoints 24

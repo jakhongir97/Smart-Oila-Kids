@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 import SwiftUI
 
 final class SessionStore: ObservableObject {
@@ -236,6 +237,12 @@ final class SessionStore: ObservableObject {
         // authorization to use it, until the server lease happened to expire. Teardown belongs to
         // the session ending, not to one of the two ways of ending it.
         Task { @MainActor in DeviceAudioStreamManager.shared.stopByChild() }
+        // Take down the "your parent sent a message" banner with the session. Left behind, it would
+        // sit on the lock screen of a device that is no longer paired — and tapping it would open a
+        // chat that belongs to a family this phone is no longer part of.
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [LocalNotificationID.chatMessage])
+        center.removeDeliveredNotifications(withIdentifiers: [LocalNotificationID.chatMessage])
         setDSN(nil)
         setAPIAccessToken(nil)
         setAPIRefreshToken(nil)

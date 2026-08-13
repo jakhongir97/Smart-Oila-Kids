@@ -1,4 +1,6 @@
 import Foundation
+import UIKit
+import UserNotifications
 import os
 
 enum PushDeliveryContext: String {
@@ -45,11 +47,38 @@ enum PushCommandRouter {
     }
 
     static let log = Logger(subsystem: "uz.smartoila.kids", category: "push")
+
+    /// True when `handle(...)` will try to raise the local chat banner for this payload.
+    ///
+    /// Exists so `didReceiveRemoteNotification` can hold its fetch completion handler for the moment
+    /// the banner needs: calling that handler tells iOS the push is finished with, and it may
+    /// suspend the process immediately — before the scheduling hop onto the main actor has run, so
+    /// the child would get no banner at all. Deliberately does NOT include the app-active check:
+    /// that one needs the main actor, and holding the handler an extra beat when no banner turns out
+    /// to be needed costs nothing.
+    static func schedulesChatBanner(userInfo: [AnyHashable: Any], deliveryContext: PushDeliveryContext) -> Bool {
+        guard deliveryContext != .userResponse, deliveryContext != .foregroundPresentation else { return false }
+        let payload = parsePayload(from: userInfo)
+        guard payload.title?.trimmedNonEmpty == nil, payload.body?.trimmedNonEmpty == nil else { return false }
+        return containsAny(in: payload.routingHaystack, tokens: RoutingTokens.chat)
+    }
+
+    /// A tap on our own "your parent sent a message" banner: open the chat, and nothing else.
+    ///
+    /// Deliberately not `handle(...)`. That would re-route an app-authored notification as if it
+    /// were a fresh server command — the exact re-ingestion `LocalNotificationID` exists to stop.
+    /// This does only the part a tap earns: arm the deep link (for a cold launch, where no view is
+    /// listening yet) and post the open (for a warm one, where Home is already on screen).
+    static func openChatFromLocalBanner(userInfo: [AnyHashable: Any]) {
+        let dsn = (userInfo[PushUserInfoKeys.dsn] as? String)?.trimmedNonEmpty
+        saveDeepLink(destination: .chat, dsn: dsn)
+        post(.pushShouldOpenChat, dsn: dsn)
+        updateDiagnostics(status: "opened", lastRoute: "chat_open_local_banner")
+    }
 }
 
 private extension PushCommandRouter {
     enum RoutingTokens {
-        static let dashboard = ["log", "usage", "geo", "location", "stat", "system"]
         static let lock = ["lock"]
         static let tasks = ["task", "award"]
         static let chat = ["chat", "message", "sms"]
@@ -77,6 +106,60 @@ private extension PushCommandRouter {
             "stream.audio", "audio.stream", "streamaudio", "audiostream",
             "stream_audio", "audio_stream", "device.stream", "device_stream"
         ]
+        /// Subject stems for the "report your status now" command, prefix-matched against the
+        /// event's FIRST token only (see `isStatusReportCommand`). "holat" is the Uzbek word the
+        /// backend logs already use for this concept.
+        static let statusSubjects = ["status", "holat"]
+        /// Whole-event aliases where the status subject is not the first token.
+        static let statusAliasEvents = ["device.status", "device_status", "devicestatus"]
+    }
+
+    /// Shows "your parent sent a message" for a SILENT `chat.refresh`.
+    ///
+    /// The backend sends chat pushes as data-only messages — the Android child app builds the banner
+    /// itself (`FCMService` → `ChatNotification.show`, channel `chat_messages`, IMPORTANCE_HIGH, one
+    /// fixed id). iOS displayed nothing at all: a data-only push draws no banner, the inbox row is
+    /// deliberately dropped for command pushes, and both `.pushShouldRefreshChat` observers live in
+    /// view bodies. So a child whose phone was in their pocket had no way to learn a message had
+    /// arrived until they happened to open the app.
+    ///
+    /// Deliberately narrow:
+    ///  • Only when the push carries NO title and NO body of its own. If the backend ever starts
+    ///    sending a real alert, iOS renders that and this would be a duplicate.
+    ///  • Never while the app is active — the chat screen and the Home badge already update live, and
+    ///    a banner over the conversation you are reading is noise.
+    ///  • The body is OUR text, never the parent's message. The message content is not in the push
+    ///    (and this app deliberately keeps person-authored text off the lock screen and off disk).
+    static func presentChatBannerIfNeeded(_ payload: PushCommandPayload, deliveryContext: PushDeliveryContext) {
+        // INVARIANT, do not weaken: this runs inside the WIDE-haystack chat block, which matches on
+        // the notification title and body — i.e. on the parent's own words. It is only safe because
+        // it refuses any push that HAS a title or body. A payload carrying human text is either a
+        // real alert (iOS renders it itself) or not a command at all.
+        guard payload.title?.trimmedNonEmpty == nil, payload.body?.trimmedNonEmpty == nil else { return }
+        guard deliveryContext != .userResponse, deliveryContext != .foregroundPresentation else { return }
+        // Addressed to a DIFFERENT device: never raise this child's banner for someone else's
+        // message. An absent dsn is accepted — the backend addresses by FCM token and omits it (the
+        // same rule `RootView.shouldHandlePush` applies).
+        if let pushedDSN = payload.dsn?.trimmedNonEmpty,
+           let localDSN = OilaDeviceIdentity.persistedDSN()?.trimmedNonEmpty,
+           pushedDSN.caseInsensitiveCompare(localDSN) != .orderedSame {
+            return
+        }
+        let dsn = payload.dsn ?? ""
+        Task { @MainActor in
+            guard UIApplication.shared.applicationState != .active else { return }
+            let content = UNMutableNotificationContent()
+            content.title = L10n.tr("chat2.notification.title")
+            content.body = L10n.tr("chat2.notification.body")
+            content.sound = .default
+            content.userInfo = [PushUserInfoKeys.dsn: dsn, "event": "chat.refresh"]
+            let request = UNNotificationRequest(
+                identifier: LocalNotificationID.chatMessage,
+                content: content,
+                trigger: nil
+            )
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
 
     static func persistInboxItem(_ payload: PushCommandPayload, openedFromInteraction: Bool) {
@@ -111,9 +194,11 @@ private extension PushCommandRouter {
         var deepLinkDestination: PushDeepLinkDestination?
         var routeActions: [String] = []
 
-        if containsAny(in: haystack, tokens: RoutingTokens.dashboard) {
-            post(.pushShouldRefreshDashboard, dsn: payload.dsn)
-            routeActions.append("dashboard_refresh")
+        // `status.report`: the parent asked for a fresh battery / network reading. Read from the
+        // structured command, never the haystack — see `isStatusReportCommand`.
+        if isStatusReportCommand(payload.commandHaystack) {
+            post(.pushShouldReportStatus, dsn: payload.dsn)
+            routeActions.append("status_report")
         }
 
         if containsAny(in: haystack, tokens: RoutingTokens.lock) {
@@ -139,6 +224,7 @@ private extension PushCommandRouter {
                 deepLinkDestination = .chat
                 routeActions.append("chat_open")
             }
+            presentChatBannerIfNeeded(payload, deliveryContext: deliveryContext)
         }
 
         // Live-audio wake: the parent tapping "listen" sends a data-push whose EVENT names the
@@ -261,6 +347,31 @@ extension PushCommandRouter {
     /// as "stop" while keeping "sending" from counting as "end".
     static func hasStem(_ token: String, in stems: [String]) -> Bool {
         stems.contains { token.hasPrefix($0) }
+    }
+
+    /// True when the push is the backend's "report your status now" command (`status.report`).
+    ///
+    /// Kept out of the private extension, and read from the structured command rather than the wide
+    /// routing haystack, for the same reason as `audioRoute`: this drives a device action, and the
+    /// haystack carries the parent's own message text on a chat push.
+    ///
+    /// Matched on the event's FIRST token so the SUBJECT has to be the status, not merely a word
+    /// appearing somewhere in it. That is what keeps `stream.status` — an informational stream
+    /// event the D-073 contract can send — from being read as a status command. `device.status` is
+    /// allowed as a whole-event alias because a machine-authored event cannot be typed by a human.
+    ///
+    /// The Android child app answers `status.report` by posting a fresh `/device/status` snapshot
+    /// immediately (`FCMService.onMessageReceived` → `SendDeviceStatusUseCase`); iOS routed the
+    /// event to `.pushShouldRefreshDashboard`, which no object observes, so the parent's refresh
+    /// did nothing until the 300s timer came round.
+    static func isStatusReportCommand(_ command: String) -> Bool {
+        let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        if RoutingTokens.statusAliasEvents.contains(normalized) { return true }
+        guard let first = normalized.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).first else {
+            return false
+        }
+        return hasStem(String(first), in: RoutingTokens.statusSubjects)
     }
 }
 

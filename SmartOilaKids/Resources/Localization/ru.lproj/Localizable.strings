@@ -190,6 +190,10 @@
 "home2.connected" = "Подключено";
 "home2.screentime.title" = "Экранное время сегодня";
 "home2.screentime.tracked_subtitle" = "В отслеживаемых приложениях";
+"home2.screentime.device_subtitle" = "На этом телефоне";
+"home2.screentime.remaining" = "осталось %@";
+"home2.screentime.limit_reached" = "Дневной лимит исчерпан";
+"home2.screentime.daily_limit" = "дневной лимит";
 "home2.sos.title" = "SOS — Нужна помощь";
 "home2.sos.subtitle" = "При нажатии — сигнал родителям";
 "home2.tasks.title" = "Задания";
@@ -210,6 +214,7 @@
 "tasks2.all" = "Все";
 "tasks2.done" = "Готово";
 "tasks2.collected" = "Получено";
+"tasks2.cancelled" = "Отменено";
 "tasks2.empty" = "Пока нет заданий";
 
 /* MARK: - Bolajon360 Settings / Disconnect (C4-C6) */
@@ -276,6 +281,8 @@
 "chat2.load_failed" = "Не удалось загрузить сообщения";
 "chat2.retry" = "Повторить";
 "chat2.unread" = "Непрочитанные сообщения";
+"chat2.notification.title" = "Новое сообщение от родителя";
+"chat2.notification.body" = "Пришло новое сообщение";
 "chat2.photo" = "Фото";
 "chat2.send" = "Отправить";
 "chat2.attach" = "Прикрепить фото";

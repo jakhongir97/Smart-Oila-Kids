@@ -135,6 +135,16 @@ private final class SOSServiceSpy: OilaDeviceServicing {
         completeTaskCalls.append(id)
         if let completeTaskError { throw completeTaskError }
     }
+    /// `GET /device/tasks/summary`. Nil by default so the view models fall back to their local sum,
+    /// which is what the existing star assertions in this file expect.
+    var taskStarTotal: Int?
+    var fetchTaskStarTotalError: Error?
+    private(set) var fetchTaskStarTotalCallCount = 0
+    func fetchTaskStarTotal() async throws -> Int? {
+        fetchTaskStarTotalCallCount += 1
+        if let fetchTaskStarTotalError { throw fetchTaskStarTotalError }
+        return taskStarTotal
+    }
     func updateFCMToken(_ token: String) async throws {}
     func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {}
     func postDeviceStatus(_ status: OilaDeviceStatus) async throws {}
@@ -142,6 +152,10 @@ private final class SOSServiceSpy: OilaDeviceServicing {
         DeviceApplicationUsageReportResponse(lockedPackages: [], stats: [])
     }
     func fetchLockState() async throws -> OilaLockState { throw Unimplemented() }
+    /// `GET /device/apps/screen-time`. Nil by default: the card must stay hidden unless a test
+    /// deliberately supplies a figure.
+    var screenTime: OilaDeviceScreenTime?
+    func fetchScreenTime() async throws -> OilaDeviceScreenTime? { screenTime }
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws {}
 }
 
@@ -292,5 +306,268 @@ final class ChatReadReceiptPredicateTests: XCTestCase {
             BolajonChatViewModel.parseISO("2026-07-26T09:15:02.418Z"),
             "and it is deterministic — the two formatters are separate immutable instances on purpose"
         )
+    }
+}
+
+/// Backend-parity behaviours added so the iPhone reports and displays what the Android child app
+/// already does: the server's own star total, the cancelled chores it used to hide, and the
+/// device-wide screen time the parent sets a budget for.
+@MainActor
+final class BolajonBackendParityTests: XCTestCase {
+    private func task(
+        _ id: String,
+        status: String,
+        reward: Int = 5,
+        completedAt: Date? = nil
+    ) -> OilaDeviceTask {
+        OilaDeviceTask(id: id, title: "Chore \(id)", status: status, rewardPoints: reward,
+                       emoji: nil, dueAt: nil, completedAt: completedAt)
+    }
+
+    // MARK: Stars
+
+    /// The local sum only ever sees the rows this device fetched, and that walk is capped. The
+    /// server's `totalPoints` is the number the parent app shows, so it wins when it answers.
+    func testServerStarTotalWinsOverTheLocalSum() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksResult = [task("t1", status: "Completed", reward: 5, completedAt: Date())]
+        service.taskStarTotal = 120
+        let viewModel = BolajonTasksViewModel(service: service)
+
+        await viewModel.load()
+
+        XCTAssertEqual(viewModel.localStarTotal, 5)
+        XCTAssertEqual(viewModel.starTotal, 120)
+    }
+
+    /// A summary failure must degrade to the local sum, never to zero: a child watching their stars
+    /// vanish because a request timed out is the worst possible failure mode for this screen.
+    func testStarTotalFallsBackToTheLocalSumWhenTheSummaryFails() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksResult = [task("t1", status: "Completed", reward: 7, completedAt: Date())]
+        service.fetchTaskStarTotalError = NetworkError.invalidURL
+        let viewModel = BolajonTasksViewModel(service: service)
+
+        await viewModel.load()
+
+        XCTAssertEqual(viewModel.starTotal, 7)
+    }
+
+    /// Once a server total has been seen, a later failure keeps it rather than falling back to a
+    /// smaller local number — the badge must not flicker downwards on a flaky connection.
+    func testLastGoodServerTotalSurvivesALaterFailure() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksResult = [task("t1", status: "Completed", reward: 5, completedAt: Date())]
+        service.taskStarTotal = 90
+        let viewModel = BolajonTasksViewModel(service: service)
+        await viewModel.load()
+        XCTAssertEqual(viewModel.starTotal, 90)
+
+        service.fetchTaskStarTotalError = NetworkError.invalidURL
+        await viewModel.load()
+
+        XCTAssertEqual(viewModel.starTotal, 90)
+    }
+
+    // MARK: Cancelled tasks
+
+    /// A chore the parent called off used to vanish: the client asked only for Active and Completed,
+    /// so the row simply never arrived. It now arrives and is rendered struck through — but it must
+    /// not appear on Home's "what should I do now" card, and it must not earn stars.
+    func testCancelledTaskIsKeptButExcludedFromHomeAndFromStars() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksResult = [
+            task("t1", status: "Active"),
+            task("t2", status: "Cancelled", reward: 9),
+            task("t3", status: "Completed", reward: 4, completedAt: Date())
+        ]
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+                                             screenTimeUsage: StubScreenTimeUsage(seconds: nil))
+
+        await viewModel.load()
+
+        XCTAssertEqual(viewModel.tasks.count, 3, "the cancelled row must reach the Tasks screen")
+        XCTAssertEqual(viewModel.activeTasks.map(\.id), ["t1"])
+        XCTAssertEqual(viewModel.localStarTotal, 4, "a cancelled chore earns nothing")
+        XCTAssertFalse(viewModel.previewTasks.contains { $0.isCancelled })
+    }
+
+    func testCancelledStatusSpellingsBothParse() {
+        XCTAssertTrue(task("a", status: "Cancelled").isCancelled)
+        XCTAssertTrue(task("b", status: "canceled").isCancelled)
+        XCTAssertFalse(task("c", status: "Active").isCancelled)
+        XCTAssertFalse(task("d", status: "Completed").isCancelled)
+    }
+
+    // MARK: Screen-time card
+
+    /// iOS cannot measure app usage without the FamilyControls entitlement, so a server figure of
+    /// zero with no budget means "we have nothing to say" — the card hides rather than claiming the
+    /// child spent no time on the phone.
+    func testScreenTimeCardHidesOnAZeroWithNoBudget() async {
+        let service = SOSServiceSpy()
+        service.screenTime = OilaDeviceScreenTime(usedSeconds: 0, dailyLimitSeconds: nil,
+                                                  remainingSeconds: nil, isLimitReached: false,
+                                                  usageDate: nil)
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+                                             screenTimeUsage: StubScreenTimeUsage(seconds: nil))
+
+        await viewModel.load()
+
+        XCTAssertFalse(viewModel.showsScreenTimeCard)
+    }
+
+    /// …but a budget alone is worth showing: "your parent set a 3h limit" is information the child
+    /// has no other way to see.
+    func testBudgetAloneRendersTheCard() async {
+        let service = SOSServiceSpy()
+        service.screenTime = OilaDeviceScreenTime(usedSeconds: 0, dailyLimitSeconds: 10800,
+                                                  remainingSeconds: 10800, isLimitReached: false,
+                                                  usageDate: nil)
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+                                             screenTimeUsage: StubScreenTimeUsage(seconds: nil))
+
+        await viewModel.load()
+
+        XCTAssertTrue(viewModel.showsScreenTimeCard)
+        XCTAssertEqual(viewModel.screenTimeLimitText, "3h")
+        XCTAssertEqual(viewModel.screenTimeRemainingText, "3h")
+    }
+
+    /// The server's device-wide figure is preferred over the local Screen Time report, so the child
+    /// and the parent never read different numbers for the same day.
+    func testServerFigureWinsOverTheLocalReport() async {
+        let service = SOSServiceSpy()
+        service.screenTime = OilaDeviceScreenTime(usedSeconds: 3600, dailyLimitSeconds: nil,
+                                                  remainingSeconds: nil, isLimitReached: false,
+                                                  usageDate: nil)
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+                                             screenTimeUsage: StubScreenTimeUsage(seconds: 60))
+
+        await viewModel.load()
+
+        XCTAssertTrue(viewModel.showsScreenTimeCard)
+        XCTAssertEqual(viewModel.screenTimeSeconds, 3600)
+    }
+
+    /// With no server answer at all the local report still drives the card, exactly as before.
+    func testLocalReportStillDrivesTheCardWhenTheServerSaysNothing() async {
+        let service = SOSServiceSpy()
+        service.screenTime = nil
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+                                             screenTimeUsage: StubScreenTimeUsage(seconds: 1800))
+
+        await viewModel.load()
+
+        XCTAssertTrue(viewModel.showsScreenTimeCard)
+        XCTAssertEqual(viewModel.screenTimeSeconds, 1800)
+        XCTAssertNil(viewModel.screenTimeLimitText)
+    }
+
+    /// A budget with no usage figure must NOT render "0m". iOS cannot measure app usage, so a
+    /// zero would be a claim about the child's day rather than a reading of it — and it would sit
+    /// next to an Android sibling's real number on the parent's screen.
+    func testBudgetOnlyCardShowsNoUsageFigure() async {
+        let service = SOSServiceSpy()
+        service.screenTime = OilaDeviceScreenTime(usedSeconds: 0, dailyLimitSeconds: 10800,
+                                                  remainingSeconds: 10800, isLimitReached: false,
+                                                  usageDate: nil)
+        let viewModel = BolajonHomeViewModel(
+            service: service,
+            telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+            screenTimeUsage: StubScreenTimeUsage(seconds: nil)
+        )
+
+        await viewModel.load()
+
+        XCTAssertTrue(viewModel.showsScreenTimeCard)
+        XCTAssertFalse(viewModel.showsUsageFigure)
+        XCTAssertNil(viewModel.screenTimeProgress, "no usage figure means no progress bar")
+    }
+
+    /// The card is captioned "Screen time today". A figure the server dated to another day must not
+    /// appear under it.
+    func testServerFigureFromAnotherDayIsIgnored() async {
+        let service = SOSServiceSpy()
+        service.screenTime = OilaDeviceScreenTime(usedSeconds: 7200, dailyLimitSeconds: nil,
+                                                  remainingSeconds: nil, isLimitReached: false,
+                                                  usageDate: "2020-01-01")
+        let viewModel = BolajonHomeViewModel(
+            service: service,
+            telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+            screenTimeUsage: StubScreenTimeUsage(seconds: nil)
+        )
+
+        await viewModel.load()
+
+        XCTAssertFalse(viewModel.showsScreenTimeCard)
+        XCTAssertNil(viewModel.screenTimeSeconds)
+    }
+
+    func testTodaysDateIsAccepted() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        XCTAssertTrue(BolajonHomeViewModel.isToday(formatter.string(from: Date())))
+        XCTAssertTrue(BolajonHomeViewModel.isToday(formatter.string(from: Date()) + "T10:00:00Z"))
+        XCTAssertFalse(BolajonHomeViewModel.isToday("2020-01-01"))
+        XCTAssertTrue(BolajonHomeViewModel.isToday("not-a-date"), "an unreadable date is not evidence of staleness")
+    }
+
+    /// The star the child just earned has to land on the badge in the same beat as the row's
+    /// "Done" — `starTotal` prefers the server value, so recomputing the local sum is not enough.
+    func testCompletingATaskOnHomeRefreshesTheServerStarTotal() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksResult = [task("t1", status: "Active")]
+        service.taskStarTotal = 10
+        let viewModel = BolajonHomeViewModel(
+            service: service,
+            telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+            screenTimeUsage: StubScreenTimeUsage(seconds: nil)
+        )
+        await viewModel.load()
+        XCTAssertEqual(viewModel.starTotal, 10)
+
+        service.taskStarTotal = 15
+        await viewModel.complete(task("t1", status: "Active"))
+
+        XCTAssertEqual(viewModel.starTotal, 15)
+    }
+}
+
+/// The predicate `didReceiveRemoteNotification` uses to decide whether to hold its completion
+/// handler for the chat banner. Getting it wrong either drops the banner (iOS suspends first) or
+/// holds the process for pushes that need nothing.
+final class ChatBannerSchedulingPredicateTests: XCTestCase {
+    func testSilentChatPushSchedulesABanner() {
+        XCTAssertTrue(PushCommandRouter.schedulesChatBanner(
+            userInfo: ["type": "chat.refresh", "dsn": "child-1"], deliveryContext: .backgroundFetch
+        ))
+    }
+
+    /// A push that carries its own text is a real alert — iOS renders it, and ours would duplicate it.
+    func testPushWithItsOwnTextSchedulesNothing() {
+        XCTAssertFalse(PushCommandRouter.schedulesChatBanner(
+            userInfo: ["event": "chat.refresh", "aps": ["alert": ["title": "Ota-ona", "body": "Salom"]]],
+            deliveryContext: .backgroundFetch
+        ))
+    }
+
+    func testNonChatCommandsScheduleNothing() {
+        for event in ["lock.refresh", "status.report", "stream.start", "stream.stop"] {
+            XCTAssertFalse(
+                PushCommandRouter.schedulesChatBanner(userInfo: ["type": event], deliveryContext: .backgroundFetch),
+                "\(event) must not hold the completion handler"
+            )
+        }
+    }
+
+    /// A tap, or a push iOS is already presenting, needs no banner from us.
+    func testInteractiveContextsScheduleNothing() {
+        for context in [PushDeliveryContext.userResponse, .foregroundPresentation] {
+            XCTAssertFalse(PushCommandRouter.schedulesChatBanner(
+                userInfo: ["type": "chat.refresh"], deliveryContext: context
+            ))
+        }
     }
 }

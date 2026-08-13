@@ -190,6 +190,10 @@
 "home2.connected" = "Ulangan";
 "home2.screentime.title" = "Bugungi ekran vaqti";
 "home2.screentime.tracked_subtitle" = "Kuzatilayotgan ilovalarda";
+"home2.screentime.device_subtitle" = "Shu telefonda";
+"home2.screentime.remaining" = "%@ qoldi";
+"home2.screentime.limit_reached" = "Kunlik chegara tugadi";
+"home2.screentime.daily_limit" = "kunlik chegara";
 "home2.sos.title" = "SOS — Yordam kerak";
 "home2.sos.subtitle" = "Bosilsa — ota-onaga xabar ketadi";
 "home2.tasks.title" = "Topshiriqlar";
@@ -210,6 +214,7 @@
 "tasks2.all" = "Barchasi";
 "tasks2.done" = "Bajardim";
 "tasks2.collected" = "Olindi";
+"tasks2.cancelled" = "Bekor qilindi";
 "tasks2.empty" = "Hozircha topshiriq yo'q";
 
 /* MARK: - Bolajon360 Settings / Disconnect (C4-C6) */
@@ -276,6 +281,8 @@
 "chat2.load_failed" = "Xabarlarni yuklab bo'lmadi";
 "chat2.retry" = "Qayta urinish";
 "chat2.unread" = "O'qilmagan xabarlar";
+"chat2.notification.title" = "Ota-onadan yangi xabar";
+"chat2.notification.body" = "Yangi xabar keldi";
 "chat2.photo" = "Rasm";
 "chat2.send" = "Yuborish";
 "chat2.attach" = "Rasm biriktirish";

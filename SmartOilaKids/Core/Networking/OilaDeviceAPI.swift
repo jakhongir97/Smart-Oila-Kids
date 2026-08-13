@@ -152,6 +152,12 @@ struct OilaDeviceTask: Identifiable {
     let completedAt: Date?
 
     var isCompleted: Bool { status.lowercased() == "completed" }
+    /// The parent called this chore off. It is shown, struck through, rather than hidden: a task
+    /// that silently disappears reads to a child as one they failed to do.
+    var isCancelled: Bool {
+        let normalized = status.lowercased()
+        return normalized == "cancelled" || normalized == "canceled"
+    }
     /// The date used to group tasks (Bugun / Kecha) — completion date, else due date.
     var groupingDate: Date? { completedAt ?? dueAt }
 }
@@ -162,6 +168,31 @@ struct OilaLocationFix: Codable, Equatable {
     let lng: Double
     let accuracy: Double?
     let ts: Date
+}
+
+/// Today's device-wide screen time from `GET /device/apps/screen-time`.
+///
+/// The live spec types the 200 body as an untyped `{}`, so every field is read tolerantly. The
+/// vocabulary mirrors the sibling per-app rows the same controller already returns
+/// (`usedSeconds` / `dailyLimitSeconds` / `remainingSeconds` / `isLimitReached` / `usageDate` —
+/// see `parseAppLimit`), plus `dailyScreenLimitSeconds`, which is the name the parent-side
+/// `SetScreenLimitDto` gives the device-wide budget. Everything is SECONDS: there is no
+/// minutes-named field anywhere in either spec.
+struct OilaDeviceScreenTime: Equatable {
+    let usedSeconds: Int
+    /// The parent's daily budget, or nil when they have not set one. `SetScreenLimitDto` declares
+    /// this nullable, so "no budget" is a normal state, not a parse failure.
+    let dailyLimitSeconds: Int?
+    let remainingSeconds: Int?
+    let isLimitReached: Bool
+    let usageDate: String?
+
+    var hasBudget: Bool { (dailyLimitSeconds ?? 0) > 0 }
+    /// 0...1 for a progress bar; nil when there is no budget to be a fraction OF.
+    var progress: Double? {
+        guard let limit = dailyLimitSeconds, limit > 0 else { return nil }
+        return min(1, max(0, Double(usedSeconds) / Double(limit)))
+    }
 }
 
 /// Snapshot for `POST /device/status` (PostDeviceStatusDto). All fields optional.
@@ -327,9 +358,19 @@ struct OilaLockState {
                 if let nested = candidate[key] as? [String: Any] { scopes.append(nested) }
             }
             for scope in scopes {
-                guard let start = Self.timeString(scope, Self.scheduleStartKeys),
-                      let end = Self.timeString(scope, Self.scheduleEndKeys) else { continue }
-                return (start, end)
+                if let start = Self.timeString(scope, Self.scheduleStartKeys),
+                   let end = Self.timeString(scope, Self.scheduleEndKeys) {
+                    return (start, end)
+                }
+                // Minute-of-day form. The parent writes schedules with `CreateLockScheduleDto`,
+                // whose `startMinute`/`endMinute` are NUMBERS in 0...1439 — the only typed evidence
+                // anywhere for how a schedule is represented. A device payload that echoes that
+                // shape used to fall straight through this loop, so the child saw a lock screen
+                // with no end time on it while the app held the answer.
+                if let start = Self.timeFromMinuteOfDay(scope, Self.scheduleStartMinuteKeys),
+                   let end = Self.timeFromMinuteOfDay(scope, Self.scheduleEndMinuteKeys) {
+                    return (start, end)
+                }
             }
         }
         return nil
@@ -350,9 +391,31 @@ struct OilaLockState {
         "endTime", "end", "endAt", "end_time", "to", "toTime", "finishTime", "lockEnd"
     ]
 
+    private static let scheduleStartMinuteKeys = ["startMinute", "start_minute", "startMinutes", "fromMinute"]
+    private static let scheduleEndMinuteKeys = ["endMinute", "end_minute", "endMinutes", "toMinute"]
+
     private static func timeString(_ dict: [String: Any], _ keys: [String]) -> String? {
         for key in keys {
             if let value = (dict[key] as? String)?.trimmedNonEmpty { return value }
+        }
+        return nil
+    }
+
+    /// Renders a minute-of-day (0...1439) as `"HH:mm"`, matching the format the string form of this
+    /// field already arrives in. Out-of-range values are refused rather than wrapped: a schedule
+    /// that says 25:00 is a payload we do not understand, and showing a wrong window on a lock
+    /// screen is worse than showing none.
+    static func timeFromMinuteOfDay(_ dict: [String: Any], _ keys: [String]) -> String? {
+        for key in keys {
+            let raw: Int?
+            switch dict[key] {
+            case let value as Int: raw = value
+            case let value as Double: raw = Int(value)
+            case let value as String: raw = Int(value.trimmingCharacters(in: .whitespaces))
+            default: raw = nil
+            }
+            guard let minute = raw, (0 ... 1439).contains(minute) else { continue }
+            return String(format: "%02d:%02d", minute / 60, minute % 60)
         }
         return nil
     }
@@ -393,6 +456,10 @@ protocol OilaDeviceServicing {
     /// Active + recently-completed tasks (for the tasks screen + collected-stars total).
     func fetchTasks() async throws -> [OilaDeviceTask]
     func completeTask(id: String) async throws
+    /// The server's own reward total (`GET /device/tasks/summary` → `totalPoints`), or nil when the
+    /// response shape isn't recognized. Authoritative where the local sum is not: see
+    /// `fetchTaskStarTotal` on the client.
+    func fetchTaskStarTotal() async throws -> Int?
     func updateFCMToken(_ token: String) async throws
     func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws
     func postDeviceStatus(_ status: OilaDeviceStatus) async throws
@@ -400,6 +467,9 @@ protocol OilaDeviceServicing {
     /// state (locked packages + per-app limit/remaining) that drives on-device app-limit locking.
     func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse
     func fetchLockState() async throws -> OilaLockState
+    /// Today's device-wide screen time vs the parent's daily budget
+    /// (`GET /device/apps/screen-time`). Nil when the response shape isn't recognized.
+    func fetchScreenTime() async throws -> OilaDeviceScreenTime?
     /// Report an app removal/tamper attempt (`POST /device/apps/removal-attempt`).
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws
 }
@@ -535,11 +605,27 @@ final class OilaDeviceClient: OilaDeviceServicing {
     }
 
     func fetchTasks() async throws -> [OilaDeviceTask] {
-        // Active + recently completed, so the tasks screen shows both and the
-        // collected-stars total can be summed from completed tasks.
-        async let active = fetchStatus("Active")
-        async let completed = fetchStatus("Completed")
-        return (try await active) + (try await completed)
+        // ONE walk over every status, the way the Android child app does it.
+        //
+        // That the unfiltered route really returns completed + cancelled rows is not an assumption:
+        // Bolajon360 versionCode 5 calls `getTasksUseCase.invoke(null, page, 10, "desc")` — an
+        // explicit null status — and its Tasks screen renders Active, Completed ("Collected") and
+        // Cancelled rows from that one response. The spec types `status` as an optional query
+        // parameter and documents no default.
+        //
+        // Two things were wrong with asking for "Active" and "Completed" separately:
+        //
+        //  • A CANCELLED task came back in neither, so a chore the parent called off simply
+        //    vanished from the child's screen with no explanation.
+        //  • The two walks ran concurrently and each could run up to `tasksMaxPages` — 20 requests
+        //    per Home load on a device we ask to stay up all day — and a task completed WHILE they
+        //    were in flight came back from both, giving two rows with the same `Identifiable` id.
+        //
+        // The dedupe below is kept as a cheap guard: it is no longer load-bearing with a single
+        // walk, but it costs one set and it is the difference between a duplicate id and a SwiftUI
+        // ForEach with undefined behaviour.
+        var seen = Set<String>()
+        return (try await fetchStatus(nil)).filter { seen.insert($0.id).inserted }
     }
 
     /// `GET /device/tasks` pagination: the spec marks `page`/`limit`/`sortOrder` as REQUIRED
@@ -548,30 +634,79 @@ final class OilaDeviceClient: OilaDeviceServicing {
     static let tasksPageLimit = 100
     static let tasksMaxPages = 10
 
-    private func fetchStatus(_ status: String) async throws -> [OilaDeviceTask] {
+    /// `status: nil` asks for every status (Active + Completed + Cancelled), which is what the
+    /// route returns when the filter is omitted.
+    private func fetchStatus(_ status: String?) async throws -> [OilaDeviceTask] {
         var tasks: [OilaDeviceTask] = []
         for page in 1 ... Self.tasksMaxPages {
+            var query = [
+                URLQueryItem(name: "page", value: "\(page)"),
+                URLQueryItem(name: "limit", value: "\(Self.tasksPageLimit)"),
+                URLQueryItem(name: "sortOrder", value: "desc")
+            ]
+            if let status { query.append(URLQueryItem(name: "status", value: status)) }
             let data = try await requestJSON(
                 path: "device/tasks",
                 method: .get,
-                query: [
-                    URLQueryItem(name: "page", value: "\(page)"),
-                    URLQueryItem(name: "limit", value: "\(Self.tasksPageLimit)"),
-                    URLQueryItem(name: "sortOrder", value: "desc"),
-                    URLQueryItem(name: "status", value: status)
-                ],
+                query: query,
                 authorized: true
             )
             let pageTasks = Self.parseTasks(from: data)
             tasks += pageTasks
-            // A short (or empty) page means we've drained the collection.
-            if pageTasks.count < Self.tasksPageLimit { break }
+            // Prefer the server's own pagination meta when it sends one (`{page, limit, total,
+            // totalPages}` — the shape the Android client's `PageMetaDto` declares). The row-count
+            // heuristic below is a fallback, and it is subtly wrong on its own: it counts PARSED
+            // rows, so a full page containing one row this client cannot parse looks short and the
+            // walk stops early, silently hiding every later task.
+            if let totalPages = Self.pageCount(from: data) {
+                if page >= totalPages { break }
+            } else if pageTasks.count < Self.tasksPageLimit {
+                break
+            }
         }
         return tasks
     }
 
+    /// `totalPages` from a paginated list response, when the payload carries pagination meta.
+    static func pageCount(from data: Any) -> Int? {
+        guard let object = dict(from: data) else { return nil }
+        let meta = firstDictionary(object, ["meta", "pagination", "page", "pageMeta"]) ?? object
+        guard let totalPages = intValue(meta, ["totalPages", "total_pages", "pageCount", "pages"]),
+              totalPages > 0 else { return nil }
+        return totalPages
+    }
+
     func completeTask(id: String) async throws {
         _ = try await requestJSON(path: "device/tasks/\(id)/complete", method: .post, authorized: true)
+    }
+
+    /// `GET /device/tasks/summary` → `{ "totalPoints": Int }`.
+    ///
+    /// The collected-stars figure was summed locally from the completed tasks this client happened to
+    /// have fetched, which under-reports in three real situations: the page walk is capped
+    /// (`tasksPageLimit` x `tasksMaxPages`), the backend need not keep completed tasks forever, and a
+    /// task completed on another of the child's devices never appears in this device's list. The
+    /// Android child app reads this endpoint for exactly this number and labels it with the same
+    /// "collected stars" wording, so adopting it also removes a cross-platform disagreement where the
+    /// two apps could show a different total for the same child.
+    ///
+    /// Returns nil rather than 0 when no known key is present, so a caller can fall back to its local
+    /// sum instead of showing a child that their stars have vanished.
+    func fetchTaskStarTotal() async throws -> Int? {
+        let data = try await requestJSON(path: "device/tasks/summary", method: .get, authorized: true)
+        guard let object = Self.dict(from: data) else { return nil }
+        // Tolerant like every other read here: the live spec types this response as an untyped {}.
+        // `totalPoints` is the confirmed spelling — it is what the Android child app's
+        // `TaskSummaryDto` declares, and that client renders it under the same "collected stars"
+        // label this one does.
+        if let total = Self.intValue(object, ["totalPoints", "total_points", "totalRewardPoints", "points", "stars"]) {
+            return total
+        }
+        // Tolerate one level of nesting rather than falling back to the local sum over a wrapper.
+        if let nested = Self.firstDictionary(object, ["summary", "data"]) {
+            return Self.intValue(nested, ["totalPoints", "total_points", "totalRewardPoints", "points", "stars"])
+        }
+        return nil
     }
 
     func updateFCMToken(_ token: String) async throws {
@@ -642,6 +777,52 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let object = (data as? [String: Any]) ?? [:]
         return Self.parseLockState(from: object)
     }
+
+    func fetchScreenTime() async throws -> OilaDeviceScreenTime? {
+        let data = try await requestJSON(path: "device/apps/screen-time", method: .get, authorized: true)
+        guard let object = Self.dict(from: data) else { return nil }
+        return Self.parseScreenTime(from: object)
+    }
+
+    /// Tolerant read for `GET /device/apps/screen-time` (2xx typed as `{}` in the live spec).
+    ///
+    /// Returns nil when the payload names no usage figure at all, so a caller can hide its card
+    /// rather than assert "0 minutes" — a claim this app is in no position to make on iOS, where
+    /// nothing reports per-app usage in the first place.
+    static func parseScreenTime(from object: [String: Any]) -> OilaDeviceScreenTime? {
+        // Some envelopes nest the payload; look one level down before giving up.
+        let source = intValue(object, usedSecondsKeys) != nil
+            ? object
+            : (firstDictionary(object, ["screenTime", "screen_time", "today", "summary"]) ?? object)
+
+        guard let used = intValue(source, usedSecondsKeys) else { return nil }
+        let limit = intValue(source, [
+            "dailyScreenLimitSeconds", "daily_screen_limit_seconds",
+            "dailyLimitSeconds", "daily_limit_seconds", "limitSeconds", "dailyLimit", "budgetSeconds"
+        ])
+        let remaining = intValue(source, ["remainingSeconds", "remaining_seconds", "remaining", "leftSeconds"])
+        // Same rule as `parseAppLimit`: trust the flag when the server sends one, otherwise derive it
+        // from the numbers, and treat "no budget" as never reached.
+        let derivedReached: Bool = {
+            guard let limit, limit > 0 else { return false }
+            return (remaining ?? (limit - used)) <= 0
+        }()
+        return OilaDeviceScreenTime(
+            usedSeconds: max(0, used),
+            dailyLimitSeconds: limit.map { max(0, $0) },
+            remainingSeconds: remaining.map { max(0, $0) },
+            isLimitReached: boolValue(source, ["isLimitReached", "is_limit_reached", "limitReached", "reached"])
+                ?? derivedReached,
+            usageDate: firstString(source, ["usageDate", "usage_date", "date", "day"])
+        )
+    }
+
+    /// `totalSeconds` is included because that is what the parent web app's screen-time aggregate
+    /// calls the same number; the device response is a different (single-day) shape, but a backend
+    /// that reused the name should not cost us the reading.
+    private static let usedSecondsKeys = [
+        "usedSeconds", "used_seconds", "usageSeconds", "used", "totalSeconds", "total_seconds"
+    ]
 
     /// Tolerant whole-payload read for `GET /device/lock/state`. The live response carries
     /// `isLocked` / `manualLockEnabled` / `scheduleLocked` / `deviceLocalTime` / `lockedPackages` /
@@ -1298,6 +1479,15 @@ struct OilaChatMessage: Identifiable, Equatable {
     }
 
     var isFromChild: Bool { sender == .child }
+
+    /// A server-generated notice rather than something a person typed.
+    ///
+    /// EITHER signal counts, which is what the Android child app does
+    /// (`isSystem = sender == SYSTEM || systemKind != null`). iOS keyed only off the sender, so a
+    /// row carrying a `systemKind` but no recognizable `senderType` — the shape an SOS or
+    /// pairing notice arrives in — rendered as an ordinary white incoming bubble, i.e. as if the
+    /// parent had typed it.
+    var isSystemNotice: Bool { sender == .system || systemKind?.trimmedNonEmpty != nil }
 
     /// A copy with the peer-read receipt set — used when a `chat:read` WS event arrives so the
     /// child's own sent messages flip to ✓✓ in realtime instead of only on a history refetch.

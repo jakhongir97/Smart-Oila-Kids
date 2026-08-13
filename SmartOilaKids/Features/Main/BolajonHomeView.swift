@@ -208,25 +208,87 @@ struct BolajonHomeView: View {
     // limit, so we show the real tracked-app usage without a fabricated limit/progress bar.
     private var screenTimeCard: some View {
         InfoCard {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 46, height: 46)
-                    Image(systemName: "hourglass")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(AppColors.ctaPurple)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 46, height: 46)
+                        Image(systemName: "hourglass")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(AppColors.ctaPurple)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L10n.tr("home2.screentime.title"))
+                            .font(AppTypography.bodyStrong(14))
+                            .foregroundStyle(AppColors.inkPrimary)
+                        // The subtitle has to match where the number came from: "in tracked apps"
+                        // is only true of the local Screen Time report, not of the server's
+                        // device-wide total.
+                        Text(L10n.tr(viewModel.screenTimeSource == .local
+                                     ? "home2.screentime.tracked_subtitle"
+                                     : "home2.screentime.device_subtitle"))
+                            .font(AppTypography.caption(12))
+                            .foregroundStyle(AppColors.inkTertiary)
+                    }
+                    Spacer()
+                    // Two shapes. With a usage figure: "1h 45m / 3h". Without one — the parent set a
+                    // budget but nothing has reported usage — the limit alone, labelled as a limit.
+                    // What must never appear is a measured-looking "0m": iOS cannot measure app
+                    // usage, so that number would be a claim, not a reading.
+                    HStack(spacing: 2) {
+                        if viewModel.showsUsageFigure {
+                            Text(viewModel.screenTimeText)
+                                .font(AppTypography.heading(18))
+                                .foregroundStyle(viewModel.screenTimeLimitReached
+                                                 ? AppColors.ctaOrange : AppColors.ctaPurple)
+                            if let limit = viewModel.screenTimeLimitText {
+                                Text(" / \(limit)")
+                                    .font(AppTypography.bodyText(13))
+                                    .foregroundStyle(AppColors.inkTertiary)
+                            }
+                        } else if let limit = viewModel.screenTimeLimitText {
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(limit)
+                                    .font(AppTypography.heading(18))
+                                    .foregroundStyle(AppColors.ctaPurple)
+                                Text(L10n.tr("home2.screentime.daily_limit"))
+                                    .font(AppTypography.caption(11))
+                                    .foregroundStyle(AppColors.inkTertiary)
+                            }
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(L10n.tr("home2.screentime.title"))
-                        .font(AppTypography.bodyStrong(14))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    Text(L10n.tr("home2.screentime.tracked_subtitle"))
-                        .font(AppTypography.caption(12))
-                        .foregroundStyle(AppColors.inkTertiary)
+
+                // Budget half. Rendered only when the parent actually set one — no invented default,
+                // and no progress bar with nothing to be a fraction of.
+                if let progress = viewModel.screenTimeProgress {
+                    VStack(alignment: .leading, spacing: 6) {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(AppColors.chipNeutral)
+                                Capsule()
+                                    .fill(viewModel.screenTimeLimitReached
+                                          ? AppColors.ctaOrange : AppColors.ctaPurple)
+                                    .frame(width: max(0, geo.size.width * progress))
+                            }
+                        }
+                        .frame(height: 6)
+                        if viewModel.screenTimeLimitReached {
+                            Text(L10n.tr("home2.screentime.limit_reached"))
+                                .font(AppTypography.caption(12))
+                                // `ctaOrange` is a FILL token that carries white labels; used as ink
+                                // on the white card it drops below 4.5:1 in dark mode. `pillCoralInk`
+                                // is the ink-role token for the same warning meaning.
+                                .foregroundStyle(AppColors.pillCoralInk)
+                        } else if let remaining = viewModel.screenTimeRemainingText {
+                            Text(L10n.tr("home2.screentime.remaining", remaining))
+                                .font(AppTypography.caption(12))
+                                .foregroundStyle(AppColors.inkTertiary)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
                 }
-                Spacer()
-                Text(viewModel.screenTimeText)
-                    .font(AppTypography.heading(18))
-                    .foregroundStyle(AppColors.ctaPurple)
             }
         }
     }
@@ -511,10 +573,25 @@ final class BolajonHomeViewModel: ObservableObject {
     private var completingTaskIDs: Set<String> = []
 
     /// Today's total usage of the parent-tracked apps (seconds), read from the local
-    /// DeviceActivity report. Nil when Screen Time isn't authorized/configured or no report
-    /// has been written yet — the Home card is hidden then. The device has no endpoint for
-    /// aggregate screen-time and no single daily limit, so the card shows usage only.
+    /// DeviceActivity report. Nil when Screen Time isn't authorized/configured or no report has
+    /// been written yet — which, with `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` off, is always.
+    ///
+    /// This is now the FALLBACK source: `serverScreenTime` below carries the device-wide figure and
+    /// the parent's daily budget from `GET /device/apps/screen-time`. (The comment that used to sit
+    /// here said no such endpoint existed. One does — it appeared in the ingestion spec after that
+    /// was written.)
     @Published private(set) var trackedUsageSeconds: Int?
+
+    /// `GET /device/tasks/summary` → `totalPoints`. See `starTotal`.
+    @Published private(set) var serverStarTotal: Int?
+
+    /// `GET /device/apps/screen-time` — today's device-wide total and the parent's daily budget.
+    ///
+    /// The server figure is preferred over the local Screen Time report because it is the one the
+    /// parent app shows, so the two can never disagree. It is also the only source that survives
+    /// this build's configuration at all: the local provider needs FamilyControls authorization,
+    /// which `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED = false` makes unreachable.
+    @Published private(set) var serverScreenTime: OilaDeviceScreenTime?
 
     private let service: OilaDeviceServicing
     private let telemetry: SOSTelemetryProviding
@@ -533,10 +610,15 @@ final class BolajonHomeViewModel: ObservableObject {
         self.screenTimeUsage = screenTimeUsage
     }
 
-    // Collected stars = reward points from completed tasks.
-    var starTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
-    // Home lists the still-to-do tasks.
-    var activeTasks: [OilaDeviceTask] { tasks.filter { !$0.isCompleted } }
+    // Collected stars = the server's own total when it answers, else the reward points of the
+    // completed tasks this device happens to hold. Same rule as the Tasks screen — see
+    // `BolajonTasksViewModel.starTotal` for why the local sum under-reports.
+    var starTotal: Int { serverStarTotal ?? localStarTotal }
+    var localStarTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
+    // Home lists the still-to-do tasks. Cancelled ones are excluded HERE and only here: the Tasks
+    // screen still shows them (struck through) so the child learns the chore was called off, but
+    // Home's "what should I do now" card must not.
+    var activeTasks: [OilaDeviceTask] { tasks.filter { !$0.isCompleted && !$0.isCancelled } }
 
     /// Home preview rows: up to two pending tasks plus the most-recently-completed one, so the
     /// card shows a "Bajarildi" row like the design (which mixes pending + a done task).
@@ -550,17 +632,104 @@ final class BolajonHomeViewModel: ObservableObject {
         return rows
     }
 
-    /// The card renders only when real local usage exists.
-    var showsScreenTimeCard: Bool { trackedUsageSeconds != nil }
-    var trackedUsageMinutes: Int? { trackedUsageSeconds.map { $0 / 60 } }
+    /// The server figure, but only when it is about TODAY. `usageDate` is the server's own day key;
+    /// if it names a different day (a stale cache, a device whose clock disagrees), the card would
+    /// be captioned "Screen time today" over yesterday's number.
+    var todaysServerScreenTime: OilaDeviceScreenTime? {
+        guard let screenTime = serverScreenTime else { return nil }
+        guard let usageDate = screenTime.usageDate?.trimmedNonEmpty else { return screenTime }
+        return Self.isToday(usageDate) ? screenTime : nil
+    }
+
+    /// Seconds to display, and where they came from. The card must never mix sources: a headline
+    /// from the local report under a progress bar from the server would describe two different days
+    /// of two different app sets.
+    enum ScreenTimeSource: Equatable { case server, local }
+    var screenTimeSource: ScreenTimeSource? {
+        if let server = todaysServerScreenTime, server.usedSeconds > 0 { return .server }
+        if trackedUsageSeconds != nil { return .local }
+        // A budget with no usage figure still renders — as a budget, not as a measured zero.
+        return todaysServerScreenTime?.hasBudget == true ? .server : nil
+    }
+    var screenTimeSeconds: Int? {
+        switch screenTimeSource {
+        case .server: return todaysServerScreenTime.map { $0.usedSeconds }
+        case .local: return trackedUsageSeconds
+        case nil: return nil
+        }
+    }
+
+    /// The card renders when there is something TRUE to show: real usage from either source, or a
+    /// budget the parent has set (worth showing on its own — "your limit is 3h" is information the
+    /// child does not otherwise have).
+    ///
+    /// It deliberately does NOT render a measured zero. iOS cannot measure app usage without the
+    /// FamilyControls entitlement, so a confident "0m" would be a claim about the child's day that
+    /// this app has no basis for — and it would read very differently on a parent's screen next to
+    /// an Android sibling's real number. `showsUsageFigure` is what keeps the budget-only card
+    /// honest: it shows the limit and says nothing about usage.
+    var showsScreenTimeCard: Bool { screenTimeSource != nil }
+    var showsUsageFigure: Bool { (screenTimeSeconds ?? 0) > 0 }
+    var trackedUsageMinutes: Int? { screenTimeSeconds.map { $0 / 60 } }
     var screenTimeText: String { hoursMinutes(trackedUsageMinutes ?? 0) }
+    /// "of 3h" — only when the parent set a budget, and only alongside a usage figure it belongs to.
+    var screenTimeLimitText: String? {
+        guard let limit = budgetScreenTime?.dailyLimitSeconds, limit > 0 else { return nil }
+        return hoursMinutes(limit / 60)
+    }
+    /// The budget half is only ever read from the server, and only when the headline number is the
+    /// server's too — otherwise the bar would measure the local number against a server budget.
+    private var budgetScreenTime: OilaDeviceScreenTime? {
+        guard screenTimeSource == .server else { return nil }
+        return todaysServerScreenTime
+    }
+    var screenTimeProgress: Double? { showsUsageFigure ? budgetScreenTime?.progress : nil }
+    /// Only meaningful against a budget: without one there is nothing to have reached, so the
+    /// alarm colour would appear with no caption to explain it.
+    var screenTimeLimitReached: Bool {
+        guard let screenTime = budgetScreenTime, screenTime.hasBudget else { return false }
+        return screenTime.isLimitReached
+    }
+    /// "45m" for the "%@ left" line. Falls back to limit − used when the server sends only the two
+    /// totals, and stays nil when there is no budget to have a remainder of.
+    var screenTimeRemainingText: String? {
+        guard let screenTime = budgetScreenTime, screenTime.hasBudget else { return nil }
+        let remaining = screenTime.remainingSeconds
+            ?? max(0, (screenTime.dailyLimitSeconds ?? 0) - screenTime.usedSeconds)
+        guard remaining > 0 else { return nil }
+        return hoursMinutes(remaining / 60)
+    }
+
+    /// True when the server's day key names today in the device's own calendar. Accepts the
+    /// `yyyy-MM-dd` the sibling `usageDate` fields use, and a full ISO timestamp.
+    static func isToday(_ usageDate: String) -> Bool {
+        let dayOnly = String(usageDate.prefix(10))
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let parsed = formatter.date(from: dayOnly) else {
+            // An unrecognized format is not evidence of staleness — keep the figure.
+            return true
+        }
+        return Calendar.current.isDateInToday(parsed)
+    }
 
     func load() async {
         do { tasks = try await service.fetchTasks() }
         catch { /* keep last tasks; Home stays usable offline */ }
+        await refreshStarTotal()
+        // Best-effort, like the star total: Home must stay usable when the network is down, and the
+        // local provider below is still consulted either way.
+        if let screenTime = try? await service.fetchScreenTime() { serverScreenTime = screenTime }
         refreshScreenTimeUsage()
 #if DEBUG
         if tasks.isEmpty && AppRuntime.hasDebugRoute { tasks = BolajonSampleData.tasks }
+        // The screen-time card's budget branch cannot be reached in a simulator (no pairing, so no
+        // server answer), which is exactly the branch worth looking at before shipping it.
+        if serverScreenTime == nil, AppRuntime.hasDebugRoute {
+            serverScreenTime = BolajonSampleData.screenTime
+        }
 #endif
     }
 
@@ -584,6 +753,16 @@ final class BolajonHomeViewModel: ObservableObject {
             // will be confirmed there within one poll cycle and routed back to pairing then.
             errorMessage = NetworkError.userMessage(for: error)
         }
+        // The star the child just earned has to land on the badge NOW. Since `starTotal` prefers the
+        // server total, recomputing the local sum is not enough — without this the badge would sit
+        // at its old value until the next Home load.
+        await refreshStarTotal()
+    }
+
+    /// Best-effort: a summary failure must never surface an error or clear the last good total —
+    /// the local sum is a fine fallback and the previous server value is better still.
+    private func refreshStarTotal() async {
+        if let total = try? await service.fetchTaskStarTotal() { serverStarTotal = total }
     }
 
     func sendSOS() async {
@@ -686,8 +865,18 @@ enum BolajonSampleData {
             OilaDeviceTask(id: "1", title: "Uy vazifasini bajarish", status: "Active", rewardPoints: 5, emoji: "📚", dueAt: now, completedAt: nil),
             OilaDeviceTask(id: "2", title: "Kitob o'qish — 20 daqiqa", status: "Active", rewardPoints: 3, emoji: "📖", dueAt: now, completedAt: nil),
             OilaDeviceTask(id: "3", title: "Xonani yig'ishtirish", status: "Completed", rewardPoints: 3, emoji: "🧹", dueAt: yesterday, completedAt: yesterday),
-            OilaDeviceTask(id: "4", title: "Idishlarni yuvish", status: "Completed", rewardPoints: 4, emoji: "🍽️", dueAt: yesterday, completedAt: yesterday)
+            OilaDeviceTask(id: "4", title: "Idishlarni yuvish", status: "Completed", rewardPoints: 4, emoji: "🍽️", dueAt: yesterday, completedAt: yesterday),
+            OilaDeviceTask(id: "5", title: "Bog'da yordam berish", status: "Cancelled", rewardPoints: 6, emoji: "🌿", dueAt: yesterday, completedAt: nil)
         ]
     }
+
+    /// 1h 45m of a 3h budget, so the debug routes render the progress bar and the "left" line.
+    static let screenTime = OilaDeviceScreenTime(
+        usedSeconds: 6300,
+        dailyLimitSeconds: 10800,
+        remainingSeconds: 4500,
+        isLimitReached: false,
+        usageDate: nil
+    )
 }
 #endif

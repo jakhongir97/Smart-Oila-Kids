@@ -91,12 +91,31 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var didPostResolvedNetworkType = false
     /// Foreground observer: `.active` mirrors the backgrounding check-in (see `start`).
     private var foregroundObserver: NSObjectProtocol?
+    /// Battery-level observer. Android reports `/device/status` on every battery change (its flow is
+    /// `distinctUntilChanged` over the whole snapshot, so a repeat value is dropped); iOS only had
+    /// the 300s timer, which is why a parent watching a child's battery drain saw it move in
+    /// five-minute steps.
+    private var batteryObserver: NSObjectProtocol?
+    /// `status.report` observer — the parent's explicit "check in now".
+    private var statusCommandObserver: NSObjectProtocol?
+    /// Battery percentage carried by the last issued `postStatus()`, so a level change that would
+    /// send the SAME number never becomes a request. This is the local equivalent of Android's
+    /// `distinctUntilChanged`; `eventStatusMinimumGap` then bounds the rate of the ones that differ.
+    private var lastPostedBattery: Int?
     /// Post-once guard so a burst of simultaneous 401s (location + status + lock) raises a single
     /// session-invalidation signal per run.
     private var didSignalInvalidation = false
     private var isConfirmingInvalidation = false
     /// Monotonic tag for lock-state reads so a slow poll can't overwrite a newer push refresh.
     private var lockRefreshSequence = 0
+    /// True while a lock read is in flight, so two triggers arriving together (the push reaches both
+    /// this service and `RootView`) issue one request instead of two. See `refreshLockNow()`.
+    private var isRefreshingLock = false
+    /// A refresh asked for while one was already running: run exactly one more when it lands.
+    private var lockRefreshRequestedWhileBusy = false
+    /// Lock-refresh observer. Registered here, not only in `RootView`, because a lock push can arrive
+    /// at an app iOS background-launched with no scene — there is no view to receive it then.
+    private var lockCommandObserver: NSObjectProtocol?
     /// How many times the OS has paused standard location updates this run. Surfaced in diagnostics
     /// only — the recovery itself is automatic (see `handleLocationUpdatesPaused`).
     private(set) var locationPauseCount = 0
@@ -109,12 +128,59 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// turn every transition into a request; the `statusInterval` timer covers the device anyway.
     /// It never throttles the timer itself, nor the backgrounding post in `flushNow()`.
     private let eventStatusMinimumGap: TimeInterval = 60
-    private let maxQueuedFixes = 200
+    /// 400 fixes ≈ 3.3 hours of continuous offline movement at the 30s cadence below. Kept under the
+    /// backend's `maxItems: 500` on `PostLocationBatchDto` even after a failed batch is requeued on
+    /// top of newer fixes; `flushLocations` also slices its uploads so the ceiling can never be the
+    /// thing that 400s a whole queue.
+    private let maxQueuedFixes = 400
+    /// Largest slice sent in one `POST /device/location/batch`. The DTO allows 500; 250 leaves room
+    /// and keeps a failed upload cheap to retry.
+    private static let locationUploadChunk = 250
+
+    // MARK: Location acceptance
+    //
+    // A direct port of the Android child app's gate (`LocationProvider.accepts`), which iOS had no
+    // equivalent of: every CoreLocation callback went straight into the upload queue. The thresholds
+    // differ from Android's because the two platforms deliver different accuracy — see each one.
+
+    /// Reject a fix worse than this. Android uses 40 m because its foreground service holds
+    /// PRIORITY_HIGH_ACCURACY GNSS continuously; CoreLocation routinely reports 30–65 m indoors even
+    /// at `kCLLocationAccuracyNearestTenMeters`, so 40 m here would silence a child inside a
+    /// building. 100 m still rejects the cell-tower-only fixes (500 m – 3 km) that put a child on the
+    /// wrong side of a city.
+    nonisolated private static let maxAcceptedAccuracyM: Double = 100
+    /// Floor for "has the child actually moved". Matches `distanceFilter`, so the queue never carries
+    /// a fix CoreLocation itself considered too small to report.
+    nonisolated private static let minDisplacementM: Double = 25
+    /// Android's `ACCURACY_FACTOR`: a 60 m-accurate fix must move ≥90 m before it counts, so GPS
+    /// noise cannot draw a walk around a stationary child.
+    nonisolated private static let accuracyFactor: Double = 1.5
+    /// Minimum time between accepted fixes (Android's `INTERVAL_MS`). CoreLocation delivers at ~1 Hz
+    /// while driving; without this a 30-minute drive is ~1,800 uploads against Android's 60.
+    private static let minFixIntervalS: TimeInterval = 30
+    /// A fix at least this much more accurate than the last accepted one is taken even inside the
+    /// interval — a better answer to the same question is worth more than the interval saves.
+    private static let accuracyImprovementM: Double = 20
+    /// How old the last accepted fix may be before quality stops being the priority. Past this, ANY
+    /// fix with a known accuracy is queued: the significant-location-change source that keeps
+    /// reporting after a background relaunch is far coarser than the ceiling, and a 3 km-accurate
+    /// "they are across town" beats a pin frozen since this morning.
+    nonisolated private static let staleFixAge: TimeInterval = 600
+
+    /// The last fix that passed `accepts`, and when. Android keeps the same pair (`lastAccepted`),
+    /// and updates it ONLY on acceptance — so a stationary child with drifting GPS never ratchets
+    /// the reference point.
+    private var lastAcceptedFix: CLLocation?
+    private var lastAcceptedFixAt: Date?
     /// Undelivered panic alerts awaiting retry. See `enqueueUndeliveredSOS`.
     private var pendingSOS: [OilaPendingSOS] = []
     /// Guards `flushPendingSOS` against overlapping runs — see the note there.
     private var isFlushingSOS = false
     private var sosFlushRequestedAgain = false
+    /// Same guard for the location drain, which now has three triggers (timer, `flushNow`,
+    /// connectivity restored) and can therefore overlap with itself. See `flushLocations`.
+    private var isFlushingLocations = false
+    private var locationFlushRequestedAgain = false
     private let maxQueuedSOS = 20
     /// An SOS older than this is dropped rather than delivered — a stale panic alert misinforms the
     /// parent about where and when their child needed help.
@@ -133,7 +199,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         self.service = service
         super.init()
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        // `NearestTenMeters` engages GPS while still letting CoreLocation duty-cycle the receiver.
+        // `HundredMeters` is the coarse Wi-Fi/cell tier — CoreLocation is allowed to satisfy it
+        // without powering GNSS at all, which is why a child's map trail was drawn from fixes an
+        // order of magnitude worse than the Android sibling's (that app asks the fused provider for
+        // PRIORITY_HIGH_ACCURACY). Deliberately NOT `Best`/`BestForNavigation`: those hold the
+        // receiver at full duty cycle and are the real battery cost. The extra fixes this produces
+        // are paid for by the acceptance gate and the 30s floor in `ingestLocations`.
+        locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         locationManager.distanceFilter = 25
         // Safe default until the authorization is known; `applyAuthorization` turns it off for
         // `.authorizedAlways` only (see there for why).
@@ -187,6 +260,39 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             Task { @MainActor [weak self] in await self?.postStatusForEvent() }
         }
 
+        // Battery: report the change, not the tick. `isBatteryMonitoringEnabled` above is what makes
+        // this notification fire at all; without an observer the app was reading the level only when
+        // something else happened to post.
+        batteryObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.batteryLevelDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.postStatusForBatteryChange() }
+        }
+
+        // `status.report` push. Observed HERE rather than in a view, because a status command can
+        // arrive at an app iOS background-launched with no scene — the same reason
+        // `armTelemetryIfPaired()` exists. This object is alive whenever telemetry is armed.
+        statusCommandObserver = NotificationCenter.default.addObserver(
+            forName: .pushShouldReportStatus,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.postStatusNow() }
+        }
+
+        // Same reasoning for the lock command: `RootView.handleLockRefreshNotification` only exists
+        // once a scene is rendered, and a parent locking the device is precisely the case where the
+        // child's app is NOT on screen. Without this the lock waited out the 30s poll.
+        lockCommandObserver = NotificationCenter.default.addObserver(
+            forName: .pushShouldRefreshLockState,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshLockNow() }
+        }
+
         applyAuthorization(locationManager.authorizationStatus)
 
         restorePendingSOS()
@@ -210,9 +316,24 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     /// Re-check lock state immediately (e.g. on foreground or a push).
+    ///
+    /// Coalesced: while a read is in flight the request is remembered rather than issued, and one
+    /// more read runs when that one lands. The push now reaches this service directly AND through
+    /// `RootView.handleLockRefreshNotification` whenever a scene exists, so without this a single
+    /// lock push fired two identical GETs. The trailing re-run is what keeps coalescing honest — a
+    /// parent who locks and unlocks in quick succession still gets the final state applied.
     func refreshLockNow() {
         guard isRunning else { return }
-        Task { await refreshLock() }
+        guard !isRefreshingLock else {
+            lockRefreshRequestedWhileBusy = true
+            return
+        }
+        // Claimed HERE, synchronously, not inside `refreshLock()`. Both triggers for a lock push
+        // (this service's observer and RootView's) arrive in the same run-loop turn; a flag set
+        // inside the Task body is set only once that body starts running, so both callers would
+        // sail past the guard and fire two identical GETs.
+        isRefreshingLock = true
+        Task { await refreshLock(alreadyClaimed: true) }
     }
 
     /// Report status immediately rather than waiting out the remainder of `statusInterval`.
@@ -239,8 +360,26 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             NotificationCenter.default.removeObserver(foregroundObserver)
             self.foregroundObserver = nil
         }
+        if let batteryObserver {
+            NotificationCenter.default.removeObserver(batteryObserver)
+            self.batteryObserver = nil
+        }
+        if let statusCommandObserver {
+            NotificationCenter.default.removeObserver(statusCommandObserver)
+            self.statusCommandObserver = nil
+        }
+        if let lockCommandObserver {
+            NotificationCenter.default.removeObserver(lockCommandObserver)
+            self.lockCommandObserver = nil
+        }
+        isRefreshingLock = false
+        lockRefreshRequestedWhileBusy = false
+        // A new pairing must not measure displacement from the previous child's last position.
+        lastAcceptedFix = nil
+        lastAcceptedFixAt = nil
         networkType = nil
         lastStatusPostAt = nil
+        lastPostedBattery = nil
         isLocked = false
         // stop() runs on unpair / confirmed session invalidation, so drop the per-app state too:
         // re-pairing to a DIFFERENT child must not inherit the previous child's blocked apps or
@@ -504,28 +643,58 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     private func flushLocations() async {
         guard isRunning, !pendingFixes.isEmpty else { return }
-        let batch = pendingFixes
-        pendingFixes.removeAll()
-        do {
-            try await service.uploadLocationBatch(batch)
-            lastUploadAt = Date()
-        } catch let error as OilaAPIError where error.requiresRePair {
-            // The 401 is UNCONFIRMED here. `requiresRePair` is true for any 401, and
-            // `handleAuthorizationLoss()` deliberately refuses to believe the first one — it probes
-            // independently before destroying the pairing. Dropping the batch contradicted that
-            // caution: the app was not yet willing to say the credentials were gone, but had already
-            // thrown away the child's queued location history, which on a route with no signal is
-            // the only record of where they were. Re-queued on the same bounded rule as any other
-            // failure; if the pairing really is dead, teardown clears the queue anyway.
-            if isRunning {
-                pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
+        // One drain at a time. There are now three triggers — the 60 s timer, `flushNow()` and the
+        // connectivity-restored hop — and two of them fire together the moment a tunnel ends. Two
+        // concurrent drains each take a slice and, on failure, each PREPENDS its slice back, which
+        // interleaves the queue out of order; the newest-wins `suffix` cap then discards whichever
+        // fixes ended up at the front. `isFlushingSOS` guards the SOS outbox the same way.
+        guard !isFlushingLocations else {
+            locationFlushRequestedAgain = true
+            return
+        }
+        isFlushingLocations = true
+        defer {
+            isFlushingLocations = false
+            if locationFlushRequestedAgain {
+                locationFlushRequestedAgain = false
+                Task { await flushLocations() }
             }
-            handleAuthorizationLoss()
-        } catch {
-            // Re-queue on failure (bounded) so fixes survive transient offline periods —
-            // but never resurrect a queue the session already tore down.
-            guard isRunning else { return }
-            pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
+        }
+        // Slice the upload. `PostLocationBatchDto` caps `items` at 500 and rejects the WHOLE batch
+        // when it is exceeded, so a long offline stretch plus a requeue could otherwise wedge the
+        // queue permanently: every retry would 400, and every 400 would requeue the same oversized
+        // batch. A loop rather than recursion, so the drain stays inside the one guarded run.
+        while isRunning, !pendingFixes.isEmpty {
+            let batch = Array(pendingFixes.prefix(Self.locationUploadChunk))
+            pendingFixes.removeFirst(batch.count)
+            do {
+                try await service.uploadLocationBatch(batch)
+                lastUploadAt = Date()
+            } catch let error as OilaAPIError where error.requiresRePair {
+                // The 401 is UNCONFIRMED here. `requiresRePair` is true for any 401, and
+                // `handleAuthorizationLoss()` deliberately refuses to believe the first one — it probes
+                // independently before destroying the pairing. Dropping the batch contradicted that
+                // caution: the app was not yet willing to say the credentials were gone, but had already
+                // thrown away the child's queued location history, which on a route with no signal is
+                // the only record of where they were. Re-queued on the same bounded rule as any other
+                // failure; if the pairing really is dead, teardown clears the queue anyway.
+                if isRunning {
+                    pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
+                }
+                handleAuthorizationLoss()
+                break
+            } catch {
+                // Re-queue on failure (bounded) so fixes survive transient offline periods —
+                // but never resurrect a queue the session already tore down. Stop at the first
+                // failed slice: the rest of the queue is older than nothing and the next trigger
+                // will retry it in order.
+                guard isRunning else { return }
+                pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
+                break
+            }
+            // Persist after every slice, so a process killed mid-drain does not resend what already
+            // landed.
+            persistPendingFixes()
         }
         // Persist the (possibly re-queued) backlog so an offline route survives a process kill.
         persistPendingFixes()
@@ -574,6 +743,17 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         } else {
             Task { await postStatusForEvent() }
         }
+        // Connectivity just came back: drain now instead of waiting out the 60s flush timer. Android
+        // does the same (`LocationTrackingService.observeConnectivity` syncs on every online
+        // transition) — and the queue this drains is precisely the one that filled while offline.
+        // SOS first, matching the flush timer's own ordering: it is the only queue whose delivery is
+        // an emergency.
+        if type != nil {
+            Task { @MainActor [weak self] in
+                await self?.flushPendingSOS()
+                await self?.flushLocations()
+            }
+        }
     }
 
     /// `postStatus()` for an out-of-band trigger (network change, foreground), rate-limited by
@@ -586,12 +766,31 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         await postStatus()
     }
 
+    /// A battery reading changed. Posts only when the PERCENTAGE we would send actually differs from
+    /// the one the last post carried — iOS fires this notification on state changes too, and a
+    /// request that repeats the previous number tells the parent nothing.
+    ///
+    /// `postStatusForEvent` then applies `eventStatusMinimumGap`, so even a pathological 1%-per-second
+    /// drain cannot exceed one status post a minute.
+    private func postStatusForBatteryChange() async {
+        guard isRunning else { return }
+        guard Self.batteryPercent() != lastPostedBattery else { return }
+        await postStatusForEvent()
+    }
+
+    /// Battery as the whole percentage `POST /device/status` accepts, or nil when the simulator /
+    /// an un-monitored device reports the sentinel -1.
+    private static func batteryPercent() -> Int? {
+        let level = UIDevice.current.batteryLevel
+        return level >= 0 ? Int((level * 100).rounded()) : nil
+    }
+
     private func postStatus() async {
         guard isRunning else { return }
         lastStatusPostAt = Date()
         if networkType != nil { didPostResolvedNetworkType = true }
-        let level = UIDevice.current.batteryLevel
-        let battery: Int? = level >= 0 ? Int((level * 100).rounded()) : nil
+        let battery = Self.batteryPercent()
+        lastPostedBattery = battery
         let status = OilaDeviceStatus(
             battery: battery,
             networkType: networkType,
@@ -607,13 +806,33 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
     }
 
-    private func refreshLock() async {
+    private func refreshLock(alreadyClaimed: Bool = false) async {
         guard isRunning else { return }
         // The 30s poll and push-driven refreshLockNow() can overlap; without ordering a slow poll's
         // stale response could clobber a fresh push result. Tag each request and apply only the
         // latest-issued one (@MainActor serializes the counter, so this is race-free).
         lockRefreshSequence &+= 1
         let sequence = lockRefreshSequence
+        // A caller that already claimed the slot synchronously (see `refreshLockNow`) passes true;
+        // the timer and the initial snapshot claim it here instead. Either way exactly one refresh
+        // is in flight and the trailing re-run below is armed by anyone who arrived meanwhile.
+        if !alreadyClaimed {
+            guard !isRefreshingLock else {
+                lockRefreshRequestedWhileBusy = true
+                return
+            }
+            isRefreshingLock = true
+        }
+        defer {
+            isRefreshingLock = false
+            if lockRefreshRequestedWhileBusy {
+                lockRefreshRequestedWhileBusy = false
+                // Trailing edge: someone asked while we were busy, so their state is newer than
+                // the response we just applied. The slot was released a line above, so this claims
+                // it the normal way.
+                Task { await refreshLock() }
+            }
+        }
         do {
             let state = try await service.fetchLockState()
             guard isRunning, sequence == lockRefreshSequence else { return }
@@ -675,22 +894,115 @@ extension OilaTelemetryService: CLLocationManagerDelegate {
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        let fixes = locations.map {
-            OilaLocationFix(
-                lat: $0.coordinate.latitude,
-                lng: $0.coordinate.longitude,
-                accuracy: $0.horizontalAccuracy >= 0 ? $0.horizontalAccuracy : nil,
-                ts: $0.timestamp
-            )
-        }
         Task { @MainActor [weak self] in
             guard let self, self.isRunning else { return }
-            self.pendingFixes = Array((self.pendingFixes + fixes).suffix(self.maxQueuedFixes))
+            self.ingestLocations(locations)
         }
     }
 
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // Transient CoreLocation errors are expected (e.g. kCLErrorLocationUnknown); queue keeps state.
+    }
+}
+
+extension OilaTelemetryService {
+    /// Decides whether a fix is worth uploading — the pure half of the gate, so it can be tested
+    /// without CoreLocation. Mirrors Android's `LocationProvider.accepts(accuracyM:distanceFromLastM:)`.
+    ///
+    /// - An unknown accuracy is REFUSED. CoreLocation reports a negative `horizontalAccuracy` when it
+    ///   has no confidence at all; that is not a location, it is a guess.
+    /// - The first fix of a run (no previous point) is always accepted — the parent needs something
+    ///   on the map before the child moves.
+    /// - **A coarse fix is accepted when the last accepted one is stale.** This is the rule Android
+    ///   has no need for: under `.authorizedAlways` this app also runs
+    ///   `startMonitoringSignificantLocationChanges`, and after a background relaunch that is the
+    ///   ONLY source delivering. SLC fixes are cell/Wi-Fi derived and routinely report 1–3 km, so a
+    ///   flat 100 m ceiling would reject every one of them and the child's map would freeze wherever
+    ///   they were when the process was last killed. Once a RECENT fix exists the ceiling applies in
+    ///   full again, so this cannot degrade normal tracking.
+    nonisolated static func acceptsFix(
+        accuracy: Double?,
+        distanceFromLast: Double?,
+        lastAcceptedAge: TimeInterval? = nil
+    ) -> Bool {
+        guard let accuracy, accuracy >= 0 else { return false }
+        // Nothing to compare against, or nothing recent: a coarse position beats no position.
+        guard let distanceFromLast, let lastAcceptedAge, lastAcceptedAge <= staleFixAge else {
+            return true
+        }
+        guard accuracy <= maxAcceptedAccuracyM else { return false }
+        return distanceFromLast >= max(minDisplacementM, accuracyFactor * accuracy)
+    }
+
+    /// Applies the gate to a CoreLocation batch and queues whatever survives.
+    ///
+    /// Also persists on every accepted fix. The backlog used to be written to disk only by
+    /// `flushLocations()`, so an app killed between flushes lost up to a minute of an offline route —
+    /// exactly the stretch it was queueing for. Android commits each fix to SQLite before anything
+    /// else, and this is the cheap analogue of that.
+    func ingestLocations(_ locations: [CLLocation]) {
+        var accepted: [OilaLocationFix] = []
+        for location in locations {
+            let accuracy: Double? = location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil
+            let distance = lastAcceptedFix.map { location.distance(from: $0) }
+            // Time gate, with the "a materially better fix wins" exception. Ordered before the
+            // displacement gate because it is the cheaper of the two to fail.
+            //
+            // Measured on the FIX's own timestamp, not on the wall clock. CoreLocation delivers
+            // buffered bursts — after a background wake, or when deferred updates flush, a whole
+            // stretch of the route arrives in one callback with timestamps minutes apart. Comparing
+            // against `Date()` would see them all as "now" and keep exactly one, silently throwing
+            // away the journey we queued the buffer for.
+            var isMuchBetterThanLast = false
+            if let lastAt = lastAcceptedFixAt {
+                let elapsed = location.timestamp.timeIntervalSince(lastAt)
+                if elapsed < 0 {
+                    // The reference is in the FUTURE relative to this fix, so it cannot be used to
+                    // measure an interval. This is not hypothetical on a device whose clock belongs
+                    // to the child: move the date forward, let one fix be accepted, then let iOS
+                    // correct the clock back, and every later fix is "-86400 s old" — permanently
+                    // inside the 30 s window, permanently failing the accuracy exception, and
+                    // location silently stops uploading while `/device/status` keeps the device
+                    // looking healthy. Drop the poisoned reference instead and take this fix.
+                    lastAcceptedFix = nil
+                    lastAcceptedFixAt = nil
+                } else if elapsed < Self.minFixIntervalS {
+                    let previousAccuracy = lastAcceptedFix?.horizontalAccuracy ?? .greatestFiniteMagnitude
+                    isMuchBetterThanLast = (accuracy ?? .greatestFiniteMagnitude)
+                        <= previousAccuracy - Self.accuracyImprovementM
+                    guard isMuchBetterThanLast else { continue }
+                }
+            }
+
+            // A sharper reading of the SAME place is the whole point of the exception above, so it
+            // must not then be failed for not having moved. Without this the escape hatch was
+            // unreachable: everything that took it was rejected one line later by the displacement
+            // rule, since a better fix of a stationary child has a displacement near zero.
+            if !isMuchBetterThanLast {
+                let age = lastAcceptedFixAt.map { location.timestamp.timeIntervalSince($0) }
+                guard Self.acceptsFix(
+                    accuracy: accuracy,
+                    distanceFromLast: distance,
+                    lastAcceptedAge: age
+                ) else { continue }
+            }
+
+            accepted.append(
+                OilaLocationFix(
+                    lat: location.coordinate.latitude,
+                    lng: location.coordinate.longitude,
+                    accuracy: accuracy,
+                    ts: location.timestamp
+                )
+            )
+            // Updated only on acceptance, so a rejected noisy fix never becomes the reference point.
+            lastAcceptedFix = location
+            lastAcceptedFixAt = location.timestamp
+        }
+
+        guard !accepted.isEmpty else { return }
+        pendingFixes = Array((pendingFixes + accepted).suffix(maxQueuedFixes))
+        persistPendingFixes()
     }
 }
 
@@ -730,8 +1042,7 @@ extension OilaTelemetryService: SOSTelemetryProviding {
     /// report a value (e.g. simulator).
     func currentSOSContext() -> OilaSOSContext {
         UIDevice.current.isBatteryMonitoringEnabled = true
-        let level = UIDevice.current.batteryLevel
-        let batteryPercent: Int? = level >= 0 ? Int((level * 100).rounded()) : nil
+        let batteryPercent = Self.batteryPercent()
 
         let location = locationManager.location
         let accuracy: Double? = {

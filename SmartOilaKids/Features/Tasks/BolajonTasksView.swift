@@ -42,7 +42,7 @@ struct BolajonTasksView: View {
                                         Task { await viewModel.complete(task) }
                                     }
                                 }
-                                .opacity(task.isCompleted ? 0.75 : 1)
+                                .opacity(task.isCompleted || task.isCancelled ? 0.75 : 1)
                             }
                         }
                     }
@@ -117,15 +117,21 @@ private struct TaskRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(task.title)
                     .font(AppTypography.bodyStrong(15))
-                    .foregroundStyle(task.isCompleted ? AppColors.inkTertiary : AppColors.inkPrimary)
-                    .strikethrough(task.isCompleted, color: AppColors.inkTertiary)
+                    .foregroundStyle(task.isCompleted || task.isCancelled
+                                     ? AppColors.inkTertiary : AppColors.inkPrimary)
+                    .strikethrough(task.isCompleted || task.isCancelled, color: AppColors.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)
-                if !task.isCompleted, task.rewardPoints > 0 {
+                // No reward pill on a cancelled chore — there is nothing left to earn.
+                if !task.isCompleted, !task.isCancelled, task.rewardPoints > 0 {
                     reward(color: AppColors.starAmber)
                 }
             }
             Spacer(minLength: 8)
-            if task.isCompleted {
+            if task.isCancelled {
+                Text(L10n.tr("tasks2.cancelled"))
+                    .font(AppTypography.bodyStrong(14))
+                    .foregroundStyle(AppColors.inkTertiary)
+            } else if task.isCompleted {
                 HStack(spacing: 4) {
                     reward(color: AppColors.successGreen)
                     Text(L10n.tr("tasks2.collected"))
@@ -148,7 +154,12 @@ private struct TaskRow: View {
 
     private var checkbox: some View {
         ZStack {
-            if task.isCompleted {
+            if task.isCancelled {
+                Circle().fill(AppColors.chipNeutral).frame(width: 30, height: 30)
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(AppColors.inkTertiary)
+            } else if task.isCompleted {
                 Circle().fill(AppColors.successGreen.opacity(0.16)).frame(width: 30, height: 30)
                 Image(systemName: "checkmark")
                     .font(.system(size: 14, weight: .bold))
@@ -179,6 +190,9 @@ final class BolajonTasksViewModel: ObservableObject {
     @Published var tasks: [OilaDeviceTask] = []
     @Published var errorMessage: String?
     @Published private(set) var completingTaskIDs: Set<String> = []
+    /// `GET /device/tasks/summary` → `totalPoints`. Nil until the first successful read; a failed
+    /// read keeps the last good value rather than dropping back to the local sum mid-session.
+    @Published private(set) var serverStarTotal: Int?
 
     private let service: OilaDeviceServicing
 
@@ -187,7 +201,14 @@ final class BolajonTasksViewModel: ObservableObject {
     }
 
     // "Collected stars" = reward points from completed tasks (design: Yig'ilgan yulduzlar).
-    var starTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
+    //
+    // The server's own total wins when it answers. The local sum only ever sees the rows THIS device
+    // fetched, and that walk is capped (`tasksPageLimit` x `tasksMaxPages`) and depends on how long
+    // the backend keeps completed tasks — so a child with a long history watched their star count
+    // quietly shrink. The Android child app reads the same endpoint for the same badge, so this also
+    // stops the two apps disagreeing about one child's stars.
+    var starTotal: Int { serverStarTotal ?? localStarTotal }
+    var localStarTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
 
     struct Group: Identifiable {
         // Stable identity across recomputes — titleKey is unique per group (today/yesterday/
@@ -231,6 +252,7 @@ final class BolajonTasksViewModel: ObservableObject {
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
         }
+        await refreshStarTotal()
 #if DEBUG
         if tasks.isEmpty && AppRuntime.hasDebugRoute { tasks = BolajonSampleData.tasks; errorMessage = nil }
 #endif
@@ -249,6 +271,15 @@ final class BolajonTasksViewModel: ObservableObject {
         } catch {
             errorMessage = NetworkError.userMessage(for: error)
         }
+        // The star the child just earned should land on the badge in the same beat as the row's
+        // "Bajarildi", so re-read the total here rather than waiting for the next screen visit.
+        await refreshStarTotal()
+    }
+
+    /// Best-effort: a summary failure must never break the list or raise the error banner — the
+    /// local sum is a perfectly good fallback, and the previous server value is better still.
+    private func refreshStarTotal() async {
+        if let total = try? await service.fetchTaskStarTotal() { serverStarTotal = total }
     }
 }
 

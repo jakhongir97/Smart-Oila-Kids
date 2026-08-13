@@ -93,6 +93,11 @@ final class DeviceChatWebSocketService {
     /// provokes on the pending `receive` — is dropped instead of tearing down its replacement.
     private var generation: UInt64 = 0
     private var reconnectAttempts = 0
+    /// Whether to ALSO put the device bearer in the socket URL's query string. Off by default —
+    /// the header alone is what the shipping Android client uses. Armed for the rest of the session
+    /// by the first auth rejection, so a gateway that needs the query recovers by itself. See
+    /// `openSocket` and `handleDisconnect`.
+    private var includeTokenInQuery = false
     private var isActive = false
     private var openedAt: Date?
     /// True while a ping has been sent but its pong has not come back. See `startPinging`.
@@ -142,15 +147,21 @@ final class DeviceChatWebSocketService {
             // No token yet — the caller will retry once paired.
             return
         }
-        // The credential also travels as an `Authorization` header, not only in the query string.
+        // The credential travels as an `Authorization` header. It is no longer ALSO in the query
+        // string by default.
         //
         // A URL's query is the worst place for a bearer: it lands in server access logs, proxy logs
         // and crash reports as plaintext, and this particular token cannot be rotated — a paired
         // device holds no refresh token, so the only remedy for a leaked one is re-pairing the child.
-        // The query parameter stays for now because the gateway authenticates on it and dropping it
-        // unilaterally would disconnect every child; sending both lets the backend switch to the
-        // header and then stop accepting the query, with no client release in between. Tracked as an
-        // ask in the team handoff.
+        // The query parameter used to be kept because it was unknown whether the gateway would
+        // authenticate on the header alone, and dropping it unilaterally would have disconnected
+        // every child. That is now settled: the shipping Android client (Bolajon360 versionCode 5)
+        // opens `wss://api.oila360.uz/ws/chat` with NO query item at all and authenticates purely
+        // through its OkHttp `AuthInterceptor` header — so the gateway demonstrably accepts it.
+        //
+        // `includeTokenInQuery` is the one-shot self-heal for the case where that reading is wrong:
+        // an auth rejection re-arms the query for the next attempt (see `handleDisconnect`), so the
+        // worst case is one failed handshake rather than a child with no chat.
         var request = URLRequest(url: url)
         if let token = tokens.accessToken()?.trimmedNonEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -317,12 +328,27 @@ final class DeviceChatWebSocketService {
         guard isActive else { return }
 
         if wasAuthReject {
-            // Ask the owner to refresh the device token and reconnect, but keep our own retry alive
-            // too: if the owner never acts, realtime would otherwise stay off for the rest of the
-            // session. Resuming the backoff well up the curve keeps that safety net slow, and
-            // `openSocket` re-reads the token, so a refresh that lands meanwhile is picked up here.
-            onAuthExpired?()
-            reconnectAttempts = max(reconnectAttempts, authReconnectMinAttempt)
+            // Self-heal for the header-only handshake: if this gateway really does authenticate on
+            // the query parameter and ignores the header, the FIRST rejection re-arms the query and
+            // the next attempt carries both — so the cost of being wrong about the Android evidence
+            // is one failed handshake, not a child with no chat. One-shot: once armed it stays armed
+            // for the rest of the session, so this cannot oscillate.
+            //
+            // This case must NOT take the slow path below: the token is not expired, the request
+            // shape was, and there is nothing for the owner to refresh. Retrying promptly is the
+            // whole point of the fallback.
+            if !includeTokenInQuery {
+                includeTokenInQuery = true
+                reconnectAttempts = 0
+            } else {
+                // Ask the owner to refresh the device token and reconnect, but keep our own retry
+                // alive too: if the owner never acts, realtime would otherwise stay off for the rest
+                // of the session. Resuming the backoff well up the curve keeps that safety net slow,
+                // and `openSocket` re-reads the token, so a refresh that lands meanwhile is picked
+                // up here.
+                onAuthExpired?()
+                reconnectAttempts = max(reconnectAttempts, authReconnectMinAttempt)
+            }
         }
         // `onAuthExpired` / `onConnectedChange` run synchronously above, and an owner is allowed to
         // call `connect()` straight from them. A socket is live again in that case, so scheduling
@@ -419,7 +445,9 @@ final class DeviceChatWebSocketService {
         components.host = base.host
         components.port = base.port
         components.path = "/ws/chat"
-        components.queryItems = [URLQueryItem(name: "token", value: token)]
+        if includeTokenInQuery {
+            components.queryItems = [URLQueryItem(name: "token", value: token)]
+        }
         return components.url
     }
 }

@@ -17,9 +17,10 @@ echo
 # The gate that actually protects the live integration. It was wired into the OpenAPI workflow but
 # never into this run, so a local release-readiness pass reported "completed" while the only
 # live-contract check had not executed.
-# Floor is pinned here, not derived from the data; the unit is METHOD+path (19 paths = 22 ops).
+# Floor is pinned here, not derived from the data; the unit is METHOD+path (21 paths = 24 ops).
+# Raised 22 → 24 when the client adopted GET /device/tasks/summary and GET /device/apps/screen-time.
 echo "== Child endpoints vs the LIVE spec =="
-python3 scripts/check_child_live_endpoints.py --min-endpoints 22
+python3 scripts/check_child_live_endpoints.py --min-endpoints 24
 echo
 
 echo "== Child-vs-parent parity gap budget =="

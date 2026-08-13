@@ -184,6 +184,23 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         PushCommandRouter.handle(userInfo: userInfo, deliveryContext: .backgroundFetch)
 
         guard isLiveMediaWake else {
+            // Two silent commands finish their work AFTER `handle` returns, each one main-actor hop
+            // away: the chat banner is scheduled there, and `status.report` posts `/device/status`
+            // from an observer. Calling the completion handler first tells iOS the push is done and
+            // invites suspension before either runs — so the child gets no banner, and the parent's
+            // explicit "check in now" produces no check-in. A short bounded hold, not the media one.
+            let needsShortHold = PushCommandRouter.schedulesChatBanner(
+                userInfo: userInfo, deliveryContext: .backgroundFetch
+            ) || PushCommandRouter.isStatusReportCommand(
+                PushCommandRouter.parsePayload(from: userInfo).commandHaystack
+            )
+            if needsShortHold {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: UInt64(Self.chatBannerHoldSeconds * 1_000_000_000))
+                    completionHandler(.newData)
+                }
+                return
+            }
             completionHandler(.newData)
             return
         }
@@ -221,6 +238,10 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     /// The router posts its notification through an unstructured main-actor hop, so the manager can
     /// legitimately still be `.idle` for a moment after this method returns.
     private static let liveMediaWakeGraceSeconds: TimeInterval = 2
+    /// Enough for the router's main-actor hop and one `UNUserNotificationCenter.add` (or the status
+    /// observer's hop into `postStatusNow`), and short
+    /// enough that a chat push never eats a meaningful share of the background budget.
+    private static let chatBannerHoldSeconds: TimeInterval = 1.5
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -254,7 +275,14 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // a deep-link, so a child tapping one of our own banners could be navigated somewhere the
         // parent never asked for. The refresh below still runs — opening the app is a fine moment
         // to re-sync, whoever posted the banner.
-        if !LocalNotificationID.isLocallyScheduled(response.notification.request.identifier) {
+        if response.notification.request.identifier == LocalNotificationID.chatMessage {
+            // Our own "new message" banner. It must not go back through the router (that would
+            // re-run the refresh and file our text in the push inbox), but a tap on it has to land
+            // where the child expects: the conversation.
+            PushCommandRouter.openChatFromLocalBanner(
+                userInfo: response.notification.request.content.userInfo
+            )
+        } else if !LocalNotificationID.isLocallyScheduled(response.notification.request.identifier) {
             PushCommandRouter.handle(
                 userInfo: response.notification.request.content.userInfo,
                 openedFromInteraction: true,

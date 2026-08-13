@@ -801,7 +801,7 @@ struct BolajonChatView: View {
                         if message.id == viewModel.unreadBoundaryID {
                             UnreadDivider().id("unread-divider")
                         }
-                        if message.sender == .system {
+                        if message.isSystemNotice {
                             ChatSystemNotice(message: message).id(message.id)
                         } else {
                             ChatBubble(

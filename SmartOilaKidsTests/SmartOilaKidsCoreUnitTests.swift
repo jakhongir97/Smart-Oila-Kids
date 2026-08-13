@@ -167,7 +167,6 @@ final class PushCommandRouterTests: XCTestCase {
         await MainActor.run { RuntimeDiagnosticsCenter.shared.resetPush() }
 
         let names: [Notification.Name] = [
-            .pushShouldRefreshDashboard,
             .pushShouldRefreshLockState,
             .pushShouldRefreshTasks,
             .pushShouldOpenTasks,
@@ -220,7 +219,11 @@ final class PushCommandRouterTests: XCTestCase {
         XCTAssertEqual(diagnosticsBeforeConsume.dsn, "child-5")
         XCTAssertEqual(diagnosticsBeforeConsume.deliveryContext, "user_response")
         XCTAssertEqual(diagnosticsBeforeConsume.lastEvent, "message_task_lock")
-        XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("dashboard_refresh"))
+        // The body here reads "Location update and lock state" — a human sentence. It used to
+        // trigger a `dashboard_refresh` route, because that matcher ran over event + title + BODY.
+        // The route is gone; nothing a parent can type may name a device action.
+        XCTAssertFalse(diagnosticsBeforeConsume.lastRoute.contains("dashboard"))
+        XCTAssertFalse(diagnosticsBeforeConsume.lastRoute.contains("status_report"))
         XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("lock_refresh"))
         XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("tasks_refresh"))
         XCTAssertTrue(diagnosticsBeforeConsume.lastRoute.contains("tasks_open"))
@@ -3568,5 +3571,124 @@ final class FirstPINProvisioningTests: XCTestCase {
             FirstPINProvisioning.decide(pairedAt: nil, now: paired, latched: false),
             .closedNoPairing
         )
+    }
+}
+
+// MARK: - status.report routing
+
+/// The Android child app answers `status.report` by posting a fresh `/device/status` snapshot at
+/// once. iOS routed the event only to `.pushShouldRefreshDashboard`, which nothing observed, so the
+/// parent's refresh did nothing. These pin the classifier that now drives `.pushShouldReportStatus`.
+///
+/// The rule under test is deliberately narrower than the dashboard route: the status subject must be
+/// the event's FIRST token (or a whole-event alias), and the classifier reads the command — never the
+/// notification title/body, which on a chat push is the parent's own words.
+final class PushStatusReportRoutingTests: XCTestCase {
+
+    func testBackendStatusReportEventIsRecognised() {
+        XCTAssertTrue(PushCommandRouter.isStatusReportCommand("status.report"))
+    }
+
+    func testStatusVariantsAreRecognised() {
+        for event in ["status", "status.request", "status_report", "STATUS.REPORT", " status.report ",
+                      "statusreport", "holat.report", "device.status", "device_status"] {
+            XCTAssertTrue(
+                PushCommandRouter.isStatusReportCommand(event),
+                "\(event) should be read as a status command"
+            )
+        }
+    }
+
+    /// `stream.status` is an informational event in the D-073 contract. It names the status, but the
+    /// SUBJECT is the stream — reading it as a check-in command would have the device answer events
+    /// that were never addressed to it.
+    func testInformationalEventsNamingStatusAreNotCommands() {
+        for event in ["stream.status", "audio.status", "lock.status.changed", "chat.refresh",
+                      "stream.start", "stream.stop", "lock.refresh", ""] {
+            XCTAssertFalse(
+                PushCommandRouter.isStatusReportCommand(event),
+                "\(event) must not be read as a status command"
+            )
+        }
+    }
+
+    /// The bug class this codebase has already been bitten by once (a parent typing "tingla" opened
+    /// the microphone): a classifier that reads person-authored text.
+    func testParentMessageBodyNeverTriggersAStatusReport() {
+        for body in ["status", "holatni yubor", "device status", "status.report"] {
+            let payload = PushCommandRouter.parsePayload(from: [
+                "event": "chat.refresh",
+                "aps": ["alert": ["title": "Ota-ona", "body": body]]
+            ])
+            XCTAssertFalse(
+                PushCommandRouter.isStatusReportCommand(payload.commandHaystack),
+                "body \"\(body)\" must not reach the status route"
+            )
+        }
+    }
+
+    /// The real payload the backend sends: a silent data push with no alert at all.
+    func testSilentStatusReportPayloadRoutes() {
+        let payload = PushCommandRouter.parsePayload(from: ["type": "status.report", "dsn": "abc"])
+        XCTAssertTrue(PushCommandRouter.isStatusReportCommand(payload.commandHaystack))
+    }
+}
+
+// MARK: - Location acceptance gate
+
+/// Pins the port of the Android child app's `LocationProvider.accepts`. Before this existed, iOS
+/// queued EVERY CoreLocation callback: a stationary child produced a scribble of GPS noise on the
+/// parent's map, and a cell-tower-only fix could place them in the wrong district entirely.
+final class LocationAcceptanceTests: XCTestCase {
+
+    func testFirstFixIsAlwaysAccepted() {
+        // Nothing to measure displacement against yet — the parent needs a point on the map.
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 12, distanceFromLast: nil))
+    }
+
+    /// Under `.authorizedAlways` the app also runs significant-location-change monitoring, and after
+    /// a background relaunch that is the only source delivering. Its fixes are cell-derived and
+    /// routinely 1–3 km, so a flat ceiling would freeze the child's map at wherever they were when
+    /// the process died.
+    func testCoarseFixIsAcceptedWhenTheLastOneIsStale() {
+        XCTAssertTrue(
+            OilaTelemetryService.acceptsFix(accuracy: 2500, distanceFromLast: 4000, lastAcceptedAge: 3600),
+            "an hour-old pin is worse than a coarse new one"
+        )
+        XCTAssertFalse(
+            OilaTelemetryService.acceptsFix(accuracy: 2500, distanceFromLast: 4000, lastAcceptedAge: 60),
+            "…but while a recent fix exists the ceiling still applies"
+        )
+    }
+
+    func testUnknownAccuracyIsRefused() {
+        // CoreLocation reports a negative horizontalAccuracy when it has no confidence at all; the
+        // caller maps that to nil. That is not a location.
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: nil, distanceFromLast: nil))
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: -1, distanceFromLast: 500, lastAcceptedAge: 30))
+    }
+
+    func testCellTowerGradeFixIsRefused() {
+        // ~1 km accuracy is the shape of a cell-only fix: it would move the child across town.
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 1000, distanceFromLast: 5000, lastAcceptedAge: 30))
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 101, distanceFromLast: 5000, lastAcceptedAge: 30))
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 100, distanceFromLast: 5000, lastAcceptedAge: 30))
+    }
+
+    func testStationaryDriftIsRefused() {
+        // 10 m of movement on a 12 m-accurate fix is noise, not a walk: the floor is
+        // max(25, 1.5 * 12) = 25.
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 12, distanceFromLast: 10, lastAcceptedAge: 30))
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 12, distanceFromLast: 25, lastAcceptedAge: 30))
+    }
+
+    /// The rule that makes the gate scale with confidence: a vaguer fix has to move further before
+    /// it is believed. This is Android's ACCURACY_FACTOR, and it is why the threshold is a max().
+    func testVaguerFixMustTravelFurther() {
+        // 1.5 * 60 = 90 m required, so 50 m of apparent movement is not enough.
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 60, distanceFromLast: 50, lastAcceptedAge: 30))
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 60, distanceFromLast: 90, lastAcceptedAge: 30))
+        // …while a sharp fix only has to clear the 25 m floor.
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 5, distanceFromLast: 25, lastAcceptedAge: 30))
     }
 }

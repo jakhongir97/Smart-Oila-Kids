@@ -533,3 +533,161 @@ final class OilaChatPageParsingTests: XCTestCase {
         XCTAssertEqual(page.nextCursor, "m1")
     }
 }
+
+/// Backend surfaces adopted so the iPhone covers what the Android child app already does:
+/// today’s device-wide screen time, the server’s task pagination meta, and the system-notice
+/// signal that used to render as an ordinary parent message.
+final class OilaDeviceBackendParityParsingTests: XCTestCase {
+
+    // MARK: Screen time (GET /device/apps/screen-time)
+
+    /// The shape the endpoint is expected to return: the per-app vocabulary the same controller
+    /// already uses, plus the device-wide budget name the parent's `SetScreenLimitDto` writes.
+    func testScreenTimeReadsTheDeviceWideBudgetShape() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(#"{"usedSeconds":5400,"dailyScreenLimitSeconds":10800,"remainingSeconds":5400,"isLimitReached":false,"usageDate":"2026-08-13"}"#.utf8)
+        ) as? [String: Any])
+
+        let screenTime = try XCTUnwrap(OilaDeviceClient.parseScreenTime(from: object))
+
+        XCTAssertEqual(screenTime.usedSeconds, 5400)
+        XCTAssertEqual(screenTime.dailyLimitSeconds, 10800)
+        XCTAssertEqual(screenTime.remainingSeconds, 5400)
+        XCTAssertFalse(screenTime.isLimitReached)
+        XCTAssertEqual(screenTime.usageDate, "2026-08-13")
+        XCTAssertEqual(screenTime.progress ?? 0, 0.5, accuracy: 0.001)
+    }
+
+    /// No budget is a NORMAL state — `SetScreenLimitDto.dailyScreenLimitSeconds` is nullable, and no
+    /// shipping parent surface writes it today. Usage must still be readable, and a limit can never
+    /// be "reached" when there is none.
+    func testScreenTimeWithoutABudgetIsUsageOnly() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(#"{"usedSeconds":900}"#.utf8)
+        ) as? [String: Any])
+
+        let screenTime = try XCTUnwrap(OilaDeviceClient.parseScreenTime(from: object))
+
+        XCTAssertEqual(screenTime.usedSeconds, 900)
+        XCTAssertNil(screenTime.dailyLimitSeconds)
+        XCTAssertNil(screenTime.progress)
+        XCTAssertFalse(screenTime.hasBudget)
+        XCTAssertFalse(screenTime.isLimitReached)
+    }
+
+    /// `isLimitReached` is derived when the server sends only the numbers — the same rule
+    /// `parseAppLimit` applies to the per-app rows.
+    func testScreenTimeDerivesLimitReachedFromTheNumbers() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(#"{"used_seconds":11000,"dailyLimitSeconds":10800}"#.utf8)
+        ) as? [String: Any])
+
+        let screenTime = try XCTUnwrap(OilaDeviceClient.parseScreenTime(from: object))
+
+        XCTAssertTrue(screenTime.isLimitReached)
+        XCTAssertEqual(screenTime.progress, 1, "progress is clamped, never above 1")
+    }
+
+    /// An unrecognized 200 must read as "nothing to say", so the Home card hides instead of
+    /// asserting the child used the phone for zero minutes — a claim iOS cannot make, since nothing
+    /// reports per-app usage without the FamilyControls entitlement.
+    func testUnrecognizedScreenTimePayloadIsNil() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(#"{"somethingElse":true}"#.utf8)
+        ) as? [String: Any])
+
+        XCTAssertNil(OilaDeviceClient.parseScreenTime(from: object))
+    }
+
+    func testScreenTimeReadsANestedPayload() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(#"{"screenTime":{"totalSeconds":600,"dailyScreenLimitSeconds":3600}}"#.utf8)
+        ) as? [String: Any])
+
+        let screenTime = try XCTUnwrap(OilaDeviceClient.parseScreenTime(from: object))
+        XCTAssertEqual(screenTime.usedSeconds, 600)
+        XCTAssertEqual(screenTime.dailyLimitSeconds, 3600)
+    }
+
+    // MARK: Lock schedule window
+
+    /// The parent writes schedules as minute-of-day integers (`CreateLockScheduleDto.startMinute`,
+    /// 0...1439). Before this the child's lock screen showed no window whenever the device payload
+    /// echoed that shape, because only string times were understood.
+    func testScheduleWindowReadsMinuteOfDayIntegers() {
+        let state = OilaLockState(
+            isLocked: true,
+            raw: [:],
+            activeScheduleRaw: ["startMinute": 1260, "endMinute": 420]
+        )
+
+        XCTAssertEqual(state.scheduleRangeText, "21:00 – 07:00")
+    }
+
+    func testScheduleWindowPrefersStringTimesWhenBothArePresent() {
+        let state = OilaLockState(
+            isLocked: true,
+            raw: [:],
+            activeScheduleRaw: ["startTime": "20:30", "endTime": "06:15", "startMinute": 0, "endMinute": 1]
+        )
+
+        XCTAssertEqual(state.scheduleRangeText, "20:30 – 06:15")
+    }
+
+    /// A window we cannot read is shown as nothing at all. A wrong time on a lock screen is worse
+    /// than an absent one: the child plans their evening around it.
+    func testOutOfRangeMinutesAreRefused() {
+        let state = OilaLockState(
+            isLocked: true,
+            raw: [:],
+            activeScheduleRaw: ["startMinute": 1500, "endMinute": 420]
+        )
+
+        XCTAssertNil(state.scheduleRangeText)
+    }
+
+    // MARK: Task paging + system messages
+
+    /// The walk used to stop on the PARSED row count, so one unparseable row in a full page made
+    /// the page look short and every later task silently disappeared. The server's own `totalPages`
+    /// is authoritative when it sends one.
+    func testPageCountPrefersServerMeta() throws {
+        let data = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(#"{"items":[],"meta":{"page":1,"limit":100,"total":250,"totalPages":3}}"#.utf8)
+        ))
+
+        XCTAssertEqual(OilaDeviceClient.pageCount(from: data), 3)
+    }
+
+    func testPageCountIsNilWhenNoMetaIsSent() throws {
+        let array = try XCTUnwrap(JSONSerialization.jsonObject(with: Data("[]".utf8)))
+        XCTAssertNil(OilaDeviceClient.pageCount(from: array), "a bare array carries no meta")
+
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(#"{"items":[],"meta":{"page":1}}"#.utf8)
+        ))
+        XCTAssertNil(OilaDeviceClient.pageCount(from: object), "meta without totalPages is unusable")
+    }
+
+    /// A notice carrying `systemKind` but no recognizable `senderType` used to render as an ordinary
+    /// incoming bubble — i.e. as if the parent had typed it. Android treats either signal as system.
+    func testSystemKindAloneMarksAMessageAsANotice() {
+        let withKind = OilaChatMessage(
+            id: "m1", text: "SOS yuborildi", sender: .unknown, createdAt: Date(), hasImage: false,
+            readByPeer: false, raw: [:], systemKind: "sos", systemData: nil
+        )
+        XCTAssertTrue(withKind.isSystemNotice)
+
+        let plainParentMessage = OilaChatMessage(
+            id: "m2", text: "Uyga qaytdingmi?", sender: .parent, createdAt: Date(), hasImage: false,
+            readByPeer: false, raw: [:], systemKind: nil, systemData: nil
+        )
+        XCTAssertFalse(plainParentMessage.isSystemNotice)
+
+        let blankKind = OilaChatMessage(
+            id: "m3", text: "hello", sender: .parent, createdAt: Date(), hasImage: false,
+            readByPeer: false, raw: [:], systemKind: "   ", systemData: nil
+        )
+        XCTAssertFalse(blankKind.isSystemNotice, "an empty kind is not a kind")
+    }
+}
