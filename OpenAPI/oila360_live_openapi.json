@@ -648,7 +648,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the parent's children",
+        "summary": "List the parent's children with their last-known status, and probe liveness",
         "tags": [
           "children"
         ]
@@ -1077,6 +1077,53 @@
           }
         ],
         "summary": "Delete a safe zone",
+        "tags": [
+          "geofences"
+        ]
+      }
+    },
+    "/api/v1/parent/geofences/{id}/events": {
+      "get": {
+        "operationId": "GeofenceController_listEvents",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "pattern": "Z$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "pattern": "Z$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List one safe zone's enter/exit crossing history",
         "tags": [
           "geofences"
         ]
@@ -2040,7 +2087,7 @@
             "bearer": []
           }
         ],
-        "summary": "Generate a pairing code for a child device",
+        "summary": "Get a child device's pairing code (returns the live one, else mints a new one)",
         "tags": [
           "pairing"
         ]
@@ -2306,6 +2353,45 @@
           }
         ],
         "summary": "Aggregated screen-time over a window",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/api/v1/parent/children/{id}/apps/screen-limit": {
+      "put": {
+        "operationId": "AppsController_setScreenLimit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetScreenLimitDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set or clear the device-wide daily screen-time budget",
         "tags": [
           "apps"
         ]
@@ -2704,59 +2790,9 @@
         ]
       }
     },
-    "/api/v1/parent/children/{id}/stream/start": {
-      "post": {
-        "operationId": "ParentStreamingController_startStream",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartStreamDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StreamStartResponseDto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Child not found or not owned by this parent"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Start — or renew — the child's live publish (D-073)",
-        "description": "Re-send at ~maxDurationSeconds/2 while the live screen is open: the child treats a repeat as a lease RENEWAL, not a restart. The lease is server-owned — there is no duration field, so a client can never ask for a longer one.",
-        "tags": [
-          "streaming"
-        ]
-      }
-    },
-    "/api/v1/parent/children/{id}/stream/stop": {
-      "post": {
-        "operationId": "ParentStreamingController_stopStream",
+    "/api/v1/parent/payments/{id}": {
+      "get": {
+        "operationId": "PaymentsController_getOne",
         "parameters": [
           {
             "name": "id",
@@ -2773,13 +2809,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StreamCommandResponseDto"
+                  "type": "object"
                 }
               }
             }
-          },
-          "404": {
-            "description": "Child not found or not owned by this parent"
           }
         },
         "security": [
@@ -2787,10 +2820,9 @@
             "bearer": []
           }
         ],
-        "summary": "Stop the child's live publish (D-073)",
-        "description": "Fast path only — the lease carried by stream/start is what guarantees the camera goes dark. Idempotent: a stop while the child is idle is a no-op.",
+        "summary": "Read one payment — what the client polls after returning from checkout",
         "tags": [
-          "streaming"
+          "payments"
         ]
       }
     },
@@ -2821,6 +2853,96 @@
           }
         ],
         "summary": "Mint a subscriber token for the child's live A/V room",
+        "tags": [
+          "streaming"
+        ]
+      }
+    },
+    "/api/v1/parent/children/{id}/stream/start": {
+      "post": {
+        "description": "Re-send at ~maxDurationSeconds/2 while the live screen is open: the child treats a repeat as a lease RENEWAL, not a restart. The lease is server-owned — there is no duration field, so a client can never ask for a longer one.",
+        "operationId": "ParentStreamingController_start",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartStreamDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command dispatched (the D-018 envelope wraps this as `data`). `delivered:false` is a SOFT failure: stream.* has no poll fallback, so the device will never hear the command — fail fast, do not wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamStartResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Child not found or not owned by this parent"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start — or renew — the child's live publish (D-073)",
+        "tags": [
+          "streaming"
+        ]
+      }
+    },
+    "/api/v1/parent/children/{id}/stream/stop": {
+      "post": {
+        "description": "Fast path only — the lease carried by stream/start is what guarantees the camera goes dark. Idempotent: a stop while the child is idle is a no-op.",
+        "operationId": "ParentStreamingController_stop",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Command dispatched — switch on `delivered`, never on `transport`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamCommandResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Child not found or not owned by this parent"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop the child's live publish (D-073)",
         "tags": [
           "streaming"
         ]
@@ -3250,6 +3372,1647 @@
         ]
       }
     },
+    "/api/v1/admin/auth/login": {
+      "post": {
+        "operationId": "AdminAuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminLoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token pair and the operator profile"
+          },
+          "401": {
+            "description": "Invalid credentials, disabled account, or locked out"
+          }
+        },
+        "summary": "Admin login (username + password) → access + refresh token",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/refresh": {
+      "post": {
+        "operationId": "AdminAuthController_refresh",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, or already-used refresh token"
+          }
+        },
+        "summary": "Rotate an admin refresh token (single use)",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/logout": {
+      "post": {
+        "operationId": "AdminAuthController_logout",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke the presented refresh token’s whole session",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/me": {
+      "get": {
+        "operationId": "AdminProfileController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The signed-in operator’s profile, role and permission list",
+        "tags": [
+          "admin-profile"
+        ]
+      },
+      "patch": {
+        "operationId": "AdminProfileController_updateMe",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdminProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update your own display name",
+        "tags": [
+          "admin-profile"
+        ]
+      }
+    },
+    "/api/v1/admin/me/password": {
+      "post": {
+        "operationId": "AdminProfileController_changePassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeAdminPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "Current password is incorrect"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change your own password (requires the current one; revokes your sessions)",
+        "tags": [
+          "admin-profile"
+        ]
+      }
+    },
+    "/api/v1/admin/admins": {
+      "get": {
+        "operationId": "AdminUsersController_list",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "SuperAdmin",
+                "Admin",
+                "Support",
+                "Viewer"
+              ]
+            }
+          },
+          {
+            "name": "isActive",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List operator accounts",
+        "tags": [
+          "admin-users"
+        ]
+      },
+      "post": {
+        "operationId": "AdminUsersController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdminDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Username already in use"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create an operator account",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
+    "/api/v1/admin/admins/{id}": {
+      "get": {
+        "operationId": "AdminUsersController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One operator account",
+        "tags": [
+          "admin-users"
+        ]
+      },
+      "patch": {
+        "operationId": "AdminUsersController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdminDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Attempt to change your own role or active state"
+          },
+          "409": {
+            "description": "Would remove the last active SuperAdmin"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update an operator’s name, role or active state",
+        "tags": [
+          "admin-users"
+        ]
+      },
+      "delete": {
+        "operationId": "AdminUsersController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "Attempt to delete your own account"
+          },
+          "409": {
+            "description": "Would remove the last active SuperAdmin"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Soft-delete an operator account (frees the username)",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
+    "/api/v1/admin/admins/{id}/password": {
+      "post": {
+        "operationId": "AdminUsersController_resetPassword",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetAdminPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set another operator’s password (the recovery path; revokes their sessions)",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
+    "/api/v1/admin/members": {
+      "get": {
+        "operationId": "AdminMembersController_list",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "isActive",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "subscription",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "none"
+              ]
+            }
+          },
+          {
+            "name": "sortBy",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "phone"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search parent accounts (phone or name), filter and paginate",
+        "tags": [
+          "admin-members"
+        ]
+      }
+    },
+    "/api/v1/admin/members/{id}": {
+      "get": {
+        "operationId": "AdminMembersController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such member"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One parent account with children, subscription chain and recent payments",
+        "tags": [
+          "admin-members"
+        ]
+      },
+      "patch": {
+        "operationId": "AdminMembersController_setActive",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdminMemberDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Block or unblock a parent account (a block also revokes their live sessions)",
+        "tags": [
+          "admin-members"
+        ]
+      },
+      "delete": {
+        "operationId": "AdminMembersController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a parent account and cascade (children, zones, notifications, subscription). Payment history is retained (D-051).",
+        "tags": [
+          "admin-members"
+        ]
+      }
+    },
+    "/api/v1/admin/members/{id}/subscriptions": {
+      "post": {
+        "operationId": "AdminMembersController_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantSubscriptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "404": {
+            "description": "No such member, or plan missing/inactive"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Grant a subscription period manually. The period APPENDS to the member’s chain, so granting mid-period extends coverage rather than replacing it (D-085).",
+        "tags": [
+          "admin-members"
+        ]
+      }
+    },
+    "/api/v1/admin/members/{id}/subscriptions/cancel": {
+      "post": {
+        "operationId": "AdminMembersController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "End the member’s subscription now — cancels the running period and anything queued behind it. Periods already in the past stay as history.",
+        "tags": [
+          "admin-members"
+        ]
+      }
+    },
+    "/api/v1/admin/subscriptions": {
+      "get": {
+        "operationId": "AdminCatalogueController_listSubscriptions",
+        "parameters": [
+          {
+            "name": "memberId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Active",
+                "Cancelled"
+              ]
+            }
+          },
+          {
+            "name": "planId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "expiringBefore",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Subscription rows across accounts. `expiringBefore` is the renewal-outreach filter.",
+        "tags": [
+          "admin-subscriptions"
+        ]
+      }
+    },
+    "/api/v1/admin/subscriptions/{id}/revoke": {
+      "post": {
+        "operationId": "AdminCatalogueController_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "No such subscription"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke ONE granted period and replay the member’s remaining chain forward (D-085). Use this for \"that period was granted in error\"; use the member-level cancel to end their subscription outright.",
+        "tags": [
+          "admin-subscriptions"
+        ]
+      }
+    },
+    "/api/v1/admin/plans": {
+      "get": {
+        "operationId": "AdminCatalogueController_listPlans",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The whole plan catalogue INCLUDING retired plans, with live grant counts",
+        "tags": [
+          "admin-subscriptions"
+        ]
+      },
+      "post": {
+        "operationId": "AdminCatalogueController_createPlan",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlanDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Plan code already in use"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a plan to the catalogue (price is integer UZS)",
+        "tags": [
+          "admin-subscriptions"
+        ]
+      }
+    },
+    "/api/v1/admin/plans/{id}": {
+      "patch": {
+        "operationId": "AdminCatalogueController_updatePlan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlanDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Edit a plan. Applies to FUTURE purchases only — a sold period freezes its own duration (D-085) and a payment freezes its amount (D-051). `code` is immutable.",
+        "tags": [
+          "admin-subscriptions"
+        ]
+      },
+      "delete": {
+        "operationId": "AdminCatalogueController_deletePlan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "409": {
+            "description": "Plan still has active subscriptions"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Soft-delete a plan. Refused while live grants point at it — deactivate it instead (`isActive: false`), which stops it being sold while keeping it resolvable.",
+        "tags": [
+          "admin-subscriptions"
+        ]
+      }
+    },
+    "/api/v1/admin/dashboard": {
+      "get": {
+        "operationId": "AdminOperationsController_dashboardOverview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Every landing-screen tile in one response: members, devices, subscriptions, revenue (today + month) and stuck payments.",
+        "tags": [
+          "admin-operations"
+        ]
+      }
+    },
+    "/api/v1/admin/devices": {
+      "get": {
+        "operationId": "AdminOperationsController_listDevices",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "memberId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "paired",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "online",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sortBy",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "pairedAt",
+                "name"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Child devices across accounts. `online=true` means seen in the last 15 minutes — liveness is an on-demand probe, so recency is the only honest definition (D-082).",
+        "tags": [
+          "admin-operations"
+        ]
+      }
+    },
+    "/api/v1/admin/devices/{id}": {
+      "get": {
+        "operationId": "AdminOperationsController_deviceDetail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One device with owner, live status and per-feature counts",
+        "tags": [
+          "admin-operations"
+        ]
+      }
+    },
+    "/api/v1/admin/payments": {
+      "get": {
+        "operationId": "AdminOperationsController_listPayments",
+        "parameters": [
+          {
+            "name": "memberId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Payme",
+                "Click"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Cancelled",
+                "Pending",
+                "Created",
+                "Paid",
+                "Refunded"
+              ]
+            }
+          },
+          {
+            "name": "providerTransactionId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Payment ledger with provider, status, date-range and gateway-transaction filters",
+        "tags": [
+          "admin-operations"
+        ]
+      }
+    },
+    "/api/v1/admin/payments/{id}": {
+      "get": {
+        "operationId": "AdminOperationsController_paymentDetail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such payment"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One payment",
+        "tags": [
+          "admin-operations"
+        ]
+      }
+    },
+    "/api/v1/admin/payments/{id}/refund": {
+      "post": {
+        "operationId": "AdminOperationsController_refund",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundPaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such payment"
+          },
+          "409": {
+            "description": "Payment is not in a refundable (Paid) state"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Record a manual refund and revoke the period it paid for. THIS MOVES NO MONEY — issue the actual refund in the gateway’s cabinet first; this marks the payment Refunded and replays the member’s remaining chain (D-084/D-085). Idempotent: repeating it on an already-refunded payment changes nothing.",
+        "tags": [
+          "admin-operations"
+        ]
+      }
+    },
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "operationId": "AdminOperationsController_auditLogs",
+        "parameters": [
+          {
+            "name": "adminId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "targetType",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "name": "targetId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Admin action log, filterable by operator, action, target and date range",
+        "tags": [
+          "admin-operations"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/growth": {
+      "get": {
+        "operationId": "AdminStatsController_growth",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 365,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "bucket",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "default": "day",
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "New members per bucket plus a cumulative total. Buckets are cut at LOCAL (Asia/Tashkent) midnight and empty ones are returned as zeros; the cumulative line includes everyone who registered before the window.",
+        "tags": [
+          "admin-stats"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/revenue": {
+      "get": {
+        "operationId": "AdminStatsController_revenue",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 365,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "bucket",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "default": "day",
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirmed revenue per bucket split by gateway, plus this window against the previous one. GROSS: a refund removes its amount from the day it was paid, and `growthPct` is null when the previous window earned nothing.",
+        "tags": [
+          "admin-stats"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/subscriptions": {
+      "get": {
+        "operationId": "AdminStatsController_subscriptions",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 365,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "bucket",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "default": "day",
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Subscriber flow per bucket as events on the grant chain: new (first-ever grant), renewals, reactivated (returned after a gap), churned (a covered span ended and nothing continued it), and net = new + reactivated − churned.",
+        "tags": [
+          "admin-stats"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/funnel": {
+      "get": {
+        "operationId": "AdminStatsController_funnel",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 365,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "bucket",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "default": "day",
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Registered → paired a device → received a grant → paid, measured on ONE cohort: the members who registered inside the window. Every step asks “ever”, so a refund or a deleted child profile cannot lower a closed cohort’s conversion. `bucket` draws no series here — it aligns the window with the charts above.",
+        "tags": [
+          "admin-stats"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/breakdown": {
+      "get": {
+        "operationId": "AdminStatsController_breakdown",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Four donuts in one request — plan, payment provider, subscription state and device platform. Current-state snapshots, so it takes no range and ignores any query parameters. Every donut is zero-filled: a plan or gateway nobody has used yet is a 0% slice, never a missing one.",
+        "tags": [
+          "admin-stats"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/retention": {
+      "get": {
+        "operationId": "AdminStatsController_retention",
+        "parameters": [
+          {
+            "name": "months",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 24,
+              "default": 6,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retention by signup-month cohort, along two axes: still subscribed (commercial) and still active — a device seen in the last 30 days (product).",
+        "tags": [
+          "admin-stats"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/top-members": {
+      "get": {
+        "operationId": "AdminStatsController_topMembers",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 90,
+              "default": 30,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Most active members over a window, ranked by total child screen time",
+        "tags": [
+          "admin-stats"
+        ]
+      }
+    },
     "/api/v1/device/location/batch": {
       "post": {
         "operationId": "DeviceLocationController_recordBatch",
@@ -3377,6 +5140,33 @@
         ]
       }
     },
+    "/api/v1/device/apps/screen-time": {
+      "get": {
+        "operationId": "DeviceAppsController_screenTime",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Today's device-wide screen time vs the daily budget",
+        "tags": [
+          "device-apps"
+        ]
+      }
+    },
     "/api/v1/device/apps/removal-attempt": {
       "post": {
         "operationId": "DeviceAppsController_reportRemovalAttempt",
@@ -3410,7 +5200,7 @@
   },
   "info": {
     "title": "Oila 360 API",
-    "description": "Main backend API, merged with the high-frequency device-telemetry ingest service (/docs/ingestion.json). Captured live 2026-07-29.",
+    "description": "Main backend API (https://api.oila360.uz/docs/api.json), merged with the high-frequency device-telemetry ingest service (https://api.oila360.uz/docs/ingestion.json). Captured live 2026-08-13. Both documents sit behind HTTP basic auth; /api/docs-json — the URL this snapshot used to be fetched from, and which OpenAPI/README.md records as 404 — was replaced by those two paths, so this file IS refreshable again.",
     "version": "1.0",
     "contact": {}
   },
@@ -3852,6 +5642,20 @@
           "fcmToken"
         ]
       },
+      "SetScreenLimitDto": {
+        "type": "object",
+        "properties": {
+          "dailyScreenLimitSeconds": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 86400
+          }
+        },
+        "required": [
+          "dailyScreenLimitSeconds"
+        ]
+      },
       "SetAppLockDto": {
         "type": "object",
         "properties": {
@@ -3990,26 +5794,27 @@
           }
         },
         "required": [
-          "planCode"
+          "planCode",
+          "provider"
         ]
       },
       "StartStreamDto": {
         "type": "object",
         "properties": {
           "mode": {
-            "type": "string",
             "enum": [
               "audio",
               "video"
             ],
+            "type": "string",
             "description": "audio = mic only, video = camera + mic"
           },
           "cameraType": {
-            "type": "string",
             "enum": [
               "Front",
               "Back"
             ],
+            "type": "string",
             "description": "Video only; ignored for audio"
           }
         },
@@ -4025,16 +5830,17 @@
             "description": "Whether FCM accepted the push. FALSE is a soft failure: stream.* has no poll fallback, so the device will never hear the command — fail fast, do not wait. TRUE does NOT mean the child is publishing yet."
           },
           "transport": {
-            "type": "string",
             "enum": [
               "poll",
               "fcm",
               "ws"
             ],
+            "type": "string",
             "description": "Informational only. 'poll' is a lie for stream.* (there is no stream-command poll endpoint) — it is reused because DispatchResult allows only these three. Switch on `delivered` alone."
           },
           "room": {
             "type": "string",
+            "example": "child-6f1c…",
             "description": "Server-derived LiveKit room. Join this — never re-derive it client-side."
           },
           "maxDurationSeconds": {
@@ -4054,18 +5860,22 @@
         "type": "object",
         "properties": {
           "delivered": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether FCM accepted the push. FALSE is a soft failure: stream.* has no poll fallback, so the device will never hear the command — fail fast, do not wait. TRUE does NOT mean the child is publishing yet."
           },
           "transport": {
-            "type": "string",
             "enum": [
               "poll",
               "fcm",
               "ws"
-            ]
+            ],
+            "type": "string",
+            "description": "Informational only. 'poll' is a lie for stream.* (there is no stream-command poll endpoint) — it is reused because DispatchResult allows only these three. Switch on `delivered` alone."
           },
           "room": {
-            "type": "string"
+            "type": "string",
+            "example": "child-6f1c…",
+            "description": "Server-derived LiveKit room. Join this — never re-derive it client-side."
           }
         },
         "required": [
@@ -4118,6 +5928,250 @@
             "type": "string",
             "format": "uuid",
             "description": "Read up to and including this message id"
+          }
+        }
+      },
+      "AdminLoginDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 64
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "AdminRefreshDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "refreshToken"
+        ]
+      },
+      "UpdateAdminProfileDto": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        }
+      },
+      "ChangeAdminPasswordDto": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ]
+      },
+      "CreateAdminDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          },
+          "fullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SuperAdmin",
+              "Admin",
+              "Support",
+              "Viewer"
+            ]
+          }
+        },
+        "required": [
+          "username",
+          "password",
+          "role"
+        ]
+      },
+      "UpdateAdminDto": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SuperAdmin",
+              "Admin",
+              "Support",
+              "Viewer"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ResetAdminPasswordDto": {
+        "type": "object",
+        "properties": {
+          "newPassword": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "newPassword"
+        ]
+      },
+      "UpdateAdminMemberDto": {
+        "type": "object",
+        "properties": {
+          "isActive": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "isActive"
+        ]
+      },
+      "GrantSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "durationMonths": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 24
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "planId"
+        ]
+      },
+      "CreatePlanDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 32,
+            "pattern": "^[a-z0-9_-]+$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "price": {
+            "type": "number",
+            "minimum": 0
+          },
+          "durationMonths": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 24
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "price",
+          "durationMonths"
+        ]
+      },
+      "UpdatePlanDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          },
+          "price": {
+            "type": "number",
+            "minimum": 0
+          },
+          "durationMonths": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 24
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RefundPaymentDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
           }
         }
       },

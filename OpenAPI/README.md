@@ -18,7 +18,27 @@ child flow (`OilaDeviceClient` in `Core/Networking/OilaDeviceAPI.swift`) targets
   (Oila 360 API 1.0). All 12 `/api/v1/device/*` calls the app makes exist here with matching
   methods and request shapes (verified 2026-07-12).
 
-## 🧊 This snapshot is FROZEN — Swagger is off in prod (2026-08-05)
+## ♻️ UNFROZEN 2026-08-13 — the docs moved, they did not go away
+
+`/api/docs-json` is still 404, but the live spec is served from **two** URLs, behind HTTP basic auth
+(credentials are in the team's Telegram — deliberately NOT written down here; this repository is
+public):
+
+- `https://api.oila360.uz/docs/api.json` — the control surface (102 paths)
+- `https://api.oila360.uz/docs/ingestion.json` — the high-frequency device telemetry surface (7 paths)
+
+`oila360_live_openapi.json` is the two merged, re-captured **2026-08-13**. The refresh was a strict
+superset of the frozen snapshot — every operation the old file described is still live, so nothing
+hand-transcribed below was lost — and it added the one device route the child app was missing:
+`GET /api/v1/device/apps/screen-time`.
+
+To refresh again: fetch both, merge `paths` / `components.schemas` / `tags` (ingestion never
+collides with the control surface), and keep the key order `openapi, paths, info, tags, servers,
+components` so the diff stays readable.
+
+The section below is kept for the history of what was hand-added while the spec could not be fetched.
+
+## 🧊 Formerly FROZEN — Swagger was off in prod (2026-08-05)
 
 `GET https://api.oila360.uz/api/docs-json` and `/api/docs` both return **404**
 (`{"success":false,"message":"…","errorCode":"NOT_FOUND"}`). Swagger is disabled on the production
