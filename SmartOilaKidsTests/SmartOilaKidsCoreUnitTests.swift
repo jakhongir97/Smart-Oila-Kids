@@ -3260,6 +3260,7 @@ final class LiveSessionLifecycleTests: XCTestCase {
         foreground: Bool = true,
         notificationsAuthorized: Bool = true,
         micGranted: Bool = true,
+        cameraOutcome: DeviceAudioStreamManager.CameraPermissionOutcome = .granted,
         consentFor mode: StreamMode = .audio
     ) -> DeviceAudioStreamManager {
         defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED")
@@ -3270,6 +3271,10 @@ final class LiveSessionLifecycleTests: XCTestCase {
         manager.isForeground = { foreground }
         manager.notificationsAuthorized = { notificationsAuthorized }
         manager.requestMicPermission = { micGranted }
+        // Without this the camera gate answers from the real `AVCaptureDevice`, which is
+        // `.notDetermined` in a test host — so every video test was refused at the camera before
+        // it could reach the behaviour it was written to check.
+        manager.requestCameraPermission = { cameraOutcome }
         return manager
     }
 
@@ -3393,6 +3398,7 @@ final class LiveSessionConsentRaceTests: XCTestCase {
         manager.isForeground = { true }
         manager.notificationsAuthorized = { true }
         manager.requestMicPermission = { true }
+        manager.requestCameraPermission = { .granted }
         return manager
     }
 
@@ -3440,6 +3446,7 @@ final class StreamWakeObserverTests: XCTestCase {
         manager.isForeground = { true }
         manager.notificationsAuthorized = { true }
         manager.requestMicPermission = { true }
+        manager.requestCameraPermission = { .granted }
         return manager
     }
 

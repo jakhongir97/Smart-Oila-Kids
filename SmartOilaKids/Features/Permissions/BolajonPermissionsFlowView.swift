@@ -48,14 +48,27 @@ struct BolajonPermissionStep: Identifiable {
     private static let allSteps: [BolajonPermissionStep] = [
         .init(kind: .intro, icon: "shield.lefthalf.filled", intent: .lavender,
               titleKey: "perm2.intro.title", bodyKey: "perm2.intro.body", primaryKey: "perm2.intro.cta", isMandatory: true),
-        // NOT mandatory. FirebaseMessaging is not linked in this build (the app target has exactly
-        // one SPM package, LiveKit, and no GoogleService-Info.plist ships), so every
-        // `#if canImport(FirebaseMessaging)` body compiles out and this permission can never
-        // produce a single notification. A non-skippable gate for a dead channel is Guideline
-        // 5.1.1(i) / 2.1 exposure, and the `remote-notification` background mode has been dropped
-        // from Info.plist to match. Make this mandatory again once FCM actually ships.
+        // Mandatory again, which is what the previous comment here asked for: it demoted this step
+        // because FirebaseMessaging was not linked, no `GoogleService-Info.plist` shipped, and
+        // `remote-notification` had been dropped from Info.plist, so the permission could not
+        // produce a single notification and a non-skippable gate for a dead channel is Guideline
+        // 5.1.1(i) / 2.1 exposure. All three premises are now false — the SPM product is linked,
+        // the plist is in the Resources build phase, and `UIBackgroundModes` carries
+        // `remote-notification` — so the condition it named ("make this mandatory again once FCM
+        // actually ships") is met.
+        //
+        // Two things now depend on the grant, which is why skippable is the wrong default:
+        //  • the live-session wake is moving to an ALERT push, because a `content-available`-only
+        //    background push is throttled by iOS to minutes (measured on hardware, 2026-08-12 —
+        //    see output/doc/apns_p8_implementation_2026-08-12.md). A child who declined sees no
+        //    banner, so the one immediate signal that a parent is asking is invisible.
+        //  • `LiveSessionDisclosure.verdict` REFUSES background audio outright without it
+        //    (`refusedNoDisclosureChannel`): the presence notification is the only disclosure
+        //    channel once the app is off screen, so no grant means no off-screen session at all.
+        // Mandatory here removes only the in-app "No, not needed" button — the OS prompt is still
+        // the child's to decline, and declining it leaves them on the same path as before.
         .init(kind: .notifications, icon: "bell.fill", intent: .lavender,
-              titleKey: "perm2.notifications.title", bodyKey: "perm2.notifications.body", primaryKey: "perm2.notifications.cta", isMandatory: false),
+              titleKey: "perm2.notifications.title", bodyKey: "perm2.notifications.body", primaryKey: "perm2.notifications.cta", isMandatory: true),
         .init(kind: .battery, icon: "battery.100.bolt", intent: .lavender,
               titleKey: "perm2.battery.title", bodyKey: "perm2.battery.body", primaryKey: "perm2.settings.cta", isMandatory: true),
         .init(kind: .location, icon: "location.fill", intent: .peach,

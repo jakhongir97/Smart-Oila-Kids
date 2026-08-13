@@ -639,6 +639,18 @@ final class DeviceAudioStreamManager: ObservableObject {
     }
     /// The microphone grant. Production prompts; a test answers without a device.
     var requestMicPermission: () async -> Bool = { await DeviceAudioStreamManager.systemRequestMicPermission() }
+    /// The camera grant. Production prompts; a test answers without a device.
+    ///
+    /// This seam was missing while its microphone twin existed, and the asymmetry was not
+    /// cosmetic: `AVCaptureDevice.authorizationStatus(for: .video)` is `.notDetermined` in a test
+    /// host, so every video test fell through to a real `requestAccess` that no simulator can
+    /// answer. `testBackgroundingDuringConnectAlwaysRefusesVideo` therefore died at the camera gate
+    /// with `camera_denied` before it could reach the disclosure reading it exists to prove — and
+    /// in the full suite it hung there and was killed. A test that cannot reach its own subject is
+    /// worse than no test: it was reporting the video refusal path as covered.
+    var requestCameraPermission: () async -> CameraPermissionOutcome = {
+        await DeviceAudioStreamManager.systemRequestCameraPermission()
+    }
 
     init(stream: OilaStreamServicing = StreamTokenSourceFactory.make(), defaults: UserDefaults = .standard) {
         self.stream = stream
@@ -1419,7 +1431,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         case deferred
     }
 
-    private func requestCameraPermission() async -> CameraPermissionOutcome {
+    private static func systemRequestCameraPermission() async -> CameraPermissionOutcome {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             return .granted
