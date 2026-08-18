@@ -1,10 +1,12 @@
 import SwiftUI
-import UIKit
 
-// Bolajon360 permissions onboarding (B1–B11): an 11-step guided lavender/peach flow that
-// replaces the legacy location-only GeoPermissionView cover. Built additively on the existing
+// Bolajon360 permissions onboarding: a guided lavender/peach flow that replaces the legacy
+// location-only GeoPermissionView cover. Built additively on the existing
 // LocationPermissionManager (which already performs the real OS requests) so no request
-// plumbing is duplicated. Notifications is the mandatory gate; location becomes optional.
+// plumbing is duplicated. Notifications is the one mandatory gate; everything else is optional.
+//
+// The length is NOT fixed — the step list follows the feature flags (see `all`), so the design
+// board's "B1–B11" numbering no longer maps 1:1 onto what any given build actually shows.
 
 // MARK: - Step model
 
@@ -12,14 +14,12 @@ struct BolajonPermissionStep: Identifiable {
     enum Kind {
         case intro
         case notifications      // mandatory
-        case battery            // mandatory (Settings-education; iOS can't grant Low Power)
+        case microphone         // optional
+        case camera             // optional
         case location           // optional
         case backgroundLocation // optional
         case usage              // optional (Screen Time)
         case appLimits          // optional (shares the Screen Time grant)
-        case autostart          // optional (Settings-education; iOS can't auto-start on boot)
-        case microphone         // optional
-        case camera             // optional
         case summary
     }
 
@@ -35,14 +35,31 @@ struct BolajonPermissionStep: Identifiable {
     var id: String { "\(kind)" }
     var showsDecline: Bool { !isMandatory && kind != .intro && kind != .summary }
 
-    /// Onboarding steps, screen-time-gated. The `.usage` / `.appLimits` steps are only shown
-    /// when `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` is on; otherwise the child would tap an
-    /// "Enable" button that can never grant anything (no FamilyControls entitlement/prompt ships).
+    /// Onboarding steps, feature-gated: a step ships only while something in the build can consume
+    /// the grant it asks for, otherwise the child taps an "Enable" button that can never turn
+    /// anything on (App Store Guideline 5.1.1).
+    ///  • `.usage` / `.appLimits` need `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` — without it no
+    ///    FamilyControls entitlement/prompt ships, so there is nothing to grant.
+    ///  • `.microphone` / `.camera` need `SMARTOILA_MEDIA_FEATURES_ENABLED`, the same flag that
+    ///    gates their rows in `BolajonPermissionChecklist`, so the flow and the checklist can never
+    ///    disagree about which permissions this build is asking for.
     static var all: [BolajonPermissionStep] {
-        guard AppRuntime.screenTimeFeaturesEnabled else {
-            return allSteps.filter { $0.kind != .usage && $0.kind != .appLimits }
+        all(screenTimeEnabled: AppRuntime.screenTimeFeaturesEnabled,
+            mediaEnabled: AppRuntime.audioStreamingEnabled)
+    }
+
+    /// Pure form of `all`, so the order and the mandatory set can be pinned in tests without
+    /// depending on whatever the test host's Info.plist happens to have the flags set to — the
+    /// same seam `PermissionRequirement.settingsCases` uses for the C5 catalogue.
+    static func all(screenTimeEnabled: Bool, mediaEnabled: Bool) -> [BolajonPermissionStep] {
+        var steps = allSteps
+        if !screenTimeEnabled {
+            steps.removeAll { $0.kind == .usage || $0.kind == .appLimits }
         }
-        return allSteps
+        if !mediaEnabled {
+            steps.removeAll { $0.kind == .microphone || $0.kind == .camera }
+        }
+        return steps
     }
 
     private static let allSteps: [BolajonPermissionStep] = [
@@ -69,8 +86,29 @@ struct BolajonPermissionStep: Identifiable {
         // the child's to decline, and declining it leaves them on the same path as before.
         .init(kind: .notifications, icon: "bell.fill", intent: .lavender,
               titleKey: "perm2.notifications.title", bodyKey: "perm2.notifications.body", primaryKey: "perm2.notifications.cta", isMandatory: true),
-        .init(kind: .battery, icon: "battery.100.bolt", intent: .lavender,
-              titleKey: "perm2.battery.title", bodyKey: "perm2.battery.body", primaryKey: "perm2.settings.cta", isMandatory: true),
+        // There is deliberately no battery ("Energiya tejashdan chiqarish") or auto-start step here
+        // any more. Neither is an iOS permission: iOS exposes no per-app battery-saver exemption in
+        // the app's own Settings pane, and it has no equivalent of Android's RECEIVE_BOOT_COMPLETED
+        // at all, so both steps could only send the child to a Settings screen that does not contain
+        // the switch the copy told them to find — and their checklist markers could never turn
+        // green. The battery step was the worse of the two because it shipped `isMandatory: true`:
+        // a child who could not find a switch that does not exist had no way past it either.
+        //
+        // Microphone and camera are asked for HERE, up front, rather than lazily at first use. A
+        // parent's listen/watch request arrives as a background push wake, and iOS presents no
+        // permission prompt to an app that is not on screen — the request resolves straight to
+        // "denied" and the capture guard just returns false — so on a fresh install the FIRST
+        // listen could never succeed, with nothing on the child's screen to explain why. These two
+        // steps were removed once on the premise that no media feature shipped; that premise is
+        // gone (`SMARTOILA_MEDIA_FEATURES_ENABLED` is true in Info.plist), and `all` still drops
+        // them for any build where the flag is off.
+        //
+        // Optional on purpose: declining must not strand a child in onboarding. Nothing else in the
+        // app depends on these grants, and C5 keeps offering them afterwards.
+        .init(kind: .microphone, icon: "mic.fill", intent: .peach,
+              titleKey: "perm2.microphone.title", bodyKey: "perm2.microphone.body", primaryKey: "perm2.allow.cta", isMandatory: false),
+        .init(kind: .camera, icon: "camera.fill", intent: .peach,
+              titleKey: "perm2.camera.title", bodyKey: "perm2.camera.body", primaryKey: "perm2.allow.cta", isMandatory: false),
         .init(kind: .location, icon: "location.fill", intent: .peach,
               titleKey: "perm2.location.title", bodyKey: "perm2.location.body", primaryKey: "perm2.allow.cta", isMandatory: false),
         .init(kind: .backgroundLocation, icon: "location.circle.fill", intent: .peach,
@@ -80,13 +118,6 @@ struct BolajonPermissionStep: Identifiable {
               titleKey: "perm2.usage.title", bodyKey: "perm2.usage.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
         .init(kind: .appLimits, icon: "square.stack.3d.up.fill", intent: .peach,
               titleKey: "perm2.limits.title", bodyKey: "perm2.limits.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
-        .init(kind: .autostart, icon: "arrow.clockwise.circle.fill", intent: .peach,
-              titleKey: "perm2.autostart.title", bodyKey: "perm2.autostart.body", primaryKey: "perm2.settings.cta_yes", isMandatory: false),
-        // Microphone + camera onboarding steps intentionally removed: the shipping build has
-        // no consumer for either (audio recording was cut for v1, video capture is parked,
-        // there is no QR scanner — pairing is a typed code), so requesting access would
-        // advertise features that do not exist (App Store Guideline 5.1.1). The
-        // .microphone/.camera enum cases remain for the deferred features.
         .init(kind: .summary, icon: "checkmark.shield.fill", intent: .lavender,
               titleKey: "perm2.summary.title", bodyKey: "perm2.summary.body", primaryKey: "perm2.summary.cta", isMandatory: true)
     ]
@@ -136,8 +167,9 @@ struct BolajonPermissionsFlowView: View {
                 case let .step(i):
                     PermissionStepView(
                         step: steps[i],
-                        // Progress tracks the permission steps only (B2–B10 = 9 markers);
-                        // intro/summary are excluded. Step index i maps 1:1 to marker i.
+                        // Progress tracks the permission steps only — intro/summary are excluded,
+                        // and how many there are follows the feature flags (see
+                        // `BolajonPermissionStep.all`). Step index i maps 1:1 to marker i.
                         progress: (i, permissionStepCount),
                         onPrimary: { handlePrimary(index: i) },
                         onDecline: { handleDecline(from: i) }
@@ -178,8 +210,6 @@ struct BolajonPermissionsFlowView: View {
             manager.performAction(for: .microphone)
         case .camera:
             manager.performAction(for: .camera)
-        case .battery, .autostart:
-            Self.openSystemSettings()
         case .summary:
             onFinished()
             return
@@ -204,12 +234,6 @@ struct BolajonPermissionsFlowView: View {
             return
         }
         advance(from: index)
-    }
-
-    private static func openSystemSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString),
-              UIApplication.shared.canOpenURL(url) else { return }
-        UIApplication.shared.open(url)
     }
 
     private static func initialPath() -> [PermRoute] {
@@ -256,7 +280,11 @@ private struct PermissionStepView: View {
             deepHero: isIntro,
             blocksBack: isIntro,
             progress: progress,
-            mandatoryCount: 2
+            // Exactly one leading marker is purple, because notifications is the only mandatory
+            // permission step left. This was 2 while the battery step existed; keeping it at 2
+            // would paint the first OPTIONAL step in the mandatory colour and tell the child they
+            // cannot skip something they can.
+            mandatoryCount: 1
         ) {
             if isIntro {
                 BolajonBrandBadge(diameter: 140)
@@ -302,9 +330,8 @@ private struct PermissionSummaryView: View {
     @ObservedObject var manager: LocationPermissionManager
     let onFinish: () -> Void
 
-    // Full checklist driven by live authorization; battery/auto-start (unreadable on iOS)
-    // show a neutral chip. Shared with the C5 settings-status screen so the two always match
-    // — see BolajonPermissionChecklist.
+    // Full checklist driven by live authorization. Shared with the C5 settings-status screen so
+    // the two always match — see BolajonPermissionChecklist.
     private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
 
     // The design tints the first permission icons purple and the location ones orange.
@@ -317,9 +344,6 @@ private struct PermissionSummaryView: View {
             StatusPill(text: L10n.tr("perm2.status.on"), state: .granted)
         case .notGranted:
             StatusPill(text: L10n.tr("perm2.status.off"), state: .off)
-        case .openSettings:
-            // iOS can't read battery-saver / boot auto-start — neutral "Open Settings" chip.
-            StatusPill(text: L10n.tr("perm2.settings.cta"), state: .neutral)
         }
     }
 
@@ -394,14 +418,15 @@ private struct PermissionSummaryView: View {
 /// summary and the C5 settings-status screen build their rows from this list, so they always
 /// show the same permission set and the same live authorization state.
 struct BolajonPermissionState: Identifiable {
+    /// Every row is a real, readable OS permission, so these two states cover all of them. A third
+    /// `openSettings` state used to exist for the battery-saver and boot-auto-start rows — the only
+    /// two whose status iOS cannot report, because iOS has neither setting. Those rows are gone, so
+    /// the state they existed for has no producer left and a row can no longer be inert.
     enum Availability: Equatable {
         /// Live OS status: authorized.
         case granted
         /// Live OS status: not authorized — actionable (re-request via `requirement`).
         case notGranted
-        /// iOS exposes no read for this (battery-saver exclusion / boot auto-start).
-        /// Shown as a neutral "Open Settings" chip, never as "On".
-        case openSettings
     }
 
     let id: String
@@ -409,7 +434,8 @@ struct BolajonPermissionState: Identifiable {
     let labelKey: String
     let descriptionKey: String?
     let availability: Availability
-    /// Requirement to (re)request when `notGranted`; nil for `openSettings` rows.
+    /// Requirement the row's "Enable" button re-requests. Optional as a guard-rail rather than
+    /// because any row omits it — see `testActionableRowsCarryTheRequirementTheirEnableButtonNeeds`.
     let requirement: PermissionRequirement?
 }
 
@@ -428,13 +454,16 @@ enum BolajonPermissionChecklist {
         func live(_ granted: Bool) -> BolajonPermissionState.Availability { granted ? .granted : .notGranted }
 
         // Order matches the design board's B11 summary (and therefore the C5 status list):
-        // notifications, battery, [screen(overlay), usage,] autostart, location, bg-location,
-        // [microphone, camera].
+        // notifications, [screen(overlay), usage,] location, bg-location, [microphone, camera].
+        //
+        // The battery ("Energiya tejashdan chiqarish") and auto-start rows are gone. They were the
+        // board's Android heritage: iOS has no per-app battery-saver exemption and no boot-launch
+        // API, so both rows were permanently stuck on a neutral "Open Settings" chip that pointed
+        // at a pane containing no such switch. A row that can never turn green teaches the child
+        // that the checklist is not to be trusted.
         var rows: [BolajonPermissionState] = [
             BolajonPermissionState(id: "notifications", icon: "bell.fill", labelKey: "perm2.item.notifications",
-                                   descriptionKey: "perm2.notifications.body", availability: live(notifications), requirement: .notifications),
-            BolajonPermissionState(id: "battery", icon: "battery.100.bolt", labelKey: "perm2.item.battery",
-                                   descriptionKey: "perm2.battery.body", availability: .openSettings, requirement: nil)
+                                   descriptionKey: "perm2.notifications.body", availability: live(notifications), requirement: .notifications)
         ]
 
         // Screen Time rows only when the feature actually ships. With
@@ -449,8 +478,6 @@ enum BolajonPermissionChecklist {
         }
 
         rows.append(contentsOf: [
-            BolajonPermissionState(id: "autostart", icon: "arrow.clockwise.circle.fill", labelKey: "perm2.item.autostart",
-                                   descriptionKey: "perm2.autostart.body", availability: .openSettings, requirement: nil),
             BolajonPermissionState(id: "location", icon: "location.fill", labelKey: "perm2.item.location",
                                    descriptionKey: "perm2.location.body", availability: live(location), requirement: .location),
             BolajonPermissionState(id: "bglocation", icon: "location.circle.fill", labelKey: "perm2.item.bglocation",

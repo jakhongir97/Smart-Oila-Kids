@@ -46,6 +46,11 @@ jobs:
       - name: Enforce child endpoints against the LIVE spec
         # Floor is pinned HERE, in the workflow, not read out of the data -- narrowing the contract
         # until it passes has to fail the build instead. Raise it when call sites are added.
-        # The unit is METHOD+path, so the 19 distinct paths the client calls are 22 operations.
+        # The unit is METHOD+path, so the distinct paths the client calls are fewer than the floor.
+        #
+        # 26 as of 2026-08-18: 24 -> 25 when POST /device/unpair was added (D3), -> 26 with
+        # GET /device/home. Both are counted honestly -- `/device/unpair` is in the snapshot marked
+        # `x-deployment-status: not-deployed`, because the client really does call it and the gate's
+        # job is to notice that, not to look away from it. See OpenAPI/README.md.
         run: |
-          python3 scripts/check_child_live_endpoints.py --min-endpoints 24
+          python3 scripts/check_child_live_endpoints.py --min-endpoints 26

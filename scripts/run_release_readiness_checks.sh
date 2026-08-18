@@ -17,10 +17,14 @@ echo
 # The gate that actually protects the live integration. It was wired into the OpenAPI workflow but
 # never into this run, so a local release-readiness pass reported "completed" while the only
 # live-contract check had not executed.
-# Floor is pinned here, not derived from the data; the unit is METHOD+path (21 paths = 24 ops).
+# Floor is pinned here, not derived from the data; the unit is METHOD+path.
 # Raised 22 → 24 when the client adopted GET /device/tasks/summary and GET /device/apps/screen-time.
+# Raised 24 → 26 for POST /device/unpair and GET /device/home. This floor must track the one in
+# .github/workflows/openapi-child-baseline.yml exactly: left at 24 while the client calls 26, the
+# ratchet carries two operations of slack, and deleting the /device/unpair call site -- the one that
+# lets a child disconnect -- would still print PASS here while CI failed on the same tree.
 echo "== Child endpoints vs the LIVE spec =="
-python3 scripts/check_child_live_endpoints.py --min-endpoints 24
+python3 scripts/check_child_live_endpoints.py --min-endpoints 26
 echo
 
 echo "== Child-vs-parent parity gap budget =="

@@ -170,8 +170,8 @@
 "perm2.notifications.title" = "Farzandingiz telefoni nazoratingizda bo'lsinmi?";
 "perm2.notifications.body" = "Bolajon360 doimo faol ekanini bildirish uchun bildirishnomalarga ruxsat kerak. Busiz ilova to'g'ri ishlamaydi.";
 "perm2.notifications.cta" = "Bildirishnomalarni yoqish";
-"perm2.battery.title" = "Ilova to'xtab qolishining oldini olish";
-"perm2.battery.body" = "Telefon ilovani fonda o'chirib qo'ymasligi uchun uni energiya tejashdan chiqarish kerak.";
+"perm2.microphone.title" = "Jonli ovozni eshitishni xohlaysizmi?";
+"perm2.camera.title" = "Jonli videoni ko'rishni xohlaysizmi?";
 "perm2.location.title" = "Farzandingiz qayerda yurganini bilishni xohlaysizmi?";
 "perm2.location.body" = "Xaritada real vaqtda joylashuvni ko'rasiz va xavfsiz hududlar belgilay olasiz.";
 "perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuvni yangilab tursinmi?";
@@ -180,8 +180,6 @@
 "perm2.usage.body" = "Har bir ilovaga qancha vaqt sarflanganini ko'rasiz va vaqt chegarasini qo'yasiz.";
 "perm2.limits.title" = "Ilovalarni cheklash imkoniyatini xohlaysizmi?";
 "perm2.limits.body" = "Ilovalarni istalgan vaqtda bloklay olasiz.";
-"perm2.autostart.title" = "Qayta ishga tushgach himoya davom etishi uchun";
-"perm2.autostart.body" = "iOS qayta ishga tushgandan so'ng ilovalarni o'zi ocholmaydi. Telefonni qayta yoqsangiz, himoya davom etishi uchun Bolajonni bir marta oching.";
 "perm2.summary.title" = "Tayyor! Himoya yoqildi";
 "perm2.summary.body" = "Bolajon360 endi farzandingizni himoya qilishga tayyor. Xohlagan payt sozlamalardan o'zgartirishingiz mumkin.";
 "perm2.summary.cta" = "Yakunlash";
@@ -240,18 +238,27 @@
 "disconnect2.confirm" = "Uzish";
 "disconnect2.cancel" = "Bekor qilish";
 "disconnect2.pin_incorrect" = "PIN kod noto'g'ri. Qayta urinib ko'ring.";
+"disconnect2.confirm_title" = "Haqiqatan uzasizmi?";
+"disconnect2.confirm_body" = "Qurilma ota-onadan uziladi va ilova yangi o'rnatilgan holatiga qaytadi.";
+"disconnect2.confirm_yes" = "Ha, uzish";
+"disconnect2.confirm_cancel" = "Bekor qilish";
+
+/* MARK: - First-run parent PIN provisioning */
+"pin_setup.title" = "PIN kod kiriting";
+"pin_setup.subtitle" = "Bola qurilmasini istalgan vaqtda o'chira olmasligi uchun PIN kodni kiriting";
+"pin_setup.confirm_title" = "PIN kodni takrorlang";
+"pin_setup.confirm_subtitle" = "Tasdiqlash uchun PIN kodni yana bir marta kiriting";
+"pin_setup.mismatch" = "PIN kodlar mos kelmadi. Qaytadan urinib ko'ring";
+"pin_setup.save" = "Saqlash";
+"pin_setup.skip" = "Hozir emas";
 
 "perm2.decline_bg" = "Yo'q, faqat ochiqda";
 
 "perm2.item.notifications" = "Bildirishnomalar";
 
-"perm2.item.battery" = "Energiya tejashdan chiqarildi";
-
 "perm2.item.screen" = "Ekran ustida ko'rsatish";
 
 "perm2.item.usage" = "Foydalanishni kuzatish";
-
-"perm2.item.autostart" = "Avtomatik ishga tushish";
 
 "perm2.item.location" = "Joylashuv";
 

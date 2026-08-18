@@ -7,8 +7,8 @@ import XCTest
 @testable import SmartOilaKids
 
 /// Covers the shared permission checklist that drives both the B11 onboarding summary and the
-/// C5 settings-status screen. Live authorization maps to granted/notGranted; battery and
-/// auto-start (unreadable on iOS) are always the neutral `openSettings`.
+/// C5 settings-status screen, plus the onboarding step list that leads into them. Every row maps
+/// live authorization to granted/notGranted — there are no inert rows left.
 final class BolajonPermissionChecklistTests: XCTestCase {
     private func snapshot(
         location: CLAuthorizationStatus = .denied,
@@ -32,7 +32,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         states.first { $0.id == id }?.availability
     }
 
-    func testAllGrantedMarksOSRowsGrantedAndUnreadableRowsOpenSettings() {
+    func testAllGrantedMarksEveryRowGranted() {
         // screenTimeEnabled: true so the screen/usage rows exist and their live mapping is covered.
         let states = BolajonPermissionChecklist.states(from: snapshot(
             location: .authorizedAlways,
@@ -49,9 +49,6 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(availability(states, "screen"), .granted)
         XCTAssertEqual(availability(states, "microphone"), .granted)
         XCTAssertEqual(availability(states, "camera"), .granted)
-        // iOS exposes no read for these — always neutral, never "On".
-        XCTAssertEqual(availability(states, "battery"), .openSettings)
-        XCTAssertEqual(availability(states, "autostart"), .openSettings)
     }
 
     func testAllDeniedMarksOSRowsNotGranted() {
@@ -65,8 +62,6 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(availability(states, "screen"), .notGranted)
         XCTAssertEqual(availability(states, "microphone"), .notGranted)
         XCTAssertEqual(availability(states, "camera"), .notGranted)
-        XCTAssertEqual(availability(states, "battery"), .openSettings)
-        XCTAssertEqual(availability(states, "autostart"), .openSettings)
     }
 
     func testWhenInUseGrantsForegroundLocationButNotBackground() {
@@ -79,12 +74,16 @@ final class BolajonPermissionChecklistTests: XCTestCase {
     func testChecklistShapeIsStableSoBothScreensMatch() {
         // B11 and C5 build from this one ordered list, so the id set keeps them in sync.
         // With both features enabled the full board shows, in board order.
-        let enabledIDs = BolajonPermissionChecklist
-            .states(from: snapshot(), screenTimeEnabled: true, mediaEnabled: true).map(\.id)
-        XCTAssertEqual(enabledIDs, [
-            "notifications", "battery", "screen", "usage", "autostart",
+        let enabled = BolajonPermissionChecklist
+            .states(from: snapshot(), screenTimeEnabled: true, mediaEnabled: true)
+        XCTAssertEqual(enabled.map(\.id), [
+            "notifications", "screen", "usage",
             "location", "bglocation", "microphone", "camera"
         ])
+        // Battery-saver exemption and boot auto-start are Android concepts with no iOS counterpart,
+        // so those rows could never report a status and never turn green. They must not come back.
+        XCTAssertNil(availability(enabled, "battery"))
+        XCTAssertNil(availability(enabled, "autostart"))
     }
 
     func testScreenTimeRowsAreHiddenWhenFeatureDisabled() {
@@ -93,8 +92,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         let states = BolajonPermissionChecklist
             .states(from: snapshot(), screenTimeEnabled: false, mediaEnabled: true)
         XCTAssertEqual(states.map(\.id), [
-            "notifications", "battery", "autostart",
-            "location", "bglocation", "microphone", "camera"
+            "notifications", "location", "bglocation", "microphone", "camera"
         ])
         XCTAssertNil(availability(states, "screen"))
         XCTAssertNil(availability(states, "usage"))
@@ -107,7 +105,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
             .states(from: snapshot(microphone: .granted, camera: .authorized),
                     screenTimeEnabled: false, mediaEnabled: false)
         XCTAssertEqual(states.map(\.id), [
-            "notifications", "battery", "autostart", "location", "bglocation"
+            "notifications", "location", "bglocation"
         ])
         XCTAssertNil(availability(states, "microphone"))
         XCTAssertNil(availability(states, "camera"))
@@ -123,5 +121,51 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         }
         XCTAssertEqual(states.first { $0.id == "microphone" }?.requirement, .microphone)
         XCTAssertEqual(states.first { $0.id == "camera" }?.requirement, .camera)
+    }
+
+    // MARK: - Onboarding step list
+
+    /// Shipping config (media on, Screen Time off). Microphone and camera sit immediately after
+    /// notifications on purpose: both are requested up front because the first real use happens
+    /// inside a background push wake, where iOS shows no prompt at all.
+    func testShippingOnboardingStepOrder() {
+        let kinds = BolajonPermissionStep.all(screenTimeEnabled: false, mediaEnabled: true).map(\.id)
+        XCTAssertEqual(kinds, [
+            "intro", "notifications", "microphone", "camera",
+            "location", "backgroundLocation", "summary"
+        ])
+    }
+
+    /// The battery and auto-start steps sent the child to a Settings pane that has no such switch
+    /// — iOS grants neither — so no build may show them again.
+    func testNoStepAsksForAPermissionIOSDoesNotHave() {
+        for combination in [(true, true), (true, false), (false, true), (false, false)] {
+            let ids = BolajonPermissionStep
+                .all(screenTimeEnabled: combination.0, mediaEnabled: combination.1).map(\.id)
+            XCTAssertFalse(ids.contains("battery"), "flags \(combination)")
+            XCTAssertFalse(ids.contains("autostart"), "flags \(combination)")
+        }
+    }
+
+    /// Notifications is the only step a child cannot skip. This is what the battery step got wrong:
+    /// it shipped mandatory, so a child hunting for a switch iOS does not have was stuck in
+    /// onboarding with no way forward and no way back.
+    func testNotificationsIsTheOnlyMandatoryPermissionStep() {
+        let steps = BolajonPermissionStep.all(screenTimeEnabled: true, mediaEnabled: true)
+        let mandatory = steps
+            .filter { $0.isMandatory && $0.kind != .intro && $0.kind != .summary }
+            .map(\.id)
+        XCTAssertEqual(mandatory, ["notifications"])
+        // Every other permission step must therefore offer the child a way past it.
+        for step in steps where step.kind != .intro && step.kind != .summary && step.kind != .notifications {
+            XCTAssertTrue(step.showsDecline, "step \(step.id) has no way past it")
+        }
+    }
+
+    /// A build with the media flag off must not ask for microphone or camera — the same rule the
+    /// checklist rows follow, so the flow and the summary can never disagree.
+    func testMediaStepsFollowTheSameFlagAsTheChecklistRows() {
+        let ids = BolajonPermissionStep.all(screenTimeEnabled: false, mediaEnabled: false).map(\.id)
+        XCTAssertEqual(ids, ["intro", "notifications", "location", "backgroundLocation", "summary"])
     }
 }

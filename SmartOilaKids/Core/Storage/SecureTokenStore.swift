@@ -164,6 +164,48 @@ final class SecureTokenStore: SecureTokenStoring {
         setRefreshToken(nil)
     }
 
+    /// UserDefaults marker proving the Keychain credentials belong to THIS install of the app.
+    nonisolated static let installMarkerKey = "OILA_KEYCHAIN_INSTALL_MARKER"
+
+    /// Drop credentials that outlived an app delete, before anything can route on them.
+    ///
+    /// Deleting an iOS app destroys its container — UserDefaults with it — but leaves the Keychain
+    /// untouched, and everything this app stores there is `AfterFirstUnlockThisDeviceOnly`, which
+    /// survives indefinitely. So a parent who "removed" a child's monitoring by deleting the app,
+    /// and then reinstalled it, handed the fresh install a LIVE device Bearer for a pairing they
+    /// believed was gone, plus the old `dsn` — a real credential for a link the user thinks they cut.
+    /// The absence of the UserDefaults marker is the only evidence available that the container is
+    /// new, and it is sufficient: nothing else survives a delete either.
+    ///
+    /// The same shape the parent-PIN verifier already uses (`SessionStore.setOilaPaired(true)` →
+    /// `SettingsProtectionController.wipePersistedPINState`): device-global Keychain state is wiped
+    /// at the moment authority changes hands, rather than being trusted because it is present. This
+    /// deliberately does NOT touch the PIN verifier itself — that one is already handled at pairing
+    /// by the owner of that mechanism, and a second wipe from here would be a second thing to keep
+    /// in sync.
+    ///
+    /// The marker is written even when the deletes could not be verified. The alternative — write it
+    /// only on a proven-clean read-back — turns a Keychain that was briefly unreadable (locked before
+    /// first unlock) into a purge that runs on EVERY later launch, including the launches after a
+    /// successful pairing, wiping the credential it just minted. A stale item surviving one attempt
+    /// is bounded: the install is unpaired either way, so it routes to pairing, and the next pairing
+    /// overwrites the slots.
+    @discardableResult
+    nonisolated static func purgeCredentialsOrphanedByReinstall(userDefaults: UserDefaults = .standard) -> Bool {
+        guard !userDefaults.bool(forKey: installMarkerKey) else { return false }
+        // The legacy account tokens and the oila360 device Bearer live in different slots; both are
+        // credentials and both survive the delete.
+        shared.clear()
+        oila.clear()
+        // The old serial goes with them. It is Keychain-backed precisely SO it survives a reinstall
+        // (see `OilaDeviceIdentity.dsnStore`) — which is right while the credential survives too,
+        // and wrong the moment the credential is taken away: the next pairing would otherwise
+        // inherit the previous child's DSN scope, the very thing `resetDSN` exists to prevent.
+        OilaDeviceIdentity.resetDSN(userDefaults: userDefaults)
+        userDefaults.set(true, forKey: installMarkerKey)
+        return true
+    }
+
     private func readValue(for account: String) -> String? {
         var query = baseQuery(for: account)
         query[kSecReturnData as String] = true

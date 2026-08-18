@@ -32,9 +32,17 @@ struct BolajonHomeView: View {
     /// Observed so the SOS takeover can be dismissed the moment the device lock engages —
     /// the root-level lock cover must never end up behind another presentation.
     @ObservedObject private var lockState = OilaTelemetryService.shared
+    /// Home is where the first-run PIN prompt is offered, so it needs the controller that owns the
+    /// one-shot grant. Presentation only: every rule about WHEN a first PIN may be set lives in
+    /// `SettingsProtectionController` / `FirstPINProvisioning`.
+    @ObservedObject private var protection = SettingsProtectionController.shared
+    /// Observed only to stay out of the consent sheet's way — see `armFirstRunPINPromptIfNeeded`.
+    @ObservedObject private var audioStream = DeviceAudioStreamManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var path: [HomeRoute] = []
     @State private var showSOSConfirm = false
+    /// True while the first-run parent-PIN sheet is up.
+    @State private var showFirstRunPINSetup = false
     /// Bumped whenever the chat unread badge has to be re-read from
     /// `GET /device/chat/unread-count`. Push isn't delivered on this build, so the badge can only
     /// stay honest by re-syncing on foreground, on leaving the thread, and on a chat push if one
@@ -66,11 +74,12 @@ struct BolajonHomeView: View {
             .navigationDestination(for: HomeRoute.self) { route in
                 homeRouteDestination(route, path: $path)
             }
-            .task { await viewModel.load() }
+            .task { await reloadHome() }
             .onAppear {
 #if DEBUG
                 if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SOS"] == "1" { showSOSConfirm = true }
 #endif
+                armFirstRunPINPromptIfNeeded()
                 // App launched/opened from a push — consume the pending deep-link and drill in.
                 // `consume` CLEARS the stored intent, so it must be routed on every destination it
                 // can return: testing only for `.tasks` silently discarded a pending `.chat` one
@@ -86,7 +95,7 @@ struct BolajonHomeView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .pushShouldRefreshTasks)) { notification in
                 guard pushMatchesSession(notification) else { return }
-                Task { await viewModel.load() }
+                Task { await reloadHome() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .pushShouldOpenTasks)) { notification in
                 guard pushMatchesSession(notification) else { return }
@@ -107,11 +116,15 @@ struct BolajonHomeView: View {
                 // Without push there is nothing to tell Home the parent wrote — coming back to
                 // the foreground is the reliable moment to re-read the unread count.
                 guard phase == .active else { return }
+                // Re-tried here as well as on appear because the prompt yields rather than fights:
+                // if the device was locked or the consent sheet was up at first appear, the grant is
+                // still unspent and the next foreground is the natural moment to offer it again.
+                armFirstRunPINPromptIfNeeded()
                 chatUnreadRefreshToken += 1
                 // Same reasoning for everything else on this screen. `.task` fires once and the
                 // home stack root never disappears, so the task preview rows and the star badge
                 // kept showing whatever was true when the app was first opened.
-                Task { await viewModel.load() }
+                Task { await reloadHome() }
             }
             .onChange(of: path) { newPath in
                 let chatOpen = newPath.contains(.chat)
@@ -121,7 +134,14 @@ struct BolajonHomeView: View {
                 chatWasOpen = chatOpen
             }
             .onChange(of: lockState.isLocked) { locked in
-                if locked { showSOSConfirm = false }
+                // Both Home presentations step aside for the lock takeover, for the same reason: the
+                // root presents it as a full-screen cover, and a sheet already up would block that
+                // presentation outright — leaving a locked child looking at a PIN keypad instead.
+                // The first-run grant is already spent by then, so the prompt does not come back.
+                if locked {
+                    showSOSConfirm = false
+                    showFirstRunPINSetup = false
+                }
             }
             .sheet(isPresented: $showSOSConfirm, onDismiss: { viewModel.resetSOS() }) {
                 SOSConfirmTakeover(
@@ -134,7 +154,93 @@ struct BolajonHomeView: View {
                 .sosSheetChrome(dismissDisabled: viewModel.isSendingSOS)
             }
         }
+        // Attached OUTSIDE the NavigationStack, not next to the SOS sheet: two `.sheet` modifiers on
+        // the same view do not both work, and this one has to cover the whole Home stack anyway —
+        // the child may already have drilled into Tasks or Chat when the app is foregrounded.
+        // Swiping it away counts as "not now"; the grant was already spent at presentation.
+        .sheet(isPresented: $showFirstRunPINSetup, onDismiss: { protection.endFirstRunPINPrompt() }) {
+            ParentPINFlowSheet(intent: .firstRun)
+        }
         .bolajonNavigationTint()
+    }
+
+    /// Offer the first-run parent-PIN prompt, at most once per pairing.
+    ///
+    /// The gate itself is `SettingsProtectionController.beginFirstRunPINPrompt()`, which spends the
+    /// one-shot grant and returns false when it is already spent or a PIN exists. Everything below
+    /// is about not stealing the screen from something more important:
+    ///
+    /// - `refreshAvailability()` first, because `hasCustomPIN` may be a stale `true` left by a
+    ///   PREVIOUS family — the verifier is device-global in the Keychain and survives a reinstall,
+    ///   and the new pairing wipes the storage without touching this live object. Without the
+    ///   refresh the new parent is silently refused their prompt.
+    /// - `oilaPaired` because the grant is a per-pairing thing, and the debug Home route can render
+    ///   this screen with no session at all.
+    /// - the device lock, exactly as the SOS takeover yields to it: a full-screen cover the child
+    ///   cannot dismiss must not have a sheet stranded on top of it.
+    /// - the live-capture consent sheet, which is presented from `RootView` and would collide.
+    ///
+    /// Not listed: the permissions flow, which routes to a different root entirely and cannot be on
+    /// screen at the same time as Home, and the live-capture banner, which is a sibling row rather
+    /// than a presentation and so has nothing to contend for.
+    private func armFirstRunPINPromptIfNeeded() {
+        // Cheap first, because this runs on every foreground for the life of the pairing: the marker
+        // is a plain `UserDefaults` read and, unlike `hasCustomPIN`, it cannot be stale — so it is
+        // the one check that can safely short-circuit the Keychain read and the `LAContext` probe.
+        guard !protection.isFirstRunPINPromptAnswered else { return }
+        guard sessionStore.oilaPaired, !lockState.isLocked else { return }
+        guard !(AppRuntime.audioStreamingEnabled && audioStream.needsConsent) else { return }
+        protection.refreshAvailability()
+        if protection.beginFirstRunPINPrompt() { showFirstRunPINSetup = true }
+    }
+
+    /// The one door every Home refresh goes through.
+    ///
+    /// Three separate triggers reload this screen — first appearance, a tasks push, and every
+    /// return to the foreground — and the child-identity write-back has to happen on all of them or
+    /// a rename lands only on whichever one the child happens to hit next. Routing them through a
+    /// single function is what stops the fourth trigger somebody adds later from quietly skipping
+    /// it, which is exactly how the identity got stuck at its pairing-day values in the first place.
+    private func reloadHome() async {
+        await viewModel.load()
+        applyRefreshedChildIdentity()
+    }
+
+    /// Write the child identity `GET /device/home` just returned into the session store.
+    ///
+    /// Name, emoji and colour are written ONCE — by `BolajonSetupFlowView.handlePaired`, out of the
+    /// pairing response — and were never read again, so a parent renaming their child, or picking a
+    /// different emoji or colour, never reached the handset. `/device/home` exists partly to fix
+    /// that and its own docs are explicit: re-read on every call, never cache the pairing copy.
+    ///
+    /// Two rules, both deliberate:
+    ///
+    ///  * The write is SKIPPED when the value has not changed. `SessionStore` is an
+    ///    `@EnvironmentObject` and `@Published` republishes on every assignment regardless of
+    ///    equality, so writing unconditionally would invalidate the whole view tree on every
+    ///    foreground for a value that is identical 99 times out of 100.
+    ///  * `nil` is written through for the emoji and the colour but never for the NAME, which is
+    ///    exactly what `handlePaired` does. The parent really can clear an emoji or a colour, and
+    ///    both have a view-side default; a name cannot be usefully cleared — the store's own
+    ///    fallback (`common.user_default`) is applied at init, so writing an empty one here would
+    ///    put a blank header on the child's screen.
+    ///
+    /// `viewModel.refreshedChild` stays nil whenever the call failed or the route is not deployed,
+    /// so nothing is touched and Home behaves exactly as it did before.
+    ///
+    /// NOT written: `child.profilePictureUrl`. Nothing in this app renders a child photo —
+    /// `ConnectedAvatar` draws the emoji or the name's first letter — and `SessionStore` has no
+    /// slot for one. Adding both is a real change to two files this task does not own, so the
+    /// value is parsed and carried (see `OilaDeviceHome`) and stops here.
+    private func applyRefreshedChildIdentity() {
+        guard let child = viewModel.refreshedChild else { return }
+        if let name = child.name?.trimmedNonEmpty, name != sessionStore.profileName {
+            sessionStore.setProfileName(name)
+        }
+        let emoji = child.avatarEmoji?.trimmedNonEmpty
+        if emoji != sessionStore.childAvatarEmoji { sessionStore.setChildAvatarEmoji(emoji) }
+        let color = child.profileColor?.trimmedNonEmpty
+        if color != sessionStore.childProfileColor { sessionStore.setChildProfileColor(color) }
     }
 
     /// Drill in to Tasks from a push, avoiding a duplicate push if already there.
@@ -165,31 +271,48 @@ struct BolajonHomeView: View {
             ConnectedAvatar(
                 emoji: sessionStore.childAvatarEmoji ?? "🦁",
                 diameter: 62,
-                isConnected: true,
+                // `isConnected` is deliberately NOT passed here. `showRing: true` makes `ringStroke`
+                // return white unconditionally, so the flag could never reach a pixel on this screen
+                // — it read like the avatar tracked the link state while being inert. The green pill
+                // below is what carries "Ulangan" on Home. Settings draws the same avatar WITHOUT a
+                // ring, and there the flag does still choose the stroke colour.
                 filled: true,
                 showRing: true,
                 fallbackText: sessionStore.profileName
             )
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(sessionStore.profileName)
-                        .font(AppTypography.title(20))
-                        .foregroundStyle(AppColors.inkPrimary)
-                    HStack(spacing: 5) {
-                        Circle().fill(AppColors.successGreen).frame(width: 7, height: 7)
-                        Text(L10n.tr("home2.connected"))
-                            .font(AppTypography.bodyStrong(12))
-                            .foregroundStyle(AppColors.successGreen)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(AppColors.successGreen.opacity(0.14)))
+            VStack(alignment: .leading, spacing: 6) {
+                // The name owns its own line now. It used to share one with the green "Ulangan"
+                // pill, which left it roughly 102pt on a 375pt screen (375 minus the screen padding,
+                // the 62pt avatar, the 46pt gear, the gaps and the ~85pt pill) — less than
+                // "Abdulfattoh" needs at the shipping 20pt title. With no lineLimit a `Text` wraps,
+                // and a single unbroken word wraps at a CHARACTER boundary, so the name came back
+                // from the field split across two lines mid-word. Moving the pill down roughly
+                // doubles the budget and `profileNameClamp` covers the rest: a long name, a large
+                // Dynamic Type setting (capped at 1.35x by AppTypography), or both together.
+                Text(sessionStore.profileName)
+                    .font(AppTypography.title(20))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .profileNameClamp()
+                HStack(spacing: 5) {
+                    Circle().fill(AppColors.successGreen).frame(width: 7, height: 7)
+                    Text(L10n.tr("home2.connected"))
+                        .font(AppTypography.bodyStrong(12))
+                        .foregroundStyle(AppColors.successGreen)
+                        .lineLimit(1)
                 }
-                Text(L10n.tr("home2.header_subtitle"))
-                    .font(AppTypography.bodyText(13))
-                    .foregroundStyle(AppColors.inkTertiary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(AppColors.successGreen.opacity(0.14)))
+                // The subtitle that used to sit here ("home2.header_subtitle" — "Oilangiz siz bilan
+                // bog'langan") is gone by product decision: it said nothing the green pill directly
+                // above it does not, and it was the second line competing for a header that already
+                // could not fit its first.
             }
-            Spacer()
+            // Ahead of the Spacer, so the name column is offered the width the gear button leaves
+            // instead of splitting it with an empty gap — without this the name starts shrinking
+            // while there is still slack in the row.
+            .layoutPriority(1)
+            Spacer(minLength: 8)
             Button(action: { path.append(.settings) }) {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 20))
@@ -204,8 +327,16 @@ struct BolajonHomeView: View {
         .padding(.top, 8)
     }
 
-    // Usage-only card: the device has no aggregate screen-time endpoint and no single daily
-    // limit, so we show the real tracked-app usage without a fabricated limit/progress bar.
+    // Today's screen time, in one of two shapes. This comment used to claim the device "has no
+    // aggregate screen-time endpoint and no single daily limit", which was true when it was written
+    // and has been false since `GET /device/apps/screen-time` appeared: that endpoint carries both
+    // the device-wide total and the parent's daily budget, and both are rendered below. Nothing here
+    // is fabricated — every number on this card came from the server or from the local Screen Time
+    // report, and the halves that have no data simply do not draw.
+    //
+    //   • budget set    — usage over the limit ("1h 45m / 3h") plus the progress bar and its caption
+    //   • no budget     — the used time ALONE: no bar, no caption, and specifically not a bar at 0%
+    //                     or full, which would invent a limit the parent never set
     private var screenTimeCard: some View {
         InfoCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -260,8 +391,10 @@ struct BolajonHomeView: View {
                     .minimumScaleFactor(0.7)
                 }
 
-                // Budget half. Rendered only when the parent actually set one — no invented default,
-                // and no progress bar with nothing to be a fraction of.
+                // Budget half — the bar AND the caption under it, which is why they share one
+                // `if`: with no `dailyLimitSeconds` there is nothing to be a fraction of and nothing
+                // to have left, so both disappear together and the card is just the time used.
+                // Splitting them is how a card ends up with a "45m left" line under no bar.
                 if let progress = viewModel.screenTimeProgress {
                     VStack(alignment: .leading, spacing: 6) {
                         GeometryReader { geo in
@@ -593,6 +726,18 @@ final class BolajonHomeViewModel: ObservableObject {
     /// which `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED = false` makes unreachable.
     @Published private(set) var serverScreenTime: OilaDeviceScreenTime?
 
+    /// The child identity `GET /device/home` last returned, for the view to write into the session
+    /// store (`BolajonHomeView.applyRefreshedChildIdentity`).
+    ///
+    /// Published rather than written from here because `SessionStore` arrives as an
+    /// `@EnvironmentObject`, which a `@StateObject` view model has no way to reach: its autoclosure
+    /// runs before any environment exists. Handing the value up is also what keeps this view model
+    /// testable without standing up a real store.
+    ///
+    /// Left UNTOUCHED when the call fails, so the last known identity survives a network blip
+    /// rather than reverting the screen to whatever pairing wrote.
+    @Published private(set) var refreshedChild: OilaChildProfile?
+
     private let service: OilaDeviceServicing
     private let telemetry: SOSTelemetryProviding
     private let screenTimeUsage: ScreenTimeUsageProviding
@@ -645,9 +790,20 @@ final class BolajonHomeViewModel: ObservableObject {
     /// from the local report under a progress bar from the server would describe two different days
     /// of two different app sets.
     enum ScreenTimeSource: Equatable { case server, local }
+
+    /// The smallest usage this card can honestly print. The card's unit is whole minutes, so
+    /// anything under a minute formats as "0m" — the exact measured-looking zero the rules below
+    /// exist to prevent, and it arrived by the front door: `usedSeconds` of 1...59 passed the old
+    /// `> 0` test, was divided by 60, and rendered "0m" in the headline slot. Sub-minute usage is
+    /// treated as nothing to report rather than rounded up to "1m", because rounding up would put a
+    /// number on the child's screen that the parent's app (which shows the same seconds) contradicts.
+    private static let displayableUsageSeconds = 60
+
     var screenTimeSource: ScreenTimeSource? {
-        if let server = todaysServerScreenTime, server.usedSeconds > 0 { return .server }
-        if trackedUsageSeconds != nil { return .local }
+        if let server = todaysServerScreenTime,
+           server.usedSeconds >= Self.displayableUsageSeconds { return .server }
+        if let local = trackedUsageSeconds,
+           local >= Self.displayableUsageSeconds { return .local }
         // A budget with no usage figure still renders — as a budget, not as a measured zero.
         return todaysServerScreenTime?.hasBudget == true ? .server : nil
     }
@@ -663,13 +819,13 @@ final class BolajonHomeViewModel: ObservableObject {
     /// budget the parent has set (worth showing on its own — "your limit is 3h" is information the
     /// child does not otherwise have).
     ///
-    /// It deliberately does NOT render a measured zero. iOS cannot measure app usage without the
-    /// FamilyControls entitlement, so a confident "0m" would be a claim about the child's day that
-    /// this app has no basis for — and it would read very differently on a parent's screen next to
-    /// an Android sibling's real number. `showsUsageFigure` is what keeps the budget-only card
-    /// honest: it shows the limit and says nothing about usage.
+    /// It deliberately does NOT render a measured zero — or anything that rounds to one. iOS cannot
+    /// measure app usage without the FamilyControls entitlement, so a confident "0m" would be a claim
+    /// about the child's day that this app has no basis for — and it would read very differently on a
+    /// parent's screen next to an Android sibling's real number. `showsUsageFigure` is what keeps the
+    /// budget-only card honest: it shows the limit and says nothing about usage.
     var showsScreenTimeCard: Bool { screenTimeSource != nil }
-    var showsUsageFigure: Bool { (screenTimeSeconds ?? 0) > 0 }
+    var showsUsageFigure: Bool { (screenTimeSeconds ?? 0) >= Self.displayableUsageSeconds }
     var trackedUsageMinutes: Int? { screenTimeSeconds.map { $0 / 60 } }
     var screenTimeText: String { hoursMinutes(trackedUsageMinutes ?? 0) }
     /// "of 3h" — only when the parent set a budget, and only alongside a usage figure it belongs to.
@@ -683,7 +839,14 @@ final class BolajonHomeViewModel: ObservableObject {
         guard screenTimeSource == .server else { return nil }
         return todaysServerScreenTime
     }
-    var screenTimeProgress: Double? { showsUsageFigure ? budgetScreenTime?.progress : nil }
+    /// Nil is the answer for BOTH ways the bar can be meaningless, and the view hides the bar and its
+    /// caption together on it: no displayable usage (nothing to plot), or no budget (nothing to plot
+    /// it against). The second is the product decision — a device with no `dailyLimitSeconds` shows
+    /// the time used and nothing else, rather than an empty bar that implies a limit somewhere.
+    var screenTimeProgress: Double? {
+        guard showsUsageFigure, let budget = budgetScreenTime, budget.hasBudget else { return nil }
+        return budget.progress
+    }
     /// Only meaningful against a budget: without one there is nothing to have reached, so the
     /// alarm colour would appear with no caption to explain it.
     var screenTimeLimitReached: Bool {
@@ -716,6 +879,20 @@ final class BolajonHomeViewModel: ObservableObject {
     }
 
     func load() async {
+        // `GET /device/home` is ADDITIVE here, not a replacement for the three calls below, and it
+        // runs first so the header can correct a renamed child before the slower task page-walk
+        // finishes. It is the only source of a CURRENT identity — everything else on this screen
+        // was already being re-read — and it is read with `try?` for the same reason the star total
+        // and the screen time are: a backend that has not deployed the route yet, or a phone with
+        // no signal, must leave this screen behaving exactly as it did before.
+        //
+        // The card data it also carries is deliberately not consumed; `OilaDeviceHome` records why
+        // for each field. The short version for the one that looks most tempting: the task card's
+        // "two pending plus the most recently completed, cancelled excluded" selection cannot be
+        // rebuilt from an unfiltered `recent[<=2]`, so `/device/tasks` stays.
+        if let home = try? await service.fetchHome(), let child = home.child {
+            refreshedChild = child
+        }
         do { tasks = try await service.fetchTasks() }
         catch { /* keep last tasks; Home stays usable offline */ }
         await refreshStarTotal()

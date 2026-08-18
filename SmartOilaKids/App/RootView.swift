@@ -11,19 +11,35 @@ struct RootView: View {
     @State var didHandleInitialAppear = false
 
     var body: some View {
-        // The live-session banner is a SIBLING of the app, above it in a stack, not an overlay on
-        // top of it. As an overlay it floated over whatever was already at the top of the screen —
-        // on Home that is the header, so the child's name and the "Connected" chip sat unreadable
-        // underneath it for the whole session, and the one piece of UI that has to be unmistakable
-        // was the one hiding something. `safeAreaInset` does not work here either: every screen is
-        // wrapped in a `NavigationStack`, which installs its own safe area and ignores an inset
-        // applied from outside it. Giving the banner its own row is the only placement that cannot
-        // cover anything.
+        disclosing { appContent }
+            .background(AppColors.screenBackground.ignoresSafeArea())
+    }
+
+    /// Puts `content` under the live-session disclosure row.
+    ///
+    /// The banner is a SIBLING of the app, above it in a stack, not an overlay on top of it. As an
+    /// overlay it floated over whatever was already at the top of the screen — on Home that is the
+    /// header, so the child's name and the "Connected" chip sat unreadable underneath it for the
+    /// whole session, and the one piece of UI that has to be unmistakable was the one hiding
+    /// something. `safeAreaInset` does not work here either: every screen is wrapped in a
+    /// `NavigationStack`, which installs its own safe area and ignores an inset applied from outside
+    /// it. Giving the banner its own row is the only placement that cannot cover anything.
+    ///
+    /// Both places that draw the disclosure go through this helper rather than assembling their own
+    /// `VStack`, because the row is no longer just a view: it carries a transition, which needs an
+    /// animating ancestor to drive it, and a second hand-written stack would silently lose that half.
+    /// The lock takeover has to look identical to the root — that is the whole reason the banner is
+    /// drawn there at all.
+    private func disclosing<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) {
             liveSessionDisclosure
-            appContent
+            content()
         }
-        .background(AppColors.screenBackground.ignoresSafeArea())
+        // The row appears and disappears mid-session, and it is tall enough that everything below it
+        // jumps when it does. Animating the whole stack on `isLive` is what turns "the app snapped"
+        // into "a strip slid in": the transition below rides this transaction. Deliberately keyed to
+        // `isLive` alone, so nothing else on screen inherits an animation it did not ask for.
+        .animation(.easeOut(duration: 0.28), value: audioStream.isLive)
     }
 
     @ViewBuilder
@@ -34,6 +50,11 @@ struct RootView: View {
                 videoUnavailable: audioStream.videoUpgradeFailure != nil,
                 onStop: { audioStream.stopByChild() }
             )
+            // Slides down out of the status bar rather than materialising at full height. Removal
+            // matters more than insertion: when the parent hangs up, the banner leaving is the
+            // child's confirmation that the microphone actually closed, and an instant disappearance
+            // reads as a glitch rather than an answer.
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -98,8 +119,7 @@ struct RootView: View {
             // parent can lock the device today. That produced the one combination this module exists
             // to prevent: a microphone open, the child staring at a lock screen, and nothing on it
             // saying so. Same view, same state, drawn where it can actually be seen.
-            VStack(spacing: 0) {
-                liveSessionDisclosure
+            disclosing {
                 DeviceLockOverlay(
                     localTime: oilaTelemetry.deviceLocalTime,
                     scheduleRange: oilaTelemetry.scheduleRangeText

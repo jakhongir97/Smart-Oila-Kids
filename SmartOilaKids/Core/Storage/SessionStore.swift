@@ -46,11 +46,20 @@ final class SessionStore: ObservableObject {
     init(
         userDefaults: UserDefaults = .standard,
         secureTokens: SecureTokenStoring = SecureTokenStore.shared,
-        deviceTokens: SecureTokenStoring = SecureTokenStore.oila
+        deviceTokens: SecureTokenStoring = SecureTokenStore.oila,
+        // The NAME, not the `UserDefaults`, because the disconnect purge removes the whole
+        // persistent domain and `removePersistentDomain(forName:)` acts on the named domain rather
+        // than on the receiver — hand it the shared identifier and it wipes the real container no
+        // matter which instance it was called on. Injected at all because that container is real,
+        // shared and device-global: a test that let the default through would delete the
+        // schedule-monitor extension's storage out from under any other test using it.
+        appGroupIdentifier: String = ScreenTimeUsageAppGroup.identifier
     ) {
         self.userDefaults = userDefaults
         self.secureTokens = secureTokens
         self.deviceTokens = deviceTokens
+        self.appGroupIdentifier = appGroupIdentifier
+        self.appGroupDefaults = UserDefaults(suiteName: appGroupIdentifier)
 
         secureTokens.migrateFromUserDefaults(userDefaults)
 
@@ -60,7 +69,7 @@ final class SessionStore: ObservableObject {
         // picker still has a resolved language, and without this the schedule-monitor extension
         // finds no APP_LANGUAGE in the App Group and falls back to the DEVICE language for its
         // system notifications — the exact mismatch the localization fix was meant to remove.
-        ScreenTimeUsageAppGroup.sharedUserDefaults()?.set(resolvedLanguage.rawValue, forKey: Keys.appLanguage)
+        appGroupDefaults?.set(resolvedLanguage.rawValue, forKey: Keys.appLanguage)
 
         dsn = userDefaults.string(forKey: Keys.dsn)?.trimmedNonEmpty
         profileName = userDefaults.string(forKey: Keys.profileName) ?? L10n.tr("common.user_default")
@@ -171,7 +180,7 @@ final class SessionStore: ObservableObject {
         userDefaults.set(value.rawValue, forKey: Keys.appLanguage)
         // Mirror into the App Group so the schedule-monitor extension localizes its system
         // notifications in the family's chosen language rather than the device language.
-        ScreenTimeUsageAppGroup.sharedUserDefaults()?.set(value.rawValue, forKey: Keys.appLanguage)
+        appGroupDefaults?.set(value.rawValue, forKey: Keys.appLanguage)
         L10n.setLanguage(value.rawValue)
     }
 
@@ -187,10 +196,12 @@ final class SessionStore: ObservableObject {
 
     /// When this install last completed `POST /device/pair`, or nil if it never has.
     ///
-    /// This is a PARENT-PRESENCE signal, not a diagnostic. Pairing requires a code the parent
-    /// generates in the Oila360 app and types into this device, so the minutes right after a
-    /// successful pair are the one window in which we know an adult is holding the phone. The
-    /// parent-PIN provisioning gate keys off it — see `BolajonSettingsView`.
+    /// It used to be a PARENT-PRESENCE signal: first-PIN provisioning was legal for 15 minutes after
+    /// it. That is gone, and deliberately — the child owns the Date & Time pane, so the comparison
+    /// was reading an attacker-controlled clock, and the stamp lands at code redemption, BEFORE the
+    /// B1–B11 permissions flow, so the window was routinely spent before Home ever opened. See
+    /// `FirstPINProvisioning`, which now uses a one-shot grant and reads no clock at all. The stamp
+    /// itself stays because it records when this device joined a family, which nothing else does.
     var pairedAt: Date? {
         let stamp = userDefaults.double(forKey: Keys.pairedAt)
         guard stamp > 0 else { return nil }
@@ -263,8 +274,20 @@ final class SessionStore: ObservableObject {
 
     /// Wipes every per-child artifact on disconnect so re-pairing this device to a DIFFERENT child
     /// cannot surface the previous child's data. DSN-scoped stores (tasks, chat, dashboard cache,
-    /// geo queue, app-lock selection) are isolated by regenerating the device DSN — the next pair
-    /// mints a fresh scope — while the few globally-keyed caches are cleared here directly.
+    /// geo queue) are isolated by regenerating the device DSN — the next pair mints a fresh scope —
+    /// while the globally-keyed caches are cleared here directly.
+    ///
+    /// The product requirement this now satisfies is stronger than "isolate": Ibrohim asked for
+    /// "yangi ilova o'rnatilgan holatga qaytarib qo'yasiz" — the state of a freshly installed app.
+    /// Regenerating the DSN only makes the previous child's data unreachable; it leaves it on disk,
+    /// and several of the artifacts below are not DSN-scoped at all and were reachable by the NEXT
+    /// family. Steps 8–12 are the difference between the two readings.
+    ///
+    /// NOT cleared, on purpose: the Family Controls / Screen Time authorization. Revoking it would
+    /// force the next parent through a full re-authorization (an OS prompt that can only be answered
+    /// with the parent's own Apple ID password) even when they are re-pairing the SAME child minutes
+    /// later. Whether a disconnect should cost that is a product call nobody has made, so this code
+    /// does not make it silently.
     private func purgeChildScopedData() {
         // 1. Regenerate the generate-once device DSN → all DSN-scoped stores start empty on re-pair.
         OilaDeviceIdentity.resetDSN(userDefaults: userDefaults)
@@ -304,6 +327,47 @@ final class SessionStore: ObservableObject {
             await DeviceApplicationRemovalAttemptCoordinator.shared.purge()
             await DeviceApplicationUsageReportCoordinator.shared.purge()
         }
+        // 8. The child's own NAME. The old comment here claimed it was safe to keep because "it is
+        //    overwritten by the next pair" — it is not: `BolajonSetupFlowView.handlePaired` falls
+        //    back to `sessionStore.profileName` when `POST /device/pair` returns a child with no
+        //    name, and the Success screen and Home header render it. A second family could therefore
+        //    meet the previous child's name on the screen that welcomes them.
+        userDefaults.removeObject(forKey: Keys.profileName)
+        profileName = L10n.tr("common.user_default")
+        // 9. The whole App Group container. It holds the Screen Time usage snapshot and its multi-day
+        //    history, the app-limit snapshot and the queue of pending control events — none of it
+        //    DSN-scoped in a way the regeneration reaches, all of it written by an EXTENSION that
+        //    keeps running on its own schedule. A per-key sweep here would rot the moment the
+        //    extension adds a key, so the suite goes wholesale.
+        if let appGroupDefaults {
+            appGroupDefaults.removePersistentDomain(forName: appGroupIdentifier)
+            // …except the language mirror, which is not child data. The extension reads it to
+            // localize its system notifications and has no other source; dropping it would silently
+            // switch those notifications to the DEVICE language, which is the exact bug the mirror
+            // was added to fix.
+            appGroupDefaults.set(appLanguage.rawValue, forKey: Keys.appLanguage)
+        }
+        // 10. DSN-scoped app-lock keys. Regenerating the DSN orphans these rather than deleting
+        //     them: the blob naming the previous child's blocked apps stays on disk forever under a
+        //     scope nothing will ever read again. Swept by PREFIX, so this also collects the orphans
+        //     left by every previous disconnect, not just this one.
+        for prefix in ["DEVICE_APP_LOCK_SELECTION_", "DEVICE_APP_LOCK_LOCKED_IDENTIFIERS_"] {
+            for key in userDefaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+                userDefaults.removeObject(forKey: key)
+            }
+        }
+        // 11. The FCM registration token. The server still maps it to the device record this
+        //     disconnect just abandoned, and `RootView.syncPushToken` re-uploads whatever is stored
+        //     here at the next pair — so the ghost device and the new one would claim the same push
+        //     address. A fresh token arrives from Firebase on the next registration anyway.
+        userDefaults.removeObject(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)
+        // 12. The telemetry outboxes. `OilaTelemetryService.stop()` already drops these — but it is
+        //     guarded on `isRunning`, and telemetry only starts once onboarding is complete AND the
+        //     install is paired. A device that queued an SOS or a location fix and then disconnected
+        //     without telemetry ever running kept both, and neither payload carries a dsn: whatever
+        //     Bearer token is held when the queue finally flushes is who the server attributes it to.
+        userDefaults.removeObject(forKey: "OILA_PENDING_SOS")
+        userDefaults.removeObject(forKey: "OILA_PENDING_LOCATION_FIXES")
     }
 
     private static func defaultLanguage(userDefaults: UserDefaults) -> AppLanguage {
@@ -317,6 +381,12 @@ final class SessionStore: ObservableObject {
     private let userDefaults: UserDefaults
     private let secureTokens: SecureTokenStoring
     private let deviceTokens: SecureTokenStoring
+    /// The `group.…` container the Screen Time extension, the app-limit snapshot and the pending
+    /// control events share with the app. `appGroupDefaults` is nil only when the suite cannot be
+    /// opened (a missing entitlement); the identifier is kept because the purge removes the domain
+    /// by name.
+    private let appGroupIdentifier: String
+    private let appGroupDefaults: UserDefaults?
 
     var hasLinkedChildDevice: Bool {
         dsn?.trimmedNonEmpty != nil

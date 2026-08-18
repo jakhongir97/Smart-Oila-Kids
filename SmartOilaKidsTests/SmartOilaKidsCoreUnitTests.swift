@@ -2899,16 +2899,31 @@ final class StreamCommandParsingTests: XCTestCase {
     }
 
     /// The consent sheet must never act on a default command: `pendingCommand` is cleared by stop()
-    /// and by start()'s queued-command capture, so a tap arriving after that must be inert rather
-    /// than opening the microphone off a stale sheet.
+    /// and by start()'s queued-command capture, so a tap arriving after that must open no hardware.
+    ///
+    /// But it must still RECORD the grant, and this test used to pin the opposite. Dropping it is
+    /// the bug behind the product owner's "men ruxsat berdim o'zi. yana so'rayapti": a stop push
+    /// landing while the sheet was on screen turned the child's Allow into a no-op, so the sheet
+    /// returned on the next request. The tap is the consent; the parked command is only what
+    /// happens next.
+    ///
+    /// `requestMicPermission` is stubbed because the grant now also banks the OS permission while
+    /// the child is on screen (see `grantConsentWithoutStarting`), and the production default would
+    /// reach a real `AVAudioApplication` prompt from the test host.
     @MainActor
-    func testGrantWithNoPendingCommandDoesNotStartAnything() {
+    func testGrantWithNoPendingCommandRecordsConsentWithoutStartingAnything() {
         let manager = makeEnabledManager(audio: false, video: false)
+        manager.requestMicPermission = { false }
 
         manager.grantConsentAndStart()
 
         XCTAssertFalse(manager.needsConsent)
         XCTAssertFalse(manager.isLive, "a grant with nothing pending must not open hardware")
+        XCTAssertEqual(
+            manager.grantedConsent,
+            .audio,
+            "the child answered the sheet — that answer has to survive to the next request"
+        )
     }
 
     func testDurationIsClampedToBackendBounds() {
@@ -3504,73 +3519,55 @@ final class StreamWakeObserverTests: XCTestCase {
     }
 }
 
-// MARK: - First-PIN provisioning window
+// MARK: - First-PIN provisioning grant
 
-/// The disconnect PIN is the control that keeps a monitored child linked, and the window that
-/// allows the FIRST one to be set used to be a bare wall-clock comparison on a device whose Date &
-/// Time panel the child controls. These pin the tamper resistance, not the arithmetic.
+/// The disconnect PIN is the control that keeps a monitored child linked, and the gate that allows
+/// the FIRST one to be set used to be a bare wall-clock comparison on a device whose Date & Time
+/// panel the child controls. These pin the tamper resistance, not the arithmetic — there is no
+/// arithmetic left.
+///
+/// The regression these replace is `testClockRolledForwardIntoTheWindowIsRefusedOnceLatched`: the
+/// child winds the clock back to `pairedAt + 5 minutes`, producing a positive, in-window elapsed
+/// that no sign check refuses, and only the one-way latch stood in the way. The strongest possible
+/// form of that test is now a type signature — `decide` takes no date — so what is asserted here is
+/// that the gate cannot be reopened by ANY input the child can reach, and that the one-way property
+/// the latch supplied survived the replacement.
 final class FirstPINProvisioningTests: XCTestCase {
-    private let paired = Date(timeIntervalSince1970: 1_700_000_000)
 
-    func testAllowedInsideTheWindow() {
-        let decision = FirstPINProvisioning.decide(
-            pairedAt: paired, now: paired.addingTimeInterval(60), latched: false
-        )
-        XCTAssertEqual(decision, .allowed)
-        XCTAssertFalse(decision.shouldLatch)
-    }
-
-    func testClosedOnceTheWindowElapses() {
-        let decision = FirstPINProvisioning.decide(
-            pairedAt: paired, now: paired.addingTimeInterval(FirstPINProvisioning.window + 1), latched: false
-        )
-        XCTAssertEqual(decision, .closedElapsed)
-        XCTAssertTrue(decision.shouldLatch, "an elapsed window must latch, or the clock can reopen it")
-    }
-
-    /// The exploit a sign check does NOT close: the child sets the clock to just after pairing, so
-    /// the interval is positive AND inside the window. Only the latch stops this.
-    func testClockRolledForwardIntoTheWindowIsRefusedOnceLatched() {
-        let daysLater = paired.addingTimeInterval(3 * 24 * 3600)
-        let elapsedDecision = FirstPINProvisioning.decide(pairedAt: paired, now: daysLater, latched: false)
-        XCTAssertTrue(elapsedDecision.shouldLatch)
-
-        // Child now rewinds the clock to pairedAt + 5 minutes: a positive, in-window elapsed.
-        let rewound = paired.addingTimeInterval(300)
+    func testAFreshPairingMayProvisionItsFirstPIN() {
         XCTAssertEqual(
-            FirstPINProvisioning.decide(pairedAt: paired, now: rewound, latched: false),
-            .allowed,
-            "without the latch this is exactly the hole — kept as a test so the latch cannot be dropped"
+            FirstPINProvisioning.decide(hasCustomPIN: false, promptAnswered: false),
+            .allowed
+        )
+    }
+
+    /// One-way, and the ONLY inputs are two booleans the child cannot write: the marker is cleared
+    /// by a pairing, and `hasCustomPIN` by the Keychain. Nothing here reads a clock, which is what
+    /// makes the rewind attack unreachable rather than merely mitigated.
+    func testAnsweringThePromptClosesProvisioningForGood() {
+        XCTAssertEqual(
+            FirstPINProvisioning.decide(hasCustomPIN: false, promptAnswered: true),
+            .closedPromptAnswered
+        )
+    }
+
+    /// An existing PIN is checked BEFORE the marker, because this is the branch that keeps the
+    /// provisioning path from being a lockout-reset oracle — see `saveCustomPIN`.
+    func testAnExistingPINClosesProvisioningWhateverTheMarkerSays() {
+        XCTAssertEqual(
+            FirstPINProvisioning.decide(hasCustomPIN: true, promptAnswered: false),
+            .closedPINExists
         )
         XCTAssertEqual(
-            FirstPINProvisioning.decide(pairedAt: paired, now: rewound, latched: true),
-            .closedLatched
+            FirstPINProvisioning.decide(hasCustomPIN: true, promptAnswered: true),
+            .closedPINExists
         )
     }
 
-    func testClockMovedWellBeforePairingIsRefusedAndLatches() {
-        let decision = FirstPINProvisioning.decide(
-            pairedAt: paired, now: paired.addingTimeInterval(-3600), latched: false
-        )
-        XCTAssertEqual(decision, .closedClockMovedBack)
-        XCTAssertTrue(decision.shouldLatch)
-    }
-
-    /// A routine NTP correction inside the legitimate window must NOT burn the parent's only
-    /// provisioning opportunity — the sole way to reopen it is a re-pair, which needs the parent app.
-    func testSmallBackwardsClockCorrectionStillAllowsProvisioning() {
-        let decision = FirstPINProvisioning.decide(
-            pairedAt: paired, now: paired.addingTimeInterval(-2), latched: false
-        )
-        XCTAssertEqual(decision, .allowed)
-        XCTAssertFalse(decision.shouldLatch)
-    }
-
-    func testNeverPairedIsRefused() {
-        XCTAssertEqual(
-            FirstPINProvisioning.decide(pairedAt: nil, now: paired, latched: false),
-            .closedNoPairing
-        )
+    func testOnlyTheAllowedDecisionIsAllowed() {
+        XCTAssertTrue(FirstPINProvisioning.Decision.allowed.isAllowed)
+        XCTAssertFalse(FirstPINProvisioning.Decision.closedPINExists.isAllowed)
+        XCTAssertFalse(FirstPINProvisioning.Decision.closedPromptAnswered.isAllowed)
     }
 }
 
@@ -3690,5 +3687,67 @@ final class LocationAcceptanceTests: XCTestCase {
         XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 60, distanceFromLast: 90, lastAcceptedAge: 30))
         // …while a sharp fix only has to clear the 25 m floor.
         XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 5, distanceFromLast: 25, lastAcceptedAge: 30))
+    }
+}
+
+// MARK: - status.report probe location
+
+/// The probe deliberately does NOT run through the acceptance gate above: a parent who tapped
+/// "check in now" has already paid for the answer, so "you have not moved 25 m" is no reason to
+/// withhold it. What still applies is freshness — sending a point the server already holds adds a
+/// phantom duplicate to the child's history and tells the parent nothing.
+final class StatusProbeLocationTests: XCTestCase {
+    private func location(at timestamp: Date, accuracy: CLLocationAccuracy = 12) -> CLLocation {
+        CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 41.31, longitude: 69.24),
+            altitude: 0,
+            horizontalAccuracy: accuracy,
+            verticalAccuracy: 5,
+            timestamp: timestamp
+        )
+    }
+
+    /// The whole point of the change: an unreported fix rides along with the probe answer.
+    func testAnUnreportedFixIsSentWithTheProbe() throws {
+        let now = Date()
+        let fix = try XCTUnwrap(
+            OilaTelemetryService.probeFix(from: location(at: now), newerThan: now.addingTimeInterval(-60))
+        )
+        XCTAssertEqual(fix.lat, 41.31)
+        XCTAssertEqual(fix.lng, 69.24)
+        XCTAssertEqual(fix.accuracy, 12)
+        XCTAssertEqual(fix.ts, now)
+    }
+
+    /// Nothing has ever been reported, so anything CoreLocation is holding is news.
+    func testTheFirstProbeSendsWhateverIsHeld() throws {
+        let fix = try XCTUnwrap(OilaTelemetryService.probeFix(from: location(at: Date()), newerThan: nil))
+        XCTAssertEqual(fix.lat, 41.31)
+    }
+
+    /// A stationary child: the newest fix is the one already uploaded, and re-sending it would put a
+    /// second identical point in the parent's history for no information at all.
+    func testAFixTheServerAlreadyHasIsNotResent() {
+        let reportedAt = Date()
+        XCTAssertNil(OilaTelemetryService.probeFix(from: location(at: reportedAt), newerThan: reportedAt))
+        XCTAssertNil(
+            OilaTelemetryService.probeFix(from: location(at: reportedAt.addingTimeInterval(-30)), newerThan: reportedAt),
+            "an older buffered fix is not a fresher answer"
+        )
+    }
+
+    /// Location denied, or nothing resolved yet. The probe still answers — with status only — rather
+    /// than blocking on a fix that may never arrive.
+    func testNoHeldFixQueuesNothing() {
+        XCTAssertNil(OilaTelemetryService.probeFix(from: nil, newerThan: nil))
+    }
+
+    /// CoreLocation's "no confidence" sentinel is a negative accuracy. It must travel as an ABSENT
+    /// `accuracy` — `PostLocationBatchDto` would otherwise be handed a negative metre count.
+    func testInvalidAccuracyIsSentAsAbsentRatherThanNegative() throws {
+        let fix = try XCTUnwrap(
+            OilaTelemetryService.probeFix(from: location(at: Date(), accuracy: -1), newerThan: nil)
+        )
+        XCTAssertNil(fix.accuracy)
     }
 }

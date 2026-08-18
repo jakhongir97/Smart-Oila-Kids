@@ -23,6 +23,10 @@ enum BolajonMetrics {
     static let contentMaxWidth: CGFloat = 640
     static let cardPadding: CGFloat = 18
     static let stackSpacing: CGFloat = 16
+    /// Floor for shrinking the child's profile name (see `profileNameClamp`). 0.75 of the 20pt
+    /// Home title is 15pt — still comfortably legible, and enough headroom that every realistic
+    /// Uzbek given name fits its column before truncation is reached.
+    static let profileNameMinimumScale: CGFloat = 0.75
 
     static let cardShadow = Color.black.opacity(0.06)
     static let cardShadowRadius: CGFloat = 18
@@ -792,6 +796,29 @@ struct ConnectedAvatar: View {
                 .font(.system(size: diameter * 0.42))
                 .foregroundStyle(filled ? .white : AppColors.inkSecondary)
         }
+    }
+}
+
+// MARK: - Profile name
+
+extension View {
+    /// The clamp every rendering of the child's profile name needs when it shares a row with
+    /// anything else (the Home header's gear button, the Settings header's avatar column).
+    ///
+    /// The name is arbitrary user text in a fixed-width column, so it has to be told what to do when
+    /// it does not fit. Without this it did the worst available thing: a bare `Text` wraps, and
+    /// SwiftUI will break a single unbroken word at a CHARACTER boundary rather than overflow — which
+    /// is how "Abdulfattoh" came back from the field split across two lines mid-word on Home. Shrink
+    /// first (down to `profileNameMinimumScale`), then truncate at the tail; never wrap, never break
+    /// a word. `allowsTightening` buys the last couple of points before the scale factor engages.
+    ///
+    /// Worth knowing: the default name is `common.user_default` ("Foydalanuvchi"), which is LONGER
+    /// than most real names — a child who never typed a name is the worst case, not the safe one.
+    func profileNameClamp() -> some View {
+        lineLimit(1)
+            .truncationMode(.tail)
+            .allowsTightening(true)
+            .minimumScaleFactor(BolajonMetrics.profileNameMinimumScale)
     }
 }
 

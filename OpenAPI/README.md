@@ -18,6 +18,60 @@ child flow (`OilaDeviceClient` in `Core/Networking/OilaDeviceAPI.swift`) targets
   (Oila 360 API 1.0). All 12 `/api/v1/device/*` calls the app makes exist here with matching
   methods and request shapes (verified 2026-07-12).
 
+## ➕ ADDED 2026-08-18 — the new control-surface routes (5 paths, 9 operations, 2 schemas)
+
+The backend published a newer control-surface spec. Against this snapshot it adds exactly three
+things, and only the first concerns the child app:
+
+| Added | Provenance |
+|---|---|
+| `GET /api/v1/device/home` | Backend's published `DeviceHomeResponseDto` (field list quoted verbatim in the schema descriptions). Probed 2026-08-18: **401 for GET** (exists, guarded), **404 for POST** — so it is GET-only. |
+| `POST /api/v1/attribution/touch` | Route + DTO **derived from the running server**, see below. |
+| `GET/POST /api/v1/admin/campaigns`, `GET/PATCH/DELETE /api/v1/admin/campaigns/{id}` | Path + verb set derived from 401-vs-404 probes, 2026-08-18. Bodies left untyped. |
+
+`/api/docs/*.json` still needs the basic-auth credentials, which this session did not have (both URLs
+answered **401**), so none of this could be copied out of the published document. What could be done
+instead is better than transcription for the DTO, and worse for everything else:
+
+- **`AttributionTouchDto` is exact, and it came from the server itself.** An empty `POST` returns
+  `VALIDATION_FAILED` naming every REQUIRED field and spelling out both enums verbatim
+  (`kind`: Click|Install|AppOpen|Register, `surface`: Web|Tma|Bot|Android|Ios). Because this backend
+  runs `forbidNonWhitelisted`, sending a candidate property back and reading whether it is refused
+  with *"property X should not exist"* enumerates the OPTIONAL ones exactly — that is how
+  `clickId`, `campaignCode` and the four `utm*` fields were found. The property SET is therefore
+  certain; the string constraints (length, pattern) are not, and are omitted rather than guessed.
+  All probes used deliberately invalid required fields, so nothing was ever recorded.
+- **The `admin/campaigns` bodies are untyped `{}` on purpose.** No client in this repo calls them and
+  no DTO was obtainable; a hand-invented `CreateCampaignDto` would be a guess dressed as a contract.
+- The `operationId`s and `tags` on all five paths are **inferred** from this file's own naming
+  conventions — replace them the next time the real document can be fetched.
+
+### ⚠️ `POST /api/v1/device/unpair` — the app calls it, the server does not serve it
+
+**It is deliberately NOT in this file.** This snapshot only ever describes what the live server
+actually answers; the moment a wished-for route is written into it, the one artifact both teams read
+as ground truth becomes indistinguishable from a wish list, and nobody downstream can tell which
+entries were captured and which were hoped for.
+
+The exemption lives in the gate instead — `DECLARED_AHEAD_OF_DEPLOYMENT` in
+`scripts/check_child_live_endpoints.py`. That placement is what makes it safe: the gate **prints the
+exempted operation on every single run**, so a call site the server cannot honour announces itself in
+CI output rather than sitting silently blessed inside a 5,000-line JSON file. The exemption is also
+narrow — any *other* unserved call site still fails the gate, which is verified by pointing a call at
+a nonexistent path and watching it go red.
+
+Why the client calls it at all (decision D3): attempt the revoke, treat 404/405/501 as "not deployed
+yet", and always complete the local teardown regardless, because a child must be able to disconnect
+with no network. Probed 2026-08-18: **404 on every verb**, identical to the
+`/api/v1/device/definitely-not-real` control, while `GET /api/v1/device/home` on the same host
+answered 401. The only working device removal today is the parent's
+`POST /api/v1/parent/children/{id}/unpair`.
+
+When the backend ships the route: re-capture this file and delete the `DECLARED_AHEAD_OF_DEPLOYMENT`
+entry — the gate prints a reminder to do exactly that once it sees the operation appear in the spec.
+If the backend decides it will never ship, delete the entry **and** the client call site in the same
+change; never the entry alone, which would leave the gate red for a reason nobody could find.
+
 ## ♻️ UNFROZEN 2026-08-13 — the docs moved, they did not go away
 
 `/api/docs-json` is still 404, but the live spec is served from **two** URLs, behind HTTP basic auth
@@ -111,8 +165,13 @@ Live-contract gate — this is the one that can actually fail on a real integrat
 caller rather than read out of the data:
 
 ```bash
-python3 scripts/check_child_live_endpoints.py --min-endpoints 22
+python3 scripts/check_child_live_endpoints.py --min-endpoints 26
 ```
+
+The floor is **26** as of 2026-08-18 (24 → 25 with `POST /device/unpair`, → 26 with
+`GET /device/home`) and is pinned identically in `.github/workflows/openapi-child-baseline.yml`.
+Raise it when call sites are added; lowering it to make a red build green is the one thing this gate
+exists to prevent.
 
 By default the script compares against:
 

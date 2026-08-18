@@ -4,64 +4,121 @@ import LocalAuthentication
 import Security
 import UIKit
 
-enum SettingsProtectionPINPrompt: String, Identifiable {
-    case unlock
-    case create
-
-    var id: String { rawValue }
-}
-
 /// Whether the parent may still set the FIRST disconnect PIN.
 ///
-/// The window exists because first-PIN provisioning is the one step with no existing secret to
-/// check, and it must not be gated on device-owner authentication — Face ID and the passcode on a
-/// child's phone belong to the CHILD, so that gate would hand the monitored user the key. The one
-/// moment a parent is provably present is just after pairing.
+/// The gate exists because first-PIN provisioning is the one step with no existing secret to check,
+/// and it must not be gated on device-owner authentication — Face ID and the passcode on a child's
+/// phone belong to the CHILD, so that gate would hand the monitored user the key.
 ///
-/// The comparison it used to make — `Date().timeIntervalSince(pairedAt) <= 900` — trusted the wall
-/// clock on a device whose Date & Time settings the child controls, and no Screen Time restriction
-/// covers that panel (only supervised MDM does). Turning off "Set Automatically" and moving the
-/// clock to just after `pairedAt` reopened the window days later, letting the child mint the
-/// disconnect PIN and then unpair — defeating the app's strongest control on exactly the devices
-/// where Screen Time blocks deleting the app.
+/// It used to be a wall-clock window: `Date().timeIntervalSince(pairedAt) <= 900`, behind a one-way
+/// latch. Two separate things killed it.
 ///
-/// A sign check alone does NOT close that: `pairedAt + 5 minutes` is a positive, in-window elapsed.
-/// The load-bearing half is the one-way latch — once the window has been observed closed it never
-/// reopens without a genuine re-pairing, whatever the clock later says.
+/// 1. The clock belongs to the child. No Screen Time restriction covers the Date & Time pane (only
+///    supervised MDM does), so turning off "Set Automatically" and winding the clock back to just
+///    after `pairedAt` reopened the window days later. A sign check does NOT close that —
+///    `pairedAt + 5 minutes` is a positive, in-window elapsed — so the latch was carrying the whole
+///    defence on its own.
+/// 2. `pairedAt` is stamped at code redemption, BEFORE the multi-step B1–B11 permissions flow. By
+///    the time Home first opens the window has routinely already elapsed AND latched, so the
+///    first-run prompt this release adds would have been refused on exactly the devices it is for.
+///
+/// So the clock is gone entirely: there is no longer a timestamp to rewind into. What replaces it is
+/// a one-shot grant — live from a pairing until the first-run prompt is ANSWERED (a PIN saved, or
+/// "not now"), then closed for good until the next pairing clears it. That keeps the one-way
+/// property the latch supplied while removing the input the child controlled, which is why this is
+/// strictly more secure than the window it replaces rather than a relaxation of it.
+///
+/// Deliberate consequence: there is ONE grant per pairing, not one per surface. Answering the
+/// first-run prompt therefore also closes the C4 Settings "set PIN" row (which falls back to
+/// `settings2.parent_pin_set_unavailable`). A parent who taps "not now" and changes their mind
+/// re-links from the Oila360 app, which is the same remedy the elapsed window had.
 enum FirstPINProvisioning {
-    static let window: TimeInterval = 15 * 60
-    /// How far the clock may appear to run backwards before we treat it as tampering rather than a
-    /// routine correction. An NTP sync of a second or two inside the legitimate window must not
-    /// latch the gate shut: the parent's only other route to provisioning is a full re-pair, which
-    /// itself needs the parent app, so a false latch is expensive.
-    static let backwardsTolerance: TimeInterval = -300
-
     enum Decision: Equatable {
         case allowed
-        /// Never paired — nothing to measure from.
-        case closedNoPairing
-        /// The latch is already set; the window is gone for good until a re-pairing clears it.
-        case closedLatched
-        /// Legitimately past the window. Caller should latch.
-        case closedElapsed
-        /// The clock reads meaningfully BEFORE pairing, which the passage of time cannot produce.
-        /// Caller should latch: the only way to reach it is by moving the clock.
-        case closedClockMovedBack
+        /// A PIN already exists. Change and remove are the paths, and both prove the current one.
+        case closedPINExists
+        /// The one-shot grant has been spent. Only a re-pairing reopens it.
+        case closedPromptAnswered
 
         var isAllowed: Bool { self == .allowed }
-        /// Whether observing this decision should permanently close the window.
-        var shouldLatch: Bool { self == .closedElapsed || self == .closedClockMovedBack }
     }
 
-    static func decide(pairedAt: Date?, now: Date, latched: Bool) -> Decision {
-        guard let pairedAt else { return .closedNoPairing }
-        if latched { return .closedLatched }
-        let elapsed = now.timeIntervalSince(pairedAt)
-        if elapsed < backwardsTolerance { return .closedClockMovedBack }
-        // A small negative elapsed is a clock correction, not time travel — treat it as "just
-        // paired" rather than refusing the parent who is standing there holding the phone.
-        if elapsed > window { return .closedElapsed }
+    /// Pure so the gate is testable without a controller, a Keychain or a clock. Note what is NOT a
+    /// parameter: the current date. That absence is the fix.
+    static func decide(hasCustomPIN: Bool, promptAnswered: Bool) -> Decision {
+        if hasCustomPIN { return .closedPINExists }
+        if promptAnswered { return .closedPromptAnswered }
         return .allowed
+    }
+}
+
+/// Why a PIN write is allowed. `saveCustomPIN` refuses without one of these.
+///
+/// Every real gate used to live in the disconnect view — the model checked only the digit count and
+/// a Keychain round-trip — so a second call site inherited no protection at all. Naming the
+/// authority at the call site and checking it here is what makes that impossible to forget.
+enum PINProvisioningAuthority: Equatable {
+    /// The one-shot first-run grant, while its prompt is actually on screen.
+    case firstRunGrant
+    /// The parent proved the CURRENT PIN moments ago via `verifyCurrentPINForAuthorization`.
+    case verifiedCurrentPIN
+}
+
+/// Result of checking an entered PIN against the stored verifier.
+///
+/// The three call sites (disconnect, change PIN, remove PIN) each hand-rolled the same contract —
+/// reject during a lockout WITHOUT consuming an attempt, record every wrong guess, clear the ladder
+/// on a correct one — and any surface that got it wrong would be an unmetered oracle for the one
+/// secret the disconnect gate rate-limits. One method, one contract.
+enum PINVerificationOutcome: Equatable {
+    case authorized
+    case incorrect
+    /// Either a lockout that was already running, or the one this attempt just triggered.
+    case lockedOut(until: Date)
+}
+
+/// Who may take a paired device off a parent's account from the device itself, and in what order.
+///
+/// Disconnect is a PARENT action, and a parent-provisioned PIN is still the only thing that can
+/// prove one is present — never the child's own biometric or passcode, which on this phone belong to
+/// the monitored user.
+///
+/// POLICY CHANGE, and it is a deliberate WEAKENING of the previous one. The C6 screen used to hide
+/// the disconnect control outright when no PIN was set, so a monitored child could not unpair at
+/// all; the refusal was belt-and-braces in three independent places (the screen's mode, the hidden
+/// button, and a guard in the button's action). Ibrohim, the product owner, specified the opposite
+/// for build 14 — "Agar PIN kiritilmagan bo'lsa Prosta HA dialog chiqarasiz yani PIN kiritish step
+/// skip bo'ladi" — so with no PIN the button is shown and goes straight to the confirm dialog. All
+/// three refusals had to go together: leaving any one of them would have shipped a dead button.
+///
+/// The mitigation was moved rather than dropped. The first-run PIN prompt on Home makes setting a
+/// PIN the prominent default for every new pairing, with "not now" as a quiet ghost button, so the
+/// protection now depends on a parent answering that prompt rather than on this screen refusing to
+/// render. That is a weaker guarantee and it is recorded here as one.
+///
+/// Lifted out of the view because a policy reversal that no test can see is a policy reversal that
+/// can be undone by accident.
+enum DisconnectFlow {
+    /// The step the screen opens on.
+    enum Entry: Equatable {
+        case enterPIN
+        case confirm
+    }
+
+    static func entry(hasCustomPIN: Bool) -> Entry {
+        hasCustomPIN ? .enterPIN : .confirm
+    }
+
+    /// What proving the PIN buys. Never the teardown: a correct PIN used to call
+    /// `performDisconnect()` on the very next line, which left the most irreversible action in the
+    /// app with no confirmation at all.
+    enum AfterPIN: Equatable {
+        case confirm
+        case retry
+    }
+
+    static func afterPIN(_ outcome: PINVerificationOutcome) -> AfterPIN {
+        outcome == .authorized ? .confirm : .retry
     }
 }
 
@@ -72,8 +129,10 @@ final class SettingsProtectionController: ObservableObject {
     @Published private(set) var isEnabled: Bool
     @Published private(set) var isDeviceAuthenticationAvailable = false
     @Published private(set) var hasCustomPIN = false
+    /// Set by `verifyCurrentPINForAuthorization`, and the proof `saveCustomPIN` demands for
+    /// `.verifiedCurrentPIN`. Deliberately short-lived and cleared on backgrounding, so "the parent
+    /// proved the current PIN" cannot be inherited by whoever picks the phone up next.
     @Published private(set) var hasActiveUnlockSession = false
-    @Published private(set) var activePINPrompt: SettingsProtectionPINPrompt?
     /// End of the current disconnect-PIN lockout, or nil when not locked out. Persisted so a
     /// relaunch cannot reset a brute-force lockout.
     @Published private(set) var pinLockedUntil: Date?
@@ -94,6 +153,13 @@ final class SettingsProtectionController: ObservableObject {
         // re-sets the PIN under the hardened scheme. (Pre-release, so no live PINs are lost.)
         userDefaults.removeObject(forKey: legacyPINHashKey)
 
+        // The wall-clock provisioning window is gone (see `FirstPINProvisioning`), and with it the
+        // latch that recorded "the window was observed closed". Its key is dropped rather than
+        // reused as the new one-shot marker on purpose: reusing it would silently deny the first-run
+        // prompt to every install that merely happened to open Settings more than 15 minutes after
+        // pairing — a condition that has nothing to do with whether a parent has answered anything.
+        userDefaults.removeObject(forKey: Self.legacyFirstPINWindowLatchKey)
+
         if userDefaults.object(forKey: protectionEnabledKey) == nil {
             self.isEnabled = true
         } else {
@@ -111,7 +177,6 @@ final class SettingsProtectionController: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.cancelPINPrompt()
                 self?.clearUnlockSession()
             }
         }
@@ -156,10 +221,6 @@ final class SettingsProtectionController: ObservableObject {
         setEnabled(false)
     }
 
-    func configureCustomPIN() async -> Bool {
-        await presentPINPrompt(.create)
-    }
-
     func removeCustomPIN() {
         guard hasCustomPIN else { return }
         pinStore.delete()
@@ -185,30 +246,51 @@ final class SettingsProtectionController: ObservableObject {
     func resetForNewPairing() {
         pinStore.delete()
         clearLockoutState()
-        userDefaults.removeObject(forKey: Self.firstPINWindowLatchKey)
+        userDefaults.removeObject(forKey: Self.firstRunPINPromptAnsweredKey)
+        isFirstRunPINPromptOpen = false
         refreshAvailability()
     }
 
-    /// Whether the first-PIN window has been permanently closed on this install.
-    var isFirstPINWindowLatched: Bool {
-        userDefaults.bool(forKey: Self.firstPINWindowLatchKey)
+    // MARK: - First-run PIN grant
+    //
+    // The grant is TWO pieces of state and they do different jobs. The persisted marker says "this
+    // pairing's one prompt has been used" and is spent the moment the prompt is put on screen, so a
+    // force-quit mid-prompt cannot farm a second one. The in-memory flag says "that prompt is open
+    // right now" and is what keeps the SAVE authorized for the life of the sheet — without it,
+    // spending the marker at presentation would refuse the very write the prompt exists to make.
+    // The in-memory half dying with the process is the correct failure mode: a sheet that is no
+    // longer on screen cannot authorize anything.
+
+    /// Whether this pairing's one first-run prompt has already been answered.
+    var isFirstRunPINPromptAnswered: Bool {
+        userDefaults.bool(forKey: Self.firstRunPINPromptAnsweredKey)
     }
 
-    /// Evaluate the window and persist the latch when it has closed.
-    ///
-    /// Call this from `.onAppear`, never from a view body: it WRITES, and `SettingsProtectionController`
-    /// is an `ObservableObject` read during rendering.
-    @discardableResult
-    func evaluateFirstPINWindow(pairedAt: Date?, now: Date = Date()) -> FirstPINProvisioning.Decision {
-        let decision = FirstPINProvisioning.decide(
-            pairedAt: pairedAt,
-            now: now,
-            latched: isFirstPINWindowLatched
+    /// Whether a first PIN may still be provisioned on this install.
+    var firstPINProvisioning: FirstPINProvisioning.Decision {
+        FirstPINProvisioning.decide(
+            hasCustomPIN: hasCustomPIN,
+            promptAnswered: isFirstRunPINPromptAnswered
         )
-        if decision.shouldLatch {
-            userDefaults.set(true, forKey: Self.firstPINWindowLatchKey)
-        }
-        return decision
+    }
+
+    /// Claim the one-shot grant and open the provisioning prompt. Returns false — and presents
+    /// nothing — when the grant is already spent or a PIN exists.
+    ///
+    /// It WRITES, so call it from `.onAppear` or a button action, never from a view body: this is an
+    /// `ObservableObject` that is read during rendering.
+    @discardableResult
+    func beginFirstRunPINPrompt() -> Bool {
+        guard firstPINProvisioning.isAllowed else { return false }
+        userDefaults.set(true, forKey: Self.firstRunPINPromptAnsweredKey)
+        isFirstRunPINPromptOpen = true
+        return true
+    }
+
+    /// The prompt left the screen — saved, skipped or swiped away. All three are "answered"; the
+    /// marker was already spent at presentation, so this only closes the write authorization.
+    func endFirstRunPINPrompt() {
+        isFirstRunPINPromptOpen = false
     }
 
     /// Synchronous, nonisolated wipe of the PERSISTED PIN + lockout.
@@ -223,13 +305,18 @@ final class SettingsProtectionController: ObservableObject {
         userDefaults.removeObject(forKey: pinFailCountKey)
         userDefaults.removeObject(forKey: pinLockUntilKey)
         userDefaults.removeObject(forKey: pinLockoutTierKey)
-        // A genuine re-pairing is the documented way to reopen first-PIN provisioning, so the latch
-        // has to clear here too — otherwise a family that missed the window once could never set a
-        // disconnect PIN again, even after re-linking from the parent app.
-        userDefaults.removeObject(forKey: firstPINWindowLatchKey)
+        // A genuine re-pairing is the documented way to reopen first-PIN provisioning, so the
+        // one-shot marker has to clear here too. This is the path that runs at `setOilaPaired(true)`
+        // AND inside the disconnect purge; `resetForNewPairing()` is the main-actor twin. Both have
+        // to clear it or the NEXT family never sees the prompt at all — which, now that the prompt
+        // is the only place a first PIN gets offered, means they silently never get one.
+        userDefaults.removeObject(forKey: firstRunPINPromptAnsweredKey)
     }
 
-    nonisolated static let firstPINWindowLatchKey = "SETTINGS_PROTECTION_FIRST_PIN_WINDOW_CLOSED"
+    nonisolated static let firstRunPINPromptAnsweredKey = "SETTINGS_PROTECTION_FIRST_RUN_PIN_ANSWERED"
+    /// Dead storage from the wall-clock window, removed once at init. Kept named so the migration
+    /// reads as a migration rather than a magic string.
+    nonisolated static let legacyFirstPINWindowLatchKey = "SETTINGS_PROTECTION_FIRST_PIN_WINDOW_CLOSED"
 
     private func clearLockoutState() {
         userDefaults.removeObject(forKey: pinFailCountKey)
@@ -238,58 +325,13 @@ final class SettingsProtectionController: ObservableObject {
         pinLockedUntil = nil
     }
 
-    func submitPINPrompt(pin: String, confirmation: String?) -> String? {
-        guard let activePINPrompt else { return nil }
-
-        let normalizedPIN = normalizePIN(pin)
-        guard normalizedPIN.count == pinLength else {
-            return L10n.tr("settings.control_protection_pin_invalid")
-        }
-
-        switch activePINPrompt {
-        case .unlock:
-            // Enforce the brute-force lockout on this path too. It was previously enforced only by
-            // the disconnect screen's own gate, so any UI wired to this prompt would have been an
-            // un-rate-limited oracle for the same shared PIN.
-            if pinLockRemaining != nil {
-                return L10n.tr("settings.control_protection_pin_incorrect")
-            }
-            guard verify(normalizedPIN) else {
-                recordPINAttempt(success: false)
-                return L10n.tr("settings.control_protection_pin_incorrect")
-            }
-            recordPINAttempt(success: true)
-            startUnlockSession()
-            completePINPrompt(result: true)
-            return nil
-        case .create:
-            let normalizedConfirmation = normalizePIN(confirmation ?? "")
-            guard normalizedConfirmation.count == pinLength else {
-                return L10n.tr("settings.control_protection_pin_invalid")
-            }
-            guard normalizedPIN == normalizedConfirmation else {
-                return L10n.tr("settings.control_protection_pin_mismatch")
-            }
-            pinStore.save(makeRecord(for: normalizedPIN))
-            startUnlockSession()
-            refreshAvailability()
-            completePINPrompt(result: true)
-            return nil
-        }
-    }
-
-    func cancelPINPrompt() {
-        guard activePINPrompt != nil || pinPromptContinuation != nil else { return }
-        activePINPrompt = nil
-        pinPromptContinuation?.resume(returning: false)
-        pinPromptContinuation = nil
-    }
-
-    // MARK: - Direct gate (used by the Bolajon360 disconnect screen)
+    // MARK: - Direct gate (used by the Bolajon360 PIN screens)
     //
-    // The disconnect screen owns its own lavender PIN field, so it validates the entered
-    // PIN directly rather than through the `activePINPrompt` continuation UI. These are pure
-    // and synchronous (except the biometric wrapper) so they are unit-testable.
+    // The PIN screens own their own lavender keypad, so they validate the entered PIN through these
+    // methods rather than through a presentation continuation. They are synchronous and free of UI
+    // so they are unit-testable — and, since this release, they are also where the ENFORCEMENT
+    // lives. The rule is that no view may authorize a PIN write; it can only report which authority
+    // it holds, and this class decides whether that authority is real.
 
     /// True when `pin` matches the stored custom PIN. False if no custom PIN is set or the
     /// input is the wrong length. Never throws — safe to call on every keystroke.
@@ -302,13 +344,50 @@ final class SettingsProtectionController: ObservableObject {
         return verify(normalized)
     }
 
-    /// Stores a new custom PIN (used by the Settings provisioning flow and by the disconnect
-    /// create-flow when none exists yet). Returns false when the input isn't exactly `pinLength`
-    /// digits.
+    /// The one way to spend a PIN attempt: applies the lockout, records the outcome, and on success
+    /// opens the short unlock session that `.verifiedCurrentPIN` is checked against.
+    ///
+    /// Callers must route "the parent typed the current PIN" through here rather than pairing
+    /// `verifyCustomPIN` with their own `recordPINAttempt` call. Two screens already did the latter,
+    /// identically, and a third that forgot half of it would be an unmetered oracle for the secret
+    /// the disconnect gate exists to rate-limit.
+    func verifyCurrentPINForAuthorization(_ pin: String) -> PINVerificationOutcome {
+        if let pinLockedUntil, pinLockedUntil > Date() {
+            // A live lockout rejects WITHOUT consuming an attempt — otherwise waiting it out would
+            // be pointless and the ladder could be walked by a caller that never guesses.
+            return .lockedOut(until: pinLockedUntil)
+        }
+        guard verifyCustomPIN(pin) else {
+            if let until = recordPINAttempt(success: false) { return .lockedOut(until: until) }
+            return .incorrect
+        }
+        recordPINAttempt(success: true)
+        startUnlockSession()
+        return .authorized
+    }
+
+    /// Stores a new custom PIN. `authority` is the whole point: it names WHY this write is allowed,
+    /// and the check below is what makes a new call site inherit the gates instead of none.
+    ///
+    /// Returns false when the input isn't exactly `pinLength` digits, when the claimed authority
+    /// isn't actually held, or when the Keychain write cannot be read back.
     @discardableResult
-    func saveCustomPIN(_ pin: String) -> Bool {
+    func saveCustomPIN(_ pin: String, authority: PINProvisioningAuthority) -> Bool {
         let normalized = normalizePIN(pin)
         guard normalized.count == pinLength else { return false }
+
+        switch authority {
+        case .firstRunGrant:
+            // `!hasCustomPIN` is load-bearing beyond "this is the first PIN". This method clears an
+            // active lockout on success (see below), so a first-run screen that could be reached
+            // while a PIN existed would be a lockout-reset oracle: five wrong guesses, then open the
+            // provisioning prompt to wipe the penalty and guess five more, forever. Requiring that
+            // no PIN exists means there is no lockout worth resetting when this branch runs.
+            guard !hasCustomPIN, isFirstRunPINPromptOpen else { return false }
+        case .verifiedCurrentPIN:
+            guard hasCustomPIN, hasActiveUnlockSession else { return false }
+        }
+
         pinStore.save(makeRecord(for: normalized))
         // Confirm the record actually landed. `PINCredentialStoring.save` returns Void, so a
         // Keychain rejection would otherwise be swallowed and this method would claim success while
@@ -316,8 +395,7 @@ final class SettingsProtectionController: ObservableObject {
         // fixing in SecureTokenStore. Verifying the just-chosen PIN round-trips proves the write.
         guard verify(normalized) else { return false }
         // A lockout is a rate limit on guessing the OLD secret; carrying it over would leave the
-        // parent unable to use the PIN they just chose. Reaching this point already required
-        // authorization (the current PIN, or the post-pairing window for the very first one).
+        // parent unable to use the PIN they just chose.
         recordPINAttempt(success: true)
         startUnlockSession()
         refreshAvailability()
@@ -326,7 +404,7 @@ final class SettingsProtectionController: ObservableObject {
 
     // NOTE: there is deliberately no biometric / device-passcode unlock here. This screen runs on the
     // CHILD's phone, where Face ID, Touch ID and the passcode all belong to the child — see the note
-    // in `BolajonSettingsView.DisconnectView`. The app therefore never calls
+    // on `DisconnectFlow` above. The app therefore never calls
     // `LAContext.evaluatePolicy`, and `NSFaceIDUsageDescription` has been removed from Info.plist to
     // match. The `canEvaluatePolicy` probe in `refreshAvailability()` needs no usage description.
 
@@ -382,7 +460,8 @@ final class SettingsProtectionController: ObservableObject {
     private let pinStore: PINCredentialStoring
     private var unlockSessionExpiration: Date?
     private var foregroundObserver: NSObjectProtocol?
-    private var pinPromptContinuation: CheckedContinuation<Bool, Never>?
+    /// See the first-run grant section: in-memory on purpose.
+    private var isFirstRunPINPromptOpen = false
     private let unlockGracePeriod: TimeInterval = 120
     private let pinLength = 4
     private let protectionEnabledKey = "SETTINGS_PROTECTION_ENABLED"
@@ -416,21 +495,6 @@ final class SettingsProtectionController: ObservableObject {
         let stored = record.suffix(PINKeyDerivation.keyLength)
         let candidate = PINKeyDerivation.derive(pin: pin, salt: Data(salt))
         return PINKeyDerivation.constantTimeEquals(Data(stored), candidate)
-    }
-
-    private func presentPINPrompt(_ prompt: SettingsProtectionPINPrompt) async -> Bool {
-        cancelPINPrompt()
-
-        return await withCheckedContinuation { continuation in
-            pinPromptContinuation = continuation
-            activePINPrompt = prompt
-        }
-    }
-
-    private func completePINPrompt(result: Bool) {
-        activePINPrompt = nil
-        pinPromptContinuation?.resume(returning: result)
-        pinPromptContinuation = nil
     }
 
     private func startUnlockSession() {

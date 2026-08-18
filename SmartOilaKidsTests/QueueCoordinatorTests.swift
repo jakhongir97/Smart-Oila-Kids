@@ -562,7 +562,16 @@ final class SessionStoreTests: XCTestCase {
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
         let secureTokens = MutableSecureTokenStoreSpy()
-        let store = SessionStore(userDefaults: userDefaults, secureTokens: secureTokens)
+        // A private stand-in for the App Group: `clearSession()` now removes that whole persistent
+        // domain (purge step 9), and the real suite is shared with a running extension and with
+        // every other test in this bundle.
+        let groupSuiteName = "SessionStoreMutationGroup.\(UUID().uuidString)"
+        defer { UserDefaults().removePersistentDomain(forName: groupSuiteName) }
+        let store = SessionStore(
+            userDefaults: userDefaults,
+            secureTokens: secureTokens,
+            appGroupIdentifier: groupSuiteName
+        )
 
         store.setDSN(" child-2 ")
         store.setProfileName("Guardian")
@@ -593,7 +602,16 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNil(store.apiRefreshToken)
         XCTAssertNil(secureTokens.access)
         XCTAssertNil(secureTokens.refresh)
-        XCTAssertEqual(store.profileName, "Guardian")
+        // The child's NAME is child data and no longer survives a disconnect (purge step 8). This
+        // assertion used to read `"Guardian"`, pinning the opposite: `handlePaired` falls back to
+        // `profileName` when `POST /device/pair` returns a child with no name, so keeping it meant
+        // the NEXT family could be greeted by the previous child's name. Compared against the
+        // localized default rather than a literal because the language set above decides which
+        // string that is — the contract is "back to the default", not "back to that one word".
+        XCTAssertEqual(store.profileName, L10n.tr("common.user_default"))
+        XCTAssertNotEqual(store.profileName, "Guardian")
+        XCTAssertNil(userDefaults.string(forKey: "PROFILE_NAME"))
+        // Theme and language are DEVICE preferences, not child data, so they still survive.
         XCTAssertEqual(store.appTheme, .light)
         XCTAssertEqual(store.appLanguage, .ru)
         XCTAssertFalse(store.hasAuthenticatedSession)
@@ -604,7 +622,15 @@ final class SessionStoreTests: XCTestCase {
         let userDefaults = UserDefaults(suiteName: suiteName)!
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
-        let store = SessionStore(userDefaults: userDefaults, secureTokens: MutableSecureTokenStoreSpy())
+        // Private App Group stand-in, for the same reason as the mutation test above: the purge
+        // removes the whole domain it is handed.
+        let groupSuiteName = "SessionStorePurgeGroup.\(UUID().uuidString)"
+        defer { UserDefaults().removePersistentDomain(forName: groupSuiteName) }
+        let store = SessionStore(
+            userDefaults: userDefaults,
+            secureTokens: MutableSecureTokenStoreSpy(),
+            appGroupIdentifier: groupSuiteName
+        )
 
         // Simulate a paired child: a generate-once device DSN + a globally-cached device list.
         let dsnBefore = OilaDeviceIdentity.deviceDSN(userDefaults: userDefaults)

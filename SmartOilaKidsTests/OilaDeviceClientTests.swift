@@ -385,6 +385,251 @@ final class OilaDeviceClientTests: XCTestCase {
 
         XCTAssertEqual(lockStateAttempts, 1, "401 must go straight to the refresh path, not be retried")
     }
+
+    // MARK: Device unpair
+
+    func testUnpairPostsTheDeviceAuthenticatedRevoke() async {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, #"{"success":true,"data":{}}"#) }
+
+        let outcome = await client.unpairDevice()
+
+        XCTAssertEqual(outcome, .revoked)
+        let request = TestHTTPURLProtocol.recordedRequests.first { $0.url?.path.contains("device/unpair") == true }
+        XCTAssertEqual(request?.httpMethod, "POST")
+        XCTAssertEqual(
+            request?.value(forHTTPHeaderField: "Authorization"),
+            "Bearer DEVICE_JWT",
+            "the revoke is authenticated by the DEVICE credential it is revoking"
+        )
+    }
+
+    /// The route is not deployed yet (backend ask B1). Until it is, every disconnect hits one of
+    /// these three statuses, and none of them is an app failure — the day it ships, the same code
+    /// starts cutting the link with no change here.
+    func testUndeployedRouteIsReportedAsMissingRatherThanFailing() async {
+        for code in [404, 405, 501] {
+            TestHTTPURLProtocol.reset()
+            let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+            TestHTTPURLProtocol.requestHandler = { [self] request in status(request, code) }
+
+            let outcome = await client.unpairDevice()
+
+            XCTAssertEqual(outcome, .routeMissing, "HTTP \(code) means the deployment lacks the route")
+        }
+    }
+
+    /// A child in a basement pressing Disconnect. The link is certainly still up server-side, and
+    /// saying so is the whole reason the outcomes are distinguished — but the teardown must still run.
+    func testTransportFailureIsReportedAsUnreachableAndNeverThrows() async {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        TestHTTPURLProtocol.requestHandler = { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let outcome = await client.unpairDevice()
+
+        XCTAssertEqual(outcome, .unreachable)
+    }
+
+    /// A 500 must not be filed as "offline": that would send whoever reads the diagnostic to the
+    /// wrong side of the problem entirely.
+    func testServerErrorIsRejectedNotUnreachable() async {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        TestHTTPURLProtocol.requestHandler = { [self] request in status(request, 500) }
+
+        let outcome = await client.unpairDevice()
+
+        XCTAssertEqual(outcome, .rejected)
+    }
+
+    /// No credential means no request was ever sent, so nothing was revoked. Claiming `.revoked`
+    /// here would be the one outcome that actively misleads.
+    func testMissingCredentialIsNotReportedAsRevoked() async {
+        let client = makeClient(tokens: InMemoryTokenStore(access: nil))
+
+        let outcome = await client.unpairDevice()
+
+        XCTAssertEqual(outcome, .rejected)
+        XCTAssertTrue(TestHTTPURLProtocol.recordedRequests.isEmpty, "there is nothing to send")
+    }
+
+    /// The disconnect path calls `logout()`, so the revoke has to happen from there — and it has to
+    /// happen while the credential is still readable, i.e. before the `defer` that clears it.
+    func testLogoutAttemptsTheUnpairBeforeClearingTheCredential() async throws {
+        let tokens = InMemoryTokenStore(access: "DEVICE_JWT")
+        let client = makeClient(tokens: tokens)
+        TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, #"{"success":true,"data":{}}"#) }
+
+        try await client.logout()
+
+        let unpair = try XCTUnwrap(
+            TestHTTPURLProtocol.recordedRequests.first { $0.url?.path.contains("device/unpair") == true }
+        )
+        XCTAssertEqual(unpair.value(forHTTPHeaderField: "Authorization"), "Bearer DEVICE_JWT")
+        XCTAssertNil(tokens.access, "the local teardown still happens whatever the server said")
+    }
+
+    /// `unpairDevice` may never be the reason a child stays paired to a phone they are holding.
+    func testLogoutStillClearsTheCredentialWhenTheDeviceIsOffline() async throws {
+        let tokens = InMemoryTokenStore(access: "DEVICE_JWT")
+        let client = makeClient(tokens: tokens)
+        TestHTTPURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+
+        try await client.logout()
+
+        XCTAssertNil(tokens.access)
+    }
+
+    func testUnpairOutcomeStatusMapping() {
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 404), .routeMissing)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 405), .routeMissing)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 501), .routeMissing)
+        // A refused Bearer cannot be used again either way, which is the state a revoke aims at.
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 401), .revoked)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 403), .revoked)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 500), .rejected)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 400), .rejected)
+    }
+
+    // MARK: Device home
+
+    /// `fetchHome` is declared on `OilaDeviceServicing` with NO protocol-extension default, so a
+    /// signature that drifted would fail to compile rather than silently stop calling the endpoint.
+    /// This pins the other half — the verb and path actually put on the wire — because the gate
+    /// script reads that literal out of the source and the spec entry has to match it.
+    func testFetchHomeGetsTheDeviceHomeRoute() async throws {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        var seen: (path: String, method: String, auth: String?)?
+        TestHTTPURLProtocol.requestHandler = { [self] request in
+            seen = (request.url!.path, request.httpMethod ?? "",
+                    request.value(forHTTPHeaderField: "Authorization"))
+            return ok(request, #"{"success":true,"data":{"child":{"id":"c1","name":"Ali"}}}"#)
+        }
+
+        let home = try await client.fetchHome()
+
+        XCTAssertEqual(seen?.path, "/device/home")
+        XCTAssertEqual(seen?.method, "GET")
+        XCTAssertEqual(seen?.auth, "Bearer DEVICE_JWT")
+        XCTAssertEqual(home?.child?.name, "Ali")
+    }
+
+    /// A 200 whose `data` is not an object at all (an empty envelope, an array) is "nothing to
+    /// report", not a crash and not an empty identity to write over a good one.
+    func testFetchHomeWithANonObjectPayloadIsNil() async throws {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        TestHTTPURLProtocol.requestHandler = { [self] request in
+            ok(request, #"{"success":true,"data":[]}"#)
+        }
+
+        let home = try await client.fetchHome()
+
+        XCTAssertNil(home)
+    }
+}
+
+/// `parseHome` against the documented `DeviceHomeResponseDto`. The point of these is that the
+/// payload is read by the SAME parsers the individual endpoints use, so what they really pin is
+/// that the reuse holds for this shape — a home response whose screen time or child stopped
+/// parsing would mean the two readings had drifted.
+final class OilaDeviceHomeParsingTests: XCTestCase {
+    private func parse(_ json: String) throws -> OilaDeviceHome {
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        return OilaDeviceClient.parseHome(from: object)
+    }
+
+    /// The documented response, whole.
+    func testFullResponseParsesEveryDocumentedField() throws {
+        let home = try parse(#"""
+        {
+          "child": {"id":"c1","name":"Abdulfattoh","profileColor":"#F0605A",
+                    "avatarEmoji":"🐧","profilePictureUrl":"https://cdn.example/c1.jpg"},
+          "screenTime": {"date":"2026-08-18","usedSeconds":5400,
+                         "dailyScreenLimitSeconds":10800,"remainingSeconds":5400},
+          "tasks": {"totalPoints":42,
+                    "recent":[{"id":"t1","title":"Kitob o'qish","emoji":"📗",
+                               "rewardPoints":5,"status":"Active"},
+                              {"id":"t2","title":"Xona yig'ish","emoji":"🧹",
+                               "rewardPoints":3,"status":"Completed"}]},
+          "chat": {"unreadCount":2,
+                   "lastMessage":{"id":"m9","senderType":"Parent","text":"Uyga qaytdingmi?",
+                                  "hasAttachment":false,"systemKind":null,
+                                  "createdAt":"2026-08-18T09:15:00.000Z"}}
+        }
+        """#)
+
+        XCTAssertEqual(home.child?.name, "Abdulfattoh")
+        XCTAssertEqual(home.child?.avatarEmoji, "🐧")
+        XCTAssertEqual(home.child?.profileColor, "#F0605A")
+        XCTAssertEqual(home.child?.avatarURL, "https://cdn.example/c1.jpg")
+        // `dailyScreenLimitSeconds` and `date` are already the first spellings `parseScreenTime`
+        // tries — the reuse needed no new keys.
+        XCTAssertEqual(home.screenTime?.usedSeconds, 5400)
+        XCTAssertEqual(home.screenTime?.dailyLimitSeconds, 10800)
+        XCTAssertEqual(home.screenTime?.remainingSeconds, 5400)
+        XCTAssertEqual(home.screenTime?.usageDate, "2026-08-18")
+        XCTAssertEqual(home.taskTotalPoints, 42)
+        XCTAssertEqual(home.recentTasks.map(\.id), ["t1", "t2"])
+        XCTAssertEqual(home.chatUnreadCount, 2)
+        XCTAssertEqual(home.chatLastMessage?.id, "m9")
+        XCTAssertEqual(home.chatLastMessage?.sender, .parent)
+        XCTAssertFalse(home.chatLastMessage?.hasImage ?? true)
+    }
+
+    /// The documented all-zeros answer for a device whose parent has set nothing up: it is a 200,
+    /// so it must parse as "no budget, no tasks, no messages" rather than as a failure.
+    func testTheEmptyButValidResponseParsesAsEmptyRatherThanNil() throws {
+        let home = try parse(#"""
+        {
+          "child": {"id":"c1","name":"Ali","profileColor":null,
+                    "avatarEmoji":null,"profilePictureUrl":null},
+          "screenTime": {"date":"2026-08-18","usedSeconds":0,
+                         "dailyScreenLimitSeconds":null,"remainingSeconds":null},
+          "tasks": {"totalPoints":0,"recent":[]},
+          "chat": {"unreadCount":0,"lastMessage":null}
+        }
+        """#)
+
+        XCTAssertEqual(home.child?.name, "Ali")
+        XCTAssertNil(home.child?.avatarEmoji)
+        XCTAssertNil(home.child?.profileColor)
+        XCTAssertEqual(home.screenTime?.usedSeconds, 0)
+        XCTAssertNil(home.screenTime?.dailyLimitSeconds)
+        XCTAssertFalse(home.screenTime?.isLimitReached ?? true, "no budget is not a budget reached")
+        XCTAssertEqual(home.taskTotalPoints, 0)
+        XCTAssertTrue(home.recentTasks.isEmpty)
+        XCTAssertEqual(home.chatUnreadCount, 0)
+        // An explicit JSON null decodes to NSNull, which is a perfectly non-nil `Any` — the same
+        // trap `parseChatMessage`'s own tests pin.
+        XCTAssertNil(home.chatLastMessage)
+    }
+
+    /// `parseChild` falls back to the object it is handed when there is no `child` key, and here
+    /// that object would be the whole Home payload — so a top-level `name` belonging to something
+    /// else would be written into the child's profile by the refresh. `parseHome` looks only under
+    /// `child`, and this is the case that would catch a regression to the loose reading.
+    func testAPayloadWithNoChildObjectYieldsNoChild() throws {
+        let home = try parse(#"""
+        {"name":"not the child","tasks":{"totalPoints":7,"recent":[]}}
+        """#)
+
+        XCTAssertNil(home.child)
+        XCTAssertEqual(home.taskTotalPoints, 7)
+    }
+
+    /// One missing branch must not cost the others: an unrecognized payload degrades field by
+    /// field, the way every other tolerant read in this client does.
+    func testMissingSectionsDegradeIndividually() throws {
+        let home = try parse(#"{"child":{"id":"c1","name":"Ali"}}"#)
+
+        XCTAssertEqual(home.child?.name, "Ali")
+        XCTAssertNil(home.screenTime)
+        XCTAssertNil(home.taskTotalPoints)
+        XCTAssertTrue(home.recentTasks.isEmpty)
+        XCTAssertNil(home.chatUnreadCount)
+        XCTAssertNil(home.chatLastMessage)
+    }
 }
 
 /// `parseChatMessage` reads several fields by existence (`item["readAt"] != nil`) rather than by
@@ -689,5 +934,48 @@ final class OilaDeviceBackendParityParsingTests: XCTestCase {
             readByPeer: false, raw: [:], systemKind: "   ", systemData: nil
         )
         XCTAssertFalse(blankKind.isSystemNotice, "an empty kind is not a kind")
+    }
+
+}
+
+// MARK: - Reinstall credential purge
+
+/// A device Bearer and the old `dsn` are written `AfterFirstUnlockThisDeviceOnly`, so deleting the
+/// app does not remove them — a reinstall could hold a live credential for a pairing the user
+/// believes they removed. The missing UserDefaults marker is the only evidence that the container is
+/// new, and it is enough, because nothing else survives a delete either.
+///
+/// These exercise the MARKER, which is the part that decides. The Keychain deletes themselves reach
+/// the shared system Keychain (the stores are singletons bound to it) and cannot be isolated here;
+/// on an install with nothing stored they are no-ops.
+final class ReinstallCredentialPurgeTests: XCTestCase {
+    private func makeDefaults() -> (UserDefaults, String) {
+        let suiteName = "ReinstallCredentialPurgeTests.\(UUID().uuidString)"
+        return (UserDefaults(suiteName: suiteName)!, suiteName)
+    }
+
+    func testFirstLaunchOfAFreshContainerPurgesExactlyOnce() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(
+            SecureTokenStore.purgeCredentialsOrphanedByReinstall(userDefaults: defaults),
+            "no marker means the container is new and anything in the Keychain is an orphan"
+        )
+        XCTAssertTrue(defaults.bool(forKey: SecureTokenStore.installMarkerKey))
+        XCTAssertFalse(
+            SecureTokenStore.purgeCredentialsOrphanedByReinstall(userDefaults: defaults),
+            "a second launch must not wipe the credential this install has since paired with"
+        )
+    }
+
+    /// The failure this ordering protects against: a purge that ran on every launch would destroy a
+    /// perfectly good pairing the moment it was made.
+    func testAnAlreadyMarkedInstallIsNeverPurged() {
+        let (defaults, suiteName) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: SecureTokenStore.installMarkerKey)
+
+        XCTAssertFalse(SecureTokenStore.purgeCredentialsOrphanedByReinstall(userDefaults: defaults))
     }
 }

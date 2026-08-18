@@ -170,8 +170,8 @@
 "perm2.notifications.title" = "Want your child's phone under your watch?";
 "perm2.notifications.body" = "Bolajon360 needs notifications to show it's active. Without them the app won't work correctly.";
 "perm2.notifications.cta" = "Enable notifications";
-"perm2.battery.title" = "Prevent the app from stopping";
-"perm2.battery.body" = "So the phone doesn't close the app in the background, exclude it from battery saving.";
+"perm2.microphone.title" = "Want to be able to hear live sound?";
+"perm2.camera.title" = "Want to be able to see live video?";
 "perm2.location.title" = "Want to know where your child is?";
 "perm2.location.body" = "You'll see the location on the map in real time and can set safe zones.";
 "perm2.bglocation.title" = "Update location even when the app is closed?";
@@ -180,8 +180,6 @@
 "perm2.usage.body" = "You'll see how much time each app takes and can set time limits.";
 "perm2.limits.title" = "Want to be able to restrict apps?";
 "perm2.limits.body" = "You'll be able to block apps at any time.";
-"perm2.autostart.title" = "Keep protection running after a restart";
-"perm2.autostart.body" = "iOS can't relaunch apps on its own after a restart. If you restart the phone, open Bolajon once so protection keeps running.";
 "perm2.summary.title" = "Done! Protection is on";
 "perm2.summary.body" = "Bolajon360 is now ready to protect your child. You can change settings any time.";
 "perm2.summary.cta" = "Finish";
@@ -240,18 +238,27 @@
 "disconnect2.confirm" = "Disconnect";
 "disconnect2.cancel" = "Cancel";
 "disconnect2.pin_incorrect" = "Incorrect PIN. Try again.";
+"disconnect2.confirm_title" = "Really disconnect?";
+"disconnect2.confirm_body" = "The device will be disconnected from the parent and the app will go back to how it was right after installing.";
+"disconnect2.confirm_yes" = "Yes, disconnect";
+"disconnect2.confirm_cancel" = "Cancel";
+
+/* MARK: - First-run parent PIN provisioning */
+"pin_setup.title" = "Set a PIN code";
+"pin_setup.subtitle" = "Set a PIN code so the child can't disconnect the device whenever they want";
+"pin_setup.confirm_title" = "Repeat the PIN code";
+"pin_setup.confirm_subtitle" = "Enter the PIN code once more to confirm";
+"pin_setup.mismatch" = "The PIN codes don't match. Try again";
+"pin_setup.save" = "Save";
+"pin_setup.skip" = "Not now";
 
 "perm2.decline_bg" = "No, only when open";
 
 "perm2.item.notifications" = "Notifications";
 
-"perm2.item.battery" = "Battery saving off";
-
 "perm2.item.screen" = "Display over screen";
 
 "perm2.item.usage" = "Usage tracking";
-
-"perm2.item.autostart" = "Auto-start";
 
 "perm2.item.location" = "Location";
 

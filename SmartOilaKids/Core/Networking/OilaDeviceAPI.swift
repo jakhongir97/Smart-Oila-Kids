@@ -195,6 +195,47 @@ struct OilaDeviceScreenTime: Equatable {
     }
 }
 
+/// One `GET /device/home` answer (DeviceHomeResponseDto) — the whole Home screen in one call.
+///
+/// Built out of the types the individual endpoints already return rather than a parallel set of
+/// home-only models. The route is documented as carrying the SAME values those endpoints do
+/// (`screenTime` is explicitly "identical to `GET /device/apps/screen-time`"), so a second set of
+/// types would be two spellings of one contract, free to drift apart without anything noticing.
+///
+/// What Home consumes today is `child`, and only `child`: name/emoji/colour are written once by
+/// `BolajonSetupFlowView.handlePaired` out of the pairing response and were then never re-read, so
+/// a parent renaming their child never reached the handset at all. The endpoint's own docs are
+/// explicit about this — "re-read on every call, do NOT cache the pairing response's copy".
+///
+/// The other three are parsed because each costs one line through the tolerant helpers that
+/// already exist, and because a partial model of a documented payload is a trap for whoever reads
+/// this next. They are deliberately NOT wired to the screen:
+///
+///  * `recentTasks` cannot drive the Home task card. That card shows two pending tasks plus the
+///    most recently completed one with cancelled ones excluded; `recent` is capped at two rows with
+///    no status filter and no pagination, so the selection is not reproducible from it. Home keeps
+///    walking `GET /device/tasks`.
+///  * `screenTime` already has its own call on this screen. A second source would only help when
+///    that call failed — and on a dead network both fail together, so the fallback could
+///    essentially never fire while still adding a second origin for a figure with careful
+///    freshness rules (`todaysServerScreenTime`) attached to it.
+///  * `chatUnreadCount` belongs to `ChatHomeCard`, which owns its own endpoint and refresh token.
+struct OilaDeviceHome {
+    /// The child's CURRENT identity. Nil when the payload named no recognizable child field at
+    /// all — a caller must then keep the identity it already has rather than clear it.
+    let child: OilaChildProfile?
+    /// `screenTime`, read with the same parser as the dedicated endpoint (see the type doc).
+    let screenTime: OilaDeviceScreenTime?
+    /// `tasks.totalPoints` — the same figure `GET /device/tasks/summary` returns.
+    let taskTotalPoints: Int?
+    /// `tasks.recent`: at most two rows, no status filter. See the type doc for why Home cannot
+    /// build its card from these.
+    let recentTasks: [OilaDeviceTask]
+    let chatUnreadCount: Int?
+    /// `chat.lastMessage`; nil on a thread with no messages yet.
+    let chatLastMessage: OilaChatMessage?
+}
+
 /// Snapshot for `POST /device/status` (PostDeviceStatusDto). All fields optional.
 struct OilaDeviceStatus {
     let battery: Int?
@@ -445,6 +486,26 @@ struct OilaDeviceFile {
     let raw: [String: Any]
 }
 
+/// What `POST /device/unpair` actually achieved.
+///
+/// Three of these look identical from the child's side — the app returns to pairing either way —
+/// and telling them apart is the whole point: `.revoked` means the server-side link really is cut,
+/// `.routeMissing` means this deployment has no such route yet and a parent must still remove the
+/// device in the Oila360 app, and `.unreachable` means the phone had no signal and the link is
+/// certainly still standing. Without the distinction the support answer to "I disconnected but the
+/// parent still sees the device" is a guess.
+enum OilaUnpairOutcome: String {
+    /// The server accepted the revoke.
+    case revoked = "device_unpair_revoked"
+    /// The route is not deployed (404/405/501). Expected until backend ask B1 ships.
+    case routeMissing = "device_unpair_route_missing"
+    /// The request never reached a server — no signal, DNS, a dropped connection.
+    case unreachable = "device_unpair_unreachable"
+    /// A server answered, but with neither a revoke nor a not-implemented. Kept distinct so a 500
+    /// is never filed as "offline", which would send anyone reading this to the wrong side.
+    case rejected = "device_unpair_rejected"
+}
+
 // MARK: - Service protocol
 
 protocol OilaDeviceServicing {
@@ -472,6 +533,15 @@ protocol OilaDeviceServicing {
     func fetchScreenTime() async throws -> OilaDeviceScreenTime?
     /// Report an app removal/tamper attempt (`POST /device/apps/removal-attempt`).
     func reportRemovalAttempt(packageName: String, applicationName: String) async throws
+    /// The Home screen's whole state in one call (`GET /device/home`). Nil when the response shape
+    /// isn't recognized.
+    ///
+    /// ON the protocol, unlike `unpairDevice()`, because Home's view model reaches the backend only
+    /// through this abstraction — a test of the child-identity refresh has no other way in. It is
+    /// deliberately NOT given a protocol-extension default returning nil: that default would win
+    /// silently if the real client's signature ever drifted, and the symptom (an endpoint that is
+    /// simply never called) looks identical to a backend that has not deployed the route.
+    func fetchHome() async throws -> OilaDeviceHome?
 }
 
 // MARK: - Client
@@ -562,18 +632,20 @@ final class OilaDeviceClient: OilaDeviceServicing {
     /// Ends this device's session. The local credential is ALWAYS cleared (the `defer`); the
     /// server-side revoke is best-effort.
     ///
-    /// The refresh token used to gate the whole call, which made it unreachable for a paired child:
-    /// a device holds a single long-lived `deviceToken` and no refresh token, so "Disconnect"
-    /// silently skipped the server entirely. The request is now always attempted — with
-    /// `refreshToken` when one is held, otherwise on the device Bearer alone — and its failure is
-    /// still ignored, because the child must be able to disconnect while offline.
+    /// `POST /device/unpair` is the real revoke and is attempted first. `/auth/logout` afterwards is
+    /// a legacy leftover and MUST NOT be read as the signal that anything was revoked: it is a
+    /// refresh-token route, and a paired device holds a single long-lived `deviceToken` and no
+    /// refresh token, so for the case that matters here the route cannot succeed even in principle.
+    /// It is still attempted because a legacy install that does hold a refresh token is entitled to
+    /// have it invalidated; the `unpairDevice()` outcome is what says whether the LINK was cut.
     ///
-    /// TODO (backend ask B1): there is no device-scoped revoke. `/auth/logout` is a refresh-token
-    /// route, so for a device token this call is expected to be rejected and the `deviceToken`
-    /// stays valid server-side until `POST /device/unpair` exists (or `/auth/logout` accepts the
-    /// device Bearer with no body).
+    /// Neither call may prevent the disconnect. `unpairDevice()` does not throw and `/auth/logout`
+    /// is behind `try?`, so a child with no signal at all still reaches the local teardown — which
+    /// is the requirement: a phone that cannot be disconnected offline is a phone the child cannot
+    /// disconnect at the moment they most need to.
     func logout() async throws {
         defer { secureTokens.clear() }
+        await unpairDevice()
         var body: [String: Any] = [:]
         if let refresh = secureTokens.refreshToken()?.trimmedNonEmpty {
             body["refreshToken"] = refresh
@@ -587,6 +659,79 @@ final class OilaDeviceClient: OilaDeviceServicing {
             // pointless work on a screen the child is leaving.
             allowRefresh: false
         )
+    }
+
+    /// Revoke THIS device's credential server-side (`POST /device/unpair`), authenticated with the
+    /// device Bearer.
+    ///
+    /// FORWARD-COMPATIBLE BY CONSTRUCTION. The route does not exist on the deployed backend yet
+    /// (backend ask B1), so 404/405/501 are reported as `.routeMissing` instead of being raised as
+    /// failures, and the day it ships this starts cutting the link with no app-side change. Building
+    /// it the other way round — waiting for the route — would mean shipping a disconnect that is
+    /// known to leave a live credential behind, which is the state the parent's app renders as a
+    /// child device that is still connected.
+    ///
+    /// It NEVER throws, deliberately: the caller must not be able to write a version of the
+    /// disconnect where this stands between the child and the teardown. The outcome is returned and
+    /// recorded for diagnosis, not as a gate.
+    ///
+    /// Deliberately NOT on `OilaDeviceServicing`, for the same reason the chat/streaming protocols
+    /// are separate: the existing device-API mocks would all have to implement it to keep compiling,
+    /// and none of them has anything to say about unpairing.
+    @discardableResult
+    func unpairDevice() async -> OilaUnpairOutcome {
+        let outcome: OilaUnpairOutcome
+        var detail: String?
+        do {
+            _ = try await requestJSON(
+                path: "device/unpair",
+                method: .post,
+                body: [:],
+                authorized: true,
+                // Same reasoning as `logout()`: a 401 means the credential this call exists to
+                // revoke is already dead, so minting a fresh one to announce its revocation is work
+                // with no possible outcome.
+                allowRefresh: false
+            )
+            outcome = .revoked
+        } catch let error as OilaAPIError {
+            detail = error.errorCode ?? "http_\(error.statusCode)"
+            if error.errorCode == OilaAPIError.noCredentialCode {
+                // Nothing was sent: this device holds no readable credential, so there was nothing
+                // for the server to revoke and no request left the app. Not `.revoked` — that word
+                // has to mean the SERVER acted, or the diagnostic is worse than silence.
+                outcome = .rejected
+            } else {
+                outcome = Self.unpairOutcome(forStatusCode: error.statusCode)
+            }
+        } catch {
+            // A transport failure, not an answer: no signal, DNS, a dropped connection.
+            outcome = .unreachable
+            detail = "transport"
+        }
+        let event = [outcome.rawValue, detail].compactMap { $0 }.joined(separator: " ")
+        // The lifecycle timeline is the app-wide event channel the diagnostics screen already
+        // renders, and a disconnect is a lifecycle event by any reading. Same channel
+        // `SecureTokenStore` uses to surface a wedged Keychain.
+        Task { @MainActor in
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(lastEvent: event)
+        }
+        return outcome
+    }
+
+    /// Maps an unpair response status onto the outcome vocabulary.
+    ///
+    /// 404 (no such route), 405 (the path exists for another verb) and 501 (declared but not
+    /// implemented) all mean "this deployment does not have it yet" and none of them is an app
+    /// error. 401/403 mean the device Bearer was refused, which is indistinguishable from — and has
+    /// the same consequence as — a credential that has already been revoked: it cannot be used
+    /// again. Everything else is a server that answered something unexpected and is filed as such.
+    static func unpairOutcome(forStatusCode statusCode: Int) -> OilaUnpairOutcome {
+        switch statusCode {
+        case 404, 405, 501: return .routeMissing
+        case 401, 403: return .revoked
+        default: return .rejected
+        }
     }
 
     // MARK: Device surface
@@ -782,6 +927,48 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let data = try await requestJSON(path: "device/apps/screen-time", method: .get, authorized: true)
         guard let object = Self.dict(from: data) else { return nil }
         return Self.parseScreenTime(from: object)
+    }
+
+    func fetchHome() async throws -> OilaDeviceHome? {
+        let data = try await requestJSON(path: "device/home", method: .get, authorized: true)
+        guard let object = Self.dict(from: data) else { return nil }
+        return Self.parseHome(from: object)
+    }
+
+    /// Tolerant read of `DeviceHomeResponseDto`.
+    ///
+    /// Every field goes through a parser that already exists, and that is the point rather than a
+    /// convenience: `child`, `screenTime`, the task rows and the chat message are documented to be
+    /// the SAME values `/device/pair`, `/device/apps/screen-time`, `/device/tasks` and
+    /// `/device/chat/messages` return, so parsing them a second way here would be the place the two
+    /// readings quietly diverge. Two of the helpers need no argument massaging at all —
+    /// `parseChild` looks under `child` before falling back to the whole object, and
+    /// `parseScreenTime` looks under `screenTime` when the top level carries no usage figure, which
+    /// is exactly this payload's shape. `parseScreenTime` also already tries
+    /// `dailyScreenLimitSeconds` first and already reads `date` as the day key, both of which are
+    /// what this response spells them.
+    ///
+    /// Split out from `fetchHome` so the parse is testable without an HTTP stub, the same way
+    /// `parseScreenTime` and `parseLockState` are. Never nil: an unrecognized payload yields an
+    /// all-nil value, and it is `fetchHome`'s job to decide that a non-object body is nothing.
+    static func parseHome(from object: [String: Any]) -> OilaDeviceHome {
+        let tasks = firstDictionary(object, ["tasks"])
+        let chat = firstDictionary(object, ["chat"])
+        let lastMessage = chat.flatMap { $0["lastMessage"] }
+        return OilaDeviceHome(
+            // Strict about where the child comes from, which `parseChild` on its own is not: with
+            // no `child` key it falls back to the object it was handed, and here that object is the
+            // WHOLE Home payload — so a stray top-level `name` would be written straight into the
+            // child's profile by the refresh below. That fallback is right for the pair response,
+            // which really does carry the child at either level; it is wrong here.
+            child: firstDictionary(object, ["child"]).flatMap { parseChild(from: $0) },
+            screenTime: parseScreenTime(from: object),
+            taskTotalPoints: tasks.flatMap { intValue($0, ["totalPoints", "total_points", "points"]) },
+            // `recent` absent → an empty array reaches `parseTasks`, which reads it as no rows.
+            recentTasks: parseTasks(from: tasks?["recent"] ?? []),
+            chatUnreadCount: chat.flatMap { intValue($0, ["unreadCount", "unread_count", "unread"]) },
+            chatLastMessage: lastMessage.flatMap { parseChatMessage(fromAny: $0) }
+        )
     }
 
     /// Tolerant read for `GET /device/apps/screen-time` (2xx typed as `{}` in the live spec).

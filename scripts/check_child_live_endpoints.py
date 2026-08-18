@@ -25,7 +25,7 @@ The unit is an OPERATION (`METHOD /path`), not a bare path: `GET /device/files` 
 the server does not implement.
 
 Run:
-    python3 scripts/check_child_live_endpoints.py --min-endpoints 22
+    python3 scripts/check_child_live_endpoints.py --min-endpoints 26
 """
 
 from __future__ import annotations
@@ -38,6 +38,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "OpenAPI" / "oila360_live_openapi.json"
+
+# Operations the client calls DELIBERATELY AHEAD of the server serving them.
+#
+# The exception belongs here and not in the spec file. `oila360_live_openapi.json` is a capture of
+# what the live server actually answers; writing a route into it that every verb 404s turns the one
+# file both teams trust as ground truth into a wish list, and the next person to read it has no way
+# to tell the two apart. Keeping the exception in the gate instead means the snapshot stays a
+# faithful capture and the discrepancy is announced on every single run (see `main`), so it cannot
+# be silently inherited by whoever repins the floor a year from now.
+#
+# An entry earns its place ONLY when the client is written to tolerate the route's absence — that is
+# what makes shipping the call site safe. Delete the entry the moment the route deploys; the gate
+# then goes back to enforcing it normally, and a still-listed operation would hide a real regression.
+DECLARED_AHEAD_OF_DEPLOYMENT = {
+    # Backend ask B1. `unpairDevice()` treats 404/405/501 as `.routeMissing` and never lets the
+    # result block the local teardown, because a child must be able to disconnect with no network.
+    "POST /api/v1/device/unpair": "backend ask B1 — probed 2026-08-18, every verb 404s",
+}
 DEFAULT_SOURCE = ROOT / "SmartOilaKids"
 
 # `path: "device/chat/messages", method: .get` — the verb always sits next to the literal, on the
@@ -106,15 +124,38 @@ def main() -> int:
     available = spec_operations(args.spec)
     called = client_operations(args.source)
 
-    missing = {p: files for p, files in called.items() if p not in available}
+    missing = {
+        p: files
+        for p, files in called.items()
+        if p not in available and p not in DECLARED_AHEAD_OF_DEPLOYMENT
+    }
+    # Announced unconditionally, including when the set is empty, so "we are calling something the
+    # server does not serve" is a line in every run's output rather than a fact you have to go
+    # looking for.
+    declared = {p: why for p, why in DECLARED_AHEAD_OF_DEPLOYMENT.items() if p in called}
+    deployed_after_all = {
+        p for p in DECLARED_AHEAD_OF_DEPLOYMENT if p in available
+    }
 
     print("Child live-endpoint gate")
     print(f"- Live spec: {display_path(args.spec)} ({len(available)} operations)")
     print(f"- Child source: {display_path(args.source)}")
     print(f"- Operations called by the client: {len(called)}")
     print(f"- Minimum required (externally pinned): {args.min_endpoints}")
+    print(f"- Declared ahead of deployment: {len(declared)}")
+    for path, why in sorted(declared.items()):
+        print(f"  - {path} — {why}")
 
     failed = False
+
+    if deployed_after_all:
+        # Not fatal — the contract is now BETTER than the exception claims. But the exemption has to
+        # go, or it will keep suppressing a genuine regression on that route for as long as it lives.
+        for path in sorted(deployed_after_all):
+            print(
+                f"- {path} is now IN the live spec. Remove it from "
+                "DECLARED_AHEAD_OF_DEPLOYMENT so the gate enforces it again."
+            )
 
     if missing:
         failed = True

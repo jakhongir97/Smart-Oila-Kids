@@ -5013,6 +5013,240 @@
         ]
       }
     },
+    "/api/v1/device/home": {
+      "get": {
+        "operationId": "DeviceHomeController_home",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Always 200 for a paired device — zeros and nulls, never a 404.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceHomeResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Everything the child Home screen shows, in one call",
+        "description": "Re-read on every call. Do NOT cache the pairing response's copy — a parent can rename the child or change the photo at any time. `screenTime` is the same figure `GET /api/v1/device/apps/screen-time` returns for this device; it must not be recomputed client-side.",
+        "tags": [
+          "device-home"
+        ]
+      }
+    },
+    "/api/v1/attribution/touch": {
+      "post": {
+        "operationId": "AttributionController_touch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttributionTouchDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — see AttributionTouchDto."
+          }
+        },
+        "summary": "Record one marketing-attribution touch",
+        "description": "PUBLIC (no guard): an unauthenticated POST answers 400 VALIDATION_FAILED, not 401. Nothing in the child app calls this — it belongs to the web/Telegram/store install funnels — and it is transcribed here only so the snapshot stays a complete picture of the control surface.",
+        "tags": [
+          "attribution"
+        ]
+      }
+    },
+    "/api/v1/admin/campaigns": {
+      "get": {
+        "operationId": "AdminCampaignsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List marketing campaigns",
+        "description": "Admin-only campaign management. The request/response bodies are UNTYPED here on purpose: the published spec is behind HTTP basic auth this snapshot could not read, and inventing a CreateCampaignDto would be a guess dressed as a contract. The path + verb set is probe-derived (2026-08-18, 401 = exists and is guarded, 404 = absent). No client in this repo calls it.",
+        "tags": [
+          "admin-campaigns"
+        ]
+      },
+      "post": {
+        "operationId": "AdminCampaignsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a marketing campaign",
+        "description": "Admin-only campaign management. The request/response bodies are UNTYPED here on purpose: the published spec is behind HTTP basic auth this snapshot could not read, and inventing a CreateCampaignDto would be a guess dressed as a contract. The path + verb set is probe-derived (2026-08-18, 401 = exists and is guarded, 404 = absent). No client in this repo calls it.",
+        "tags": [
+          "admin-campaigns"
+        ]
+      }
+    },
+    "/api/v1/admin/campaigns/{id}": {
+      "get": {
+        "operationId": "AdminCampaignsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One campaign",
+        "description": "Admin-only campaign management. The request/response bodies are UNTYPED here on purpose: the published spec is behind HTTP basic auth this snapshot could not read, and inventing a CreateCampaignDto would be a guess dressed as a contract. The path + verb set is probe-derived (2026-08-18, 401 = exists and is guarded, 404 = absent). No client in this repo calls it.",
+        "tags": [
+          "admin-campaigns"
+        ]
+      },
+      "patch": {
+        "operationId": "AdminCampaignsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Edit a campaign",
+        "description": "Admin-only campaign management. The request/response bodies are UNTYPED here on purpose: the published spec is behind HTTP basic auth this snapshot could not read, and inventing a CreateCampaignDto would be a guess dressed as a contract. The path + verb set is probe-derived (2026-08-18, 401 = exists and is guarded, 404 = absent). No client in this repo calls it.",
+        "tags": [
+          "admin-campaigns"
+        ]
+      },
+      "delete": {
+        "operationId": "AdminCampaignsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a campaign",
+        "description": "Admin-only campaign management. The request/response bodies are UNTYPED here on purpose: the published spec is behind HTTP basic auth this snapshot could not read, and inventing a CreateCampaignDto would be a guess dressed as a contract. The path + verb set is probe-derived (2026-08-18, 401 = exists and is guarded, 404 = absent). No client in this repo calls it.",
+        "tags": [
+          "admin-campaigns"
+        ]
+      }
+    },
     "/api/v1/device/location/batch": {
       "post": {
         "operationId": "DeviceLocationController_recordBatch",
@@ -6331,6 +6565,216 @@
         "required": [
           "packageName",
           "applicationName"
+        ]
+      },
+      "DeviceHomeResponseDto": {
+        "type": "object",
+        "properties": {
+          "child": {
+            "type": "object",
+            "description": "The child's CURRENT identity. A parent may rename the child or change the emoji, colour or photo at any time, so this is the only correct source — the copy in the `POST /api/v1/device/pair` response is a snapshot of pairing day.",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "profileColor": {
+                "type": "string",
+                "nullable": true,
+                "example": "#F0605A"
+              },
+              "avatarEmoji": {
+                "type": "string",
+                "nullable": true
+              },
+              "profilePictureUrl": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "screenTime": {
+            "type": "object",
+            "description": "Identical to the body of `GET /api/v1/device/apps/screen-time`. Everything is SECONDS. Null limits mean the parent has set no budget — a normal state, not a missing value.",
+            "properties": {
+              "date": {
+                "type": "string",
+                "example": "2026-08-18"
+              },
+              "usedSeconds": {
+                "type": "number"
+              },
+              "dailyScreenLimitSeconds": {
+                "type": "number",
+                "nullable": true
+              },
+              "remainingSeconds": {
+                "type": "number",
+                "nullable": true
+              }
+            },
+            "required": [
+              "date",
+              "usedSeconds"
+            ]
+          },
+          "tasks": {
+            "type": "object",
+            "properties": {
+              "totalPoints": {
+                "type": "number"
+              },
+              "recent": {
+                "type": "array",
+                "maxItems": 2,
+                "description": "At most two rows, for a preview. This is NOT a substitute for `GET /api/v1/device/tasks`: it carries no pagination and no status filter, so a caller that needs a particular selection (pending vs. completed vs. cancelled) must still walk that route.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "emoji": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "rewardPoints": {
+                      "type": "number"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "rewardPoints",
+                    "status"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "totalPoints",
+              "recent"
+            ]
+          },
+          "chat": {
+            "type": "object",
+            "properties": {
+              "unreadCount": {
+                "type": "number"
+              },
+              "lastMessage": {
+                "type": "object",
+                "nullable": true,
+                "description": "Null on a thread with no messages yet.",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "senderType": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "hasAttachment": {
+                    "type": "boolean"
+                  },
+                  "systemKind": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "id",
+                  "senderType",
+                  "hasAttachment",
+                  "createdAt"
+                ]
+              }
+            },
+            "required": [
+              "unreadCount"
+            ]
+          }
+        },
+        "required": [
+          "child",
+          "screenTime",
+          "tasks",
+          "chat"
+        ]
+      },
+      "AttributionTouchDto": {
+        "type": "object",
+        "description": "Transcribed 2026-08-18 from the server's own ValidationPipe rather than from the published spec, which sits behind basic auth: an empty POST names the required fields and their enums, and `forbidNonWhitelisted` names every declared optional one by refusing everything else with 'property X should not exist'. So the property SET is exact; the string constraints (length, pattern) are not — the pipe does not report those for a value it never reaches.",
+        "properties": {
+          "installId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "Click",
+              "Install",
+              "AppOpen",
+              "Register"
+            ]
+          },
+          "surface": {
+            "type": "string",
+            "enum": [
+              "Web",
+              "Tma",
+              "Bot",
+              "Android",
+              "Ios"
+            ]
+          },
+          "clickId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignCode": {
+            "type": "string"
+          },
+          "utmSource": {
+            "type": "string"
+          },
+          "utmMedium": {
+            "type": "string"
+          },
+          "utmCampaign": {
+            "type": "string"
+          },
+          "utmContent": {
+            "type": "string"
+          },
+          "utmTerm": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "installId",
+          "kind",
+          "surface"
         ]
       }
     }

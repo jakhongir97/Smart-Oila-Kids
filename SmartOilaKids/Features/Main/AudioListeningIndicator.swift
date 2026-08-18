@@ -15,25 +15,56 @@ struct AudioListeningIndicator: View {
     /// that can never be withdrawn is not consent.
     var onStop: (() -> Void)?
 
-    @State private var pulse = false
+    /// The banner's layout numbers, in one place because two of them are load-bearing rather than
+    /// decorative: `stopHitTarget` is the only way a child can end a live session, and
+    /// `loweredBy == bottomInset` is what keeps a lowered banner from covering the screen beneath it.
+    /// Both are pinned by `AudioListeningIndicatorLayoutTests`, so a future tidy-up of the paddings
+    /// cannot quietly shrink the one control that must not be fiddly.
+    enum Metrics {
+        /// Apple's minimum comfortable touch target, and the floor for this row's height.
+        static let stopHitTarget: CGFloat = 44
+        /// Inside the capsule. Does NOT set the capsule's height — `stopHitTarget` does — so this is
+        /// pure breathing room and the first thing to give when the ask is "make it more compact".
+        static let capsulePaddingV: CGFloat = 4
+        static let capsulePaddingH: CGFloat = 14
+        /// Outside the capsule: the margin that caps its width so the labels have something to clamp
+        /// against, and the row's own top inset.
+        static let rowInsetH: CGFloat = 12
+        static let topInset: CGFloat = 2
+        /// How far the drawn capsule is pushed down inside its row, and — necessarily equal — the
+        /// bottom padding that reserves that distance so nothing below is overlapped.
+        static let loweredBy: CGFloat = 8
+
+        static var capsuleHeight: CGFloat { stopHitTarget + capsulePaddingV * 2 }
+        /// Total height the disclosure claims in the root stack.
+        static var rowHeight: CGFloat { topInset + capsuleHeight + loweredBy }
+    }
 
     private var label: String {
         mode == .video ? L10n.tr("audio2.watching") : L10n.tr("audio2.listening")
     }
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 8) {
+            // A static recording dot, not a pulsing one. The pulse was a `repeatForever` animation
+            // living on the app's ROOT view for the whole session — a permanent redraw on a child's
+            // battery, and a never-ending transaction that fights the insertion transition RootView
+            // now gives this row. The disclosure does its job by being present and legible, not by
+            // moving; dropping it also retires the reduce-motion special case this view carried for
+            // it.
             ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.55), lineWidth: 3)
-                    .frame(width: 16, height: 16)
-                    .scaleEffect(pulse ? 1.7 : 1)
-                    .opacity(pulse ? 0 : 0.9)
-                Circle().fill(Color.white).frame(width: 9, height: 9)
+                Circle().stroke(Color.white.opacity(0.55), lineWidth: 2).frame(width: 14, height: 14)
+                Circle().fill(Color.white).frame(width: 8, height: 8)
             }
             Image(systemName: mode == .video ? "video.fill" : "waveform")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Color.white)
+            // Both lines are clamped. The capsule hugs its content, so before the outer horizontal
+            // padding below there was nothing to clamp AGAINST and a long translation simply grew
+            // the capsule past the screen edge — "Камера не открылась — только звук" at 1.35x
+            // Dynamic Type is the case that does it. One line each, shrink rather than wrap: this
+            // row must stay one compact strip, and a two-line label would also push the Stop button
+            // down the screen mid-session.
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     .font(AppTypography.bodyStrong(13))
@@ -44,6 +75,8 @@ struct AudioListeningIndicator: View {
                         .foregroundStyle(Color.white.opacity(0.85))
                 }
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
 
             if let onStop {
                 Button(action: onStop) {
@@ -64,19 +97,31 @@ struct AudioListeningIndicator: View {
                 // session they can see running, on a banner deliberately sized to be unobtrusive —
                 // the one control in the app that must not be fiddly. `contentShape` makes the whole
                 // frame tappable rather than just the capsule inside it.
-                .frame(minWidth: 44, minHeight: 44)
+                .frame(minWidth: Metrics.stopHitTarget, minHeight: Metrics.stopHitTarget)
                 .contentShape(Rectangle())
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
+        // Compact, per the product owner's item 5. The 44pt Stop frame — not this padding — is what
+        // sets the capsule's height, so trimming the vertical padding from 9 to 4 is a real 10pt
+        // saving and takes nothing off the hit target: the capsule is now exactly the 44pt target
+        // plus 8pt of breathing room, which is as short as this row can honestly get while the only
+        // way to end a session stays a full-size control.
+        .padding(.horizontal, Metrics.capsulePaddingH)
+        .padding(.vertical, Metrics.capsulePaddingV)
         .background(Capsule().fill(AppColors.livePresenceCoral))
-        .shadow(color: AppColors.livePresenceCoral.opacity(0.45), radius: 12, x: 0, y: 5)
-        .padding(.top, 6)
-        .onAppear {
-            guard !UIAccessibility.isReduceMotionEnabled else { return }
-            withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { pulse = true }
-        }
+        .shadow(color: AppColors.livePresenceCoral.opacity(0.4), radius: 10, x: 0, y: 4)
+        // Outer margin, applied AFTER the background so it does not pad the capsule's inside. This
+        // is what caps the capsule's width — without it the hugging HStack proposed its ideal width
+        // to the labels, they never had a reason to shrink, and a long translation ran to the bezel.
+        .padding(.horizontal, Metrics.rowInsetH)
+        // Lowered, also per item 5. The offset moves the DRAWN capsule down while `bottom` reserves
+        // the same distance in the row, so the disclosure still cannot overlap the screen underneath
+        // it — that non-overlap is the entire reason RootView gives this a row of its own instead of
+        // an overlay, and it survives this change. Net against build 13: the capsule's top edge sits
+        // 4pt lower (6 → 10) while the row it occupies is 6pt shorter (68 → 62).
+        .padding(.top, Metrics.topInset)
+        .padding(.bottom, Metrics.loweredBy)
+        .offset(y: Metrics.loweredBy)
         .accessibilityElement(children: .contain)
         // `label`, not the audio string: VoiceOver must say "watching" when the camera is what is
         // live, exactly as the visible text does.

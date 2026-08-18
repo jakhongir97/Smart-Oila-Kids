@@ -279,7 +279,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.postStatusNow() }
+            Task { @MainActor [weak self] in self?.reportStatusForProbe() }
         }
 
         // Same reasoning for the lock command: `RootView.handleLockRefreshNotification` only exists
@@ -344,6 +344,76 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     func postStatusNow() {
         guard isRunning else { return }
         Task { await postStatus() }
+    }
+
+    /// Answer the parent's explicit `status.report` probe with LOCATION as well as status.
+    ///
+    /// The probe used to post `/device/status` and nothing else, so a parent tapping "check in now"
+    /// learned the phone was alive and learned nothing about where it was — the position on their
+    /// map stayed at whatever the acceptance gate last let through, which for a stationary child can
+    /// be the whole `staleFixAge`. The backend owner asked for exactly this: "fresh dataga location
+    /// ni ham qo'shib jo'natish kerak".
+    ///
+    /// The fix rides `POST /device/location/batch`, NOT extra properties on `/device/status`: that
+    /// DTO declares three fields and the backend runs `forbidNonWhitelisted`, so an undeclared
+    /// `lat`/`lng` would 400 the whole request and destroy the liveness signal itself (see
+    /// `postDeviceStatus`). Nothing changes server-side.
+    ///
+    /// It deliberately does NOT wait for a new CoreLocation fix. `requestLocation()` can take tens of
+    /// seconds — indoors it can never succeed — and the push that carries this probe is answered on a
+    /// held completion handler measured in a second or two, so blocking on a fresh fix would trade a
+    /// certain, immediate answer for a probable timeout. The freshest fix already in memory is what
+    /// the parent gets, and the two requests are issued as separate tasks so the location upload can
+    /// never delay the status answer.
+    func reportStatusForProbe() {
+        guard isRunning else { return }
+        queueFreshestKnownFixForProbe()
+        Task { await postStatus() }
+        Task { await flushLocations() }
+    }
+
+    /// Queue the last fix CoreLocation is holding, bypassing the acceptance gate.
+    ///
+    /// The gate exists to keep a stationary child from spending battery on 1,800 near-identical
+    /// uploads; a parent asking where their child is right now is the one caller that has already
+    /// paid for the answer, so "you have not moved 25 m" is not a reason to withhold it. The
+    /// freshness comparison is what keeps this honest: if the newest fix is one the server already
+    /// has, nothing is queued and the parent's map is already correct.
+    private func queueFreshestKnownFixForProbe() {
+        // `lastAcceptedFixAt` is not cleared on upload, so it — together with anything still in the
+        // outbox — is the complete record of what the server has been told. Take the later of the two.
+        let alreadyReported = [lastAcceptedFixAt, pendingFixes.last?.ts].compactMap { $0 }.max()
+        // Read ONCE. `CLLocationManager.location` can return a newer object between two reads, and
+        // the reference below has to be the same fix that was actually queued or the displacement
+        // gate would measure from a point the server was never told about.
+        let held = locationManager.location
+        guard let fix = Self.probeFix(from: held, newerThan: alreadyReported) else { return }
+        pendingFixes = Array((pendingFixes + [fix]).suffix(maxQueuedFixes))
+        // Advance the reference exactly as `ingestLocations` does on acceptance. Without this a
+        // second probe seconds later would re-send the same coordinates once the first upload had
+        // already drained the outbox, and every duplicate is a phantom point in the child's history.
+        lastAcceptedFix = held
+        lastAcceptedFixAt = fix.ts
+        persistPendingFixes()
+    }
+
+    /// The pure half of `queueFreshestKnownFixForProbe`, split out for the same reason `acceptsFix`
+    /// is: `locationManager` is not injectable, so without this the probe's freshness rule would be
+    /// unreachable from a test.
+    ///
+    /// Returns nil when there is no fix at all (location never authorized, or nothing resolved yet)
+    /// or when the newest one is not newer than what has already been reported. A negative
+    /// `horizontalAccuracy` is CoreLocation's "invalid" sentinel and is sent as an absent `accuracy`
+    /// rather than as a negative number, matching `ingestLocations`.
+    nonisolated static func probeFix(from location: CLLocation?, newerThan alreadyReported: Date?) -> OilaLocationFix? {
+        guard let location else { return nil }
+        if let alreadyReported, location.timestamp <= alreadyReported { return nil }
+        return OilaLocationFix(
+            lat: location.coordinate.latitude,
+            lng: location.coordinate.longitude,
+            accuracy: location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil,
+            ts: location.timestamp
+        )
     }
 
     func stop() {
@@ -753,6 +823,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 await self?.flushPendingSOS()
                 await self?.flushLocations()
             }
+            // The FCM registration outbox drains on the same signal. Its other triggers are launch
+            // and `didBecomeActive`; a token that rotated while the child was underground would
+            // otherwise sit unregistered until somebody opened the app, which on a child's phone can
+            // be days — and an unregistered token means every parent command is delivered nowhere.
+            Task { @MainActor in await FCMPushRegistrar.shared.flushPendingTokenRegistration() }
         }
     }
 

@@ -911,9 +911,20 @@ final class DeviceAudioStreamManager: ObservableObject {
         // `start()`'s queued-command capture, either of which can leave the sheet on screen with no
         // command behind it — and a default would then open the microphone off a tap the child
         // aimed at something else.
+        //
+        // THE TAP IS THE CONSENT; the command is only what happens next. This branch used to return
+        // WITHOUT recording anything, which is the bug behind "men ruxsat berdim o'zi. yana
+        // so'rayapti" — the child tapped Allow, nothing was persisted, and the sheet came back on
+        // the next request. Losing the command is common, not exotic: a parent's `stream.stop`, or a
+        // second `stream.start`, landing while the sheet sits on a seven-year-old's screen clears
+        // `pendingCommand` and leaves `needsConsent` set. Recording the grant opens no hardware —
+        // that is `start()`, which is still skipped precisely because there is nothing to start.
         guard let command = pendingCommand else {
+            let grantedMode = consentMode
+            grantConsentWithoutStarting(for: grantedMode)
             needsConsent = false
             consentMode = .audio
+            recordMedia(status: "idle", event: Self.event(grantedMode, "consent_granted_without_command"))
             return
         }
         // The lease is re-checked HERE, not only at `onWakeStart`. A consent sheet can sit on a
@@ -925,27 +936,10 @@ final class DeviceAudioStreamManager: ObservableObject {
         // The consent itself IS recorded: the child answered the question, and re-asking on the
         // next request would punish them for a stale push.
         guard !command.isStaleWake else {
-            recordConsent(for: command.mode)
+            grantConsentWithoutStarting(for: command.mode)
             needsConsent = false
             pendingCommand = nil
             consentMode = .audio
-            // TAKE THE OS GRANT WHILE THE CHILD IS DEMONSTRABLY ON SCREEN.
-            //
-            // Onboarding ships no microphone step, so this tap is usually the first and only moment
-            // the app can present the system prompt: the child is in the foreground, by definition,
-            // because they just tapped Allow. Returning without asking left the install in the worst
-            // available state — audio consent RECORDED but the microphone still `.undetermined` —
-            // and because leases are short this stale branch is the COMMON path, not a rare one.
-            // Every later parent check then reached `requestMicPermission()` from the background,
-            // where iOS cannot present an alert, and died on the 45s watchdog.
-            //
-            // Fire-and-forget: no session is started (the lease really has expired), only the grant
-            // is banked so the next check can connect immediately.
-            Task { [weak self] in
-                guard let self else { return }
-                _ = await self.requestMicPermission()
-                if command.mode == .video { _ = await self.requestCameraPermission() }
-            }
             recordMedia(status: "idle", event: Self.event(command.mode, "consent_granted_after_lease_expiry"))
             return
         }
@@ -958,6 +952,28 @@ final class DeviceAudioStreamManager: ObservableObject {
             Task { await renew(command: command) }
         } else {
             Task { await start(command: command) }
+        }
+    }
+
+    /// Bank a consent tap that starts no session: record the standing grant, and take the OS
+    /// permission while the child is demonstrably on screen.
+    ///
+    /// Both no-session branches of `grantConsentAndStart` need exactly this, and neither may skip
+    /// the second half. Onboarding ships no microphone step, so this tap is usually the first and
+    /// only moment the app can present the system prompt: the child is in the foreground, by
+    /// definition, because they just tapped Allow. Returning without asking left the install in the
+    /// worst available state — consent RECORDED but the microphone still `.undetermined` — and every
+    /// later parent check then reached `requestMicPermission()` from the BACKGROUND, where iOS
+    /// cannot present an alert, so it died on the 45s watchdog.
+    ///
+    /// Fire-and-forget: no session is started, only the grant is banked so the next request can
+    /// connect immediately.
+    private func grantConsentWithoutStarting(for mode: StreamMode) {
+        recordConsent(for: mode)
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await self.requestMicPermission()
+            if mode == .video { _ = await self.requestCameraPermission() }
         }
     }
 

@@ -11,6 +11,14 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         let launchDate = Date()
+        // FIRST, ahead of everything: drop Keychain credentials left behind by a previous install.
+        //
+        // This has to run before any other line in this method, because `armTelemetryIfPaired()`
+        // below reads the device token and would arm telemetry against an orphaned credential — and
+        // it has to run before the app routes at all, which it does: `SessionStore` is a
+        // `@StateObject` whose autoclosure is not evaluated until the first scene body, long after
+        // the delegate has finished launching.
+        SecureTokenStore.purgeCredentialsOrphanedByReinstall()
         // Configure Firebase Cloud Messaging as early as possible so APNs registration below can
         // hand its token to Firebase and mint a real FCM token. No-op until the SDK + plist ship.
         FCMPushRegistrar.shared.configureIfPossible()
@@ -28,6 +36,12 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // side effect of rendering. It is cheap: no hardware is opened until a command arrives.
         _ = DeviceAudioStreamManager.shared
         armTelemetryIfPaired()
+        // Drain the FCM outbox at LAUNCH too, not only from `applicationDidBecomeActive`. iOS
+        // background-launches this app for silent pushes and for the `location` background mode, and
+        // neither delivers a become-active — so on a device that is rarely opened (the normal case
+        // for a child's phone left in a pocket) the become-active trigger alone could leave a
+        // rotated token unregistered for days, which is precisely when the parent needs to reach it.
+        Task { @MainActor in await FCMPushRegistrar.shared.flushPendingTokenRegistration() }
         let notificationCenter = UNUserNotificationCenter.current()
         notificationCenter.delegate = self
         DeviceControlEventBridge.shared.start()
@@ -132,7 +146,10 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         }
         if UserDefaults.standard.bool(forKey: "BOLAJON_OILA_PAIRED"),
            let fcmToken = UserDefaults.standard.string(forKey: FCMPushRegistrar.fcmTokenDefaultsKey)?.trimmedNonEmpty {
-            Task { try? await OilaDeviceClient.shared.updateFCMToken(fcmToken) }
+            // Through the durable outbox, not a bare `Task { try? await … }`. This handler runs at
+            // every launch, which is exactly when the network is least likely to be up yet, and the
+            // discarded failure is how a rotated token stayed unregistered for the life of an install.
+            FCMPushRegistrar.shared.registerToken(fcmToken)
         }
     }
 
@@ -157,6 +174,11 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
             await DeviceControlEventBridge.shared.syncNow()
             await PushInboxStore.shared.reconcileAppBadge()
         }
+        // Retry any FCM registration the server has not acknowledged. Becoming active is the single
+        // most reliable "the network is probably up again" signal this app gets — the other one,
+        // connectivity returning, is watched by `OilaTelemetryService.applyNetworkType`, which only
+        // runs while telemetry is armed.
+        Task { @MainActor in await FCMPushRegistrar.shared.flushPendingTokenRegistration() }
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
@@ -239,7 +261,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     /// legitimately still be `.idle` for a moment after this method returns.
     private static let liveMediaWakeGraceSeconds: TimeInterval = 2
     /// Enough for the router's main-actor hop and one `UNUserNotificationCenter.add` (or the status
-    /// observer's hop into `postStatusNow`), and short
+    /// observer's hop into `reportStatusForProbe`), and short
     /// enough that a chat push never eats a meaningful share of the background budget.
     private static let chatBannerHoldSeconds: TimeInterval = 1.5
 
@@ -323,6 +345,26 @@ final class FCMPushRegistrar: NSObject {
 
     /// UserDefaults key holding the latest FCM registration token, read by pairing + token sync.
     static let fcmTokenDefaultsKey = "OILA_FCM_TOKEN"
+
+    /// Durable outbox for `PATCH /device/fcm-token`: the token the server has NOT yet acknowledged.
+    ///
+    /// This is the exact failure the backend owner reproduced on his own device — the token rotated,
+    /// the PATCH did not land, and the server went on pushing to a dead address with nothing on
+    /// either side saying so. Every previous attempt was launch-scoped and best-effort: a `try?` in
+    /// an unstructured `Task` whose failure was thrown away, so an upload that failed because the
+    /// child was in a lift was never retried, and the app looked perfectly registered from the
+    /// inside. Persisting the attempt is what makes the retry survive the process.
+    ///
+    /// Exactly ONE entry, deliberately. An older registration token is a dead address, so replaying
+    /// it after a newer one would re-create the very state this exists to clear; "queue" here means
+    /// "survives relaunch", not "keeps history".
+    static let pendingFCMTokenDefaultsKey = "OILA_PENDING_FCM_TOKEN"
+
+    /// Single-flight guard + trailing re-run for the outbox drain, mirroring the telemetry flushes.
+    /// Three triggers now converge on it (launch, `didBecomeActive`, connectivity restored) and the
+    /// last two fire together the moment a phone leaves a tunnel while being picked up.
+    @MainActor private var isFlushingPendingToken = false
+    @MainActor private var pendingTokenFlushRequestedAgain = false
 
     /// Why the FCM path is (or is not) live. Recorded into `RuntimeDiagnosticsCenter.pushToken`
     /// so "this device is not addressable" is a readable fact instead of silence. Every non-`live`
@@ -446,19 +488,73 @@ final class FCMPushRegistrar: NSObject {
             )
         }
 
-        // Push to the backend when paired and the token is new (rotation-safe).
+        // Push to the backend when paired and the token is new (rotation-safe). An unpaired install
+        // needs no PATCH at all: `pair()` carries `fcmToken` in the redemption body itself.
         guard trimmed != previous, defaults.bool(forKey: "BOLAJON_OILA_PAIRED") else { return }
-        Task {
-            do {
-                try await OilaDeviceClient.shared.updateFCMToken(trimmed)
-                await MainActor.run {
-                    RuntimeDiagnosticsCenter.shared.updatePushToken(status: "token_uploaded", remoteToken: String(trimmed.prefix(12)) + "…")
-                }
-            } catch {
-                await MainActor.run {
-                    RuntimeDiagnosticsCenter.shared.updatePushToken(status: "token_upload_failed", lastError: error.localizedDescription)
-                }
+        registerToken(trimmed)
+    }
+
+    /// Record that `token` still has to reach `PATCH /device/fcm-token`, then try immediately.
+    ///
+    /// The single entry point for both producers — a Firebase rotation and the APNs registration
+    /// callback — so neither can go back to firing a one-shot request whose failure disappears.
+    func registerToken(_ token: String) {
+        guard let trimmed = token.trimmedNonEmpty else { return }
+        UserDefaults.standard.set(trimmed, forKey: Self.pendingFCMTokenDefaultsKey)
+        Task { @MainActor [weak self] in await self?.flushPendingTokenRegistration() }
+    }
+
+    /// Drain the outbox. Safe and cheap to call whenever the app might be able to reach the network:
+    /// it returns at the first guard when there is nothing pending.
+    @MainActor
+    func flushPendingTokenRegistration() async {
+        guard !isFlushingPendingToken else {
+            // A rotation that arrives mid-flight must not wait for the next foreground: the token in
+            // the outbox has changed under the request now in flight, so run once more when it ends.
+            pendingTokenFlushRequestedAgain = true
+            return
+        }
+        isFlushingPendingToken = true
+        defer { isFlushingPendingToken = false }
+        repeat {
+            pendingTokenFlushRequestedAgain = false
+            await flushPendingTokenRegistrationOnce()
+        } while pendingTokenFlushRequestedAgain
+    }
+
+    @MainActor
+    private func flushPendingTokenRegistrationOnce() async {
+        let defaults = UserDefaults.standard
+        guard let pending = defaults.string(forKey: Self.pendingFCMTokenDefaultsKey)?.trimmedNonEmpty else { return }
+        // An unpaired install has nothing to register the token AGAINST, and uploading it once the
+        // next family pairs would attribute this device's push address to whichever Bearer happens
+        // to be held then. Same reasoning as the removal-attempt and usage outboxes the disconnect
+        // purge drops. Dropping it here rather than in the disconnect keeps the rule with the queue.
+        guard defaults.bool(forKey: "BOLAJON_OILA_PAIRED") else {
+            defaults.removeObject(forKey: Self.pendingFCMTokenDefaultsKey)
+            return
+        }
+        do {
+            try await OilaDeviceClient.shared.updateFCMToken(pending)
+            // Cleared ONLY on a server acknowledgement, and only if the entry is still the one that
+            // was just acknowledged — a rotation landing mid-request replaces it, and clearing
+            // blindly would drop the NEWER token and leave the backend holding the older one.
+            if defaults.string(forKey: Self.pendingFCMTokenDefaultsKey)?.trimmedNonEmpty == pending {
+                defaults.removeObject(forKey: Self.pendingFCMTokenDefaultsKey)
             }
+            RuntimeDiagnosticsCenter.shared.updatePushToken(
+                status: "token_uploaded",
+                remoteToken: String(pending.prefix(12)) + "…",
+                lastError: "-"
+            )
+        } catch {
+            // The entry stays. Status says "pending", not "failed": the difference matters on the
+            // diagnostics screen, because a retained entry WILL be retried at the next foreground or
+            // the next time connectivity returns, whereas the old one-shot upload never was.
+            RuntimeDiagnosticsCenter.shared.updatePushToken(
+                status: "token_upload_pending",
+                lastError: error.localizedDescription
+            )
         }
     }
 }
