@@ -74,10 +74,18 @@ final class StoreReviewModeStore {
     /// seen, held across launches. Safe to read from any thread (`UserDefaults` is thread-safe).
     var isActive: Bool { userDefaults.bool(forKey: Self.defaultsKey) }
 
-    /// Fetch and cache. Any failure or timeout leaves review mode OFF (covert features visible),
-    /// per the backend contract and the production-safe default.
+    /// Fetch and cache. Only a DEFINITIVE answer is written; a failure or timeout leaves the last
+    /// known value in place.
+    ///
+    /// The backend's "treat any error as false" rule governs a build that has never had an answer —
+    /// and that case is already covered, because `isActive` reads false until something is cached.
+    /// Applying it to the CACHE too would be actively unsafe: this endpoint is rate-limited
+    /// (60/min/IP), so a single 429 or a dropped connection while the build sits in App Review would
+    /// erase a known `true` and re-open the microphone in front of the reviewer. The asymmetry
+    /// decides it — a stale `true` costs a real family live audio until the next refresh, a stale
+    /// `false` costs an App Store rejection on a children's app.
     func refresh() async {
-        let value = await fetch()
-        userDefaults.set(value ?? false, forKey: Self.defaultsKey)
+        guard let value = await fetch() else { return }
+        userDefaults.set(value, forKey: Self.defaultsKey)
     }
 }

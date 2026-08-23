@@ -3713,7 +3713,7 @@ final class LocationAcceptanceTests: XCTestCase {
 // MARK: - status.report probe location
 
 /// The probe deliberately does NOT run through the acceptance gate above: a parent who tapped
-/// "check in now" has already paid for the answer, so "you have not moved 25 m" is no reason to
+/// "check in now" has already paid for the answer, so "you have not moved 15 m" is no reason to
 /// withhold it. What still applies is freshness — sending a point the server already holds adds a
 /// phantom duplicate to the child's history and tells the parent nothing.
 final class StatusProbeLocationTests: XCTestCase {
@@ -3797,14 +3797,22 @@ final class StoreReviewModeStoreTests: XCTestCase {
         XCTAssertTrue(store.isActive)
     }
 
-    func testFetchFailureResolvesToInactive() async {
+    func testFetchFailureWithNothingCachedStaysInactive() async {
+        // The backend's "treat any error as false" rule, in the case it is actually about: a build
+        // that has never had an answer must not hide features from a real family.
+        let store = StoreReviewModeStore(userDefaults: makeDefaults(), fetch: { nil })
+        await store.refresh()
+        XCTAssertFalse(store.isActive)
+    }
+
+    func testFetchFailureDoesNotEraseAnActiveReviewFlag() async {
         let defaults = makeDefaults()
-        // Seed it "active", then let a failing fetch (nil) run: it must fall back to false, never
-        // leave a stale true that would keep hiding features after the review window closed.
         defaults.set(true, forKey: StoreReviewModeStore.defaultsKey)
         let store = StoreReviewModeStore(userDefaults: defaults, fetch: { nil })
         await store.refresh()
-        XCTAssertFalse(store.isActive, "any error or timeout must resolve to not-under-review")
+        // This endpoint is rate-limited (60/min/IP). A 429 mid-review must not re-open the
+        // microphone in front of the reviewer — only a definitive `false` clears the flag.
+        XCTAssertTrue(store.isActive, "a transient failure must not clear a known review flag")
     }
 
     func testBackendFalseClearsAPreviousActive() async {
@@ -3813,5 +3821,42 @@ final class StoreReviewModeStoreTests: XCTestCase {
         let store = StoreReviewModeStore(userDefaults: defaults, fetch: { false })
         await store.refresh()
         XCTAssertFalse(store.isActive)
+    }
+}
+
+// MARK: - Chat system notice copy
+
+/// The child's chat screen must never render the BACKEND's own wording. `systemKind` is an open
+/// string in the live spec, so an unrecognized kind has to fall back to localized copy rather than
+/// echoing whatever text arrived with it.
+final class ChatSystemNoticeTextTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        L10n.setLanguage(AppLanguage.en.rawValue)
+    }
+
+    override func tearDown() {
+        L10n.setLanguage(AppLanguage.defaultForDevice.rawValue)
+        super.tearDown()
+    }
+
+    func testSosKindIsLocalized() {
+        XCTAssertEqual(ChatSystemNoticeText.localized(forKind: "sos"), L10n.tr("chat2.system.sos"))
+        // The backend's casing/padding must not decide whether a child sees the SOS copy.
+        XCTAssertEqual(ChatSystemNoticeText.localized(forKind: " SOS "), L10n.tr("chat2.system.sos"))
+    }
+
+    func testUnknownAndAbsentKindsFallBackToLocalizedGeneric() {
+        let generic = L10n.tr("chat2.system.generic")
+        XCTAssertEqual(ChatSystemNoticeText.localized(forKind: "device_unpaired"), generic)
+        XCTAssertEqual(ChatSystemNoticeText.localized(forKind: nil), generic)
+        XCTAssertEqual(ChatSystemNoticeText.localized(forKind: "   "), generic)
+    }
+
+    /// The regression this closes: a kind the app does not know used to render the server's raw
+    /// English `text` verbatim.
+    func testCopyNeverEchoesBackendText() {
+        let serverText = "Device was unpaired by parent (code 409)"
+        XCTAssertNotEqual(ChatSystemNoticeText.localized(forKind: "unpaired"), serverText)
     }
 }

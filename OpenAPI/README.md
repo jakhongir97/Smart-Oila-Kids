@@ -15,8 +15,18 @@ child flow (`OilaDeviceClient` in `Core/Networking/OilaDeviceAPI.swift`) targets
 `https://api.oila360.uz/api/v1` backend, whose contract is captured in:
 
 - `OpenAPI/oila360_live_openapi.json` — fetched from `https://api.oila360.uz/api/docs-json`
-  (Oila 360 API 1.0). All 12 `/api/v1/device/*` calls the app makes exist here with matching
-  methods and request shapes (verified 2026-07-12).
+  (Oila 360 API 1.0). The app now calls **27 operations**, of which **24 are `/api/v1/device/*`**;
+  every one exists here with matching methods and request shapes, except `POST /device/unpair`,
+  which the server does not serve (see below). Counts re-derived 2026-08-24 — the gate
+  (`scripts/check_child_live_endpoints.py --min-endpoints 27`) is what enforces them.
+
+## ➕ ADDED 2026-08-24 — the public app-config route (store-review mode)
+
+`GET /api/v1/app-config?platform=Ios&appBuild=N` → `{ storeReviewMode }`, plus the
+`AppConfigResponseDto` schema. Copied from the backend's own published spec, not probed. It is the
+one route in this snapshot the child app calls **unauthenticated**, and the app treats any error or
+timeout as `false`. The floor moved 26 → 27 with it, in both
+`scripts/run_release_readiness_checks.sh` and `.github/workflows/openapi-child-baseline.yml`.
 
 ## ➕ ADDED 2026-08-18 — the new control-surface routes (5 paths, 9 operations, 2 schemas)
 

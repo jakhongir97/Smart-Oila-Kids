@@ -1059,6 +1059,12 @@ final class DeviceAudioStreamManager: ObservableObject {
 
     func start(command: StreamCommand) async {
         guard isFeatureEnabled() else { recordStartDroppedByFlag(); return }
+        // Store-review suppression belongs HERE, not only on the push route — same reasoning as the
+        // consent gate below. `grantConsentAndStart()` reaches `start()`/`renew()` directly from the
+        // child's consent sheet, and the DEBUG helpers reach it without a push at all, so a gate
+        // living only in `PushCommandRouter` would leave the microphone openable while this build
+        // is in front of App Review.
+        guard !StoreReviewModeStore.shared.isActive else { recordStartDroppedByStoreReview(); return }
         guard MediaPublisherFactory.isLiveKitLinked else {
             state = .unsupported
             recordMedia(status: "unsupported", event: "audio_start_dropped_sdk_missing")
@@ -1249,6 +1255,10 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// NOT tear the session down (the audio half is still valuable).
     private func renew(command: StreamCommand) async {
         guard state == .live, let publisher else { return }
+        // Review mode turning on mid-session must not be extendable: refusing the RENEWAL lets the
+        // server-owned lease run out and the session wind down on its own, rather than cutting a
+        // live call dead. A start is refused outright above; this is the same rule for the lease.
+        guard !StoreReviewModeStore.shared.isActive else { recordStartDroppedByStoreReview(); return }
         let generation = startGeneration
         // An audio→video upgrade goes through the SAME two gates `start()` applies — the child's
         // camera consent and the OS camera grant. Neither was checked here, and `activeMode` was
@@ -1482,6 +1492,17 @@ final class DeviceAudioStreamManager: ObservableObject {
     private func recordStartDroppedByFlag() {
         state = .disabled
         recordMedia(status: "disabled", event: "audio_start_dropped_flag_off")
+    }
+
+    /// A start/renew refused because this build is under App Store review.
+    ///
+    /// Deliberately leaves `state` alone rather than moving to `.disabled`: review mode is a
+    /// temporary, server-controlled condition that clears on the next `app-config` refresh, and
+    /// `.disabled` is the terminal "this build cannot stream" answer the feature flag owns. Recorded
+    /// into the media diagnostics so the suppression is legible on a real device instead of looking
+    /// like a push that silently went nowhere.
+    private func recordStartDroppedByStoreReview() {
+        recordMedia(status: "store_review", event: "audio_start_dropped_store_review")
     }
 
     /// Prefixes a lifecycle event with the hardware it concerns, so `audio_live` and `video_live`

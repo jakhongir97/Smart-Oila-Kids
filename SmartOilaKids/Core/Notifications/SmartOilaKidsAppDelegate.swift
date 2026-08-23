@@ -183,6 +183,11 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // connectivity returning, is watched by `OilaTelemetryService.applyNetworkType`, which only
         // runs while telemetry is armed.
         Task { @MainActor in await FCMPushRegistrar.shared.flushPendingTokenRegistration() }
+        // Re-read the store-review flag on every foreground, not only at launch. An operator marks a
+        // build as under review AFTER it is already installed on the review device, and a child's
+        // phone can stay resident for days — a launch-only refresh would leave that build
+        // unprotected for the whole review. Cheap: one small unauthenticated GET.
+        Task { await StoreReviewModeStore.shared.refresh() }
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {

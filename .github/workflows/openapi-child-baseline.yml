@@ -48,9 +48,12 @@ jobs:
         # until it passes has to fail the build instead. Raise it when call sites are added.
         # The unit is METHOD+path, so the distinct paths the client calls are fewer than the floor.
         #
-        # 26 as of 2026-08-18: 24 -> 25 when POST /device/unpair was added (D3), -> 26 with
-        # GET /device/home. Both are counted honestly -- `/device/unpair` is in the snapshot marked
-        # `x-deployment-status: not-deployed`, because the client really does call it and the gate's
-        # job is to notice that, not to look away from it. See OpenAPI/README.md.
+        # 27 as of 2026-08-24: 24 -> 25 when POST /device/unpair was added (D3), -> 26 with
+        # GET /device/home, -> 27 with the public GET /api/v1/app-config (store-review mode).
+        # `/device/unpair` is counted honestly but is deliberately NOT in the snapshot: the server
+        # 404s every verb on it, and the snapshot only ever describes what the live server answers.
+        # Its exemption lives in `DECLARED_AHEAD_OF_DEPLOYMENT` in check_child_live_endpoints.py,
+        # which PRINTS it on every run -- the gate's job is to notice the gap, not look away from
+        # it. See OpenAPI/README.md.
         run: |
           python3 scripts/check_child_live_endpoints.py --min-endpoints 27

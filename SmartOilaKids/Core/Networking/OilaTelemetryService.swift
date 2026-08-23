@@ -155,8 +155,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// wrong side of a city.
     nonisolated private static let maxAcceptedAccuracyM: Double = 100
     /// Floor for "has the child actually moved" — Ibrohim's rule: a fix is packaged only when the
-    /// child has moved MORE than ~15 m since the last accepted one ("15 metrdan oshgan bo'lsa
-    /// yuboradi"), matching the Android child app's displacement floor. Kept equal to
+    /// child has moved AT LEAST ~15 m since the last accepted one ("15 metrdan oshgan bo'lsa
+    /// yuboradi" — the gate is `>=`, so exactly 15 m counts as movement). Matches the Android child
+    /// app's displacement floor. Kept equal to
     /// `distanceFilter`, so the queue never carries a fix CoreLocation itself considered too small
     /// to report. The `accuracyFactor` max() below still raises this for a vague fix — a 40 m-
     /// accurate reading has to travel further before it is believed — so GPS noise on a stationary
@@ -388,7 +389,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     ///
     /// The gate exists to keep a stationary child from spending battery on 1,800 near-identical
     /// uploads; a parent asking where their child is right now is the one caller that has already
-    /// paid for the answer, so "you have not moved 25 m" is not a reason to withhold it. The
+    /// paid for the answer, so "you have not moved 15 m" is not a reason to withhold it. The
     /// freshness comparison is what keeps this honest: if the newest fix is one the server already
     /// has, nothing is queued and the parent's map is already correct.
     private func queueFreshestKnownFixForProbe() {
@@ -503,13 +504,13 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private func flushPendingSOS() async {
         guard isRunning, !pendingSOS.isEmpty else { return }
         // RE-ENTRANCY GUARD. The queue is drained only AFTER the awaits below, so an enqueue-driven
-        // flush still inside `sendSOS` could be overlapped by the 60s timer tick — both read the
+        // flush still inside `sendSOS` could be overlapped by the 30s timer tick — both read the
         // same `pendingSOS`, and both POSTed it. The parent got the same panic alert twice, which
         // in an emergency feature is a real cost: it makes a duplicate indistinguishable from the
         // child pressing SOS a second time.
         //
         // A re-run flag rather than a bare early return: a genuinely NEW SOS enqueued while a flush
-        // is in flight must not wait out the next 60s tick, so the loop repeats instead of dropping
+        // is in flight must not wait out the next 30s tick, so the loop repeats instead of dropping
         // the request.
         guard !isFlushingSOS else {
             sosFlushRequestedAgain = true
@@ -725,7 +726,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     private func flushLocations() async {
         guard isRunning, !pendingFixes.isEmpty else { return }
-        // One drain at a time. There are now three triggers — the 60 s timer, `flushNow()` and the
+        // One drain at a time. There are now three triggers — the 30 s timer, `flushNow()` and the
         // connectivity-restored hop — and two of them fire together the moment a tunnel ends. Two
         // concurrent drains each take a slice and, on failure, each PREPENDS its slice back, which
         // interleaves the queue out of order; the newest-wins `suffix` cap then discards whichever
@@ -825,7 +826,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         } else {
             Task { await postStatusForEvent() }
         }
-        // Connectivity just came back: drain now instead of waiting out the 60s flush timer. Android
+        // Connectivity just came back: drain now instead of waiting out the 30s flush timer. Android
         // does the same (`LocationTrackingService.observeConnectivity` syncs on every online
         // transition) — and the queue this drains is precisely the one that filled while offline.
         // SOS first, matching the flush timer's own ordering: it is the only queue whose delivery is

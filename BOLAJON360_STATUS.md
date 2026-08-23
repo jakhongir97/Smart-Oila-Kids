@@ -1,6 +1,9 @@
 # Bolajon360 — Current Status & Handoff (single source of truth)
 
-_Last updated: 2026-07-29, rewritten against the tree after a full audit (182 verified findings).
+_Last updated: 2026-08-24 for build 15 (facts below re-read from the tree; the narrative sections
+still date from the 2026-07-29 rewrite after a full audit of 182 verified findings)._
+
+_Original note: rewritten against the tree after a full audit (182 verified findings).
 Every number below was read from the code, not carried over. Where the older submission docs
 (`APP_STORE_SUBMISSION_PACKAGE.md`, `APP_STORE_CONNECT_FAST_FILL.md`,
 `output/doc/week6_rc_go_no_go_checklist.md`) disagree with this file, **this file is correct** — but
@@ -18,12 +21,30 @@ backend.
 |---|---|
 | **App name (in build)** | Bolajon360 |
 | **Bundle id** | `uz.smartoila.kids` (team `3TWN5NW4BL`) |
-| **Version** | **1.1 (build 10)** |
-| **Branch** | `audit-fixes` off `main`. **`main` has unpushed commits — see "CI" below.** |
+| **Version** | **1.1 (build 15)** |
+| **Branch** | `main` — build 15 merged and pushed (`5d91860`); no other branches open. |
 | **Backend (live)** | `https://api.oila360.uz/api/v1` — Bearer `deviceToken`, single long-lived token |
 | **Auth model** | Parent generates a 5-digit pairing code → child redeems via `POST /device/pair` |
 | **Android sibling** | `com.oila24.bolajon360` (native Kotlin) — **not** feature-equivalent, see below |
 | **App Store listing** | In-place rebrand of "Smart Oila Kids" v1.0 (id 6761430412). Universal; iPad cannot be dropped (QA1623) |
+
+## What changed in build 15 (2026-08-24)
+
+- **Location is sent in packages, matching the Android child app.** Queued fixes go up as one
+  `POST /device/location/batch` every **30 s** (was 60 s), and a fix is accepted only once the child
+  has moved **>= 15 m** since the last accepted one (floor was 25 m; `distanceFilter` 25 -> 15). A
+  stationary window sends nothing. The `accuracyFactor` guard is unchanged, so a vague fix still has
+  to travel `1.5 x accuracy` before it is believed.
+- **Store-review mode.** The app calls the public `GET /api/v1/app-config?platform=Ios&appBuild=N`
+  at launch and on every foreground; when it answers `storeReviewMode: true` for THIS build, live
+  audio/video is refused at `DeviceAudioStreamManager.start()/renew()` (the hardware chokepoint, so
+  the push route, the consent sheet and the DEBUG helpers are all covered). Fail-safe: with no
+  definitive answer ever cached it stays OFF; a transient failure does NOT clear a cached `true`.
+  **Operator step:** this only takes effect if someone records the build under
+  `PUT /api/v1/admin/store-review` before submitting.
+- **Error copy.** `NetworkError` no longer surfaces a backend body, an unmapped `URLError`, or a
+  `CancellationError` as raw English — everything maps to a localized key.
+- **Default language is Uzbek** on a handset whose locale is neither ru nor uz (was English).
 
 ## Feature flags — what actually ships
 
@@ -68,10 +89,11 @@ and it is the highest-stakes claim in the repo, so:
 ## Status: AMBER — not submittable yet
 
 - **Build:** app + both extensions compile clean. Release build: zero warnings.
-- **Tests:** **180** XCTest methods, 0 failures.
+- **Tests:** **350** XCTest methods, 0 failures.
 - **Script tests:** 35 passing.
-- **Localization:** **294** keys × 3 (en/ru/uz), 0 gaps, 0 format-specifier mismatches.
-- **Endpoints:** 19 REST paths, all verified present in the live spec.
+- **Localization:** **310** keys × 3 (en/ru/uz), 0 gaps, 0 format-specifier mismatches.
+- **Endpoints:** 27 client operations (24 `/api/v1/device/*`), gate floor pinned at 27. All
+  present in the live spec except `POST /device/unpair`, which the server still 404s.
 
 ### What the audit fixed on this branch
 
@@ -107,7 +129,7 @@ CI extension step fixed · RC gate now rejects NO-GO · a new live-endpoint gate
 **Team / Apple / ASC**
 
 - [ ] **Family Controls entitlement** — `com.apple.developer.family-controls` is in **none** of the
-      three `.entitlements` files, and the two Screen Time extensions are **not embedded** (an Embed
+      four `.entitlements` files (a debug one carries the APNs sandbox environment), and the two Screen Time extensions are **not embedded** (an Embed
       App Extensions phase + target dependencies are needed). Do not flip
       `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` until Apple grants it.
 - [ ] **Reviewer access** — a live 5-digit code is required to get past pairing and codes expire.
@@ -149,9 +171,11 @@ Five workflows. Be aware of what they do and do not prove:
   parent-child gap budget reads `../Smart Oila Parent/Source`, which no runner checks out, so its
   "gap 0" is vacuous.
 
-**Backend contract (2026-08-05).** `https://api.oila360.uz/api/docs-json` now returns **404** —
-Swagger is disabled in prod, so `OpenAPI/oila360_live_openapi.json` can no longer be re-fetched and
-is maintained by hand. Five `/device/*` endpoints the child depends on are missing from the
+**Backend contract (updated 2026-08-24).** `https://api.oila360.uz/api/docs-json` still returns
+**404**, but the live spec did NOT go away — it moved to two basic-auth URLs and the snapshot was
+re-captured from them on 2026-08-13, so `OpenAPI/oila360_live_openapi.json` is a real capture, not a
+hand-maintained file (the credentials live in the team's Telegram, deliberately not in this public
+repo). Five `/device/*` endpoints the child depends on are missing from the
 backend's published spec but proven live by a 401-vs-404 probe, and the two D-073 stream-control
 paths were added by hand. Read `OpenAPI/README.md` before touching that file or the endpoint gates.
 

@@ -1373,6 +1373,30 @@ private struct ChatImageViewer: View {
 
 // MARK: - System notice (SOS etc.)
 
+/// Localized copy for a chat system row, resolved from `systemKind` ALONE.
+///
+/// The message's `text` is deliberately never rendered. It is the backend's own wording taken
+/// straight off the wire, and `systemKind` is an open string in the live spec — so any kind the
+/// server adds later would have put developer English on a child's chat screen. That is the same
+/// leak `NetworkError` closes for request failures ("never surface the backend's message to a
+/// child"); this was the one live path that still contradicted it.
+///
+/// Unrecognized AND absent kinds both fall to the generic line — a system row can arrive with
+/// `senderType: "system"` and no kind at all, so the nil case is not hypothetical. Add a case plus
+/// an `en`/`ru`/`uz` key when the backend defines a new kind.
+///
+/// Internal (not nested in the private view) so it can be unit-tested directly.
+enum ChatSystemNoticeText {
+    static func localized(forKind kind: String?) -> String {
+        switch kind?.trimmedNonEmpty?.lowercased() {
+        case "sos":
+            return L10n.tr("chat2.system.sos")
+        default:
+            return L10n.tr("chat2.system.generic")
+        }
+    }
+}
+
 private struct ChatSystemNotice: View {
     let message: OilaChatMessage
 
@@ -1394,11 +1418,7 @@ private struct ChatSystemNotice: View {
         .padding(.vertical, 2)
     }
 
-    private var noticeText: String {
-        if message.systemKind == "sos" { return L10n.tr("chat2.system.sos") }
-        if let text = message.text, !text.isEmpty { return text }
-        return L10n.tr("chat2.system.generic")
-    }
+    private var noticeText: String { ChatSystemNoticeText.localized(forKind: message.systemKind) }
 }
 
 // MARK: - Unread divider

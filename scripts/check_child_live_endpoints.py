@@ -25,7 +25,7 @@ The unit is an OPERATION (`METHOD /path`), not a bare path: `GET /device/files` 
 the server does not implement.
 
 Run:
-    python3 scripts/check_child_live_endpoints.py --min-endpoints 26
+    python3 scripts/check_child_live_endpoints.py --min-endpoints 27
 """
 
 from __future__ import annotations

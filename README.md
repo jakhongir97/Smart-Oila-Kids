@@ -1,6 +1,12 @@
-# Smart Oila Kids
+# Bolajon360 (iOS child app)
 
-Smart Oila Kids is the iOS child companion app. The shipped app target lives in `SmartOilaKids`, with Screen Time extensions for usage reporting and schedule monitoring.
+Bolajon360 is the iOS child companion app of the Oila360 parental-monitoring product. It ships as
+`Bolajon360` (bundle `uz.smartoila.kids`); the Xcode target, scheme and source directory keep their
+original `SmartOilaKids` names, with Screen Time extensions for usage reporting and schedule
+monitoring.
+
+> Current state, per-build facts and open blockers live in **`BOLAJON360_STATUS.md`** — the single
+> source of truth. Prefer it over the older `APP_STORE_*` docs, which predate the rebrand.
 
 ## Repo Layout
 
