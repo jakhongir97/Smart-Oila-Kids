@@ -19,12 +19,13 @@ echo
 # live-contract check had not executed.
 # Floor is pinned here, not derived from the data; the unit is METHOD+path.
 # Raised 22 → 24 when the client adopted GET /device/tasks/summary and GET /device/apps/screen-time.
-# Raised 24 → 26 for POST /device/unpair and GET /device/home. This floor must track the one in
+# Raised 24 → 26 for POST /device/unpair and GET /device/home. Raised 26 → 27 for the public
+# GET /api/v1/app-config (store-review mode) the launch path now calls. This floor must track the one in
 # .github/workflows/openapi-child-baseline.yml exactly: left at 24 while the client calls 26, the
 # ratchet carries two operations of slack, and deleting the /device/unpair call site -- the one that
 # lets a child disconnect -- would still print PASS here while CI failed on the same tree.
 echo "== Child endpoints vs the LIVE spec =="
-python3 scripts/check_child_live_endpoints.py --min-endpoints 26
+python3 scripts/check_child_live_endpoints.py --min-endpoints 27
 echo
 
 echo "== Child-vs-parent parity gap budget =="

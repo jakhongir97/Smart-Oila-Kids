@@ -38,3 +38,46 @@ private extension AppConfig {
         return URL(string: fallback)!
     }
 }
+
+/// Caches whether THIS build is currently under App Store review, from the public
+/// `GET /api/v1/app-config` endpoint (`{ storeReviewMode }`).
+///
+/// When review mode is active the app hides its covert feature — live audio/video streaming — so a
+/// build sitting in App Review cannot exhibit behaviour App Review would reject on a children's
+/// device. An operator flips this per-build from the admin panel; every other build reads `false`.
+///
+/// FAIL-SAFE FALSE. The backend contract is explicit — "any error or timeout must be treated as
+/// false" — and that is also the right production default: the config call may be rate-limited,
+/// slow, or briefly unavailable, and none of those should hide paid features from a real family.
+/// So an unset value, a network failure, or an unparseable body all resolve to "not under review".
+///
+/// The cached value is a plain `UserDefaults` bool, read SYNCHRONOUSLY wherever a covert feature is
+/// about to start (e.g. `PushCommandRouter.applyRouting`), and refreshed asynchronously at launch.
+/// It persists across launches so a review build stays protected even before the first refresh.
+final class StoreReviewModeStore {
+    static let shared = StoreReviewModeStore()
+
+    static let defaultsKey = "BOLAJON_STORE_REVIEW_MODE"
+
+    private let userDefaults: UserDefaults
+    private let fetch: () async -> Bool?
+
+    init(
+        userDefaults: UserDefaults = .standard,
+        fetch: @escaping () async -> Bool? = { try? await OilaDeviceClient.shared.fetchStoreReviewMode() }
+    ) {
+        self.userDefaults = userDefaults
+        self.fetch = fetch
+    }
+
+    /// Synchronous last-known value. `false` until the first successful refresh, then the last value
+    /// seen, held across launches. Safe to read from any thread (`UserDefaults` is thread-safe).
+    var isActive: Bool { userDefaults.bool(forKey: Self.defaultsKey) }
+
+    /// Fetch and cache. Any failure or timeout leaves review mode OFF (covert features visible),
+    /// per the backend contract and the production-safe default.
+    func refresh() async {
+        let value = await fetch()
+        userDefaults.set(value ?? false, forKey: Self.defaultsKey)
+    }
+}

@@ -120,7 +120,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// only — the recovery itself is automatic (see `handleLocationUpdatesPaused`).
     private(set) var locationPauseCount = 0
 
-    private let flushInterval: TimeInterval = 60
+    /// The location BATCH window. Every `flushInterval` the queued fixes are packaged into one
+    /// `POST /device/location/batch` — Ibrohim's "30 sekund paket qilib, bitta collection qilib
+    /// jo'natadi". Set to 30s to match the Android child app: a walk produces at most one accepted
+    /// fix per window (see `minFixIntervalS`), so a moving child yields one point every 30s and a
+    /// stationary one yields an empty window that sends nothing.
+    private let flushInterval: TimeInterval = 30
     private let statusInterval: TimeInterval = 300
     private let lockInterval: TimeInterval = 30
     /// Minimum gap between EVENT-triggered status posts (network change, foreground). A path that
@@ -149,9 +154,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// building. 100 m still rejects the cell-tower-only fixes (500 m – 3 km) that put a child on the
     /// wrong side of a city.
     nonisolated private static let maxAcceptedAccuracyM: Double = 100
-    /// Floor for "has the child actually moved". Matches `distanceFilter`, so the queue never carries
-    /// a fix CoreLocation itself considered too small to report.
-    nonisolated private static let minDisplacementM: Double = 25
+    /// Floor for "has the child actually moved" — Ibrohim's rule: a fix is packaged only when the
+    /// child has moved MORE than ~15 m since the last accepted one ("15 metrdan oshgan bo'lsa
+    /// yuboradi"), matching the Android child app's displacement floor. Kept equal to
+    /// `distanceFilter`, so the queue never carries a fix CoreLocation itself considered too small
+    /// to report. The `accuracyFactor` max() below still raises this for a vague fix — a 40 m-
+    /// accurate reading has to travel further before it is believed — so GPS noise on a stationary
+    /// child cannot draw a fake walk, exactly as Android's ACCURACY_FACTOR intends.
+    nonisolated private static let minDisplacementM: Double = 15
     /// Android's `ACCURACY_FACTOR`: a 60 m-accurate fix must move ≥90 m before it counts, so GPS
     /// noise cannot draw a walk around a stationary child.
     nonisolated private static let accuracyFactor: Double = 1.5
@@ -207,7 +217,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // receiver at full duty cycle and are the real battery cost. The extra fixes this produces
         // are paid for by the acceptance gate and the 30s floor in `ingestLocations`.
         locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        locationManager.distanceFilter = 25
+        // 15 m to match the batch acceptance floor (`minDisplacementM`) and the Android child app —
+        // CoreLocation itself suppresses sub-15 m moves so a stationary child never wakes the queue.
+        locationManager.distanceFilter = 15
         // Safe default until the authorization is known; `applyAuthorization` turns it off for
         // `.authorizedAlways` only (see there for why).
         locationManager.pausesLocationUpdatesAutomatically = true

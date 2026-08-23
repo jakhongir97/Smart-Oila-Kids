@@ -33,7 +33,7 @@
 "main.parent_tracking_action_checking" = "Checking…";
 
 "lock.title" = "App is paused";
-"lock.subtitle" = "Your parent has paused Bolajon for now.";
+"lock.subtitle" = "Your parent has paused Bolajon360 for now.";
 "lock.schedule" = "Schedule: %@";
 "lock.local_time" = "Device time: %@";
 
@@ -164,7 +164,7 @@
 "perm2.settings.cta_yes" = "Yes, open Settings";
 "perm2.allow.cta" = "Yes, allow";
 "perm2.always.cta" = "Yes, always allow";
-"perm2.intro.title" = "Let's set up Bolajon";
+"perm2.intro.title" = "Let's set up Bolajon360";
 "perm2.intro.body" = "A few permissions are needed to keep your child safe. Let's set them up one by one, clearly.";
 "perm2.intro.cta" = "Start";
 "perm2.notifications.title" = "Want your child's phone under your watch?";

@@ -33,7 +33,7 @@
 "main.parent_tracking_action_checking" = "Проверяем…";
 
 "lock.title" = "Приложение приостановлено";
-"lock.subtitle" = "Родитель временно приостановил приложение Bolajon.";
+"lock.subtitle" = "Родитель временно приостановил приложение Bolajon360.";
 "lock.schedule" = "Расписание: %@";
 "lock.local_time" = "Время устройства: %@";
 
@@ -164,7 +164,7 @@
 "perm2.settings.cta_yes" = "Да, перейти в настройки";
 "perm2.allow.cta" = "Да, разрешить";
 "perm2.always.cta" = "Да, всегда разрешать";
-"perm2.intro.title" = "Настроим приложение Bolajon";
+"perm2.intro.title" = "Настроим приложение Bolajon360";
 "perm2.intro.body" = "Для безопасности ребёнка потребуется несколько разрешений. Настроим их по очереди, шаг за шагом.";
 "perm2.intro.cta" = "Начать";
 "perm2.notifications.title" = "Хотите держать телефон ребёнка под контролем?";

@@ -36,10 +36,10 @@ enum NetworkError: LocalizedError {
             return L10n.tr("error.request_failed")
         case .decodingFailed, .unexpectedBody:
             return L10n.tr("error.invalid_response")
-        case let .server(statusCode, body):
-            if let detail = Self.extractServerMessage(from: body) {
-                return detail
-            }
+        case let .server(statusCode, _):
+            // The backend's own `message`/`detail` is developer English ("Bad Request",
+            // "Validation failed") — never show it to a child. Map the status to a friendly,
+            // localized line instead.
             switch statusCode {
             case 401, 403:
                 return L10n.tr("error.auth_required")
@@ -64,15 +64,25 @@ enum NetworkError: LocalizedError {
 
         if let urlError = error as? URLError {
             switch urlError.code {
-            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed,
+                 .internationalRoamingOff:
                 return L10n.tr("error.network_offline")
             case .timedOut:
                 return L10n.tr("error.timeout")
             case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
                 return L10n.tr("error.server_unavailable")
             default:
-                break
+                // Every other URLError (TLS failures, cancelled, bad server response, …) carries a
+                // system-language `localizedDescription` — English on an English handset. Never
+                // surface it; a generic localized line is friendlier and stays in the app's language.
+                return L10n.tr("error.request_failed")
             }
+        }
+
+        // A cancelled Task (e.g. the retry backoff sleep) throws CancellationError, whose
+        // `localizedDescription` is the English "The operation couldn't be completed." Map it too.
+        if error is CancellationError {
+            return L10n.tr("error.request_failed")
         }
 
         // oila360 API errors carry the backend's raw (English/developer) message. Never surface
@@ -91,11 +101,9 @@ enum NetworkError: LocalizedError {
             }
         }
 
-        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        if message.isEmpty {
-            return L10n.tr("error.request_failed")
-        }
-        return message
+        // Anything else: a Foundation `localizedDescription` is system-language English on most
+        // handsets here, so it is never shown. Fall back to the app's own localized generic.
+        return L10n.tr("error.request_failed")
     }
 
     static func shouldRetry(_ error: Error, policy: RetryPolicy) -> Bool {
@@ -148,37 +156,4 @@ enum NetworkError: LocalizedError {
         }
     }
 
-    private static func extractServerMessage(from body: String) -> String? {
-        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard !trimmed.hasPrefix("<") else { return nil }
-
-        guard let data = trimmed.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) else {
-            return trimmed
-        }
-
-        if let dictionary = json as? [String: Any] {
-            let candidates = [
-                dictionary["detail"],
-                dictionary["message"],
-                dictionary["error"]
-            ]
-            for candidate in candidates {
-                if let value = candidate as? String,
-                   let normalized = value.trimmedNonEmpty {
-                    return normalized
-                }
-            }
-            return nil
-        }
-
-        if let array = json as? [Any],
-           let first = array.first as? String,
-           let normalized = first.trimmedNonEmpty {
-            return normalized
-        }
-
-        return nil
-    }
 }

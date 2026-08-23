@@ -53,6 +53,11 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         if preferred.hasPrefix(AppLanguage.uz.rawValue) {
             return .uz
         }
-        return .en
+        // Bolajon360 ships to an Uzbek audience, and most handsets here run an English system
+        // locale — so an English fallback showed the whole app (and its red error banners) in
+        // English, which the team flagged. Default an unrecognized locale to Uzbek Latin rather
+        // than English; the child can still switch language in onboarding/settings. Reversible:
+        // change this return to `.en` to restore the previous behaviour.
+        return .uz
     }
 }

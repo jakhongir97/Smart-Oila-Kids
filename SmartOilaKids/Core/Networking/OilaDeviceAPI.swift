@@ -114,6 +114,12 @@ enum OilaDeviceIdentity {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
     }
 
+    /// The build number (`CFBundleVersion`), e.g. `"15"` — what `GET /api/v1/app-config` keys the
+    /// store-review flag on, since review targets one exact build, not a marketing version.
+    static var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+    }
+
     static var timezone: String { TimeZone.current.identifier }
 }
 
@@ -933,6 +939,27 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let data = try await requestJSON(path: "device/home", method: .get, authorized: true)
         guard let object = Self.dict(from: data) else { return nil }
         return Self.parseHome(from: object)
+    }
+
+    /// Public per-build config (`GET /api/v1/app-config?platform=Ios&appBuild=N`). Returns whether
+    /// THIS build is currently under App Store review, so the app can hide covert features. No
+    /// bearer — this is called at launch, before (and independent of) pairing. The caller
+    /// (`StoreReviewModeStore`) treats any throw as `false`; the `?? false` here only handles a
+    /// 200 whose body is present but shaped unexpectedly.
+    func fetchStoreReviewMode() async throws -> Bool {
+        let query = [
+            URLQueryItem(name: "platform", value: OilaDeviceIdentity.platform),
+            URLQueryItem(name: "appBuild", value: OilaDeviceIdentity.appBuild)
+        ]
+        let data = try await requestJSON(path: "app-config", method: .get, query: query, authorized: false)
+        guard let object = Self.dict(from: data) else { return false }
+        // JSON booleans bridge through NSNumber; accept a numeric/string spelling too, defensively.
+        switch object["storeReviewMode"] {
+        case let value as Bool: return value
+        case let value as NSNumber: return value.boolValue
+        case let value as String: return (value as NSString).boolValue
+        default: return false
+        }
     }
 
     /// Tolerant read of `DeviceHomeResponseDto`.

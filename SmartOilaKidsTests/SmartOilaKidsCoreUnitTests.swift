@@ -1457,6 +1457,18 @@ final class ScreenTimeUsageActivitySummaryBuilderTests: XCTestCase {
 }
 
 final class SettingsDiagnosticsValueMapperTests: XCTestCase {
+    // These assertions pin the ENGLISH diagnostics strings, so the language must be fixed rather
+    // than inherited from the device default (which is Uzbek — see AppLanguage.defaultForDevice).
+    override func setUp() {
+        super.setUp()
+        L10n.setLanguage(AppLanguage.en.rawValue)
+    }
+
+    override func tearDown() {
+        L10n.setLanguage(AppLanguage.defaultForDevice.rawValue)
+        super.tearDown()
+    }
+
     func testTimestampThemeAndLanguageMappings() {
         let date = makeUTCDate(year: 2026, month: 3, day: 11, hour: 14, minute: 5, second: 9)
 
@@ -3674,9 +3686,17 @@ final class LocationAcceptanceTests: XCTestCase {
 
     func testStationaryDriftIsRefused() {
         // 10 m of movement on a 12 m-accurate fix is noise, not a walk: the floor is
-        // max(25, 1.5 * 12) = 25.
+        // max(15, 1.5 * 12) = 18.
         XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 12, distanceFromLast: 10, lastAcceptedAge: 30))
         XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 12, distanceFromLast: 25, lastAcceptedAge: 30))
+    }
+
+    /// Ibrohim's rule, pinned: a sharp fix that has moved MORE than the 15 m floor is packaged;
+    /// a smaller move is held. Matches the Android child app's displacement gate.
+    func testSharpFixSendsPastFifteenMetres() {
+        // accuracy 8 → floor is max(15, 1.5 * 8 = 12) = 15.
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 8, distanceFromLast: 14, lastAcceptedAge: 30))
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 8, distanceFromLast: 15, lastAcceptedAge: 30))
     }
 
     /// The rule that makes the gate scale with confidence: a vaguer fix has to move further before
@@ -3685,7 +3705,7 @@ final class LocationAcceptanceTests: XCTestCase {
         // 1.5 * 60 = 90 m required, so 50 m of apparent movement is not enough.
         XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 60, distanceFromLast: 50, lastAcceptedAge: 30))
         XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 60, distanceFromLast: 90, lastAcceptedAge: 30))
-        // …while a sharp fix only has to clear the 25 m floor.
+        // …while a sharp fix only has to clear the 15 m floor.
         XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 5, distanceFromLast: 25, lastAcceptedAge: 30))
     }
 }
@@ -3749,5 +3769,49 @@ final class StatusProbeLocationTests: XCTestCase {
             OilaTelemetryService.probeFix(from: location(at: Date(), accuracy: -1), newerThan: nil)
         )
         XCTAssertNil(fix.accuracy)
+    }
+}
+
+// MARK: - Store review mode
+
+/// Pins the fail-safe contract of `StoreReviewModeStore`: covert features stay visible unless the
+/// backend explicitly says this build is under review, and any fetch failure means "not under
+/// review". Uses an isolated defaults suite so it never touches the real cached flag.
+final class StoreReviewModeStoreTests: XCTestCase {
+    private func makeDefaults() -> UserDefaults {
+        let suite = "test.storeReview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    func testDefaultsToInactiveBeforeAnyRefresh() {
+        let store = StoreReviewModeStore(userDefaults: makeDefaults(), fetch: { nil })
+        XCTAssertFalse(store.isActive, "with nothing cached, covert features must be visible")
+    }
+
+    func testActiveWhenBackendReportsTrue() async {
+        let defaults = makeDefaults()
+        let store = StoreReviewModeStore(userDefaults: defaults, fetch: { true })
+        await store.refresh()
+        XCTAssertTrue(store.isActive)
+    }
+
+    func testFetchFailureResolvesToInactive() async {
+        let defaults = makeDefaults()
+        // Seed it "active", then let a failing fetch (nil) run: it must fall back to false, never
+        // leave a stale true that would keep hiding features after the review window closed.
+        defaults.set(true, forKey: StoreReviewModeStore.defaultsKey)
+        let store = StoreReviewModeStore(userDefaults: defaults, fetch: { nil })
+        await store.refresh()
+        XCTAssertFalse(store.isActive, "any error or timeout must resolve to not-under-review")
+    }
+
+    func testBackendFalseClearsAPreviousActive() async {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: StoreReviewModeStore.defaultsKey)
+        let store = StoreReviewModeStore(userDefaults: defaults, fetch: { false })
+        await store.refresh()
+        XCTAssertFalse(store.isActive)
     }
 }

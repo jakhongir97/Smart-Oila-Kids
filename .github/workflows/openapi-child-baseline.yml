@@ -53,4 +53,4 @@ jobs:
         # `x-deployment-status: not-deployed`, because the client really does call it and the gate's
         # job is to notice that, not to look away from it. See OpenAPI/README.md.
         run: |
-          python3 scripts/check_child_live_endpoints.py --min-endpoints 26
+          python3 scripts/check_child_live_endpoints.py --min-endpoints 27

@@ -33,7 +33,7 @@
 "main.parent_tracking_action_checking" = "Tekshirilmoqda…";
 
 "lock.title" = "Ilova to'xtatildi";
-"lock.subtitle" = "Ota-onangiz Bolajon ilovasini hozircha to'xtatib qo'ydi.";
+"lock.subtitle" = "Ota-onangiz Bolajon360 ilovasini hozircha to'xtatib qo'ydi.";
 "lock.schedule" = "Jadval: %@";
 "lock.local_time" = "Qurilma vaqti: %@";
 
@@ -164,7 +164,7 @@
 "perm2.settings.cta_yes" = "Ha, sozlamaga o'tish";
 "perm2.allow.cta" = "Ha, ruxsat berish";
 "perm2.always.cta" = "Ha, doim ruxsat";
-"perm2.intro.title" = "Bolajon ilovasini sozlaymiz";
+"perm2.intro.title" = "Bolajon360 ilovasini sozlaymiz";
 "perm2.intro.body" = "Farzandingiz xavfsizligi uchun bir nechta ruxsat kerak bo'ladi. Keling, birma-bir, tushunarli qilib sozlaymiz.";
 "perm2.intro.cta" = "Boshlash";
 "perm2.notifications.title" = "Farzandingiz telefoni nazoratingizda bo'lsinmi?";

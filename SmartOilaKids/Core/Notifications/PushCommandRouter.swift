@@ -235,6 +235,12 @@ private extension PushCommandRouter {
         // message, so a parent writing "tingla" was enough to open the child's microphone. The
         // blocks above keep the wide haystack on purpose — they only refresh or deep-link.
         switch audioRoute(forCommand: payload.commandHaystack) {
+        case .start where StoreReviewModeStore.shared.isActive:
+            // Under App Store review this build hides its covert feature: a live-audio/video wake is
+            // dropped rather than opening the mic/camera. Recorded so the reason is visible in
+            // diagnostics, never silently swallowed. Reverts automatically when the operator clears
+            // review mode for this build (next `app-config` refresh).
+            routeActions.append("audio_start_suppressed_store_review")
         case .start:
             // Forward the server-owned lease fields (mode / cameraType / maxDurationSeconds /
             // expiresAt) so the manager can drop a stale (Doze-delayed) command, size its lease, and

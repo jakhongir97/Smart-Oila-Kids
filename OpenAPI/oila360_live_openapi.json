@@ -5430,6 +5430,56 @@
           "device-apps"
         ]
       }
+    },
+    "/api/v1/app-config": {
+      "get": {
+        "operationId": "AppConfigController_read",
+        "parameters": [
+          {
+            "name": "platform",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Ios",
+                "Android"
+              ]
+            }
+          },
+          {
+            "name": "appBuild",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConfigResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown platform, or a missing parameter"
+          },
+          "429": {
+            "description": "Rate limited (APP_CONFIG_THROTTLE, 60/min/IP)"
+          }
+        },
+        "summary": "Public per-build app configuration. Called at launch with the app's own platform and build number; answers whether THIS build is the one currently under store review. Any error or timeout must be treated as false.",
+        "tags": [
+          "app-config"
+        ]
+      }
     }
   },
   "info": {
@@ -6775,6 +6825,19 @@
           "installId",
           "kind",
           "surface"
+        ]
+      },
+      "AppConfigResponseDto": {
+        "type": "object",
+        "properties": {
+          "storeReviewMode": {
+            "type": "boolean",
+            "example": false,
+            "description": "True only when this exact platform/build pair is the one an operator recorded as under store review, the master toggle is on, and any configured expiry is still in the future. Treat any error or timeout as FALSE."
+          }
+        },
+        "required": [
+          "storeReviewMode"
         ]
       }
     }

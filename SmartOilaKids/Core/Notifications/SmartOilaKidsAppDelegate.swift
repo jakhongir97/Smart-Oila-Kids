@@ -36,6 +36,10 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // side effect of rendering. It is cheap: no hardware is opened until a command arrives.
         _ = DeviceAudioStreamManager.shared
         armTelemetryIfPaired()
+        // Refresh the per-build store-review flag from the public app-config endpoint. Best-effort
+        // and fail-safe FALSE (see StoreReviewModeStore): a failure leaves covert features visible,
+        // and the cached value from a prior launch keeps a review build protected until this returns.
+        Task { await StoreReviewModeStore.shared.refresh() }
         // Drain the FCM outbox at LAUNCH too, not only from `applicationDidBecomeActive`. iOS
         // background-launches this app for silent pushes and for the `location` background mode, and
         // neither delivers a become-active — so on a device that is rarely opened (the normal case
