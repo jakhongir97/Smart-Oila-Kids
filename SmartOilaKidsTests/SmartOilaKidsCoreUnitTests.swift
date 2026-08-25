@@ -2795,6 +2795,31 @@ final class StreamCommandParsingTests: XCTestCase {
         XCTAssertTrue(cmd.isStaleWake, "a wake past its expiresAt must be dropped")
     }
 
+    /// The clock belongs to the CHILD. A phone wound forward makes every server `expiresAt` look
+    /// long past, which used to drop 100% of the parent's live checks permanently and silently.
+    func testImplausiblyOldExpiryIsDisbelievedRatherThanObeyed() {
+        let wayPast = Date().addingTimeInterval(-(StreamCommand.maxTrustedClockSkew + 600))
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamExpiresAt: String(Int(wayPast.timeIntervalSince1970 * 1000))
+        ]))
+        XCTAssertTrue(cmd.hasImplausibleExpiry)
+        XCTAssertFalse(cmd.isStaleWake, "a clock-skewed expiry must fall back to the receipt lease")
+        XCTAssertGreaterThan(cmd.remainingLeaseSeconds, 0, "and the fallback lease must be usable")
+    }
+
+    /// The other side of the same rule: an ORDINARY late push is still dropped, so a command that
+    /// genuinely expired while the parent walked away cannot open the microphone.
+    func testOrdinaryLateWakeIsStillDropped() {
+        let recentlyPast = Date().addingTimeInterval(-60)
+        let cmd = StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "audio",
+            PushUserInfoKeys.streamExpiresAt: String(Int(recentlyPast.timeIntervalSince1970 * 1000))
+        ]))
+        XCTAssertFalse(cmd.hasImplausibleExpiry, "60s late is well within any delivery delay")
+        XCTAssertTrue(cmd.isStaleWake)
+    }
+
     func testMissingExpiresAtFallsBackToTheReceiptTimeLease() {
         // `expiresAt` is in no version of the D-073 contract, so failing closed on it dropped 100%
         // of stream.start pushes from a backend that never sends it. A command with no expiry is

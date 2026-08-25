@@ -129,12 +129,22 @@ Build the key from **normalised** values (parsed `Date`, enum `mode`, clamped `I
 FCM payload and an epoch-millis WS payload for the same command otherwise produce different keys and
 the cross-transport dedupe silently never fires.
 
-### 4.6 Do not relax `isStaleWake`
-One design discarded a past `expiresAt` for WS to allow for clock skew. That routes into
-`effectiveDeadline = receivedAt + maxDurationSeconds` — a **fresh full lease** — turning a replayed
-30s command into a new 120s one. The past-`expiresAt` drop is the only replay defence in the system,
-and the socket is the one transport that can replay. Leave it alone; fix the *observability* of the
-drop instead (`RuntimeDiagnosticsCenter.updateMedia(lastEvent: "audio_wake_dropped_stale")`).
+### 4.6 Do not relax `isStaleWake` — SUPERSEDED 2026-08-24 (build 16)
+> **This section no longer describes the shipping rule.** Its rationale was scoped to a WebSocket
+> command transport that was never built: `stream.*` arrives over FCM/APNs only, and no
+> `DeviceRealtimeChannel` exists in the codebase, so the replay attack it defends against has no
+> vector today. Meanwhile the zero-tolerance rule had a cost it did not anticipate — `expiresAt` is
+> compared against a clock the CHILD controls, so winding it forward disabled every parent live
+> check permanently and silently. Build 16 keeps the strict drop for ordinary late pushes and falls
+> back to the receipt-time lease ONLY when `expiresAt` is implausible by more than
+> `StreamCommand.maxTrustedClockSkew` (900 s). Reinstate a stricter rule here if a replayable
+> transport is ever added.
+
+_Original text:_ One design discarded a past `expiresAt` for WS to allow for clock skew. That routes
+into `effectiveDeadline = receivedAt + maxDurationSeconds` — a **fresh full lease** — turning a
+replayed 30s command into a new 120s one. The past-`expiresAt` drop is the only replay defence in the
+system, and the socket is the one transport that can replay. Leave it alone; fix the *observability*
+of the drop instead (`RuntimeDiagnosticsCenter.updateMedia(lastEvent: "audio_wake_dropped_stale")`).
 
 ## 5. What is already sound and needs no work
 

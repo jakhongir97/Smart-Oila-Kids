@@ -54,9 +54,36 @@ struct StreamCommand: Equatable {
     /// The instant this lease really ends: the earlier of the server's `expiresAt` and the full
     /// `maxDurationSeconds` measured from receipt. Taking the earlier of the two is what stops a
     /// push delayed in transit from arming a lease that outlives the deadline the server minted.
+    /// How far behind `receivedAt` a server `expiresAt` may sit before it is DISBELIEVED rather than
+    /// obeyed.
+    ///
+    /// `expiresAt` is minted by the server but compared against the device's own wall clock — and on
+    /// this product the clock belongs to the child. `SettingsProtectionController` documents the
+    /// same threat model: no Screen Time restriction covers the Date & Time pane, so winding the
+    /// clock forward is a one-tap change. With no allowance at all, a clock running fast makes
+    /// `Date() > effectiveDeadline` true for EVERY wake, forever — the parent's live checks stop
+    /// working permanently, silently, and indistinguishably from the push-delay bug. The location
+    /// path already refuses to trust this clock for the same reason.
+    ///
+    /// The tradeoff, stated plainly: a value this large keeps ordinary late pushes (seconds to a few
+    /// minutes) on the STRICT path, so a command that genuinely expired while the parent walked away
+    /// is still dropped. Only a gap too big for any delivery delay to explain is treated as "the
+    /// clock is wrong", and those fall back to the receipt-time lease — bounded by the child's
+    /// one-time consent, the on-screen indicator, and a lease that expires on its own.
+    static let maxTrustedClockSkew: TimeInterval = 900
+
+    /// True when `expiresAt` disagrees with receipt by more than any delivery delay can explain.
+    var hasImplausibleExpiry: Bool {
+        guard let expiresAt else { return false }
+        return expiresAt <= receivedAt.addingTimeInterval(-Self.maxTrustedClockSkew)
+    }
+
     var effectiveDeadline: Date {
         let leaseEnd = receivedAt.addingTimeInterval(TimeInterval(maxDurationSeconds))
-        guard let expiresAt else { return leaseEnd }
+        // An absent OR implausible `expiresAt` both fall back to the receipt-time lease. Same
+        // reasoning as the missing-field case below: failing closed on a value we cannot trust
+        // drops 100% of parent checks, which is worse than the bounded session it prevents.
+        guard let expiresAt, !hasImplausibleExpiry else { return leaseEnd }
         return min(expiresAt, leaseEnd)
     }
 
@@ -567,7 +594,13 @@ final class DeviceAudioStreamManager: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle {
-        didSet { if state != oldValue { syncPresenceNotification() } }
+        didSet {
+            guard state != oldValue else { return }
+            // Stamped here rather than at the eight assignment sites, so a new `.connecting` path
+            // added later cannot forget it and silently reintroduce the deaf-device bug.
+            connectingSinceUptime = state == .connecting ? ProcessInfo.processInfo.systemUptime : nil
+            syncPresenceNotification()
+        }
     }
     /// Whether the current/last session is audio-only or video — drives the indicator's text/icon.
     @Published private(set) var activeMode: StreamMode = .audio {
@@ -599,6 +632,11 @@ final class DeviceAudioStreamManager: ObservableObject {
     private var startGeneration: UInt64 = 0
     /// The command awaiting consent, so `grantConsentAndStart()` starts the mode the parent asked for.
     private var pendingCommand: StreamCommand?
+    /// When the current `.connecting` attempt began, on the MONOTONIC clock (`systemUptime`), not
+    /// the wall clock — the wall clock belongs to the child and winding it would otherwise let this
+    /// recovery be disabled the same way `expiresAt` could be. Only ever compared within one process
+    /// lifetime, so uptime's reset-on-reboot is irrelevant. nil whenever `state != .connecting`.
+    private var connectingSinceUptime: TimeInterval?
     /// The server-owned lease: an outstanding auto-stop scheduled for `maxDurationSeconds` after the
     /// last start/renewal. Cancelled and rescheduled on renewal; fired only by the owning generation.
     private var leaseTask: Task<Void, Never>?
@@ -808,7 +846,11 @@ final class DeviceAudioStreamManager: ObservableObject {
         // without this event that is indistinguishable in the field from a push that never
         // arrived — the single most expensive ambiguity this subsystem can produce.
         guard !command.isStaleWake else {
-            recordMedia(status: "idle", event: Self.event(command.mode, "start_dropped_stale"))
+            // Named apart from an ordinary late drop: a skew-shaped drop means the DEVICE CLOCK is
+            // the problem, and the two need different answers in the field (chase the sender vs
+            // chase the phone's Date & Time setting).
+            let reason = command.hasImplausibleExpiry ? "start_dropped_stale_clock_skew" : "start_dropped_stale"
+            recordMedia(status: "idle", event: Self.event(command.mode, reason))
             return
         }
         requestStart(command: command)
@@ -959,8 +1001,11 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// permission while the child is demonstrably on screen.
     ///
     /// Both no-session branches of `grantConsentAndStart` need exactly this, and neither may skip
-    /// the second half. Onboarding ships no microphone step, so this tap is usually the first and
-    /// only moment the app can present the system prompt: the child is in the foreground, by
+    /// the second half. Onboarding DOES ship microphone and camera steps
+    /// (`BolajonPermissionsFlowView`, both optional and both skippable, and both dropped entirely
+    /// when the media flag is off) — but a child who skipped them reaches here with the permission
+    /// still `.notDetermined`, so this tap is the last moment the app can present the system prompt:
+    /// the child is in the foreground, by
     /// definition, because they just tapped Allow. Returning without asking left the install in the
     /// worst available state — consent RECORDED but the microphone still `.undetermined` — and every
     /// later parent check then reached `requestMicPermission()` from the BACKGROUND, where iOS
@@ -1080,6 +1125,19 @@ final class DeviceAudioStreamManager: ObservableObject {
         // then overwritten by B at `self.publisher = publisher`, both connected, both opened the
         // mic, and `stop()` only ever disconnected B. Room A published indefinitely with the
         // indicator off, endable only by force-quit or reboot.
+        // …but a `.connecting` attempt can also be a CORPSE. `connectWatchdog` is a sleeping Task,
+        // and iOS suspends a backgrounded process mid-connect: the sleep does not advance while
+        // suspended, so the attempt neither completes nor times out. `state` stays `.connecting`,
+        // and because of the guard below the device is then deaf to every later wake — the parent
+        // presses listen and nothing happens, indefinitely. Reclaim an attempt that has outlived the
+        // watchdog's own timeout before the guard runs. `stop()` bumps `startGeneration`, which is
+        // precisely what invalidates the dead attempt if it ever does resume.
+        if state == .connecting,
+           let since = connectingSinceUptime,
+           ProcessInfo.processInfo.systemUptime - since > TimeInterval(Self.connectTimeout) {
+            recordMedia(status: "idle", event: Self.event(command.mode, "start_reclaimed_stuck_connect"))
+            await stop()
+        }
         guard state != .live, state != .connecting else { return }
         // Never open the camera on an audio-only grant, even if some other caller reaches start()
         // directly: the consent gate belongs with the hardware, not only with the push route.
