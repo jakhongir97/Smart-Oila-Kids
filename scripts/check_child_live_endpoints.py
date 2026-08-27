@@ -54,7 +54,17 @@ DEFAULT_SPEC = ROOT / "OpenAPI" / "oila360_live_openapi.json"
 DECLARED_AHEAD_OF_DEPLOYMENT = {
     # Backend ask B1. `unpairDevice()` treats 404/405/501 as `.routeMissing` and never lets the
     # result block the local teardown, because a child must be able to disconnect with no network.
-    "POST /api/v1/device/unpair": "backend ask B1 — probed 2026-08-18, every verb 404s",
+    #
+    # ⚠️ RE-PROBED 2026-08-28: **POST now answers 401, not 404** — the backend has SHIPPED this route
+    # since the 08-18 probe. Control `POST /api/v1/device/definitely-not-real` still 404s, and
+    # `GET /api/v1/device/unpair` 404s, so the 401 is a real guarded POST endpoint and not a
+    # catch-all. This exemption is therefore now STALE and should be deleted — but deleting it
+    # requires re-capturing `OpenAPI/oila360_live_openapi.json` from the live docs first (they are
+    # behind basic auth; credentials are in the team's Telegram and must never be written into this
+    # PUBLIC repo). Until that refresh lands the exemption stays, so the gate keeps passing, and this
+    # note is what stops it being mistaken for a still-missing route.
+    "POST /api/v1/device/unpair": "backend ask B1 — RE-PROBED 2026-08-28: POST now 401 (route is LIVE); "
+                                  "exemption pending an OpenAPI snapshot refresh",
 }
 DEFAULT_SOURCE = ROOT / "SmartOilaKids"
 
