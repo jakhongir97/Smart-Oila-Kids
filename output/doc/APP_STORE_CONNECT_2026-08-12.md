@@ -118,8 +118,9 @@ session is running, the child's screen shows a clear indicator, and if the app i
 device shows a persistent notification instead. The child can end any session themselves, and if the
 device cannot show that notification, the session does not start at all.
 
-When a parent has set a disconnect PIN, the child can unlink the device from Settings by entering it. Removing the device from the
-parent account ends all monitoring immediately.
+The child can unlink the device from Settings at any time — with the parent's PIN if one has been
+set, or with a confirmation if not. Removing the device from the parent account ends all monitoring
+immediately.
 
 Requires an Oila360 parent account.
 ```
@@ -149,8 +150,9 @@ Bolajon360 никогда не записывает и не сохраняет �
 экране — на устройстве показывается постоянное уведомление. Ребёнок может сам завершить любой сеанс, а
 если устройство не может показать такое уведомление, сеанс вообще не начнётся.
 
-Если родитель задал PIN отвязки, ребёнок может отвязать устройство в настройках, введя этот PIN. Удаление устройства из
-родительского аккаунта сразу прекращает наблюдение.
+Ребёнок может отвязать устройство в настройках в любой момент — с родительским PIN-кодом, если он
+задан, или с подтверждением, если нет. Удаление устройства из родительского аккаунта сразу
+прекращает наблюдение.
 
 Требуется родительский аккаунт Oila360.
 ```
@@ -178,8 +180,9 @@ mumkin. Seans davomida bolaning ekranida aniq belgi ko'rinadi, ilova ekranda bo'
 bildirishnoma chiqadi. Bola istalgan seansni o'zi tugatishi mumkin, agar qurilma bunday bildirishnomani
 ko'rsata olmasa, seans umuman boshlanmaydi.
 
-Agar ota-ona uzish PIN kodini o'rnatgan bo'lsa, bola sozlamalardan shu PIN kodi bilan qurilmani uzishi mumkin. Qurilmani ota-ona akkauntidan
-o'chirish kuzatuvni darhol to'xtatadi.
+Bola istalgan vaqtda sozlamalardan qurilmani uzishi mumkin — PIN kod o'rnatilgan bo'lsa, o'sha PIN
+bilan, o'rnatilmagan bo'lsa tasdiqlash bilan. Qurilmani ota-ona akkauntidan o'chirish kuzatuvni
+darhol to'xtatadi.
 
 Oila360 ota-ona akkaunti talab qilinadi.
 ```
@@ -236,7 +239,7 @@ What you can exercise on the device:
 - Parent-child chat, including a photo attachment
 - Tasks
 - Settings, permission status, language switching (English, Russian, Uzbek)
-- Disconnecting the device (only once a parent has set a disconnect PIN — see the note below)
+- Disconnecting the device (with the parent PIN, or with a confirmation when no PIN is set — see the note below)
 
 About background location:
 Location is used so the paired parent can see where the child device is. This is the core purpose of
@@ -255,10 +258,14 @@ there is no recording feature and nothing is written to disk or uploaded. Specif
 - sessions are limited by a server-issued lease and stop on their own.
 
 About disconnecting:
-On-device disconnect is protected by a PIN that only a parent can set, and only within 15 minutes of
-pairing. A disconnect PIN has already been set on the review child account and is included below, so
-the Settings > Disconnect flow can be exercised. Without it the row correctly reports that
-disconnection is managed from the parent app.
+The child can disconnect the device from Settings. If a parent has set a disconnect PIN, the flow
+asks for it first; if no PIN has been set, it asks for a plain confirmation. Either way the device is
+unlinked and all monitoring stops, which is deliberate — a monitored person must always be able to
+end the monitoring from the device they are carrying.
+
+A parent can set the disconnect PIN once per pairing, from the prompt shown on the child's home
+screen after linking. A disconnect PIN has already been set on the review child account and is
+included below, so the PIN-protected form of the flow can be exercised.
 
 Reviewer disconnect PIN: [REVIEW_DISCONNECT_PIN]
 

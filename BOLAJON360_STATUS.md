@@ -1,7 +1,8 @@
 # Bolajon360 — Current Status & Handoff (single source of truth)
 
-_Last updated: 2026-08-24 for build 15 (facts below re-read from the tree; the narrative sections
-still date from the 2026-07-29 rewrite after a full audit of 182 verified findings)._
+_Last updated: 2026-08-28 after the full audit of build 16 (275 raw findings, 43 refuted by an
+adversarial verification pass). Facts below re-read from the tree; the narrative sections still date
+from the 2026-07-29 rewrite._
 
 _Original note: rewritten against the tree after a full audit (182 verified findings).
 Every number below was read from the code, not carried over. Where the older submission docs
@@ -21,8 +22,8 @@ backend.
 |---|---|
 | **App name (in build)** | Bolajon360 |
 | **Bundle id** | `uz.smartoila.kids` (team `3TWN5NW4BL`) |
-| **Version** | **1.1 (build 15)** |
-| **Branch** | `main` — build 15 merged and pushed (`5d91860`); no other branches open. |
+| **Version** | **1.1 (build 16)** — audit fixes land on `fix/audit-2026-08-27` on top of it |
+| **Branch** | `main` @ `3817cfc` (build 16, pushed). Audit fixes on `fix/audit-2026-08-27`. |
 | **Backend (live)** | `https://api.oila360.uz/api/v1` — Bearer `deviceToken`, single long-lived token |
 | **Auth model** | Parent generates a 5-digit pairing code → child redeems via `POST /device/pair` |
 | **Android sibling** | `com.oila24.bolajon360` (native Kotlin) — **not** feature-equivalent, see below |
@@ -94,11 +95,26 @@ and it is the highest-stakes claim in the repo, so:
 ## Status: AMBER — not submittable yet
 
 - **Build:** app + both extensions compile clean. Release build: zero warnings.
-- **Tests:** **350** XCTest methods, 0 failures.
+- **Tests:** **389** XCTest methods, 0 failures (was 350 at build 15; the audit branch adds 39).
 - **Script tests:** 35 passing.
-- **Localization:** **310** keys × 3 (en/ru/uz), 0 gaps, 0 format-specifier mismatches.
-- **Endpoints:** 27 client operations (24 `/api/v1/device/*`), gate floor pinned at 27. All
-  present in the live spec except `POST /device/unpair`, which the server still 404s.
+- **Localization:** **312** keys × 3 (en/ru/uz), 0 gaps, 0 format-specifier mismatches.
+- **Endpoints:** 26 client operations (24 `/api/v1/device/*`), gate floor pinned at 26 — lowered from
+  27 when the `app-config` store-review call site was deleted. All present in the live spec except
+  `POST /device/unpair`, which the server still 404s.
+- **CI:** builds the app for the first time since the Firebase plist landed. Both macOS jobs used to
+  die on the gitignored `GoogleService-Info.plist` being a named build input; they now copy in a
+  committed placeholder whose deliberately-wrong `BUNDLE_ID` the runtime guard refuses to configure
+  against.
+
+### On-device disconnect — what actually ships since build 14
+
+Recorded here because the submission docs said the opposite until 2026-08-28, and it is the kind of
+claim App Review checks. The child can disconnect from Settings **whether or not a PIN exists**: with
+a PIN the flow asks for it, without one it asks for a plain confirmation. This was Ibrohim's explicit
+build-14 decision ("Agar PIN kiritilmagan bo'lsa Prosta HA dialog chiqarasiz"). The earlier
+15-minute provisioning window is **gone** — `FirstPINProvisioning.decide` takes no clock at all,
+because the clock belonged to the child. What remains is one grant per pairing, spent by an explicit
+answer to the first-run prompt.
 
 ### What the audit fixed on this branch
 
