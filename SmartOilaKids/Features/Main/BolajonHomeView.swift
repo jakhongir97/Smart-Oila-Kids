@@ -74,6 +74,8 @@ struct BolajonHomeView: View {
     @State private var showSOSConfirm = false
     /// True while the first-run parent-PIN sheet is up.
     @State private var showFirstRunPINSetup = false
+    /// One location re-ask per launch. See `reaskForLocationIfNeverAnswered`.
+    @State private var didReaskForLocation = false
     /// Bumped whenever the chat unread badge has to be re-read from
     /// `GET /device/chat/unread-count`. Push isn't delivered on this build, so the badge can only
     /// stay honest by re-syncing on foreground, on leaving the thread, and on a chat push if one
@@ -151,6 +153,7 @@ struct BolajonHomeView: View {
                 // if the device was locked or the consent sheet was up at first appear, the grant is
                 // still unspent and the next foreground is the natural moment to offer it again.
                 armFirstRunPINPromptIfNeeded()
+                reaskForLocationIfNeverAnswered()
                 chatUnreadRefreshToken += 1
                 // Same reasoning for everything else on this screen. `.task` fires once and the
                 // home stack root never disappears, so the task preview rows and the star badge
@@ -218,6 +221,21 @@ struct BolajonHomeView: View {
     /// Not listed: the permissions flow, which routes to a different root entirely and cannot be on
     /// screen at the same time as Home, and the live-capture banner, which is a sibling row rather
     /// than a presentation and so has nothing to contend for.
+    /// Ask for location once per launch when the child has never actually answered iOS's prompt.
+    ///
+    /// Both location steps in onboarding ship a visible decline, and nothing anywhere asked again —
+    /// so a child could finish setup with location fully unanswered and the product's core feature
+    /// silently off for the life of the pairing, with the parent seeing an empty map rather than a
+    /// reason. This costs nothing when the child HAS answered: from any status other than
+    /// `.notDetermined` iOS shows no prompt, which is why the check is on the status and not on a
+    /// counter. The header chip covers the denied case, which no prompt can reopen.
+    private func reaskForLocationIfNeverAnswered() {
+        guard !didReaskForLocation, sessionStore.oilaPaired, !lockState.isLocked else { return }
+        guard permissionManager.locationAuthorizationStatus == .notDetermined else { return }
+        didReaskForLocation = true
+        permissionManager.requestLocationPermission()
+    }
+
     private func armFirstRunPINPromptIfNeeded() {
         // Cheap first, because this runs on every foreground for the life of the pairing: the marker
         // is a plain `UserDefaults` read and, unlike `hasCustomPIN`, it cannot be stale — so it is

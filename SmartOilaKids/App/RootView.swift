@@ -161,11 +161,17 @@ private extension RootView {
     /// Presents the device-lock takeover. Driven by GET /device/lock/state, polled by
     /// OilaTelemetryService (parent manual-lock + schedules). The setter is intentionally
     /// a no-op: only the lock state may hide the cover.
+    /// Whether the parent's device-lock takeover should be on screen. Read by both bindings below,
+    /// so the two presentations can never disagree about which of them owns the window.
+    var deviceLockIsTakingOver: Bool {
+        oilaTelemetry.isLocked && sessionStore.oilaPaired && sessionStore.onboardingCompleted
+    }
+
     var deviceLockCoverPresented: Binding<Bool> {
         Binding(
             // The lock only applies to a paired child on Home — never let a restored fail-closed
             // lock cover the pairing or B1–B11 onboarding screens.
-            get: { oilaTelemetry.isLocked && sessionStore.oilaPaired && sessionStore.onboardingCompleted },
+            get: { deviceLockIsTakingOver },
             set: { _ in }
         )
     }
@@ -174,8 +180,20 @@ private extension RootView {
     /// child has ever consented. Dismissing counts as "not now" (declineConsent).
     var audioConsentPresented: Binding<Bool> {
         Binding(
-            get: { AppRuntime.audioStreamingEnabled && audioStream.needsConsent },
-            set: { if !$0 { audioStream.declineConsent() } }
+            // The lock takeover WINS. Both presentations are chained on this same view, and SwiftUI
+            // will not present a full-screen cover while a sheet from the same subtree is up — so an
+            // unanswered consent sheet (which is exactly what a listen request to a child who has
+            // never consented produces, and it can sit there indefinitely) blocked the parent's lock
+            // outright. `BolajonHomeView` already yields its SOS cover to the lock for this reason;
+            // this is the same rule for the last presentation that did not.
+            //
+            // The consent request is NOT answered here, only hidden: `needsConsent` stays true, so
+            // the sheet returns once the lock clears and the parent's request is still honoured
+            // (subject to the stale-lease check `grantConsentAndStart` already applies). Declining on
+            // the child's behalf because their parent locked the phone would be the wrong answer to
+            // a question nobody asked them.
+            get: { AppRuntime.audioStreamingEnabled && audioStream.needsConsent && !deviceLockIsTakingOver },
+            set: { if !$0, !deviceLockIsTakingOver { audioStream.declineConsent() } }
         )
     }
 }
