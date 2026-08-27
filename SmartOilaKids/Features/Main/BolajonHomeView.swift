@@ -183,6 +183,7 @@ struct BolajonHomeView: View {
                     isSending: viewModel.isSendingSOS,
                     sent: viewModel.sosSent,
                     failed: viewModel.sosFailed,
+                    queued: viewModel.sosQueued,
                     onConfirm: { Task { await viewModel.sendSOS() } },
                     onClose: { showSOSConfirm = false }
                 )
@@ -640,6 +641,9 @@ struct SOSConfirmTakeover: View {
     let isSending: Bool
     let sent: Bool
     let failed: Bool
+    /// The failed alert was durably queued and is still being retried. Defaulted so the debug
+    /// preview route and any other construction site keep compiling.
+    var queued: Bool = false
     let onConfirm: () -> Void
     let onClose: () -> Void
 
@@ -676,9 +680,13 @@ struct SOSConfirmTakeover: View {
             }
 
             if !sent, failed, !isSending {
-                Text(L10n.tr("sos2.failed"))
+                // "Couldn't send" was a lie whenever the alert had actually been queued: a failed
+                // SOS is persisted and retried across relaunches for as long as the app lives, so
+                // telling a frightened child that nothing happened is both false and the worst
+                // possible moment to be false. `queued` says what is really going on.
+                Text(L10n.tr(queued ? "sos2.queued" : "sos2.failed"))
                     .font(AppTypography.caption(13))
-                    .foregroundStyle(AppColors.sosCoral)
+                    .foregroundStyle(queued ? AppColors.inkSecondary : AppColors.sosCoral)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
@@ -759,6 +767,10 @@ final class BolajonHomeViewModel: ObservableObject {
     @Published var sosSent = false
     /// True when the SOS send failed after all retries — drives the takeover's error + retry state.
     @Published var sosFailed = false
+    /// True when that failure was DURABLY QUEUED rather than lost. `hasUndeliveredSOS` existed on the
+    /// telemetry service for exactly this and had zero readers, so the child was told the alert
+    /// "couldn't send" while it was queued and retrying.
+    @Published var sosQueued = false
     @Published var errorMessage: String?
 
     /// Tasks whose completion is currently in flight — guards against a rapid double-tap
@@ -1007,6 +1019,7 @@ final class BolajonHomeViewModel: ObservableObject {
         guard !isSendingSOS, !sosSent else { return }
         isSendingSOS = true
         sosFailed = false
+        sosQueued = false
         defer { isSendingSOS = false }
         // Attach the latest known location + battery so the parent sees where/how the child
         // is. Any field may be nil (location unavailable / battery unknown) — the SOS still
@@ -1044,6 +1057,7 @@ final class BolajonHomeViewModel: ObservableObject {
                 // with repeated independent probes before tearing anything down.
                 if attempt == maxAttempts {
                     telemetry.enqueueUndeliveredSOS(context)
+                    sosQueued = telemetry.hasUndeliveredSOS
                     sosFailed = true
                     errorMessage = NetworkError.userMessage(for: error)
                 } else {

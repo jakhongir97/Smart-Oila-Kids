@@ -205,6 +205,7 @@
 "sos2.cancel" = "Cancel";
 "sos2.sent" = "Alert sent";
 "sos2.failed" = "Couldn't send. Check your connection and try again.";
+"sos2.queued" = "Sent to your parent as soon as there is a connection. Still trying.";
 "sos2.retry" = "Try again";
 "tasks2.title" = "Tasks";
 "tasks2.stars_collected" = "Stars collected";

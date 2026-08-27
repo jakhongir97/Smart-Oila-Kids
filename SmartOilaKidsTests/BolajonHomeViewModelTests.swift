@@ -99,6 +99,8 @@ private final class StubSOSTelemetry: SOSTelemetryProviding {
 
     func currentSOSContext() -> OilaSOSContext { context }
     func enqueueUndeliveredSOS(_ context: OilaSOSContext) { enqueued.append(context) }
+    /// Mirrors the real outbox: anything handed over is still pending until something delivers it.
+    var hasUndeliveredSOS: Bool { !enqueued.isEmpty }
 }
 
 private struct StubScreenTimeUsage: ScreenTimeUsageProviding {

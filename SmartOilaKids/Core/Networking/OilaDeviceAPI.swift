@@ -476,7 +476,9 @@ struct OilaLockState {
             let raw: Int?
             switch dict[key] {
             case let value as Int: raw = value
-            case let value as Double: raw = Int(value)
+            // Trapping conversion — see `safeInt`. A schedule minute arriving as 1e400 would
+            // otherwise crash the app on the lock screen, of all places.
+            case let value as Double: raw = OilaDeviceClient.safeInt(value)
             case let value as String: raw = Int(value.trimmingCharacters(in: .whitespaces))
             default: raw = nil
             }
@@ -1567,10 +1569,31 @@ final class OilaDeviceClient: OilaDeviceServicing {
     private static func intValue(_ dict: [String: Any], _ keys: [String]) -> Int? {
         for key in keys {
             if let intValue = dict[key] as? Int { return intValue }
-            if let doubleValue = dict[key] as? Double { return Int(doubleValue) }
+            if let doubleValue = dict[key] as? Double { return Self.safeInt(doubleValue) }
             if let stringValue = dict[key] as? String, let parsed = Int(stringValue) { return parsed }
         }
         return nil
+    }
+
+    /// `Int(Double)` is a TRAPPING conversion: NaN, ±infinity and anything outside `Int64` crash the
+    /// process rather than returning nil. `JSONSerialization` yields a finite-but-huge Double for an
+    /// ordinary-looking literal like `1e19` or `1e30` (it rejects `1e400` outright, so infinity is
+    /// not the reachable case — the large finite ones are). So one malformed number anywhere in a
+    /// `/device/*` response — a backend serialization bug, a truncated body — killed the child's app
+    /// every time it parsed that response. On a monitoring app a crash loop is not a glitch: it is
+    /// monitoring silently switched off.
+    ///
+    /// Implemented with `Int(exactly:)` on the TRUNCATED value rather than a range comparison,
+    /// because the obvious range check is itself wrong at the boundary: `Double(Int.max)` rounds UP
+    /// to 9223372036854775808, one more than `Int.max`, so `value <= Double(Int.max)` admits a value
+    /// that then traps. `Int(exactly:)` cannot trap and needs no boundary reasoning.
+    ///
+    /// An unusable number is treated as ABSENT, which every caller already handles (`intValue`
+    /// returns an Optional precisely so a missing field is normal).
+    static func safeInt(_ value: Double) -> Int? {
+        guard value.isFinite else { return nil }
+        // `rounded(.towardZero)` preserves the old truncating behaviour for ordinary fractions.
+        return Int(exactly: value.rounded(.towardZero))
     }
 
     /// Same tolerance as `intValue`, for flags: a JSON boolean, or a stringified one (some

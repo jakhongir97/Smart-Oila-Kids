@@ -4338,3 +4338,54 @@ final class PINLockoutLadderTests: XCTestCase {
                        "the tier must reset with the counter")
     }
 }
+
+// MARK: - Parsing a hostile number must not kill the app
+
+/// `Int(Double)` is a TRAPPING conversion. `JSONSerialization` returns `Double.infinity` for a
+/// literal like `1e400`, so one malformed number anywhere in a `/device/*` response crashed the
+/// child's app every time it parsed that response — and on a monitoring app a crash loop is not a
+/// glitch, it is monitoring silently switched off.
+final class SafeIntConversionTests: XCTestCase {
+    func testOrdinaryValuesConvert() {
+        XCTAssertEqual(OilaDeviceClient.safeInt(42), 42)
+        XCTAssertEqual(OilaDeviceClient.safeInt(-7), -7)
+        XCTAssertEqual(OilaDeviceClient.safeInt(0), 0)
+    }
+
+    func testFractionsTruncateTowardZeroAsBefore() {
+        XCTAssertEqual(OilaDeviceClient.safeInt(9.99), 9)
+        XCTAssertEqual(OilaDeviceClient.safeInt(-9.99), -9)
+    }
+
+    /// Each of these traps under the old `Int(value)`.
+    func testValuesThatWouldTrapAreTreatedAsAbsent() {
+        XCTAssertNil(OilaDeviceClient.safeInt(.infinity))
+        XCTAssertNil(OilaDeviceClient.safeInt(-.infinity))
+        XCTAssertNil(OilaDeviceClient.safeInt(.nan))
+        XCTAssertNil(OilaDeviceClient.safeInt(1e30), "outside Int64")
+        XCTAssertNil(OilaDeviceClient.safeInt(-1e30))
+    }
+
+    /// The boundary that makes the OBVIOUS fix wrong too. `Double(Int.max)` rounds UP to
+    /// 9223372036854775808 — one more than `Int.max` — so a `value <= Double(Int.max)` guard admits
+    /// exactly this value and then traps converting it. Measured, not assumed.
+    func testTheBoundaryValueThatDefeatsARangeCheck() {
+        XCTAssertNil(OilaDeviceClient.safeInt(Double(Int.max)),
+                     "Double(Int.max) is not representable as an Int")
+        XCTAssertEqual(OilaDeviceClient.safeInt(Double(Int.min)), Int.min,
+                       "Int.min IS exactly representable, so it must still convert")
+    }
+
+    /// Proof the crash is reachable from a real response and not theoretical. Note the mechanism is
+    /// large FINITE doubles: `JSONSerialization` rejects `1e400` outright rather than yielding
+    /// infinity, so the reachable case is an ordinary-looking literal like this one.
+    func testTheRealJSONPathThatWouldHaveCrashedTheApp() throws {
+        let data = Data(#"{"n": 1e19}"#.utf8)
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let parsed = try XCTUnwrap(object["n"] as? Double)
+        XCTAssertTrue(parsed.isFinite)
+        XCTAssertNil(OilaDeviceClient.safeInt(parsed),
+                     "this is the value that used to kill the process")
+    }
+}

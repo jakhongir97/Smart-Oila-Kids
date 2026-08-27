@@ -595,8 +595,26 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// Bounded, because an SOS that is hours stale is worse than none — `maxQueuedSOS` most-recent
     /// entries survive, and anything older than `sosMaxAge` is dropped on restore rather than
     /// delivered as a phantom emergency.
+    /// How close together two undelivered SOS attempts must be to count as ONE emergency.
+    ///
+    /// A child who presses SOS, sees "couldn't send", and presses again is not reporting a second
+    /// emergency — they are reporting the same one, harder. Every tap used to append another entry,
+    /// so an offline child tapping "Try again" a few times made the parent's phone receive that many
+    /// separate panic alerts once connectivity returned, and a duplicate alert is indistinguishable
+    /// from a genuine second press at the moment it matters most.
+    nonisolated static let sosDuplicateWindow: TimeInterval = 120
+
     func enqueueUndeliveredSOS(_ context: OilaSOSContext) {
-        pendingSOS.append(OilaPendingSOS(context: context, queuedAt: Date()))
+        let now = Date()
+        // Collapse onto the newest pending entry when it is from the same emergency, keeping the NEW
+        // context: a retry usually carries a fresher location and battery reading, which is exactly
+        // what the parent wants, and the queue position stays where the first press put it.
+        if let last = pendingSOS.indices.last,
+           now.timeIntervalSince(pendingSOS[last].queuedAt) < Self.sosDuplicateWindow {
+            pendingSOS[last] = OilaPendingSOS(context: context, queuedAt: pendingSOS[last].queuedAt)
+        } else {
+            pendingSOS.append(OilaPendingSOS(context: context, queuedAt: now))
+        }
         if pendingSOS.count > maxQueuedSOS {
             pendingSOS.removeFirst(pendingSOS.count - maxQueuedSOS)
         }
@@ -1315,6 +1333,9 @@ protocol SOSTelemetryProviding {
     func currentSOSContext() -> OilaSOSContext
     /// Durably queue an SOS that could not be delivered, for retry across relaunches.
     func enqueueUndeliveredSOS(_ context: OilaSOSContext)
+    /// Whether an SOS is still queued for delivery. On the protocol so the UI can tell the child
+    /// "still trying" instead of "couldn't send" — the concrete property existed with zero readers.
+    var hasUndeliveredSOS: Bool { get }
 }
 
 extension OilaTelemetryService: SOSTelemetryProviding {

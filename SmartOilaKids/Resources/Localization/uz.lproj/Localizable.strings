@@ -205,6 +205,7 @@
 "sos2.cancel" = "Bekor qilish";
 "sos2.sent" = "Xabar yuborildi";
 "sos2.failed" = "Yuborilmadi. Ulanishni tekshirib, qayta urinib ko'ring.";
+"sos2.queued" = "Aloqa paydo bo'lishi bilan ota-onangizga yuboriladi. Urinishda davom etamiz.";
 "sos2.retry" = "Qayta urinish";
 "tasks2.title" = "Topshiriqlar";
 "tasks2.stars_collected" = "Yig'ilgan yulduzlar";
