@@ -21,7 +21,7 @@ extension LocationPermissionManager {
 
     /// UserDefaults marker: the one-time Always-upgrade prompt has already been issued on this
     /// install. See `requestLocationPermission()`.
-    static let alwaysPromptIssuedKey = "BOLAJON_ALWAYS_PROMPT_ISSUED"
+    nonisolated static let alwaysPromptIssuedKey = "BOLAJON_ALWAYS_PROMPT_ISSUED"
 
     func requestLocationPermission() {
         switch locationAuthorizationStatus {
