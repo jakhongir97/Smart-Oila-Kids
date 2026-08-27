@@ -4177,3 +4177,164 @@ final class LockPollBackoffTests: XCTestCase {
         XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 50, baseInterval: base), 600)
     }
 }
+
+// MARK: - The fail-closed lock resolver
+
+/// `OilaLockState.isDeviceLocked` decides whether a parent's lock cover comes up, and its contract is
+/// three-valued on purpose: nil means "unrecognized payload, KEEP the last-known lock", never
+/// "unlocked". It had no tests at all, which matters because it has already regressed once — deriving
+/// only true-or-nil from the reason flags made it a one-way latch that could never release a lock.
+final class DeviceLockResolutionTests: XCTestCase {
+    private func state(isLocked: Bool? = nil,
+                       manual: Bool? = nil,
+                       schedule: Bool? = nil) -> OilaLockState {
+        OilaLockState(isLocked: isLocked, raw: [:],
+                      manualLockEnabled: manual, scheduleLocked: schedule)
+    }
+
+    func testThePrimaryFlagWinsWhenPresent() {
+        XCTAssertEqual(state(isLocked: true).isDeviceLocked, true)
+        XCTAssertEqual(state(isLocked: false).isDeviceLocked, false)
+    }
+
+    func testThePrimaryFlagBeatsDisagreeingReasonFlags() {
+        XCTAssertEqual(state(isLocked: false, manual: true, schedule: true).isDeviceLocked, false)
+        XCTAssertEqual(state(isLocked: true, manual: false, schedule: false).isDeviceLocked, true)
+    }
+
+    func testEitherReasonFlagLocksWhenThePrimaryIsAbsent() {
+        XCTAssertEqual(state(manual: true).isDeviceLocked, true)
+        XCTAssertEqual(state(schedule: true).isDeviceLocked, true)
+        XCTAssertEqual(state(manual: false, schedule: true).isDeviceLocked, true)
+    }
+
+    /// The regression this resolver was rewritten for: a payload carrying only `scheduleLocked: false`
+    /// must RELEASE the lock. Resolving it to nil made the lock impossible to lift through this path.
+    func testAReasonFlagCanReportUnlockedAndNotOnlyLocked() {
+        XCTAssertEqual(state(schedule: false).isDeviceLocked, false)
+        XCTAssertEqual(state(manual: false).isDeviceLocked, false)
+        XCTAssertEqual(state(manual: false, schedule: false).isDeviceLocked, false)
+    }
+
+    /// THE FAIL-CLOSED CASE. An unrecognized 200 must resolve to nil so the caller keeps the last
+    /// known lock. Returning `false` here would let any backend shape change silently unlock every
+    /// locked child in the fleet at once.
+    func testAnUnrecognizedPayloadIsUnknownRatherThanUnlocked() {
+        XCTAssertNil(state().isDeviceLocked,
+                     "nil means keep the last-known lock; false would release it")
+    }
+}
+
+// MARK: - The audio-subject guard, and the PIN ladder
+
+/// `audioRoute` is the gate between a push and the child's microphone. The existing suite covers the
+/// verbs thoroughly, but nothing covered the SUBJECT guard at `PushCommandRouter.swift:332` — delete
+/// that one line and the whole suite still passes while any start-verb push, on any topic, opens the
+/// mic. These are the tests that fail when it is removed.
+final class PushAudioSubjectGuardTests: XCTestCase {
+    func testAStartVerbWithNoAudioSubjectDoesNotOpenTheMicrophone() {
+        for command in ["task.start", "chat.open", "session.begin", "download.resume",
+                        "sync.wake", "app.boshla", "lock.start"] {
+            XCTAssertNil(PushCommandRouter.audioRoute(forCommand: command),
+                         "\(command) names no audio subject and must never reach the mic")
+        }
+    }
+
+    func testAStopVerbWithNoAudioSubjectIsAlsoIgnored() {
+        // Not merely symmetry: a spurious `.stop` is a denial-of-service on a legitimate session.
+        for command in ["task.stop", "download.cancel", "sync.end"] {
+            XCTAssertNil(PushCommandRouter.audioRoute(forCommand: command))
+        }
+    }
+
+    func testTheSubjectStillRoutesWhenItIsPresent() {
+        XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: "stream.start"), .start)
+        XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: "stream.stop"), .stop)
+    }
+
+    /// Fails closed: an audio subject with no verb at all is not a start.
+    func testAnAudioSubjectWithNoVerbIsNotAStartUnlessItIsAKnownBareEvent() {
+        XCTAssertNil(PushCommandRouter.audioRoute(forCommand: "stream.something"))
+        XCTAssertEqual(PushCommandRouter.audioRoute(forCommand: "stream"), .start)
+    }
+}
+
+/// The escalating lockout is the only thing making a 4-digit PIN expensive, and neither the ladder
+/// nor its reset had a test. Both have already regressed once: a flat penalty allowed ~288 guesses a
+/// day, and a tier that never reset let a child re-arm a 24-hour lockout of the parent's own controls
+/// with five taps, indefinitely.
+@MainActor
+final class PINLockoutLadderTests: XCTestCase {
+    private func makeController() -> (SettingsProtectionController, UserDefaults, String) {
+        let suite = "PINLadder.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return (SettingsProtectionController(userDefaults: defaults,
+                                             pinStore: InMemoryPINCredentialStore()),
+                defaults, suite)
+    }
+
+    /// End a running lockout the way time would: push its monotonic deadline into the past while
+    /// leaving the boot anchor current, so `PINLockoutClock` resolves `.clear` and not `.restart`.
+    private func expireLockout(_ defaults: UserDefaults) {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        defaults.set(uptime - 1, forKey: SettingsProtectionController.pinLockUptimeUntilKey)
+        defaults.set(Date().timeIntervalSince1970 - uptime,
+                     forKey: SettingsProtectionController.pinLockBootAnchorKey)
+    }
+
+    private func provisionPIN(_ controller: SettingsProtectionController, _ pin: String) {
+        XCTAssertTrue(controller.beginFirstRunPINPrompt())
+        XCTAssertTrue(controller.saveCustomPIN(pin, authority: .firstRunGrant))
+        controller.recordFirstRunPINPromptAnswered()
+        controller.endFirstRunPINPrompt()
+    }
+
+    func testTheLadderIsStrictlyEscalatingAndCapped() {
+        let ladder = SettingsProtectionController.pinLockoutLadder
+        XCTAssertEqual(ladder, ladder.sorted(), "each tier must be at least as long as the last")
+        XCTAssertEqual(Set(ladder).count, ladder.count, "a repeated tier is a flat penalty in disguise")
+        XCTAssertEqual(ladder.first, 60)
+        XCTAssertEqual(ladder.last, 86_400)
+    }
+
+    func testFiveWrongGuessesStartALockoutAndAFurtherFiveEscalateIt() {
+        let (controller, defaults, suite) = makeController()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        provisionPIN(controller, "1234")
+
+        for _ in 0 ..< 4 { XCTAssertNil(controller.recordPINAttempt(success: false)) }
+        XCTAssertNotNil(controller.recordPINAttempt(success: false), "the 5th failure locks")
+        let first = controller.pinLockRemaining
+        XCTAssertNotNil(first)
+
+        // Serve it out by expiring the monotonic deadline in place (keeping the boot anchor valid,
+        // so the resolver reads "time served" rather than "anchors changed"), then fail five more:
+        // the next tier must be strictly longer.
+        expireLockout(defaults)
+        for _ in 0 ..< 5 { _ = controller.recordPINAttempt(success: false) }
+        let second = controller.pinLockRemaining
+        XCTAssertNotNil(second)
+        XCTAssertGreaterThan(second ?? 0, first ?? 0, "the ladder must climb, not repeat")
+    }
+
+    /// The oracle this closes: a parent who once fumbled their PIN carried the top tier forever, so a
+    /// child could re-arm a 24-hour lockout of the parent's own disconnect controls at will.
+    func testACorrectPINResetsTheTierAndNotJustTheCounter() {
+        let (controller, defaults, suite) = makeController()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        provisionPIN(controller, "1234")
+
+        for _ in 0 ..< 5 { _ = controller.recordPINAttempt(success: false) }
+        XCTAssertNotNil(controller.pinLockRemaining, "precondition: locked out")
+
+        controller.recordPINAttempt(success: true)
+        XCTAssertNil(controller.pinLockRemaining, "a correct PIN ends the lockout")
+
+        // …and the ladder is back at the bottom rung, not still at the top.
+        for _ in 0 ..< 5 { _ = controller.recordPINAttempt(success: false) }
+        XCTAssertEqual(controller.pinLockRemaining.map { $0.rounded() },
+                       SettingsProtectionController.pinLockoutLadder[0],
+                       "the tier must reset with the counter")
+    }
+}
