@@ -4026,3 +4026,85 @@ final class SOSLocationFreshnessTests: XCTestCase {
         XCTAssertNil(OilaTelemetryService.sosUsableLocation(future, now: now))
     }
 }
+
+// MARK: - The PIN lockout runs on a clock the child does not own
+
+/// The escalating ladder (1min → 24h) is the only thing that makes a 4-digit disconnect PIN
+/// expensive to guess, and it was enforced entirely against `Date()` — on a device belonging to the
+/// person it defends against. Settings → General → Date & Time, wind the clock forward, and every
+/// tier evaporated: 5 guesses, change the date, 5 more, for all 10,000 values.
+final class PINLockoutClockTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private let uptime: TimeInterval = 50_000
+
+    /// A lockout begun `elapsed` seconds ago for `duration`, on this boot.
+    private func anchors(duration: TimeInterval, elapsed: TimeInterval)
+        -> (uptimeUntil: TimeInterval, bootAnchor: TimeInterval) {
+        (uptime - elapsed + duration, now.timeIntervalSince1970 - uptime)
+    }
+
+    func testNoRecordedLockoutIsClear() {
+        XCTAssertEqual(
+            PINLockoutClock.resolve(uptimeUntil: nil, bootAnchor: nil, now: now, uptime: uptime),
+            .clear
+        )
+    }
+
+    func testARunningLockoutReportsItsMonotonicRemainder() {
+        let a = anchors(duration: 300, elapsed: 100)
+        XCTAssertEqual(
+            PINLockoutClock.resolve(uptimeUntil: a.uptimeUntil, bootAnchor: a.bootAnchor,
+                                    now: now, uptime: uptime),
+            .locked(remaining: 200)
+        )
+    }
+
+    func testAServedLockoutIsClear() {
+        let a = anchors(duration: 300, elapsed: 301)
+        XCTAssertEqual(
+            PINLockoutClock.resolve(uptimeUntil: a.uptimeUntil, bootAnchor: a.bootAnchor,
+                                    now: now, uptime: uptime),
+            .clear
+        )
+    }
+
+    /// THE ATTACK. The child winds the wall clock a day forward; `systemUptime` does not move, so the
+    /// remaining time is unchanged. The old code read `Date()` and released the lockout instantly.
+    func testWindingTheWallClockForwardDoesNotShortenTheLockout() {
+        let a = anchors(duration: 3_600, elapsed: 60)
+        let tomorrow = now.addingTimeInterval(86_400)
+        let resolution = PINLockoutClock.resolve(uptimeUntil: a.uptimeUntil, bootAnchor: a.bootAnchor,
+                                                 now: tomorrow, uptime: uptime)
+        XCTAssertNotEqual(resolution, .clear, "a date change must never end a lockout")
+        // The anchor no longer matches, so we cannot tell a clock change from a reboot: fail closed.
+        XCTAssertEqual(resolution, .restart)
+    }
+
+    func testWindingTheWallClockBackwardAlsoFailsClosed() {
+        let a = anchors(duration: 3_600, elapsed: 60)
+        let resolution = PINLockoutClock.resolve(uptimeUntil: a.uptimeUntil, bootAnchor: a.bootAnchor,
+                                                 now: now.addingTimeInterval(-86_400), uptime: uptime)
+        XCTAssertEqual(resolution, .restart)
+    }
+
+    /// A reboot resets `systemUptime`, so the recorded deadline is meaningless. Indistinguishable
+    /// from a clock change, and treated the same way: serve the tier again rather than trust it.
+    func testARebootRestartsRatherThanReleases() {
+        let a = anchors(duration: 3_600, elapsed: 60)
+        let resolution = PINLockoutClock.resolve(uptimeUntil: a.uptimeUntil, bootAnchor: a.bootAnchor,
+                                                 now: now, uptime: 12)
+        XCTAssertEqual(resolution, .restart)
+    }
+
+    /// Normal drift between the two clocks, and sub-second NTP corrections, must not read as tampering
+    /// — otherwise every device would restart its lockout constantly.
+    func testSmallDriftIsToleratedAsTheSameBoot() {
+        let a = anchors(duration: 300, elapsed: 100)
+        let drifted = now.addingTimeInterval(PINLockoutClock.bootAnchorTolerance - 1)
+        XCTAssertEqual(
+            PINLockoutClock.resolve(uptimeUntil: a.uptimeUntil, bootAnchor: a.bootAnchor,
+                                    now: drifted, uptime: uptime),
+            .locked(remaining: 200)
+        )
+    }
+}

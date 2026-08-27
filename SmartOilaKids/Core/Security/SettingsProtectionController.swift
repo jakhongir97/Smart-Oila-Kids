@@ -52,6 +52,51 @@ enum FirstPINProvisioning {
     }
 }
 
+/// Resolves how much of a disconnect-PIN lockout is left, on a clock the child does not own.
+///
+/// The escalating ladder (1min → 24h) is the only thing making a 4-digit PIN expensive to guess, and
+/// it was enforced entirely against `Date()`. The device belongs to the person the lockout is
+/// defending against: Settings → General → Date & Time, push the date forward, and every tier
+/// evaporates — 5 guesses, change the date, 5 more, for the whole 10,000-value space.
+///
+/// The deadline is therefore also recorded on `ProcessInfo.systemUptime`, which no setting can move.
+/// Because uptime resets on reboot, a boot anchor (`wall clock − uptime`) says whether the monotonic
+/// deadline still belongs to this boot. When it does not — a genuine reboot, OR a clock change, which
+/// are indistinguishable from inside the app — the resolver FAILS CLOSED and restarts the current
+/// tier rather than trusting a wall-clock deadline the child may have just walked past.
+enum PINLockoutClock {
+    /// Boot-anchor drift tolerated as "same boot". `systemUptime` and `Date()` drift slightly against
+    /// each other, and an NTP correction is normally sub-second; the attack needs a shift of minutes
+    /// to hours, so this is nowhere near large enough to enable it.
+    static let bootAnchorTolerance: TimeInterval = 30
+
+    enum Resolution: Equatable {
+        /// No lockout is running.
+        case clear
+        /// Seconds still to serve, measured monotonically.
+        case locked(remaining: TimeInterval)
+        /// The anchors no longer describe this boot. The caller must restart the tier's full penalty.
+        case restart
+    }
+
+    /// - Parameters:
+    ///   - uptimeUntil: persisted `systemUptime` deadline, or nil when none was recorded.
+    ///   - bootAnchor: persisted `wall clock − systemUptime` at the moment the lockout began.
+    ///   - now / uptime: today's readings of the two clocks.
+    static func resolve(
+        uptimeUntil: TimeInterval?,
+        bootAnchor: TimeInterval?,
+        now: Date,
+        uptime: TimeInterval
+    ) -> Resolution {
+        guard let uptimeUntil, let bootAnchor else { return .clear }
+        let currentAnchor = now.timeIntervalSince1970 - uptime
+        guard abs(currentAnchor - bootAnchor) <= bootAnchorTolerance else { return .restart }
+        let remaining = uptimeUntil - uptime
+        return remaining > 0 ? .locked(remaining: remaining) : .clear
+    }
+}
+
 /// Why a PIN write is allowed. `saveCustomPIN` refuses without one of these.
 ///
 /// Every real gate used to live in the disconnect view — the model checked only the digit count and
@@ -166,6 +211,10 @@ final class SettingsProtectionController: ObservableObject {
             self.isEnabled = userDefaults.bool(forKey: protectionEnabledKey)
         }
 
+        // Restore the published deadline for any countdown UI. The AUTHORITATIVE answer is
+        // `pinLockRemaining`, which re-resolves against the monotonic clock on every read — a stale
+        // or wound-forward wall-clock value here cannot shorten a lockout, it can only mis-draw a
+        // label for one frame.
         let persistedLock = userDefaults.double(forKey: pinLockUntilKey)
         if persistedLock > Date().timeIntervalSince1970 {
             self.pinLockedUntil = Date(timeIntervalSince1970: persistedLock)
@@ -319,6 +368,8 @@ final class SettingsProtectionController: ObservableObject {
         KeychainPINCredentialStore().delete()
         userDefaults.removeObject(forKey: pinFailCountKey)
         userDefaults.removeObject(forKey: pinLockUntilKey)
+        userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
+        userDefaults.removeObject(forKey: pinLockBootAnchorKey)
         userDefaults.removeObject(forKey: pinLockoutTierKey)
         // A genuine re-pairing is the documented way to reopen first-PIN provisioning, so the
         // one-shot marker has to clear here too. This is the path that runs at `setOilaPaired(true)`
@@ -336,6 +387,8 @@ final class SettingsProtectionController: ObservableObject {
     private func clearLockoutState() {
         userDefaults.removeObject(forKey: pinFailCountKey)
         userDefaults.removeObject(forKey: pinLockUntilKey)
+        userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
+        userDefaults.removeObject(forKey: pinLockBootAnchorKey)
         userDefaults.removeObject(forKey: pinLockoutTierKey)
         pinLockedUntil = nil
     }
@@ -430,9 +483,59 @@ final class SettingsProtectionController: ObservableObject {
     // relaunch (or a reinstall that preserves UserDefaults via a backup) cannot reset them.
 
     /// Seconds remaining on the disconnect-PIN lockout, or nil when entry is currently allowed.
+    /// Start (or restart) a lockout, recording the deadline on BOTH clocks.
+    @discardableResult
+    private func beginLockout(duration: TimeInterval) -> Date {
+        let now = Date()
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let until = now.addingTimeInterval(duration)
+        userDefaults.set(until.timeIntervalSince1970, forKey: pinLockUntilKey)
+        userDefaults.set(uptime + duration, forKey: pinLockUptimeUntilKey)
+        userDefaults.set(now.timeIntervalSince1970 - uptime, forKey: pinLockBootAnchorKey)
+        pinLockedUntil = until
+        return until
+    }
+
+    /// Seconds left to serve, or nil when nothing is running.
+    ///
+    /// Measured monotonically. If the anchors say the recorded deadline belongs to a different boot —
+    /// which is also what a wall-clock change looks like from in here — the tier's full penalty is
+    /// restarted rather than trusted, because the alternative is a lockout the child can end from the
+    /// Date & Time screen.
     var pinLockRemaining: TimeInterval? {
-        guard let pinLockedUntil, pinLockedUntil > Date() else { return nil }
-        return pinLockedUntil.timeIntervalSinceNow
+        let resolution = PINLockoutClock.resolve(
+            uptimeUntil: userDefaults.object(forKey: pinLockUptimeUntilKey) as? TimeInterval,
+            bootAnchor: userDefaults.object(forKey: pinLockBootAnchorKey) as? TimeInterval,
+            now: Date(),
+            uptime: ProcessInfo.processInfo.systemUptime
+        )
+        switch resolution {
+        case .clear:
+            if pinLockedUntil != nil { clearExpiredLockoutDeadline() }
+            return nil
+        case let .locked(remaining):
+            // Keep the published wall-clock date roughly in step so any countdown UI stays sane.
+            let until = Date().addingTimeInterval(remaining)
+            if pinLockedUntil == nil { pinLockedUntil = until }
+            return remaining
+        case .restart:
+            // Serve the CURRENT tier again. `pinLockoutTierKey` already points one past the tier that
+            // was served, so step back to it rather than escalating on a reboot.
+            let tier = max(userDefaults.integer(forKey: pinLockoutTierKey) - 1, 0)
+            let duration = Self.pinLockoutLadder[min(tier, Self.pinLockoutLadder.count - 1)]
+            beginLockout(duration: duration)
+            return duration
+        }
+    }
+
+    /// Drop the DEADLINE of a lockout that has finished serving, leaving the fail counter and the
+    /// tier alone — unlike `clearLockoutState()`, which resets the whole ladder and is for a proven
+    /// PIN or a re-pairing. Only a correct PIN may walk the ladder back down.
+    private func clearExpiredLockoutDeadline() {
+        userDefaults.removeObject(forKey: pinLockUntilKey)
+        userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
+        userDefaults.removeObject(forKey: pinLockBootAnchorKey)
+        pinLockedUntil = nil
     }
 
     /// Records the outcome of a disconnect-PIN attempt. Success clears the failure counter and any
@@ -443,6 +546,8 @@ final class SettingsProtectionController: ObservableObject {
         if success {
             userDefaults.removeObject(forKey: pinFailCountKey)
             userDefaults.removeObject(forKey: pinLockUntilKey)
+            userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
+            userDefaults.removeObject(forKey: pinLockBootAnchorKey)
             // The TIER has to reset too. It persists on purpose so a relaunch cannot walk the
             // ladder back down, but leaving it standing after a CORRECT entry meant a parent who
             // once fumbled the PIN into a lockout carried the top tier forever: the child could
@@ -460,11 +565,9 @@ final class SettingsProtectionController: ObservableObject {
             // lockout in the same run climbs the ladder and the tier persists, so a relaunch cannot
             // reset it.
             let tier = min(userDefaults.integer(forKey: pinLockoutTierKey), Self.pinLockoutLadder.count - 1)
-            let until = Date().addingTimeInterval(Self.pinLockoutLadder[tier])
-            userDefaults.set(until.timeIntervalSince1970, forKey: pinLockUntilKey)
+            let until = beginLockout(duration: Self.pinLockoutLadder[tier])
             userDefaults.set(0, forKey: pinFailCountKey)
             userDefaults.set(min(tier + 1, Self.pinLockoutLadder.count - 1), forKey: pinLockoutTierKey)
-            pinLockedUntil = until
             return until
         }
         userDefaults.set(fails, forKey: pinFailCountKey)
@@ -484,9 +587,16 @@ final class SettingsProtectionController: ObservableObject {
     private var pinFailCountKey: String { Self.pinFailCountKey }
     private var pinLockUntilKey: String { Self.pinLockUntilKey }
     private var pinLockoutTierKey: String { Self.pinLockoutTierKey }
+    private var pinLockUptimeUntilKey: String { Self.pinLockUptimeUntilKey }
+    private var pinLockBootAnchorKey: String { Self.pinLockBootAnchorKey }
     nonisolated static let pinFailCountKey = "SETTINGS_PROTECTION_PIN_FAILS"
     nonisolated static let pinLockUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UNTIL"
     nonisolated static let pinLockoutTierKey = "SETTINGS_PROTECTION_PIN_LOCK_TIER"
+    /// The lockout deadline on the MONOTONIC clock (`ProcessInfo.systemUptime`).
+    nonisolated static let pinLockUptimeUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UPTIME_UNTIL"
+    /// Approximate boot instant (`wall clock − systemUptime`), used to detect that the monotonic
+    /// deadline belongs to a different boot — or that the wall clock has been moved.
+    nonisolated static let pinLockBootAnchorKey = "SETTINGS_PROTECTION_PIN_LOCK_BOOT_ANCHOR"
     /// Escalating lockout durations: 1min, 5min, 15min, 1h, 24h. Index persisted in
     /// `pinLockoutTierKey` so a relaunch cannot walk back down the ladder.
     static let pinLockoutLadder: [TimeInterval] = [60, 300, 900, 3600, 86_400]
