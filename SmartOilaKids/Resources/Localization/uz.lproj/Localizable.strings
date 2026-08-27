@@ -186,6 +186,8 @@
 
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Ulangan";
+"home2.link_out_of_contact" = "Hozir aloqa yo'q";
+"home2.link_relink" = "Ota-onadan qayta ulashni so'rang";
 "home2.screentime.title" = "Bugungi ekran vaqti";
 "home2.screentime.tracked_subtitle" = "Kuzatilayotgan ilovalarda";
 "home2.screentime.device_subtitle" = "Shu telefonda";

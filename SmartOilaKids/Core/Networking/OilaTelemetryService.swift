@@ -10,6 +10,69 @@ import UIKit
 // It never *requests* permissions — the B1–B11 onboarding owns that. It simply uses
 // whatever authorization the child granted, so it is safe to start right after onboarding.
 
+/// What the child's "Connected" chip is actually allowed to claim.
+///
+/// Home and Settings each drew a hardcoded green pill reading `home2.connected`, bound to no state at
+/// all: it stayed green with location revoked, with the credential gone, and on a device that had not
+/// reached the server in days. On an app whose entire purpose is telling a parent their child's phone
+/// is being watched, a permanently green light is worse than no light — it is the reason the silent
+/// dead states in this file were invisible for so long.
+///
+/// Pure and primitive-typed on purpose, so it is testable without a Keychain, a network or a view.
+enum LinkHealth: Equatable {
+    /// Credential present, recent contact, every permission granted.
+    case protecting
+    /// Reachable, but N permissions the product needs are switched off.
+    case degraded(offPermissions: Int)
+    /// Nothing has reached the server since this date (or ever, when nil).
+    case outOfContact(since: Date?)
+    /// The Keychain holds no device credential. Nothing can be sent and nothing will recover it.
+    case noCredential
+
+    /// Only `.protecting` earns the green pill.
+    var isHealthy: Bool { self == .protecting }
+
+    /// Child-facing copy. Every branch is localized; none of it names a mechanism the child cannot
+    /// act on ("Keychain", "token", "401") — the one actionable instruction is "ask a parent".
+    var displayText: String {
+        switch self {
+        case .protecting:
+            return L10n.tr("home2.connected")
+        case let .degraded(offPermissions):
+            return String(format: L10n.tr("settings2.permissions_off_count"), offPermissions)
+        case .outOfContact:
+            return L10n.tr("home2.link_out_of_contact")
+        case .noCredential:
+            return L10n.tr("home2.link_relink")
+        }
+    }
+
+    /// How long a device may be silent before the chip stops claiming everything is fine.
+    ///
+    /// The backend's own offline threshold is ~45 minutes and `/device/status` is posted every 300 s,
+    /// so a device that has said nothing for 45 minutes is already offline in the PARENT's app. The
+    /// child's screen agreeing with the parent's screen is the whole point.
+    static let contactStaleAfter: TimeInterval = 45 * 60
+
+    /// Worst-first: a device with no credential is not "degraded", it is off.
+    static func decide(
+        hasCredential: Bool,
+        offPermissions: Int,
+        lastContactAt: Date?,
+        now: Date = Date()
+    ) -> LinkHealth {
+        guard hasCredential else { return .noCredential }
+        guard let lastContactAt else { return .outOfContact(since: nil) }
+        // A contact timestamp in the FUTURE means the child moved the clock backwards after a real
+        // check-in. Treat it as contact, not as staleness: the alternative is a chip a child can turn
+        // red at will, and staleness is not the tamper signal this app relies on.
+        if now.timeIntervalSince(lastContactAt) > contactStaleAfter {
+            return .outOfContact(since: lastContactAt)
+        }
+        return offPermissions > 0 ? .degraded(offPermissions: offPermissions) : .protecting
+    }
+}
+
 extension Notification.Name {
     /// Posted when an authorized `/device/*` call reports the device credential is no longer valid
     /// (revoked, expired, or the parent unpaired this device server-side via
@@ -24,6 +87,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var lastUploadAt: Date?
+    /// The last time ANY authorized call reached the server and was answered. `lastUploadAt` only
+    /// covers the location batch, which a stationary child never sends — so it cannot answer "is this
+    /// device still in touch", which is exactly what the Home chip needs to know.
+    /// Persisted, because the question survives process death and a relaunched app that has not yet
+    /// checked in must not present itself as freshly connected.
+    @Published private(set) var lastSuccessfulContactAt: Date? {
+        didSet {
+            guard let lastSuccessfulContactAt else { return }
+            UserDefaults.standard.set(lastSuccessfulContactAt.timeIntervalSince1970, forKey: Self.lastContactKey)
+        }
+    }
+
+    /// Whether the Keychain currently holds a usable device credential. Re-evaluated at `start()` and
+    /// whenever a call comes back conclusively credential-less, so the UI can say "ask a parent to
+    /// re-link this device" instead of a green chip that will never be true again.
+    @Published private(set) var hasCredential = true
     /// Global device lock resolved from GET /device/lock/state (drives the lock overlay).
     /// Persisted on every change so the lock is FAIL-CLOSED: a force-quit + offline relaunch
     /// restores the last-known lock (see init) instead of silently defaulting to unlocked.
@@ -69,6 +148,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// offline route isn't lost if iOS kills the app; cleared on unpair via stop()).
     private static let pendingFixesKey = "OILA_PENDING_LOCATION_FIXES"
     private static let pendingSOSKey = "OILA_PENDING_SOS"
+    /// Persisted `lastSuccessfulContactAt`, so "when did this phone last reach the server" survives a
+    /// relaunch. Cleared in `stop()` with the rest of the child-scoped state.
+    private static let lastContactKey = "OILA_LAST_SUCCESSFUL_CONTACT"
 
     private let service: OilaDeviceServicing
     private let locationManager = CLLocationManager()
@@ -229,6 +311,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // stop() clears it on unpair. (Property observers don't fire during init, so this doesn't
         // re-persist.)
         isLocked = UserDefaults.standard.bool(forKey: Self.lockStateKey)
+        // Restore the last contact stamp the same way, and for the same reason: a relaunched app that
+        // has not reached the server yet must not render as freshly connected. 0 means "never".
+        let storedContact = UserDefaults.standard.double(forKey: Self.lastContactKey)
+        lastSuccessfulContactAt = storedContact > 0 ? Date(timeIntervalSince1970: storedContact) : nil
     }
 
     func start() {
@@ -237,6 +323,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         didSignalInvalidation = false
         isConfirmingInvalidation = false
         didPostResolvedNetworkType = false
+        // Ask the Keychain directly rather than waiting for the first request to fail. A device
+        // restored from a backup has no credential at all — every item this app writes is
+        // `…ThisDeviceOnly` and backups exclude those — so the answer is available at once, and the
+        // alternative is a green "Connected" chip until something happens to be sent.
+        hasCredential = SecureTokenStore.oila.accessTokenState() != .absent
         // Restore any backlog persisted before a process kill. A genuinely new pairing is always
         // preceded by stop() (unpair / invalidation), which clears the persisted store — so this
         // can only inherit fixes from a killed-then-relaunched run of the SAME session.
@@ -477,6 +568,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // The outbox is child-scoped: a queued SOS must never be delivered against a NEW pairing.
         pendingSOS.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.pendingSOSKey)
+        // Contact history belongs to the pairing that made it. Leaving it behind would let a fresh
+        // pairing inherit the previous child's "last seen" and render as healthy before it has ever
+        // reached the server.
+        lastSuccessfulContactAt = nil
+        UserDefaults.standard.removeObject(forKey: Self.lastContactKey)
+        hasCredential = true
     }
 
     // MARK: - SOS outbox
@@ -544,7 +641,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 delivered.insert(entry.id)
             } catch let error as OilaAPIError where error.requiresRePair {
                 // Don't spin: let the confirmation probe decide whether the pairing is really gone.
-                handleAuthorizationLoss()
+                handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
                 break
             } catch {
                 break // still offline — keep the whole remaining queue for the next flush
@@ -675,8 +772,28 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// no refresh token and `send()`'s refresh path therefore always fails — confirm with one
     /// independent authorized probe before invalidating. Real revocation makes the probe fail too;
     /// a transient blip does not.
-    private func handleAuthorizationLoss() {
+    /// A request reached the server and was answered. Also clears `hasCredential` doubt: a call that
+    /// got an answer necessarily carried a Bearer.
+    private func recordSuccessfulContact() {
+        lastSuccessfulContactAt = Date()
+        if !hasCredential { hasCredential = true }
+    }
+
+    private func handleAuthorizationLoss(credentialAbsent: Bool = false) {
+        if credentialAbsent { hasCredential = false }
         guard !didSignalInvalidation, !isConfirmingInvalidation else { return }
+        // A conclusively absent credential needs no confirmation, and cannot get one: the probe is an
+        // AUTHORIZED request, so it re-reads the same empty Keychain slot and fails the same way,
+        // three times, with randomized delays in between. Worse, every probe failure is itself a
+        // `requiresRePair`, so the loop would confirm what it already knew after several minutes of
+        // waiting — on an install where nothing else will ever be sent again. Invalidate now and let
+        // the child re-link.
+        guard !credentialAbsent else {
+            didSignalInvalidation = true
+            NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
+            stop()
+            return
+        }
         isConfirmingInvalidation = true
         Task { [weak self] in await self?.confirmAndInvalidate() }
     }
@@ -753,6 +870,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             do {
                 try await service.uploadLocationBatch(batch)
                 lastUploadAt = Date()
+                recordSuccessfulContact()
             } catch let error as OilaAPIError where error.requiresRePair {
                 // The 401 is UNCONFIRMED here. `requiresRePair` is true for any 401, and
                 // `handleAuthorizationLoss()` deliberately refuses to believe the first one — it probes
@@ -764,7 +882,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 if isRunning {
                     pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
                 }
-                handleAuthorizationLoss()
+                handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
                 break
             } catch {
                 // Re-queue on failure (bounded) so fixes survive transient offline periods —
@@ -887,8 +1005,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         )
         do {
             try await service.postDeviceStatus(status)
+            recordSuccessfulContact()
         } catch let error as OilaAPIError where error.requiresRePair {
-            handleAuthorizationLoss()
+            handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
         } catch {
             // Ignore transient status-post failures.
         }
@@ -923,10 +1042,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
         do {
             let state = try await service.fetchLockState()
+            recordSuccessfulContact()
             guard isRunning, sequence == lockRefreshSequence else { return }
             applyLockState(state)
         } catch let error as OilaAPIError where error.requiresRePair {
-            handleAuthorizationLoss()
+            handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
         } catch {
             // Keep the last known lock state on a transient failure.
         }

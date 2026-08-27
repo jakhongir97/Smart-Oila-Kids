@@ -26,6 +26,18 @@ func homeRouteDestination(_ route: HomeRoute, path: Binding<[HomeRoute]>) -> som
     }
 }
 
+/// The header chip's presentation, shared by Home and Settings so the two screens can never disagree
+/// about whether this device is protected — they used to print the same unconditional "Connected",
+/// and Settings printed it directly above the coral "Permissions off: N" badge contradicting it.
+extension LinkHealth {
+    /// Fill hue and dot. Paired with `ink` below, never used as the label colour itself: a label drawn
+    /// in the same hue as its own 14% fill measures 1.92:1 (see `AppColors.pillGreenInk`).
+    var tint: Color { isHealthy ? AppColors.successGreen : AppColors.sosCoral }
+
+    /// The contrast-checked label colour for `tint.opacity(0.14)`.
+    var ink: Color { isHealthy ? AppColors.pillGreenInk : AppColors.pillCoralInk }
+}
+
 struct BolajonHomeView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var viewModel = BolajonHomeViewModel()
@@ -38,6 +50,25 @@ struct BolajonHomeView: View {
     @ObservedObject private var protection = SettingsProtectionController.shared
     /// Observed only to stay out of the consent sheet's way — see `armFirstRunPINPromptIfNeeded`.
     @ObservedObject private var audioStream = DeviceAudioStreamManager.shared
+    /// Drives the header chip's permission half. Owned here (not read from Settings) because the chip
+    /// has to be right the moment Home appears, and Settings may never have been opened.
+    @StateObject private var permissionManager = LocationPermissionManager()
+
+    /// What the header chip is allowed to claim. Recomputed on every body pass, which is what makes it
+    /// honest: `lockState` (the telemetry service) republishes on contact and on credential loss, and
+    /// `permissionManager` republishes when the child returns from Settings.app.
+    private var linkHealth: LinkHealth {
+        LinkHealth.decide(
+            hasCredential: lockState.hasCredential,
+            offPermissions: BolajonPermissionChecklist.states(from: permissionManager)
+                .filter { $0.availability == .notGranted }.count,
+            lastContactAt: lockState.lastSuccessfulContactAt
+        )
+    }
+
+    private var linkHealthText: String { linkHealth.displayText }
+    private var linkHealthTint: Color { linkHealth.tint }
+    private var linkHealthInk: Color { linkHealth.ink }
     @Environment(\.scenePhase) private var scenePhase
     @State private var path: [HomeRoute] = []
     @State private var showSOSConfirm = false
@@ -293,16 +324,24 @@ struct BolajonHomeView: View {
                     .font(AppTypography.title(20))
                     .foregroundStyle(AppColors.inkPrimary)
                     .profileNameClamp()
+                // The chip used to be a green dot and the literal `home2.connected`, bound to nothing:
+                // it read "Connected" with location revoked, with the credential gone, and on a phone
+                // that had not reached the server in days. It now states what is actually true.
                 HStack(spacing: 5) {
-                    Circle().fill(AppColors.successGreen).frame(width: 7, height: 7)
-                    Text(L10n.tr("home2.connected"))
+                    Circle().fill(linkHealthTint).frame(width: 7, height: 7)
+                    Text(linkHealthText)
                         .font(AppTypography.bodyStrong(12))
-                        .foregroundStyle(AppColors.successGreen)
+                        .foregroundStyle(linkHealthInk)
                         .lineLimit(1)
+                        // Every degraded string is longer than "Ulangan", and the header already has
+                        // a trailing gear button. Shrink before truncating a warning.
+                        .minimumScaleFactor(0.85)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Capsule().fill(AppColors.successGreen.opacity(0.14)))
+                .background(Capsule().fill(linkHealthTint.opacity(0.14)))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(linkHealthText)
                 // The subtitle that used to sit here ("home2.header_subtitle" — "Oilangiz siz bilan
                 // bog'langan") is gone by product decision: it said nothing the green pill directly
                 // above it does not, and it was the second line competing for a header that already

@@ -186,6 +186,8 @@
 
 /* MARK: - Bolajon360 Home / SOS / Tasks (C1-C3) */
 "home2.connected" = "Подключено";
+"home2.link_out_of_contact" = "Сейчас нет связи";
+"home2.link_relink" = "Попросите родителя связать заново";
 "home2.screentime.title" = "Экранное время сегодня";
 "home2.screentime.tracked_subtitle" = "В отслеживаемых приложениях";
 "home2.screentime.device_subtitle" = "На этом телефоне";

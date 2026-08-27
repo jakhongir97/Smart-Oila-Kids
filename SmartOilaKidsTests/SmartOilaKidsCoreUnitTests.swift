@@ -3833,3 +3833,128 @@ final class ChatSystemNoticeTextTests: XCTestCase {
         XCTAssertNotEqual(ChatSystemNoticeText.localized(forKind: "unpaired"), serverText)
     }
 }
+
+// MARK: - Link health (the chip that used to always say "Connected")
+
+/// Home and Settings both drew a hardcoded green "Connected" pill bound to no state whatsoever. On a
+/// monitoring app that is the worst possible failure: the one surface that tells a family the phone is
+/// being watched said yes unconditionally — with location revoked, with the device silent for days, and
+/// with the Keychain credential gone after a restore-from-backup.
+final class LinkHealthTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testProtectingRequiresCredentialRecentContactAndEveryPermission() {
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0,
+                              lastContactAt: now.addingTimeInterval(-60), now: now),
+            .protecting
+        )
+    }
+
+    func testMissingCredentialOutranksEverythingElse() {
+        // The restore-from-backup state: UserDefaults say "paired", the Keychain says nothing. Before
+        // this, the chip stayed green for the life of the install.
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: false, offPermissions: 0,
+                              lastContactAt: now, now: now),
+            .noCredential
+        )
+    }
+
+    func testNeverHavingReachedTheServerIsNotHealthy() {
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0, lastContactAt: nil, now: now),
+            .outOfContact(since: nil)
+        )
+    }
+
+    func testSilenceBeyondTheBackendOfflineThresholdReadsAsOutOfContact() {
+        let last = now.addingTimeInterval(-(LinkHealth.contactStaleAfter + 1))
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0, lastContactAt: last, now: now),
+            .outOfContact(since: last)
+        )
+    }
+
+    func testContactExactlyAtTheThresholdStillCounts() {
+        let last = now.addingTimeInterval(-LinkHealth.contactStaleAfter)
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0, lastContactAt: last, now: now),
+            .protecting
+        )
+    }
+
+    func testRevokedPermissionsDegradeAReachableDevice() {
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 2,
+                              lastContactAt: now.addingTimeInterval(-60), now: now),
+            .degraded(offPermissions: 2)
+        )
+    }
+
+    func testOutOfContactOutranksOffPermissions() {
+        // A phone that cannot reach the server has a worse problem than a permission toggle, and the
+        // chip has room for one message.
+        let last = now.addingTimeInterval(-(LinkHealth.contactStaleAfter + 1))
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 3, lastContactAt: last, now: now),
+            .outOfContact(since: last)
+        )
+    }
+
+    func testAClockMovedBackwardsDoesNotTurnTheChipRed() {
+        // A child who sets the date forward, checks in, then sets it back would otherwise produce a
+        // future timestamp and a permanently alarming chip. Staleness is not this app's tamper signal.
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0,
+                              lastContactAt: now.addingTimeInterval(3_600), now: now),
+            .protecting
+        )
+    }
+
+    func testOnlyProtectingIsHealthy() {
+        XCTAssertTrue(LinkHealth.protecting.isHealthy)
+        XCTAssertFalse(LinkHealth.degraded(offPermissions: 1).isHealthy)
+        XCTAssertFalse(LinkHealth.outOfContact(since: nil).isHealthy)
+        XCTAssertFalse(LinkHealth.noCredential.isHealthy)
+    }
+
+    func testEveryStateResolvesToLocalizedCopyAndNeverARawKey() {
+        for state in [LinkHealth.protecting, .degraded(offPermissions: 2),
+                      .outOfContact(since: nil), .noCredential] {
+            let text = state.displayText
+            XCTAssertFalse(text.isEmpty)
+            XCTAssertFalse(text.contains("home2."), "raw key leaked to the UI: \(text)")
+            XCTAssertFalse(text.contains("settings2."), "raw key leaked to the UI: \(text)")
+        }
+    }
+}
+
+// MARK: - Credential absence is conclusive
+
+/// `readValue` used to collapse "the Keychain says this item does not exist" and "the Keychain cannot
+/// be read right now" into one nil, and `requiresRePair` excluded the pair of them. That exclusion is
+/// correct for a device locked before first unlock; applied to a provably empty slot it produced a
+/// device that stayed "paired" forever and never sent another request.
+final class CredentialAbsenceTests: XCTestCase {
+    private func error(_ code: String) -> OilaAPIError {
+        OilaAPIError(statusCode: 401, message: "m", errorCode: code, fieldErrors: [])
+    }
+
+    func testAConclusivelyAbsentCredentialForcesRePairing() {
+        XCTAssertTrue(error(OilaAPIError.credentialAbsentCode).requiresRePair)
+        XCTAssertTrue(error(OilaAPIError.credentialAbsentCode).isCredentialAbsent)
+    }
+
+    func testAnUnreadableKeychainStillDoesNotDestroyThePairing() {
+        // The regression this exclusion exists to prevent: a locked device answering
+        // errSecInteractionNotAllowed must never be read as "the parent unpaired me".
+        XCTAssertFalse(error(OilaAPIError.noCredentialCode).requiresRePair)
+        XCTAssertFalse(error(OilaAPIError.noCredentialCode).isCredentialAbsent)
+    }
+
+    func testAnOrdinaryServerRejectionIsUnaffected() {
+        XCTAssertTrue(error("UNAUTHORIZED").requiresRePair)
+        XCTAssertFalse(error("UNAUTHORIZED").isCredentialAbsent)
+    }
+}

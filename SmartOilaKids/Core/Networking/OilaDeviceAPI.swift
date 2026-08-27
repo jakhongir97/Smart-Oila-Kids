@@ -25,6 +25,16 @@ struct OilaAPIError: LocalizedError {
     /// before first unlock). Deliberately excluded from `requiresRePair`: see below.
     static let noCredentialCode = "NO_LOCAL_CREDENTIAL"
 
+    /// The Keychain answered definitively that this device holds no credential (`errSecItemNotFound`,
+    /// or an item that is present but empty). Unlike `NO_LOCAL_CREDENTIAL` this is CONCLUSIVE, so it
+    /// does force re-pairing: waiting cannot produce a token that is not there.
+    ///
+    /// The case this exists for is a device migration. Every item this app writes is
+    /// `…ThisDeviceOnly`, which backups exclude, while the UserDefaults that say "paired" restore
+    /// intact — so a restored install used to route to Home, show a green "Connected" chip, and
+    /// never send another request for the life of the install.
+    static let credentialAbsentCode = "CREDENTIAL_ABSENT"
+
     /// The device credential is no longer valid server-side — the caller should force re-pairing.
     ///
     /// `NO_LOCAL_CREDENTIAL` is excluded on purpose. Requests used to be sent WITHOUT an
@@ -32,9 +42,24 @@ struct OilaAPIError: LocalizedError {
     /// "we cannot read our own token" became indistinguishable from "the parent unpaired this
     /// device". The confirmation probe then re-read the same unreadable Keychain, got the same 401,
     /// and self-confirmed the revocation -- destroying a perfectly valid pairing.
+    ///
+    /// `CREDENTIAL_ABSENT` is the half of that nil the exclusion was never meant to cover: the
+    /// Keychain did answer, and it said the item is not here.
     var requiresRePair: Bool {
+        if errorCode == Self.credentialAbsentCode { return true }
         guard errorCode != Self.noCredentialCode else { return false }
         return errorCode == "REFRESH_INVALID" || errorCode == "UNAUTHORIZED" || statusCode == 401
+    }
+
+    /// A conclusive "there is no credential on this device". Probing cannot change the answer, so the
+    /// invalidation path skips its confirmation delay for this one.
+    var isCredentialAbsent: Bool { errorCode == Self.credentialAbsentCode }
+
+    /// No Bearer could be attached, for either reason — so `send()` threw before any request left the
+    /// app. Callers reporting an OUTCOME must branch on this rather than on the 401, because nothing
+    /// was sent and therefore nothing was revoked, rejected by a server, or reached.
+    var holdsNoCredential: Bool {
+        errorCode == Self.noCredentialCode || errorCode == Self.credentialAbsentCode
     }
 }
 
@@ -696,7 +721,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
             outcome = .revoked
         } catch let error as OilaAPIError {
             detail = error.errorCode ?? "http_\(error.statusCode)"
-            if error.errorCode == OilaAPIError.noCredentialCode {
+            if error.holdsNoCredential {
                 // Nothing was sent: this device holds no readable credential, so there was nothing
                 // for the server to revoke and no request left the app. Not `.revoked` — that word
                 // has to mean the SERVER acted, or the diagnostic is worse than silence.
@@ -1290,10 +1315,15 @@ final class OilaDeviceClient: OilaDeviceServicing {
             // an unreadable Keychain silently produced a request with no Authorization header, and
             // the resulting 401 was treated as a revoked pairing.
             guard let token = secureTokens.accessToken()?.trimmedNonEmpty else {
+                // Which nil is this? `.absent` means the Keychain answered "no such item", which no
+                // retry can fix and which a restored-from-backup install produces on every request
+                // for the rest of its life; anything else (notably locked-before-first-unlock) is
+                // transient and must NOT be allowed to tear down a valid pairing.
+                let absent = secureTokens.accessTokenState() == .absent
                 throw OilaAPIError(
                     statusCode: 401,
                     message: "No device credential available on this device",
-                    errorCode: OilaAPIError.noCredentialCode,
+                    errorCode: absent ? OilaAPIError.credentialAbsentCode : OilaAPIError.noCredentialCode,
                     fieldErrors: []
                 )
             }

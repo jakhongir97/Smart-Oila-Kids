@@ -18,9 +18,29 @@ struct SecureTokenStoreWriteFailure: Equatable {
     }
 }
 
+/// Why `accessToken()` came back nil — the distinction the app used to be unable to make.
+///
+/// A nil token has two completely different meanings and only one of them is recoverable by waiting.
+/// `errSecInteractionNotAllowed` (device locked before first unlock) is transient: the item is there
+/// and will read fine in a moment. `errSecItemNotFound` is CONCLUSIVE: the item is provably not on
+/// this device, and no amount of retrying will conjure it. Collapsing both into nil is what let a
+/// restored-from-backup install sit "paired" forever with no credential — every item this app writes
+/// is `…ThisDeviceOnly`, which iCloud and encrypted-iTunes backups deliberately exclude, while the
+/// UserDefaults that say "paired" restore perfectly.
+enum SecureTokenCredentialState: Equatable {
+    /// A non-empty token was read.
+    case present
+    /// The Keychain answered `errSecItemNotFound`: there is no such item on this device. Conclusive.
+    case absent
+    /// The read failed for any other reason (notably locked-before-first-unlock). Say nothing.
+    case unreadable(OSStatus)
+}
+
 protocol SecureTokenStoring {
     func accessToken() -> String?
     func refreshToken() -> String?
+    /// Why `accessToken()` is nil. Defaulted for test doubles, which have no Keychain to ask.
+    func accessTokenState() -> SecureTokenCredentialState
     func setAccessToken(_ token: String?)
     func setRefreshToken(_ token: String?)
     func migrateFromUserDefaults(_ userDefaults: UserDefaults)
@@ -43,6 +63,12 @@ extension SecureTokenStoring {
     /// Defaulted so the existing conformers and test doubles — which predate write reporting and
     /// live in files this change does not touch — keep compiling unchanged.
     var lastWriteFailure: SecureTokenStoreWriteFailure? { nil }
+
+    /// Defaulted for stores with no Keychain behind them: a token either is or is not there, and an
+    /// in-memory double can never be in the "unreadable" state a locked device produces.
+    func accessTokenState() -> SecureTokenCredentialState {
+        accessToken()?.trimmedNonEmpty == nil ? .absent : .present
+    }
 
     /// Defaults for conformers that do not report write outcomes. They perform the write and then
     /// verify by READING IT BACK, rather than optimistically returning true — an in-memory test
@@ -207,6 +233,15 @@ final class SecureTokenStore: SecureTokenStoring {
     }
 
     private func readValue(for account: String) -> String? {
+        readValue(for: account).value
+    }
+
+    /// The read, keeping the `OSStatus` the plain accessor throws away.
+    ///
+    /// Everything above this line wants a `String?`; only the credential-liveness path needs to tell
+    /// "not on this device" from "cannot look right now", so the status is carried alongside rather
+    /// than forced on every caller.
+    private func readValue(for account: String) -> (value: String?, status: OSStatus) {
         var query = baseQuery(for: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -215,14 +250,23 @@ final class SecureTokenStore: SecureTokenStoring {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
 
         guard status == errSecSuccess else {
-            return nil
+            return (nil, status)
         }
 
         guard let data = item as? Data else {
-            return nil
+            return (nil, status)
         }
 
-        return String(data: data, encoding: .utf8)
+        return (String(data: data, encoding: .utf8), status)
+    }
+
+    func accessTokenState() -> SecureTokenCredentialState {
+        let read: (value: String?, status: OSStatus) = readValue(for: accessTokenAccount)
+        if read.value?.trimmedNonEmpty != nil { return .present }
+        // A stored-but-empty item is as useless as a missing one, and it is equally conclusive:
+        // the Keychain answered, and what it holds cannot authorize a request.
+        if read.status == errSecSuccess { return .absent }
+        return read.status == errSecItemNotFound ? .absent : .unreadable(read.status)
     }
 
     /// Performs the write and records its outcome. Returns true when the Keychain accepted it.

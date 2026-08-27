@@ -54,6 +54,8 @@ struct SettingsRootView: View {
     /// Drives the parent-PIN rows: `hasCustomPIN` decides whether this screen offers "set" or
     /// "change / remove", and it changes the moment the provisioning sheet saves or clears one.
     @ObservedObject private var protection = SettingsProtectionController.shared
+    /// Contact + credential state behind the header chip and the connection row.
+    @ObservedObject private var telemetry = OilaTelemetryService.shared
     @Environment(\.openURL) private var openURL
 
     /// Non-nil while the parent-PIN sheet is up; the case decides which steps it runs.
@@ -66,6 +68,15 @@ struct SettingsRootView: View {
     private var offPermissionCount: Int {
         BolajonPermissionChecklist.states(from: permissionManager)
             .filter { $0.availability == .notGranted }.count
+    }
+
+    /// The same verdict Home's header chip draws. See `LinkHealth`.
+    private var linkHealth: LinkHealth {
+        LinkHealth.decide(
+            hasCredential: telemetry.hasCredential,
+            offPermissions: offPermissionCount,
+            lastContactAt: telemetry.lastSuccessfulContactAt
+        )
     }
 
     /// "Bolajon360 · v" + the real bundle version, so the row never drifts from the build.
@@ -96,9 +107,12 @@ struct SettingsRootView: View {
                                 // card. Milder here than on Home (this row has no trailing gear
                                 // button), which is why it survived, not why it is fine.
                                 .profileNameClamp()
-                            Text(L10n.tr("home2.connected"))
+                            // Was the unconditional `home2.connected`, printed a few points above the
+                            // coral "Permissions off: N" badge that contradicted it. Same state as
+                            // Home now, so the two screens cannot disagree.
+                            Text(linkHealth.displayText)
                                 .font(AppTypography.bodyStrong(14))
-                                .foregroundStyle(AppColors.successGreen)
+                                .foregroundStyle(linkHealth.ink)
                         }
                         Spacer()
                     }
@@ -112,9 +126,15 @@ struct SettingsRootView: View {
                             ? L10n.tr("settings2.permissions_off_count", offPermissionCount) : nil,
                         offCount: offPermissionCount,
                         action: { path.append(.settingsPermissions) })
+                    // A row titled "Connection status" whose value was the constant "Connected to
+                    // parent" answered its own question wrongly on every degraded device. It now
+                    // reports the real state, and becomes tappable when there is something to fix.
                     row(glyph: .connection, tint: AppColors.glyphPurple,
-                        title: "settings2.connection", subtitle: "settings2.connection_value",
-                        action: nil)
+                        title: "settings2.connection",
+                        subtitleLiteral: linkHealth.isHealthy
+                            ? L10n.tr("settings2.connection_value")
+                            : linkHealth.displayText,
+                        action: linkHealth.isHealthy ? nil : { path.append(.settingsPermissions) })
                 }
 
                 section(title: "settings2.section_parent") {
