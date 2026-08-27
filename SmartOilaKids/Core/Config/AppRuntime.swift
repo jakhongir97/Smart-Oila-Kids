@@ -33,8 +33,6 @@ enum AppRuntime {
     /// (`SMARTOILA_MEDIA_FEATURES_ENABLED` = `true`) — it reads as a flag because enabling mic
     /// capture is a deliberate, reviewed step (App Store Guideline 5.1.2), which also requires a
     /// visible "parent is listening" indicator + child disclosure and the mic usage string.
-    /// Independently of this flag, a start is refused while the build is under App Store review
-    /// (see `StoreReviewModeStore`).
     ///
     /// While it is off, a `stream.start` push is still ROUTED by `PushCommandRouter` and only then
     /// discarded by `DeviceAudioStreamManager`. That drop is recorded as `audio_start_dropped_flag_off`

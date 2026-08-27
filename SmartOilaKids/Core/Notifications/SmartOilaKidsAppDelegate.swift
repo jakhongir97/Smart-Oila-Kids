@@ -36,10 +36,6 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // side effect of rendering. It is cheap: no hardware is opened until a command arrives.
         _ = DeviceAudioStreamManager.shared
         armTelemetryIfPaired()
-        // Refresh the per-build store-review flag from the public app-config endpoint. Best-effort
-        // and fail-safe FALSE (see StoreReviewModeStore): a failure leaves covert features visible,
-        // and the cached value from a prior launch keeps a review build protected until this returns.
-        Task { await StoreReviewModeStore.shared.refresh() }
         // Drain the FCM outbox at LAUNCH too, not only from `applicationDidBecomeActive`. iOS
         // background-launches this app for silent pushes and for the `location` background mode, and
         // neither delivers a become-active — so on a device that is rarely opened (the normal case
@@ -183,11 +179,6 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // connectivity returning, is watched by `OilaTelemetryService.applyNetworkType`, which only
         // runs while telemetry is armed.
         Task { @MainActor in await FCMPushRegistrar.shared.flushPendingTokenRegistration() }
-        // Re-read the store-review flag on every foreground, not only at launch. An operator marks a
-        // build as under review AFTER it is already installed on the review device, and a child's
-        // phone can stay resident for days — a launch-only refresh would leave that build
-        // unprotected for the whole review. Cheap: one small unauthenticated GET.
-        Task { await StoreReviewModeStore.shared.refresh() }
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {

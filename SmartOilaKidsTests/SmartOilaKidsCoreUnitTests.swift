@@ -3797,58 +3797,6 @@ final class StatusProbeLocationTests: XCTestCase {
     }
 }
 
-// MARK: - Store review mode
-
-/// Pins the fail-safe contract of `StoreReviewModeStore`: covert features stay visible unless the
-/// backend explicitly says this build is under review, and any fetch failure means "not under
-/// review". Uses an isolated defaults suite so it never touches the real cached flag.
-final class StoreReviewModeStoreTests: XCTestCase {
-    private func makeDefaults() -> UserDefaults {
-        let suite = "test.storeReview.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
-    }
-
-    func testDefaultsToInactiveBeforeAnyRefresh() {
-        let store = StoreReviewModeStore(userDefaults: makeDefaults(), fetch: { nil })
-        XCTAssertFalse(store.isActive, "with nothing cached, covert features must be visible")
-    }
-
-    func testActiveWhenBackendReportsTrue() async {
-        let defaults = makeDefaults()
-        let store = StoreReviewModeStore(userDefaults: defaults, fetch: { true })
-        await store.refresh()
-        XCTAssertTrue(store.isActive)
-    }
-
-    func testFetchFailureWithNothingCachedStaysInactive() async {
-        // The backend's "treat any error as false" rule, in the case it is actually about: a build
-        // that has never had an answer must not hide features from a real family.
-        let store = StoreReviewModeStore(userDefaults: makeDefaults(), fetch: { nil })
-        await store.refresh()
-        XCTAssertFalse(store.isActive)
-    }
-
-    func testFetchFailureDoesNotEraseAnActiveReviewFlag() async {
-        let defaults = makeDefaults()
-        defaults.set(true, forKey: StoreReviewModeStore.defaultsKey)
-        let store = StoreReviewModeStore(userDefaults: defaults, fetch: { nil })
-        await store.refresh()
-        // This endpoint is rate-limited (60/min/IP). A 429 mid-review must not re-open the
-        // microphone in front of the reviewer — only a definitive `false` clears the flag.
-        XCTAssertTrue(store.isActive, "a transient failure must not clear a known review flag")
-    }
-
-    func testBackendFalseClearsAPreviousActive() async {
-        let defaults = makeDefaults()
-        defaults.set(true, forKey: StoreReviewModeStore.defaultsKey)
-        let store = StoreReviewModeStore(userDefaults: defaults, fetch: { false })
-        await store.refresh()
-        XCTAssertFalse(store.isActive)
-    }
-}
-
 // MARK: - Chat system notice copy
 
 /// The child's chat screen must never render the BACKEND's own wording. `systemKind` is an open

@@ -35,13 +35,18 @@ backend.
   has moved **>= 15 m** since the last accepted one (floor was 25 m; `distanceFilter` 25 -> 15). A
   stationary window sends nothing. The `accuracyFactor` guard is unchanged, so a vague fix still has
   to travel `1.5 x accuracy` before it is believed.
-- **Store-review mode.** The app calls the public `GET /api/v1/app-config?platform=Ios&appBuild=N`
-  at launch and on every foreground; when it answers `storeReviewMode: true` for THIS build, live
-  audio/video is refused at `DeviceAudioStreamManager.start()/renew()` (the hardware chokepoint, so
-  the push route, the consent sheet and the DEBUG helpers are all covered). Fail-safe: with no
-  definitive answer ever cached it stays OFF; a transient failure does NOT clear a cached `true`.
-  **Operator step:** this only takes effect if someone records the build under
-  `PUT /api/v1/admin/store-review` before submitting.
+- **Store-review mode: REMOVED 2026-08-27.** Build 15 added a `GET /api/v1/app-config?platform=Ios&appBuild=N`
+  flag that, when an operator marked THIS build as under review, refused live audio/video at
+  `DeviceAudioStreamManager.start()/renew()`. That is a mechanism for showing App Review different
+  behaviour than families get, which App Store Guideline 2.3.1 forbids and which Apple has treated as
+  a Developer Program License Agreement matter rather than an ordinary rejection. It also carried the
+  reverse risk: `refresh()` never cleared a cached `true` on error, so one stale flag would ship a
+  public build with the paid live-A/V feature dead for every family. The store, its API call, all
+  three chokepoints and its five tests are gone; the endpoint floor went back 27 → 26.
+  **The feature was always designed to survive review on its merits** — consent sheet, on-screen
+  indicator, presence notification, lease expiry, off-screen video refusal — so demonstrate it, do
+  not suppress it. If a live-A/V kill switch is genuinely wanted, it must apply uniformly to every
+  build and every user, and be disclosed in the review notes.
 - **Error copy.** `NetworkError` no longer surfaces a backend body, an unmapped `URLError`, or a
   `CancellationError` as raw English — everything maps to a localized key.
 - **Default language is Uzbek** on a handset whose locale is neither ru nor uz (was English).
