@@ -45,6 +45,20 @@ jobs:
       - name: List Available iOS Simulators
         run: xcrun simctl list devices available
 
+      - name: Provide GoogleService-Info.plist for the build
+        # The real plist is gitignored (this repo is PUBLIC and it carries a live API key), but the
+        # app target's Resources phase lists it by NAME — so a clean checkout failed on a missing
+        # build input before a single test ran. Copy the committed placeholder in when the real file
+        # is absent. Its BUNDLE_ID is deliberately wrong, so `FCMPushRegistrar.configureIfPossible()`
+        # refuses to configure Firebase against it (`.bundleMismatch`) rather than coming up pointed
+        # at a fake project. The `-f` test means a runner that DOES have the real file is untouched.
+        run: |
+          real=SmartOilaKids/Resources/GoogleService-Info.plist
+          if [ ! -f "$real" ]; then
+            cp SmartOilaKids/Resources/GoogleService-Info.sample.plist "$real"
+            echo "Using the CI placeholder GoogleService-Info.plist."
+          fi
+
       - name: Compile Screen Time extensions
         # The extensions aren't embedded in the app target (Screen Time ships disabled in v1), so the
         # app scheme never builds them. Compile them explicitly so their sources can't silently

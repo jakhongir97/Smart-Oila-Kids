@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  CI PLACEHOLDER. Not a credential — every value here is fake.
+
+	  The real `GoogleService-Info.plist` is gitignored (this repository is PUBLIC and the file
+	  carries a live API key), but the app target's Resources build phase lists it by name, so a
+	  clean checkout could not build AT ALL: every CI run died on a missing input before a single
+	  test executed. CI copies this file into place when the real one is absent.
+
+	  BUNDLE_ID is deliberately WRONG. `FCMPushRegistrar.configureIfPossible()` compares it against
+	  `Bundle.main.bundleIdentifier` and refuses to configure Firebase on a mismatch — reporting
+	  `.bundleMismatch` — so a CI build can never come up pointed at a fake Firebase project. That
+	  guard exists because a plist minted for the wrong app entry looks healthy and delivers nothing;
+	  here it is doing exactly the job it was written for.
+	-->
+	<key>BUNDLE_ID</key>
+	<string>uz.smartoila.kids.ci-placeholder</string>
+	<key>PROJECT_ID</key>
+	<string>ci-placeholder</string>
+	<key>GCM_SENDER_ID</key>
+	<string>000000000000</string>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:000000000000:ios:0000000000000000000000</string>
+	<key>API_KEY</key>
+	<string>NOT-A-REAL-KEY-CI-PLACEHOLDER</string>
+	<key>STORAGE_BUCKET</key>
+	<string>ci-placeholder.appspot.com</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>IS_ADS_ENABLED</key>
+	<false/>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false/>
+	<key>IS_APPINVITE_ENABLED</key>
+	<false/>
+	<key>IS_GCM_ENABLED</key>
+	<true/>
+	<key>IS_SIGNIN_ENABLED</key>
+	<false/>
+</dict>
+</plist>
