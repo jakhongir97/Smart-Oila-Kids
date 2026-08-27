@@ -4108,3 +4108,72 @@ final class PINLockoutClockTests: XCTestCase {
         )
     }
 }
+
+// MARK: - A lock that cannot outlive the network, and a poll that stops shouting into it
+
+/// The fail-closed lock restore is right — a force-quit must not unlock a locked child — but it had
+/// no age ceiling and the cover has no non-network exit. A child who loses connectivity (a prepaid
+/// balance running out is the ordinary case in this market) was therefore locked out permanently:
+/// every refresh landed in the swallow-everything catch, and each relaunch restored the lock before
+/// a request was even issued. The parent unlocking from their own app changed nothing.
+final class LockRestoreCeilingTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testAnUnlockedDeviceStaysUnlocked() {
+        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: false, confirmedAt: now, now: now))
+    }
+
+    func testARecentlyConfirmedLockIsRestored() {
+        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true, confirmedAt: now.addingTimeInterval(-3_600), now: now),
+            "an overnight lock must survive a force-quit")
+    }
+
+    func testALockAtTheCeilingIsStillRestored() {
+        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true,
+            confirmedAt: now.addingTimeInterval(-OilaTelemetryService.lockRestoreMaxAge),
+            now: now))
+    }
+
+    func testALockTheServerHasNotConfirmedInHalfADayIsReleased() {
+        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true,
+            confirmedAt: now.addingTimeInterval(-(OilaTelemetryService.lockRestoreMaxAge + 1)),
+            now: now),
+            "a permanently bricked phone is a worse failure than an unlock")
+    }
+
+    func testALockFromBeforeThisFieldExistedIsHonouredOnce() {
+        // An app updated while the device was locked has no stamp. Trust it; the next poll settles it.
+        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true, confirmedAt: nil, now: now))
+    }
+
+    func testAClockMovedBackwardsDoesNotBuyAnUnlock() {
+        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true, confirmedAt: now.addingTimeInterval(86_400), now: now),
+            "a future stamp means the child moved the clock; fail closed")
+    }
+}
+
+/// The 30 s lock poll never slowed down, so an unreachable device woke its radio twice a minute
+/// forever — real battery and real prepaid data, spent on a request that cannot succeed.
+final class LockPollBackoffTests: XCTestCase {
+    private let base: TimeInterval = 30
+
+    func testAHealthyPollIsNotDelayed() {
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 0, baseInterval: base), 0)
+    }
+
+    func testTheIntervalDoublesWithEachFailure() {
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 1, baseInterval: base), 60)
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 2, baseInterval: base), 120)
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 3, baseInterval: base), 240)
+    }
+
+    func testTheBackoffIsCappedSoALockNeverGoesUnnoticedForLong() {
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 50, baseInterval: base), 600)
+    }
+}

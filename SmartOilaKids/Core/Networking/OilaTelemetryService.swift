@@ -151,6 +151,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// Persisted `lastSuccessfulContactAt`, so "when did this phone last reach the server" survives a
     /// relaunch. Cleared in `stop()` with the rest of the child-scoped state.
     private static let lastContactKey = "OILA_LAST_SUCCESSFUL_CONTACT"
+    /// When the server last CONFIRMED a lock state (either value). Bounds the fail-closed restore.
+    nonisolated static let lockConfirmedAtKey = "OILA_LAST_LOCK_CONFIRMED_AT"
 
     private let service: OilaDeviceServicing
     private let locationManager = CLLocationManager()
@@ -195,6 +197,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var isRefreshingLock = false
     /// A refresh asked for while one was already running: run exactly one more when it lands.
     private var lockRefreshRequestedWhileBusy = false
+    /// Consecutive `fetchLockState()` failures, driving the timer's backoff.
+    private var consecutiveLockFailures = 0
+    /// When the TIMER last actually issued a poll (push/foreground refreshes do not set this).
+    private var lastLockPollAt: Date?
     /// Lock-refresh observer. Registered here, not only in `RootView`, because a lock push can arrive
     /// at an app iOS background-launched with no scene — there is no view to receive it then.
     private var lockCommandObserver: NSObjectProtocol?
@@ -310,7 +316,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // silently unlock a locked child. refreshLock() corrects it once the server is reachable;
         // stop() clears it on unpair. (Property observers don't fire during init, so this doesn't
         // re-persist.)
-        isLocked = UserDefaults.standard.bool(forKey: Self.lockStateKey)
+        let confirmedRaw = UserDefaults.standard.double(forKey: Self.lockConfirmedAtKey)
+        isLocked = Self.restoredLockIsTrustworthy(
+            wasLocked: UserDefaults.standard.bool(forKey: Self.lockStateKey),
+            confirmedAt: confirmedRaw > 0 ? Date(timeIntervalSince1970: confirmedRaw) : nil
+        )
         // Restore the last contact stamp the same way, and for the same reason: a relaunched app that
         // has not reached the server yet must not render as freshly connected. 0 means "never".
         let storedContact = UserDefaults.standard.double(forKey: Self.lastContactKey)
@@ -412,7 +422,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             Task { @MainActor [weak self] in await self?.postStatus() }
         }
         lockTimer = Timer.scheduledTimer(withTimeInterval: lockInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in await self?.refreshLock() }
+            Task { @MainActor [weak self] in await self?.refreshLockOnTimer() }
         }
         // Initial status + lock snapshot straight away.
         Task { await postStatus() }
@@ -573,6 +583,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // reached the server.
         lastSuccessfulContactAt = nil
         UserDefaults.standard.removeObject(forKey: Self.lastContactKey)
+        UserDefaults.standard.removeObject(forKey: Self.lockConfirmedAtKey)
         hasCredential = true
     }
 
@@ -1043,18 +1054,80 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         do {
             let state = try await service.fetchLockState()
             recordSuccessfulContact()
+            consecutiveLockFailures = 0
             guard isRunning, sequence == lockRefreshSequence else { return }
             applyLockState(state)
         } catch let error as OilaAPIError where error.requiresRePair {
             handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
         } catch {
-            // Keep the last known lock state on a transient failure.
+            // Keep the last known lock state on a transient failure — but stop asking at full rate.
+            consecutiveLockFailures += 1
         }
+    }
+
+    /// The 30 s timer's entry point, which backs off while the server is unreachable.
+    ///
+    /// The poll was unconditional: a child with no data, or an app that has been offline for days,
+    /// still woke the radio every 30 seconds forever, which on a cheap phone is a measurable share of
+    /// the battery and of a prepaid balance — spent on a request that cannot succeed. Only the TIMER
+    /// backs off. A lock push and a foreground both still refresh immediately, so the moment
+    /// connectivity or the parent's intent changes, the device is current again.
+    private func refreshLockOnTimer() async {
+        let backoff = Self.lockPollBackoff(consecutiveFailures: consecutiveLockFailures,
+                                           baseInterval: lockInterval)
+        if let last = lastLockPollAt, Date().timeIntervalSince(last) < backoff { return }
+        lastLockPollAt = Date()
+        await refreshLock()
+    }
+
+    /// Effective interval for the lock poll after `consecutiveFailures` failures: the base interval
+    /// doubled per failure, capped at 10 minutes. Pure, so the curve is testable.
+    nonisolated static func lockPollBackoff(consecutiveFailures: Int,
+                                            baseInterval: TimeInterval) -> TimeInterval {
+        guard consecutiveFailures > 0 else { return 0 }
+        let capped = min(consecutiveFailures, 8)
+        return min(baseInterval * pow(2, Double(capped)), 600)
     }
 
     /// Publishes one lock-state response. Callers must already have passed the sequence guard in
     /// `refreshLock()` — this method assumes `state` is the newest response we've seen.
+    /// How long a restored lock may go without a server confirmation before it is released on
+    /// launch.
+    ///
+    /// The fail-closed restore is right — a force-quit must not unlock a locked child — but it had no
+    /// ceiling and no non-network exit, so it could brick the phone: the child loses connectivity (a
+    /// prepaid balance running out is the ordinary case here), every `refreshLock()` lands in the
+    /// swallow-everything catch, `isLocked` stays true, and a relaunch restores it before the first
+    /// request is even issued. The parent unlocking from their app changes nothing, because nothing
+    /// can fetch that. The child is behind an undismissable cover, permanently.
+    ///
+    /// 12 hours is chosen so a normal overnight lock and any realistic outage survive intact, while a
+    /// lock the server has not confirmed for half a day releases rather than becoming permanent.
+    /// It is deliberately not shorter: a phone with no connectivity is already useless for the
+    /// internet, so going offline to escape a lock costs the child roughly what the lock does — but a
+    /// short ceiling would turn a subway ride into an unlock.
+    nonisolated static let lockRestoreMaxAge: TimeInterval = 12 * 3_600
+
+    /// Whether a persisted lock may still be trusted at launch. Pure, so the ceiling is testable.
+    nonisolated static func restoredLockIsTrustworthy(
+        wasLocked: Bool,
+        confirmedAt: Date?,
+        now: Date = Date()
+    ) -> Bool {
+        guard wasLocked else { return false }
+        // No stamp at all means the lock predates this field (an app updated mid-lock). Honour it
+        // once — the next poll either confirms it or clears it — rather than unlocking on upgrade.
+        guard let confirmedAt else { return true }
+        let age = now.timeIntervalSince(confirmedAt)
+        // A negative age means the clock moved backwards; treat it as fresh (fail closed) rather than
+        // handing the child an unlock for changing the date.
+        return age <= lockRestoreMaxAge
+    }
+
     private func applyLockState(_ state: OilaLockState) {
+        // Stamp every SERVER-CONFIRMED read, whatever it says. This is what bounds the fail-closed
+        // restore above: without it a lock had no age and could outlive the pairing.
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lockConfirmedAtKey)
         // Whole device: only apply a recognized shape. A nil (unrecognized 200) keeps the
         // last-known lock — never releases an active parental lock on an unexpected payload
         // (fail closed). `isDeviceLocked` preserves that: nil still means "unrecognized, keep the
