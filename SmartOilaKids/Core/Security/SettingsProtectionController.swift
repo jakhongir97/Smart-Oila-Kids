@@ -274,21 +274,36 @@ final class SettingsProtectionController: ObservableObject {
         )
     }
 
-    /// Claim the one-shot grant and open the provisioning prompt. Returns false — and presents
-    /// nothing — when the grant is already spent or a PIN exists.
+    /// Open the provisioning prompt. Returns false — and presents nothing — when the grant is already
+    /// spent or a PIN exists.
+    ///
+    /// The one-shot marker used to be written HERE, at presentation. That handed the monitored child
+    /// the simplest possible defeat: the sheet appears on their own Home screen, and one downward
+    /// swipe spent the only chance this pairing had of ever getting a parent PIN. Without a PIN,
+    /// Disconnect is a single confirm dialog — so a swipe permanently removed the protection.
+    /// The grant is now spent only by an explicit answer (see `endFirstRunPINPrompt`), and
+    /// re-presentation is guarded by the in-memory `isFirstRunPINPromptOpen` instead.
     ///
     /// It WRITES, so call it from `.onAppear` or a button action, never from a view body: this is an
     /// `ObservableObject` that is read during rendering.
     @discardableResult
     func beginFirstRunPINPrompt() -> Bool {
-        guard firstPINProvisioning.isAllowed else { return false }
-        userDefaults.set(true, forKey: Self.firstRunPINPromptAnsweredKey)
+        guard firstPINProvisioning.isAllowed, !isFirstRunPINPromptOpen else { return false }
         isFirstRunPINPromptOpen = true
         return true
     }
 
-    /// The prompt left the screen — saved, skipped or swiped away. All three are "answered"; the
-    /// marker was already spent at presentation, so this only closes the write authorization.
+    /// The parent gave the prompt a real answer — saved a PIN, or tapped "not now". THIS is what
+    /// spends the one-shot grant, and it is called only from those two explicit taps.
+    ///
+    /// Separated from `endFirstRunPINPrompt` because `onDismiss` cannot tell a decision from a swipe,
+    /// and treating them alike is what let the child spend the parent's only chance.
+    func recordFirstRunPINPromptAnswered() {
+        userDefaults.set(true, forKey: Self.firstRunPINPromptAnsweredKey)
+    }
+
+    /// The prompt left the screen, by any route. Closes the write authorization only; whether the
+    /// grant was spent is decided by `recordFirstRunPINPromptAnswered`.
     func endFirstRunPINPrompt() {
         isFirstRunPINPromptOpen = false
     }

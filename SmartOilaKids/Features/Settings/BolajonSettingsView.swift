@@ -461,7 +461,11 @@ struct ParentPINFlowSheet: View {
             Spacer(minLength: 16)
 
             if step == .done {
-                BolajonPrimaryButton(title: L10n.tr("common.done")) { dismiss() }
+                BolajonPrimaryButton(title: L10n.tr("common.done")) {
+                    // An explicit answer — this is what spends the one-shot first-run grant.
+                    protection.recordFirstRunPINPromptAnswered()
+                    dismiss()
+                }
             } else {
                 NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendDigit, onBackspace: removeDigit)
                     .padding(.bottom, 12)
@@ -477,7 +481,11 @@ struct ParentPINFlowSheet: View {
                 // now disconnects on a plain confirm, the strength of this screen's default is what
                 // decides whether most families end up protected. Saving is the filled primary;
                 // opting out is a ghost button. Deliberately NOT symmetric.
-                GhostButton(title: L10n.tr(secondaryTitleKey)) { dismiss() }
+                GhostButton(title: L10n.tr(secondaryTitleKey)) {
+                    // "Not now" is also an answer. A SWIPE is not, and must leave the grant intact.
+                    protection.recordFirstRunPINPromptAnswered()
+                    dismiss()
+                }
             }
         }
     }

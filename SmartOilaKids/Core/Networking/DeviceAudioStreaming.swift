@@ -240,16 +240,19 @@ enum LiveSessionDisclosure {
     /// - Parameters:
     ///   - isForeground: whether the app is currently on screen. A background LAUNCH connects no UI
     ///     scene at all, so this is false there too — which is the case that matters most.
-    ///   - notificationsAuthorized: `.authorized` or `.provisional`. Provisional counts: a quiet
-    ///     banner still appears in Notification Centre, which is a real disclosure channel.
+    ///   - presenceBannerWouldRender: whether a presence banner would actually RENDER, now, on a
+    ///     surface the child can look at. NOT merely `authorizationStatus == .authorized`: a child
+    ///     can leave notifications "on" while switching every delivery surface off, and Scheduled
+    ///     Summary defers the banner to the evening digest. Both would have run the microphone
+    ///     off-screen with nothing disclosing it. See `presenceBannerWouldRenderNow()`.
     static func verdict(
         mode: StreamMode,
         isForeground: Bool,
-        notificationsAuthorized: Bool
+        presenceBannerWouldRender: Bool
     ) -> Verdict {
         if isForeground { return .allowed(.onScreenIndicator) }
         if mode == .video { return .refusedVideoOffScreen }
-        return notificationsAuthorized ? .allowed(.presenceNotification) : .refusedNoDisclosureChannel
+        return presenceBannerWouldRender ? .allowed(.presenceNotification) : .refusedNoDisclosureChannel
     }
 }
 
@@ -671,9 +674,9 @@ final class DeviceAudioStreamManager: ObservableObject {
     var makePublisher: () -> LiveMediaPublishing = { MediaPublisherFactory.make() }
     /// Whether the app is on screen. See `systemIsForeground`.
     var isForeground: () -> Bool = { DeviceAudioStreamManager.systemIsForeground }
-    /// Whether a presence notification would actually be seen. See `systemNotificationsAuthorized`.
-    var notificationsAuthorized: () async -> Bool = {
-        await DeviceAudioStreamManager.systemNotificationsAuthorized()
+    /// Whether a presence notification would actually be seen. See `presenceBannerWouldRenderNow`.
+    var presenceBannerWouldRender: () async -> Bool = {
+        await DeviceAudioStreamManager.presenceBannerWouldRenderNow()
     }
     /// The microphone grant. Production prompts; a test answers without a device.
     var requestMicPermission: () async -> Bool = { await DeviceAudioStreamManager.systemRequestMicPermission() }
@@ -805,7 +808,7 @@ final class DeviceAudioStreamManager: ObservableObject {
             let verdict = LiveSessionDisclosure.verdict(
                 mode: self.activeMode,
                 isForeground: false,
-                notificationsAuthorized: await self.notificationsAuthorized()
+                presenceBannerWouldRender: await self.presenceBannerWouldRender()
             )
             guard !verdict.isAllowed, self.state == .live || self.state == .connecting else { return }
             self.recordMedia(status: "idle", event: "\(self.activeMode.rawValue)_stopped_\(verdict.diagnosticSuffix)")
@@ -813,12 +816,28 @@ final class DeviceAudioStreamManager: ObservableObject {
         }
     }
 
-    /// Whether the child would actually see a presence notification if one were posted. Provisional
-    /// counts — a quiet banner still lands in Notification Centre.
-    private static func systemNotificationsAuthorized() async -> Bool {
+    /// Whether the presence banner would actually RENDER, now, where the child can see it.
+    ///
+    /// This used to test `authorizationStatus` alone, which answers a different question:
+    /// "may this app post notifications", not "will the child see one". A child can leave Allow
+    /// Notifications on while switching off Banners, Lock Screen and Notification Centre — the status
+    /// stays `.authorized`, `UNUserNotificationCenter.add` still succeeds, and the banner renders
+    /// nowhere. Scheduled Summary is the same shape in slow motion: the banner is real but deferred to
+    /// the evening digest, hours after the microphone closed.
+    ///
+    /// Either way the session would have run off-screen with nothing on the device disclosing it,
+    /// which is the covert-capture shape this whole module exists to refuse (Guideline 5.1.2).
+    /// `.provisional` still counts: a quiet banner does land in Notification Centre.
+    private static func presenceBannerWouldRenderNow() async -> Bool {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        return settings.authorizationStatus == .authorized
-            || settings.authorizationStatus == .provisional
+        guard settings.authorizationStatus == .authorized
+            || settings.authorizationStatus == .provisional else { return false }
+        // Deferred delivery is not concurrent disclosure.
+        guard settings.scheduledDeliverySetting != .enabled else { return false }
+        // Any ONE surface the child can actually look at is enough.
+        return settings.alertSetting == .enabled
+            || settings.lockScreenSetting == .enabled
+            || settings.notificationCenterSetting == .enabled
     }
 
     /// True when the app has a rendered UI, so the in-app indicator is on screen and is disclosure
@@ -1172,7 +1191,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         let disclosure = LiveSessionDisclosure.verdict(
             mode: command.mode,
             isForeground: isForeground(),
-            notificationsAuthorized: await notificationsAuthorized()
+            presenceBannerWouldRender: await presenceBannerWouldRender()
         )
         guard disclosure.isAllowed else {
             if generation == startGeneration {
@@ -1244,7 +1263,7 @@ final class DeviceAudioStreamManager: ObservableObject {
             let liveDisclosure = LiveSessionDisclosure.verdict(
                 mode: command.mode,
                 isForeground: isForeground(),
-                notificationsAuthorized: await notificationsAuthorized()
+                presenceBannerWouldRender: await presenceBannerWouldRender()
             )
             // Ownership can change across that await too, so it is re-checked before either branch.
             guard generation == startGeneration, self.publisher === publisher else {
@@ -1328,7 +1347,7 @@ final class DeviceAudioStreamManager: ObservableObject {
             let disclosure = LiveSessionDisclosure.verdict(
                 mode: .video,
                 isForeground: isForeground(),
-                notificationsAuthorized: await notificationsAuthorized()
+                presenceBannerWouldRender: await presenceBannerWouldRender()
             )
             if !disclosure.isAllowed {
                 rejection = disclosure.diagnosticSuffix

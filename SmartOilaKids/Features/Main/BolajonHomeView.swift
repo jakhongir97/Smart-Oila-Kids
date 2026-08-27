@@ -168,7 +168,8 @@ struct BolajonHomeView: View {
                 // Both Home presentations step aside for the lock takeover, for the same reason: the
                 // root presents it as a full-screen cover, and a sheet already up would block that
                 // presentation outright — leaving a locked child looking at a PIN keypad instead.
-                // The first-run grant is already spent by then, so the prompt does not come back.
+                // This is a teardown, not an answer, so the grant survives and the prompt is offered
+                // again the next time Home appears unlocked.
                 if locked {
                     showSOSConfirm = false
                     showFirstRunPINSetup = false
@@ -188,7 +189,9 @@ struct BolajonHomeView: View {
         // Attached OUTSIDE the NavigationStack, not next to the SOS sheet: two `.sheet` modifiers on
         // the same view do not both work, and this one has to cover the whole Home stack anyway —
         // the child may already have drilled into Tasks or Chat when the app is foregrounded.
-        // Swiping it away counts as "not now"; the grant was already spent at presentation.
+        // Swiping it away is NOT an answer: this sheet appears on the monitored child's own Home
+        // screen, and spending the grant on a swipe let the child remove the parent-PIN protection —
+        // and with it the only thing standing between them and Disconnect — with one gesture.
         .sheet(isPresented: $showFirstRunPINSetup, onDismiss: { protection.endFirstRunPINPrompt() }) {
             ParentPINFlowSheet(intent: .firstRun)
         }
@@ -197,9 +200,10 @@ struct BolajonHomeView: View {
 
     /// Offer the first-run parent-PIN prompt, at most once per pairing.
     ///
-    /// The gate itself is `SettingsProtectionController.beginFirstRunPINPrompt()`, which spends the
-    /// one-shot grant and returns false when it is already spent or a PIN exists. Everything below
-    /// is about not stealing the screen from something more important:
+    /// The gate itself is `SettingsProtectionController.beginFirstRunPINPrompt()`, which returns false
+    /// when the grant is already spent or a PIN exists. The grant is spent by an explicit ANSWER
+    /// inside the sheet, not by presenting it. Everything below is about not stealing the screen from
+    /// something more important:
     ///
     /// - `refreshAvailability()` first, because `hasCustomPIN` may be a stale `true` left by a
     ///   PREVIOUS family — the verifier is device-global in the Keychain and survives a reinstall,

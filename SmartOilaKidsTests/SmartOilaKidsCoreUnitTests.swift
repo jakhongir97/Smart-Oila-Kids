@@ -3172,7 +3172,7 @@ final class LiveSessionDisclosureTests: XCTestCase {
         for mode in [StreamMode.audio, .video] {
             // Notifications are irrelevant on screen: the in-app indicator is the channel.
             XCTAssertEqual(
-                LiveSessionDisclosure.verdict(mode: mode, isForeground: true, notificationsAuthorized: false),
+                LiveSessionDisclosure.verdict(mode: mode, isForeground: true, presenceBannerWouldRender: false),
                 .allowed(.onScreenIndicator)
             )
         }
@@ -3180,15 +3180,31 @@ final class LiveSessionDisclosureTests: XCTestCase {
 
     func testBackgroundAudioNeedsTheNotificationChannel() {
         XCTAssertEqual(
-            LiveSessionDisclosure.verdict(mode: .audio, isForeground: false, notificationsAuthorized: true),
+            LiveSessionDisclosure.verdict(mode: .audio, isForeground: false, presenceBannerWouldRender: true),
             .allowed(.presenceNotification)
+        )
+    }
+
+    /// The parameter is "would a banner RENDER", not "is the app authorized" — a distinction that
+    /// used to be collapsed at the call site. A child can leave Allow Notifications on while turning
+    /// Banners, Lock Screen and Notification Centre off (status stays `.authorized`, `add` still
+    /// succeeds, nothing appears), and Scheduled Summary defers the banner to the evening digest.
+    /// Both resolved to `true` and ran the microphone off-screen with nothing disclosing it.
+    /// `presenceBannerWouldRenderNow()` is what now answers this honestly; this pins the contract it
+    /// has to satisfy.
+    func testABannerThatWouldNotRenderIsNotADisclosureChannel() {
+        XCTAssertEqual(
+            LiveSessionDisclosure.verdict(mode: .audio, isForeground: false,
+                                          presenceBannerWouldRender: false),
+            .refusedNoDisclosureChannel,
+            "authorized-but-invisible must refuse exactly like unauthorized"
         )
     }
 
     /// The finding this whole type exists for.
     func testBackgroundAudioIsRefusedWithNoWayToDiscloseIt() {
         XCTAssertEqual(
-            LiveSessionDisclosure.verdict(mode: .audio, isForeground: false, notificationsAuthorized: false),
+            LiveSessionDisclosure.verdict(mode: .audio, isForeground: false, presenceBannerWouldRender: false),
             .refusedNoDisclosureChannel,
             "an open mic with nothing on the device disclosing it is the shape we refuse to ship"
         )
@@ -3199,7 +3215,7 @@ final class LiveSessionDisclosureTests: XCTestCase {
     /// `handleAppDidEnterBackground` already stops video on the transition; starting must match.
     func testBackgroundVideoIsRefusedEvenWhenNotificationsAreAuthorized() {
         XCTAssertEqual(
-            LiveSessionDisclosure.verdict(mode: .video, isForeground: false, notificationsAuthorized: true),
+            LiveSessionDisclosure.verdict(mode: .video, isForeground: false, presenceBannerWouldRender: true),
             .refusedVideoOffScreen
         )
     }
@@ -3313,7 +3329,7 @@ final class LiveSessionLifecycleTests: XCTestCase {
     private func makeManager(
         publisher: FakeMediaPublisher,
         foreground: Bool = true,
-        notificationsAuthorized: Bool = true,
+        presenceBannerWouldRender: Bool = true,
         micGranted: Bool = true,
         cameraOutcome: DeviceAudioStreamManager.CameraPermissionOutcome = .granted,
         consentFor mode: StreamMode = .audio
@@ -3324,7 +3340,7 @@ final class LiveSessionLifecycleTests: XCTestCase {
         manager.isFeatureEnabled = { true }
         manager.makePublisher = { publisher }
         manager.isForeground = { foreground }
-        manager.notificationsAuthorized = { notificationsAuthorized }
+        manager.presenceBannerWouldRender = { presenceBannerWouldRender }
         manager.requestMicPermission = { micGranted }
         // Without this the camera gate answers from the real `AVCaptureDevice`, which is
         // `.notDetermined` in a test host — so every video test was refused at the camera before
@@ -3365,7 +3381,7 @@ final class LiveSessionLifecycleTests: XCTestCase {
         let publisher = FakeMediaPublisher()
         // Foreground at the moment the parent asks, off screen by the time the room is up.
         let onScreen = OSAllocatedUnfairLock(initialState: true)
-        let manager = makeManager(publisher: publisher, notificationsAuthorized: false)
+        let manager = makeManager(publisher: publisher, presenceBannerWouldRender: false)
         manager.isForeground = { onScreen.withLock { $0 } }
         publisher.beforeConnectReturns = { onScreen.withLock { $0 = false } }
 
@@ -3382,7 +3398,7 @@ final class LiveSessionLifecycleTests: XCTestCase {
     func testBackgroundingDuringConnectIsAllowedWhenTheBannerCanBeShown() async {
         let publisher = FakeMediaPublisher()
         let onScreen = OSAllocatedUnfairLock(initialState: true)
-        let manager = makeManager(publisher: publisher, notificationsAuthorized: true)
+        let manager = makeManager(publisher: publisher, presenceBannerWouldRender: true)
         manager.isForeground = { onScreen.withLock { $0 } }
         publisher.beforeConnectReturns = { onScreen.withLock { $0 = false } }
 
@@ -3397,7 +3413,7 @@ final class LiveSessionLifecycleTests: XCTestCase {
     func testBackgroundingDuringConnectAlwaysRefusesVideo() async {
         let publisher = FakeMediaPublisher()
         let onScreen = OSAllocatedUnfairLock(initialState: true)
-        let manager = makeManager(publisher: publisher, notificationsAuthorized: true, consentFor: .video)
+        let manager = makeManager(publisher: publisher, presenceBannerWouldRender: true, consentFor: .video)
         manager.isForeground = { onScreen.withLock { $0 } }
         publisher.beforeConnectReturns = { onScreen.withLock { $0 = false } }
 
@@ -3412,7 +3428,7 @@ final class LiveSessionLifecycleTests: XCTestCase {
 
     func testASessionRefusedBeforeConnectingNeverTouchesTheTransport() async {
         let publisher = FakeMediaPublisher()
-        let manager = makeManager(publisher: publisher, foreground: false, notificationsAuthorized: false)
+        let manager = makeManager(publisher: publisher, foreground: false, presenceBannerWouldRender: false)
 
         await manager.start(command: .debugAudio)
 
@@ -3451,7 +3467,7 @@ final class LiveSessionConsentRaceTests: XCTestCase {
         manager.isFeatureEnabled = { true }
         manager.makePublisher = { publisher }
         manager.isForeground = { true }
-        manager.notificationsAuthorized = { true }
+        manager.presenceBannerWouldRender = { true }
         manager.requestMicPermission = { true }
         manager.requestCameraPermission = { .granted }
         return manager
@@ -3499,7 +3515,7 @@ final class StreamWakeObserverTests: XCTestCase {
         manager.isFeatureEnabled = { true }
         manager.makePublisher = { publisher }
         manager.isForeground = { true }
-        manager.notificationsAuthorized = { true }
+        manager.presenceBannerWouldRender = { true }
         manager.requestMicPermission = { true }
         manager.requestCameraPermission = { .granted }
         return manager

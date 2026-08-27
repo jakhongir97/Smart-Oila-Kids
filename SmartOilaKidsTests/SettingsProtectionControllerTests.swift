@@ -263,14 +263,15 @@ final class FirstRunPINGrantTests: XCTestCase {
         SettingsProtectionController(userDefaults: defaults, pinStore: InMemoryPINCredentialStore())
     }
 
-    func testTheGrantIsSpentAtPresentationAndNeverReopens() {
+    func testAnExplicitAnswerSpendsTheGrantAndNeverReopens() {
         let suite = "FirstRunPINGrant.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let controller = makeController(defaults)
         XCTAssertTrue(controller.beginFirstRunPINPrompt(), "a fresh install is offered its one prompt")
-        // Skipping: the sheet closes with no PIN saved.
+        // "Not now" — an explicit tap inside the sheet, which is what spends the grant.
+        controller.recordFirstRunPINPromptAnswered()
         controller.endFirstRunPINPrompt()
 
         XCTAssertFalse(controller.hasCustomPIN)
@@ -280,9 +281,43 @@ final class FirstRunPINGrantTests: XCTestCase {
         XCTAssertFalse(makeController(defaults).beginFirstRunPINPrompt())
     }
 
-    /// A force-quit while the prompt is on screen is the case that made the marker "spent at
-    /// presentation" rather than "spent on dismissal".
-    func testAKilledPromptDoesNotHandBackTheGrant() {
+    /// The defect this contract exists to prevent: the sheet appears on the MONITORED CHILD's own
+    /// Home screen, and the grant used to be spent the instant it was presented. One downward swipe
+    /// therefore removed the parent-PIN option permanently — and with no PIN, Disconnect is a single
+    /// confirm dialog the child can tap. A swipe is not an answer.
+    func testASwipeDoesNotSpendTheGrant() {
+        let suite = "FirstRunPINGrantSwipe.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let controller = makeController(defaults)
+        XCTAssertTrue(controller.beginFirstRunPINPrompt())
+        // Swiped away: `onDismiss` runs, but no button inside the sheet was ever tapped.
+        controller.endFirstRunPINPrompt()
+
+        XCTAssertEqual(controller.firstPINProvisioning, .allowed)
+        XCTAssertTrue(controller.beginFirstRunPINPrompt(), "the parent still gets their chance")
+        XCTAssertTrue(makeController(defaults).beginFirstRunPINPrompt(), "and it survives a relaunch")
+    }
+
+    /// Re-presentation is guarded in memory, so an already-open prompt cannot be opened twice.
+    func testAnOpenPromptIsNotReopened() {
+        let suite = "FirstRunPINGrantOpen.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let controller = makeController(defaults)
+        XCTAssertTrue(controller.beginFirstRunPINPrompt())
+        XCTAssertFalse(controller.beginFirstRunPINPrompt(), "already on screen")
+        controller.endFirstRunPINPrompt()
+        XCTAssertTrue(controller.beginFirstRunPINPrompt(), "closed unanswered, so offerable again")
+    }
+
+    /// A force-quit with the prompt on screen is not an answer either, so the grant survives — but
+    /// the WRITE authority does not, and that is the half that matters. The relaunched process must
+    /// re-present the sheet before it can save anything, which is what stops a killed prompt from
+    /// leaving a standing licence to write a PIN.
+    func testAKilledPromptKeepsTheGrantButLosesTheWriteAuthority() {
         let suite = "FirstRunPINGrantKill.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -290,9 +325,10 @@ final class FirstRunPINGrantTests: XCTestCase {
         XCTAssertTrue(makeController(defaults).beginFirstRunPINPrompt())
         // No `endFirstRunPINPrompt()`: the process died with the sheet up.
         let relaunched = makeController(defaults)
-        XCTAssertFalse(relaunched.beginFirstRunPINPrompt())
-        // The in-memory half died with it, so the write authority is gone too.
+        // The in-memory half died with it, so the write authority is gone.
         XCTAssertFalse(relaunched.saveCustomPIN("1234", authority: .firstRunGrant))
+        // The parent's unanswered chance is still there.
+        XCTAssertTrue(relaunched.beginFirstRunPINPrompt())
     }
 
     /// Both reset paths have to clear the marker. The static one runs at `setOilaPaired(true)` and
@@ -306,11 +342,13 @@ final class FirstRunPINGrantTests: XCTestCase {
 
         let controller = makeController(defaults)
         XCTAssertTrue(controller.beginFirstRunPINPrompt())
+        controller.recordFirstRunPINPromptAnswered()
         controller.endFirstRunPINPrompt()
         XCTAssertFalse(controller.beginFirstRunPINPrompt())
 
         SettingsProtectionController.wipePersistedPINState(userDefaults: defaults)
         XCTAssertTrue(controller.beginFirstRunPINPrompt(), "a re-pairing reopens provisioning")
+        controller.recordFirstRunPINPromptAnswered()
         controller.endFirstRunPINPrompt()
         XCTAssertFalse(controller.beginFirstRunPINPrompt())
 

@@ -106,6 +106,19 @@
 				<string>1C8F.1</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- DeviceAudioStreaming reads ProcessInfo.processInfo.systemUptime to time the
+			     .connecting window on a MONOTONIC clock (the wall clock belongs to the child).
+			     35F9.1 = measure elapsed time between events that occurred within the app, which
+			     is exactly that and nothing more: the value never leaves the device.
+			     Omitting this is ITMS-91053 at upload, not a review finding. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
