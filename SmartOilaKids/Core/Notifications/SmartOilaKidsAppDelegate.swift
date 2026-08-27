@@ -494,6 +494,26 @@ final class FCMPushRegistrar: NSObject {
         registerToken(trimmed)
     }
 
+    /// Re-ask Firebase for the current registration token and re-persist it.
+    ///
+    /// Needed because `purgeChildScopedData()` deletes `OILA_FCM_TOKEN` on disconnect — correctly,
+    /// since a push address is child-scoped — while Firebase itself keeps the same token. Nothing
+    /// then re-derives it: `handleFCMToken` only fires on a ROTATION or a cold launch. So a family
+    /// that disconnected and re-paired without quitting the app paired with no push address at all,
+    /// and stayed unreachable (no listen, no lock, no chat wake) until the next cold launch.
+    ///
+    /// Safe to call whenever pairing state changes: the SDK answers from cache, and `handleFCMToken`
+    /// is idempotent.
+    func refreshRegistrationToken() {
+        #if canImport(FirebaseMessaging)
+        guard isConfigured else { return }
+        Messaging.messaging().token { [weak self] token, _ in
+            guard let token = token?.trimmedNonEmpty else { return }
+            self?.handleFCMToken(token)
+        }
+        #endif
+    }
+
     /// Record that `token` still has to reach `PATCH /device/fcm-token`, then try immediately.
     ///
     /// The single entry point for both producers — a Firebase rotation and the APNs registration

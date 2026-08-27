@@ -1248,20 +1248,43 @@ extension OilaTelemetryService: SOSTelemetryProviding {
     /// Reads the location manager's most recent fix + the current battery level. Location is
     /// nil when not authorized or not yet resolved; battery is nil when monitoring can't
     /// report a value (e.g. simulator).
+    /// How old `CLLocationManager.location` may be before an SOS refuses to carry it.
+    ///
+    /// `location` is simply the last fix the manager happens to be holding — it has no age bound and
+    /// no validity requirement, so a child who has been indoors for hours, or who denied location
+    /// entirely after one early fix, would send a panic alert pinned to where they used to be.
+    /// `TriggerSosDto` carries no timestamp, so the parent has no way to judge what they are looking
+    /// at: the map simply shows a pin. A pin in the wrong place is worse than no pin at all when
+    /// someone is deciding where to drive, so a stale fix travels as ABSENT.
+    nonisolated static let sosLocationMaxAge: TimeInterval = 120
+
     func currentSOSContext() -> OilaSOSContext {
         UIDevice.current.isBatteryMonitoringEnabled = true
         let batteryPercent = Self.batteryPercent()
 
-        let location = locationManager.location
-        let accuracy: Double? = {
-            guard let horizontal = location?.horizontalAccuracy, horizontal >= 0 else { return nil }
-            return horizontal
-        }()
+        // Ask for a fresh fix in the background too. It cannot help THIS request, but SOS retries
+        // from the outbox and a foregrounded manager usually lands one within seconds.
+        if [.authorizedAlways, .authorizedWhenInUse].contains(locationManager.authorizationStatus) {
+            locationManager.requestLocation()
+        }
+
+        let location = Self.sosUsableLocation(locationManager.location)
         return OilaSOSContext(
             lat: location?.coordinate.latitude,
             lng: location?.coordinate.longitude,
-            accuracy: accuracy,
+            accuracy: location?.horizontalAccuracy,
             batteryPercent: batteryPercent
         )
+    }
+
+    /// The fix an SOS may carry, or nil. Pure, so the age and validity rules are testable.
+    ///
+    /// A negative `horizontalAccuracy` means CoreLocation is telling us the coordinate is invalid;
+    /// it used to null only the ACCURACY while still sending the coordinate, which published a
+    /// meaningless position as if it were a real one.
+    nonisolated static func sosUsableLocation(_ location: CLLocation?, now: Date = Date()) -> CLLocation? {
+        guard let location, location.horizontalAccuracy >= 0 else { return nil }
+        guard abs(now.timeIntervalSince(location.timestamp)) <= sosLocationMaxAge else { return nil }
+        return location
     }
 }

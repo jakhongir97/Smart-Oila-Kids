@@ -82,6 +82,12 @@ struct BolajonSetupFlowView: View {
         childEmoji = result.child?.avatarEmoji?.trimmedNonEmpty
         // Mark this install as oila360-paired — the flag that gates telemetry.
         sessionStore.setOilaPaired(true)
+        // Re-derive the push address. `purgeChildScopedData()` deletes `OILA_FCM_TOKEN` on
+        // disconnect (right — it is child-scoped), but Firebase keeps the same token and nothing
+        // re-reads it until a rotation or a cold launch. Without this, disconnecting and re-pairing
+        // in one app session produced a device with NO push address: no listen, no lock, no chat
+        // wake, until the family happened to quit and reopen the app.
+        Task { @MainActor in FCMPushRegistrar.shared.refreshRegistrationToken() }
         // Set DSN last: it flips `hasLinkedChildDevice` and starts child services.
         sessionStore.setDSN(result.dsn)
         // Replace the stack (not append) so back/swipe can't return to the used pairing code.

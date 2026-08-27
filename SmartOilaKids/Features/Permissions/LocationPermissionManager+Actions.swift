@@ -19,6 +19,10 @@ extension LocationPermissionManager {
         performDisableAction(for: requirement)
     }
 
+    /// UserDefaults marker: the one-time Always-upgrade prompt has already been issued on this
+    /// install. See `requestLocationPermission()`.
+    static let alwaysPromptIssuedKey = "BOLAJON_ALWAYS_PROMPT_ISSUED"
+
     func requestLocationPermission() {
         switch locationAuthorizationStatus {
         case .authorizedAlways:
@@ -26,7 +30,17 @@ extension LocationPermissionManager {
         case .notDetermined:
             requestWhenInUseLocationAuthorization()
         case .authorizedWhenInUse:
-            requestAlwaysLocationAuthorization()
+            // iOS shows the "Change to Always?" upgrade prompt ONCE per install. Once the child has
+            // answered it with "Keep Only While Using", `requestAlwaysAuthorization()` is a silent
+            // no-op forever — so the C5 permission screen kept rendering an Enable button that did
+            // nothing at all, on the one row that background location depends on. Ask once; after
+            // that send them where the setting actually lives, exactly as the `.denied` branch does.
+            if UserDefaults.standard.bool(forKey: Self.alwaysPromptIssuedKey) {
+                openAppSettings()
+            } else {
+                UserDefaults.standard.set(true, forKey: Self.alwaysPromptIssuedKey)
+                requestAlwaysLocationAuthorization()
+            }
         case .denied, .restricted:
             openAppSettings()
         @unknown default:

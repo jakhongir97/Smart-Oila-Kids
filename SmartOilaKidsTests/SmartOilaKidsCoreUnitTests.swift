@@ -3974,3 +3974,55 @@ final class CredentialAbsenceTests: XCTestCase {
         XCTAssertFalse(error("UNAUTHORIZED").isCredentialAbsent)
     }
 }
+
+// MARK: - What an SOS is allowed to claim about where the child is
+
+/// `currentSOSContext()` shipped whatever `CLLocationManager.location` happened to be holding — no
+/// age bound, and a negative `horizontalAccuracy` nulled only the accuracy while still sending the
+/// coordinate. `TriggerSosDto` carries no timestamp, so the parent sees a pin with no way to judge
+/// it. A pin in the wrong place is worse than no pin when someone is deciding where to drive.
+final class SOSLocationFreshnessTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func fix(age: TimeInterval, accuracy: CLLocationAccuracy = 25) -> CLLocation {
+        CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 41.31, longitude: 69.24),
+            altitude: 0,
+            horizontalAccuracy: accuracy,
+            verticalAccuracy: 5,
+            timestamp: now.addingTimeInterval(-age)
+        )
+    }
+
+    func testAFreshFixIsCarried() {
+        XCTAssertNotNil(OilaTelemetryService.sosUsableLocation(fix(age: 10), now: now))
+    }
+
+    func testAStaleFixTravelsAsAbsentRatherThanAsAPosition() {
+        let stale = fix(age: OilaTelemetryService.sosLocationMaxAge + 1)
+        XCTAssertNil(OilaTelemetryService.sosUsableLocation(stale, now: now),
+                     "a child indoors for an hour must not be reported where they used to be")
+    }
+
+    func testAFixAtTheAgeBoundIsStillCarried() {
+        let edge = fix(age: OilaTelemetryService.sosLocationMaxAge)
+        XCTAssertNotNil(OilaTelemetryService.sosUsableLocation(edge, now: now))
+    }
+
+    func testAnInvalidCoordinateIsDroppedEntirelyNotJustItsAccuracy() {
+        // CoreLocation signals "this coordinate is meaningless" with a negative accuracy. The old
+        // code nulled `accuracy` and sent the latitude and longitude anyway.
+        XCTAssertNil(OilaTelemetryService.sosUsableLocation(fix(age: 5, accuracy: -1), now: now))
+    }
+
+    func testNoFixAtAllIsHandled() {
+        XCTAssertNil(OilaTelemetryService.sosUsableLocation(nil, now: now))
+    }
+
+    func testAFixTimestampedInTheFutureIsAlsoRefused() {
+        // A child who moved the clock backwards leaves the manager holding a future-dated fix; its
+        // real age is unknowable, so it is not evidence of anything.
+        let future = fix(age: -(OilaTelemetryService.sosLocationMaxAge + 60))
+        XCTAssertNil(OilaTelemetryService.sosUsableLocation(future, now: now))
+    }
+}
