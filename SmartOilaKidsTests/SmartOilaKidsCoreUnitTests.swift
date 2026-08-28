@@ -3016,6 +3016,24 @@ final class StreamCommandParsingTests: XCTestCase {
         XCTAssertEqual(manager.grantedConsent, .audio)
     }
 
+    /// REGRESSION. The decline branch first shipped as a bare key wipe, justified by "there is no
+    /// live session during onboarding". That premise is false — pairing completes BEFORE the flow is
+    /// routed to, and RootView hangs the consent sheet and the live indicator above the routing
+    /// branch, so a parent can start a session while the child is still on the intro step. A wipe
+    /// that leaves `needsConsent` standing also leaves the outstanding question on screen, and the
+    /// microphone publishing until the lease expires, after the child has said no.
+    @MainActor
+    func testDecliningRetractsTheOUTSTANDINGQuestionToo() {
+        let manager = makeEnabledManager(audio: false, video: false)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent, "precondition: a live request has raised the sheet")
+
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: false, cameraAllowed: false)
+
+        XCTAssertFalse(manager.needsConsent, "a refusal must take the question down, not only the flag")
+        XCTAssertNil(manager.grantedConsent)
+    }
+
     /// An existing audio-only grant must keep working without re-prompting — splitting the key must
     /// not invalidate consent every child in the field has already given.
     @MainActor

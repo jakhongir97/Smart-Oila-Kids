@@ -309,8 +309,21 @@ final class SessionStore: ObservableObject {
         //    Both halves go: the camera grant is worthless on its own (a video session needs the
         //    audio grant too), but leaving it behind means a re-consent for audio alone could be
         //    read back as covering video by any future code that checks the flags separately.
+        //    The raw removals stay because this method takes an INJECTED `userDefaults` and must
+        //    work against a test store with no singleton behind it. But they were not enough on
+        //    their own: they go around `DeviceAudioStreamManager`, which keeps the consent QUESTION
+        //    in memory. `clearSession`'s only manager call is `stopByChild()`, and `stop()` clears
+        //    `pendingCommand` while leaving `needsConsent` alone — and RootView's sheet binding is
+        //    gated on `needsConsent` with no pairing check at all. So a consent sheet raised for the
+        //    previous family survived the unpair, sat modally over the pairing screen, and whoever
+        //    tapped "Allow" ran `grantConsentWithoutStarting` and wrote both keys straight back
+        //    AFTER this purge. Re-pair to child B and the first listen opened their microphone with
+        //    no sheet — exactly the leak this step exists to close, reached through the sheet
+        //    instead of through the onboarding mirror. `revokeConsent()` clears the keys, the
+        //    pending question and anything running under it.
         userDefaults.removeObject(forKey: "OILA_AUDIO_CONSENT_GRANTED")
         userDefaults.removeObject(forKey: "OILA_VIDEO_CONSENT_GRANTED")
+        Task { @MainActor in DeviceAudioStreamManager.shared.revokeConsent() }
         // 5. Drop any pending removal-attempt reports. The queue survives relaunches by design, but
         //    `POST /device/apps/removal-attempt` carries no dsn — the server attributes the report to
         //    whichever device Bearer is held when it finally flushes. A report queued for the previous

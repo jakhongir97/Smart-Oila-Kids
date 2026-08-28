@@ -1144,20 +1144,27 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// deliberately clears the camera flag, so applying the two independently would let a late
     /// microphone callback wipe a camera consent recorded a moment earlier. Idempotent.
     ///
-    /// A declined microphone CLEARS both flags rather than recording nothing. Recording nothing was
-    /// the second half of the same defect: a decline could not retract a grant an earlier step had
-    /// already written, so the child's one explicit refusal was inert. There is no live session
-    /// during onboarding, so this deliberately does not touch `needsConsent` or call `stop()` the
-    /// way the Settings-screen `revokeConsent()` does.
+    /// A declined microphone RETRACTS rather than recording nothing. Recording nothing was the
+    /// second half of the same defect: a decline could not undo a grant an earlier step had already
+    /// written, so the child's one explicit refusal was inert.
+    ///
+    /// The retraction is the FULL `revokeConsent()`, not just a key wipe. An earlier version cleared
+    /// the two flags and left the rest alone, on the reasoning that "there is no live session during
+    /// onboarding" — and that premise is false. `BolajonSetupFlowView.handlePaired` sets
+    /// `oilaPaired` and the DSN BEFORE `RootView+Routing` shows this flow, so the install is paired
+    /// for the whole of B1–B11; `onWakeStart` is registered in the manager's `init`, and RootView
+    /// hangs both the consent sheet and the live indicator off `appContent`, ABOVE the routing
+    /// branch. A parent can therefore start a live session while the child is still on the intro
+    /// step. Clearing only the flags there meant the microphone kept publishing — for up to the
+    /// remaining lease — after the child had explicitly said no; only a later renewal would have
+    /// been refused, which does nothing about the session already open.
     func applyOnboardingMediaAnswer(microphoneAllowed: Bool, cameraAllowed: Bool) {
         guard isFeatureEnabled() else { return }
         guard microphoneAllowed else {
             // No microphone ⇒ no live session of either kind. A consent flag standing over a denied
             // OS permission would send the session into a capture guard that fails with no sheet to
-            // explain why.
-            defaults.removeObject(forKey: consentKey)
-            defaults.removeObject(forKey: videoConsentKey)
-            refreshGrantedConsent()
+            // explain why — and anything already running under the old grant has to stop with it.
+            revokeConsent()
             return
         }
         recordConsent(for: cameraAllowed ? .video : .audio)
