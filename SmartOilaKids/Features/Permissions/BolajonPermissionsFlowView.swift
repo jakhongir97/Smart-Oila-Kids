@@ -139,6 +139,12 @@ struct BolajonPermissionsFlowView: View {
     /// the shared instance is how every other screen reaches it, and matching that keeps the one
     /// singleton with one ownership story.
     @ObservedObject private var streaming = DeviceAudioStreamManager.shared
+    /// What the child said to each media step IN THIS RUN — nil until the step is answered, then
+    /// true for "Allow" and false for "No, not needed". Deliberately not derived from the OS status:
+    /// the iOS grants survive an unpair and can belong to a previous family, so the status answers
+    /// "does this phone hold the permission", never "did this child agree".
+    @State private var microphoneAnswer: Bool?
+    @State private var cameraAnswer: Bool?
     @State private var path: [PermRoute]
 
     private let steps = BolajonPermissionStep.all
@@ -194,15 +200,25 @@ struct BolajonPermissionsFlowView: View {
         .onChange(of: manager.cameraAuthorizationStatus) { _ in mirrorMediaConsent() }
     }
 
-    /// See `recordOnboardingMediaConsent`. Also called straight from the media steps because a
+    /// See `applyOnboardingMediaAnswer`. Also called straight from the media steps because a
     /// re-onboarding is the case `onChange` alone misses: `clearSession()` replays B1–B11 after every
     /// unpair while the iOS grants survive it, so the status is already `.granted` when the step
     /// opens, never changes, and the child would meet a consent sheet for a permission this phone
     /// has held all along.
+    ///
+    /// A grant is forwarded ONLY for a step the child has actually answered **yes** to in this run.
+    /// The first version passed the raw statuses, and that was a real hole: on a re-pair the
+    /// surviving iOS grants from the PREVIOUS family made the microphone step write video consent
+    /// before the camera step was shown, so a new child could decline the camera and still have it
+    /// opened without a sheet. The `answer` state is what keeps this bound to what the child in
+    /// front of the phone actually said — and it is why an untouched step (both answers nil) writes
+    /// nothing at all, which also stops a permission flipped in the iOS Settings pane, while this
+    /// flow happens to be on screen, from recording a consent nobody was asked for.
     private func mirrorMediaConsent() {
-        streaming.recordOnboardingMediaConsent(
-            microphoneGranted: manager.microphonePermission == .granted,
-            cameraGranted: manager.cameraAuthorizationStatus == .authorized
+        guard microphoneAnswer != nil || cameraAnswer != nil else { return }
+        streaming.applyOnboardingMediaAnswer(
+            microphoneAllowed: microphoneAnswer == true && manager.microphonePermission == .granted,
+            cameraAllowed: cameraAnswer == true && manager.cameraAuthorizationStatus == .authorized
         )
     }
 
@@ -228,9 +244,11 @@ struct BolajonPermissionsFlowView: View {
         case .usage, .appLimits:
             manager.performAction(for: .usageStats)
         case .microphone:
+            microphoneAnswer = true
             manager.performAction(for: .microphone)
             mirrorMediaConsent()
         case .camera:
+            cameraAnswer = true
             manager.performAction(for: .camera)
             mirrorMediaConsent()
         case .summary:
@@ -251,6 +269,22 @@ struct BolajonPermissionsFlowView: View {
     /// background-location step (B5) — the design labels B5 "4-qadam «Ha» bo'lsa", so it only
     /// appears when the child accepted foreground location.
     private func handleDecline(from index: Int) {
+        // "No, not needed" on a media step is an ANSWER, and it has to be able to retract. Before
+        // this, decline touched nothing: a child who declined the camera kept whatever video consent
+        // an earlier step had recorded, so their one explicit refusal was inert and the parent's
+        // next watch request opened the camera anyway. Declining the microphone clears both, because
+        // there is no live session of either kind without it.
+        switch steps[index].kind {
+        case .microphone:
+            microphoneAnswer = false
+            mirrorMediaConsent()
+        case .camera:
+            cameraAnswer = false
+            mirrorMediaConsent()
+        default:
+            break
+        }
+
         if steps[index].kind == .location,
            index + 1 < steps.count, steps[index + 1].kind == .backgroundLocation {
             advance(from: index + 1)

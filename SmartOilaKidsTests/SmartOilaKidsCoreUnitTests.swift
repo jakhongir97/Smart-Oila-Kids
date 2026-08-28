@@ -2918,7 +2918,7 @@ final class StreamCommandParsingTests: XCTestCase {
     func testAnsweringTheOnboardingStepsMeansTheFirstListenDoesNotAskAgain() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: true)
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: true)
         manager.requestStart(command: .debugAudio)
 
         XCTAssertFalse(manager.needsConsent, "the child already answered this question in onboarding")
@@ -2931,19 +2931,19 @@ final class StreamCommandParsingTests: XCTestCase {
     func testMicrophoneOnlyOnboardingGrantDoesNotAuthorizeTheCamera() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: false)
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: false)
 
         XCTAssertEqual(manager.grantedConsent, .audio)
     }
 
-    /// A declined (or never-answered) microphone step records nothing, so the sheet still appears.
-    /// A consent flag standing over a denied OS permission is worse than the extra prompt: the
-    /// session would go straight into a capture guard that fails with nothing on screen.
+    /// A declined microphone step records nothing, so the sheet still appears. A consent flag
+    /// standing over a denied OS permission is worse than the extra prompt: the session would go
+    /// straight into a capture guard that fails with nothing on screen.
     @MainActor
     func testDecliningTheMicrophoneStepRecordsNoConsent() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.recordOnboardingMediaConsent(microphoneGranted: false, cameraGranted: true)
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: false, cameraAllowed: true)
 
         XCTAssertNil(manager.grantedConsent)
         manager.requestStart(command: .debugAudio)
@@ -2951,17 +2951,69 @@ final class StreamCommandParsingTests: XCTestCase {
     }
 
     /// The mirror is fired from a status change AND from the step itself, so it runs repeatedly with
-    /// whatever the current pair of grants is. Writing one mode from the pair is what makes that
-    /// safe: mirroring the two statuses independently would let a late microphone callback call
+    /// whatever the current pair of answers is. Writing one mode from the pair is what makes that
+    /// safe: applying the two independently would let a late microphone callback call
     /// `recordConsent(.audio)` and clear a camera consent recorded a moment earlier.
     @MainActor
     func testRepeatedMirroringIsIdempotentAndKeepsTheCameraGrant() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: true)
-        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: true)
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: true)
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: true)
 
         XCTAssertEqual(manager.grantedConsent, .video)
+    }
+
+    /// REGRESSION. An adversarial review of the first version of this mirror found it took the live
+    /// OS statuses rather than the child's answers, which re-created — out of the iOS grants that
+    /// survive an unpair — the cross-child leak `SessionStore.purgeChildScopedData` step 4 exists to
+    /// close.
+    ///
+    /// The scenario: the handset is re-paired to a DIFFERENT child, so `clearSession()` has wiped
+    /// both consent flags while iOS still holds the microphone and camera grants from the previous
+    /// family. The new child answers the microphone step (which comes FIRST) and has not yet been
+    /// shown the camera step. Passing the raw camera status here wrote `.video`, and the child could
+    /// then decline the camera outright and still have it opened with no sheet.
+    ///
+    /// The call site now passes `cameraAnswer == true && status == .authorized`, so an unanswered
+    /// camera step contributes `false` no matter what iOS holds.
+    @MainActor
+    func testTheMicrophoneStepCannotGrantACameraTheChildWasNeverAskedAbout() {
+        let manager = makeEnabledManager(audio: false, video: false)
+
+        // Microphone answered yes; camera step not reached, so its answer is nil ⇒ `false` here.
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: false)
+
+        XCTAssertEqual(manager.grantedConsent, .audio, "an unanswered camera step must grant nothing")
+
+        manager.requestStart(command: StreamCommand(notification: note([
+            PushUserInfoKeys.streamMode: "video"
+        ])))
+        XCTAssertTrue(manager.needsConsent, "a video request must still meet the sheet")
+    }
+
+    /// REGRESSION, the other half. Declining used to record NOTHING, which meant a decline could not
+    /// retract a grant an earlier step had already written — the child's one explicit refusal was
+    /// inert. A declined microphone now clears both flags.
+    @MainActor
+    func testDecliningAfterAnEarlierGrantActuallyRetractsIt() {
+        let manager = makeEnabledManager(audio: true, video: true)
+        XCTAssertEqual(manager.grantedConsent, .video, "precondition: a grant is already on file")
+
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: false, cameraAllowed: false)
+
+        XCTAssertNil(manager.grantedConsent, "an explicit refusal must retract, not be ignored")
+    }
+
+    /// …and a declined CAMERA after an allowed microphone drops to audio rather than leaving the
+    /// camera flag standing.
+    @MainActor
+    func testDecliningOnlyTheCameraLeavesAudioAndDropsVideo() {
+        let manager = makeEnabledManager(audio: true, video: true)
+
+        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: false)
+
+        XCTAssertEqual(manager.grantedConsent, .audio)
     }
 
     /// An existing audio-only grant must keep working without re-prompting — splitting the key must

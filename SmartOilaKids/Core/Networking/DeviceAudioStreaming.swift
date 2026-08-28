@@ -1114,7 +1114,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         refreshGrantedConsent()
     }
 
-    /// Mirror the ANSWERED onboarding microphone/camera steps into the standing consent.
+    /// Apply the child's ANSWER to the onboarding microphone/camera steps as the standing consent.
     ///
     /// Ibrohim, on build 16: *"bunday narsa kerak emas. men ruxsat berdim o'zi. yana so'rayapti"* —
     /// this thing is not needed, I already gave permission, it is asking again. He was right, and it
@@ -1128,17 +1128,39 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// and a child who skipped or declined the onboarding steps still meets it. What changes is that
     /// answering the question ONCE now counts, which is all Ibrohim asked for.
     ///
-    /// Takes both grants together and writes the mode in ONE call on purpose: `recordConsent(.audio)`
-    /// deliberately clears the camera flag, so mirroring the two statuses independently would let a
-    /// late microphone callback wipe a camera consent recorded a moment earlier. Idempotent, so the
-    /// caller can fire it on a status change and on the step itself without keeping track.
+    /// **The parameters are ANSWERS, not OS permission statuses, and the difference is the whole
+    /// safety property.** The first version of this took the live grants — and an adversarial review
+    /// found it re-created, from the surviving iOS grants, exactly the cross-child leak
+    /// `SessionStore.purgeChildScopedData` step 4 exists to close. `clearSession()` wipes both
+    /// consent flags on an unpair and replays B1–B11 while the iOS grants survive, so on a re-pair
+    /// (possibly to a DIFFERENT child) the microphone step read `cameraAuthorizationStatus ==
+    /// .authorized` left by the previous family and wrote VIDEO consent before the camera step had
+    /// even been shown. The new child could then decline the camera outright and the parent's next
+    /// watch request would open the camera with no sheet at all — Guideline 5.1.2, and worse than
+    /// the duplicate prompt this set out to fix. A caller must therefore pass "the child said yes to
+    /// this step AND iOS granted it", never the status alone.
     ///
-    /// No microphone ⇒ nothing recorded: there is no live session of either kind without it, and a
-    /// consent flag standing over a denied OS permission would send the session into a capture guard
-    /// that fails with no sheet to explain why.
-    func recordOnboardingMediaConsent(microphoneGranted: Bool, cameraGranted: Bool) {
-        guard isFeatureEnabled(), microphoneGranted else { return }
-        recordConsent(for: cameraGranted ? .video : .audio)
+    /// Both answers go in together and write the mode in ONE call: `recordConsent(.audio)`
+    /// deliberately clears the camera flag, so applying the two independently would let a late
+    /// microphone callback wipe a camera consent recorded a moment earlier. Idempotent.
+    ///
+    /// A declined microphone CLEARS both flags rather than recording nothing. Recording nothing was
+    /// the second half of the same defect: a decline could not retract a grant an earlier step had
+    /// already written, so the child's one explicit refusal was inert. There is no live session
+    /// during onboarding, so this deliberately does not touch `needsConsent` or call `stop()` the
+    /// way the Settings-screen `revokeConsent()` does.
+    func applyOnboardingMediaAnswer(microphoneAllowed: Bool, cameraAllowed: Bool) {
+        guard isFeatureEnabled() else { return }
+        guard microphoneAllowed else {
+            // No microphone ⇒ no live session of either kind. A consent flag standing over a denied
+            // OS permission would send the session into a capture guard that fails with no sheet to
+            // explain why.
+            defaults.removeObject(forKey: consentKey)
+            defaults.removeObject(forKey: videoConsentKey)
+            refreshGrantedConsent()
+            return
+        }
+        recordConsent(for: cameraAllowed ? .video : .audio)
     }
 
     /// Re-read the stored grant into the published mirror. UserDefaults is not observable, so the
