@@ -97,10 +97,46 @@ So a child-initiated disconnect probably *does* reach you now. Please confirm tw
 Also worth knowing: `POST /auth/logout` is not a substitute and never was — it requires a
 `refreshToken`, and a paired device holds only the long-lived `deviceToken`, so `{}` is a 400 there.
 
-**On our side:** `OpenAPI/oila360_live_openapi.json` still predates the deployment, so the gate
-`scripts/check_child_live_endpoints.py` continues to print this route as
-declared-ahead-of-deployment. That is now a false alarm and the exemption is marked stale in the
-script. It clears itself the next time we re-capture the snapshot from the live docs.
+**On our side — DONE later the same day.** The published documentation for the route reached us, so
+the snapshot now carries `/api/v1/device/unpair` (and `/api/v1/parent/children/{id}/unpair-pin`) as
+real entries and `scripts/check_child_live_endpoints.py`'s exemption list is **empty**. More
+importantly the client was NOT "calling it correctly the whole time" — the paragraph above was wrong
+about that, and the correction matters:
+
+- `unpairDevice()` had **no call site**. The disconnect screen called `logout()` and cleared local
+  state only, so every child-initiated disconnect left a live token and a parent still seeing a
+  connected device. Wired now, and the local teardown waits for your answer.
+- We were sending **no `pin`**, and mapping **403 to "revoked"** — so a wrong PIN wiped the phone
+  instead of refusing. Fixed: 403 ⇒ ask for the PIN, 429 ⇒ "wait a minute", 401 ⇒ treat as done, per
+  your own response docs.
+
+---
+
+## 5. The parent app cannot set the unpair PIN — the feature is half-live (PARENT APP)
+
+**The problem.** The backend has `PUT /api/v1/parent/children/{id}/unpair-pin` and it works (probed
+401 for an invalid Bearer on 2026-08-28). The child app now sends the PIN and lets you validate it,
+which is exactly what was agreed in the group chat — *"Yoq. Siz jonatasiz. Backend tekshiradi"*,
+`POST /device/unpair {"pin":"1234"}`.
+
+**But `app.oila360.uz` never calls that route.** Its shipped bundle (`assets/index-Bwl31f4L.js`,
+checked 2026-08-28) contains no occurrence of `unpair-pin` at all. So no parent in the field has a
+PIN set, every child's disconnect resolves on the plain confirm, and the gate Ibrohim specified —
+*"Bola qurilmasini istalgan vaqtda o'chira olmasligi uchun PIN kodni kiriting"* — protects nobody
+yet.
+
+**The ask.** Add the PIN control to the parent app's child screen: set it, and overwrite it. Note
+what the route's own docs say, because it shapes the UI:
+
+- it is **write-only** — there is no read-back, so the parent app cannot show the current PIN and
+  should not pretend to;
+- there is **no delete** — `0000` is the documented convention for standing the gate down, but it
+  stores like any other PIN and the child is still asked for one;
+- the PIN **survives an unpair**, so a re-pair restores the gate.
+
+Until this ships, the child app keeps its old local PIN prompt in front of the server call, because
+that is the only gate that exists in the field. It should be removed once the parent app can set the
+real one — two PINs for one door is worse than either.
 
 ---
 
@@ -120,3 +156,8 @@ script. It clears itself the next time we re-capture the snapshot from the live 
 > 4. **`POST /device/unpair`** — buni siz allaqachon chiqaribsiz (28-avgust: 401 qaytaryapti, avval
 >    404 edi). Iltimos tasdiqlang: token bekor qilinadimi va **ota-onaga xabar boradimi**? Bola
 >    uzilganda ota-ona buni bilishi kerak.
+> 5. **Ota-ona ilovasiga PIN qo'yish kerak.** `PUT /parent/children/{id}/unpair-pin` backendda bor va
+>    ishlaydi, bola ilovasi endi PIN'ni yuboradi — lekin `app.oila360.uz` bu route'ni umuman
+>    chaqirmaydi (bundle'da `unpair-pin` yo'q). Ya'ni hozir hech bir ota-onada PIN o'rnatilmagan va
+>    bola istalgan vaqtda uzib qo'ya oladi. PIN'ni faqat o'rnatish/almashtirish kerak: o'qib
+>    bo'lmaydi, o'chirib ham bo'lmaydi (`0000` — konvensiya), va uzilgandan keyin ham saqlanadi.

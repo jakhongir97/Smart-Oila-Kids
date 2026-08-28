@@ -95,18 +95,25 @@ and it is the highest-stakes claim in the repo, so:
 ## Status: AMBER — not submittable yet
 
 - **Build:** app + both extensions compile clean. Release build: zero warnings.
-- **Tests:** **389** XCTest methods, 0 failures (was 350 at build 15; the audit branch adds 39).
+- **Tests:** **412** XCTest methods, 0 failures. Note that "0 failures" was NOT true of `main` on
+  2026-08-28 before this round: `BolajonBackendParityTests` had **5 red**, asserting English
+  screen-time suffixes ("3h", "1h 45m") while build 15 made Uzbek the default for any locale that
+  is neither ru nor uz — every CI runner. "3s" IS three hours in Uzbek. The app was right; the
+  language is now pinned in that class's `setUp`.
 - **Script tests:** 35 passing.
-- **Localization:** **312** keys × 3 (en/ru/uz), 0 gaps, 0 format-specifier mismatches.
+- **Localization:** **317** keys × 3 (en/ru/uz), 0 gaps, 0 format-specifier mismatches.
 - **Endpoints:** 26 client operations (24 `/api/v1/device/*`), gate floor pinned at 26 — lowered from
-  27 when the `app-config` store-review call site was deleted. All present in the live spec except
-  `POST /device/unpair`, which the server still 404s.
+  27 when the `app-config` store-review call site was deleted. **All 26 are now present in the live
+  spec and the gate's exemption list is EMPTY.** `POST /device/unpair` was the last entry; it went
+  live on 2026-08-28 (probed 401 for an invalid Bearer, control `POST /device/definitely-not-real`
+  still 404) and its published documentation reached the team the same day, so it is a real entry in
+  the snapshot instead of an exemption — and a backend that withdraws it now gets reported.
 - **CI:** builds the app for the first time since the Firebase plist landed. Both macOS jobs used to
   die on the gitignored `GoogleService-Info.plist` being a named build input; they now copy in a
   committed placeholder whose deliberately-wrong `BUNDLE_ID` the runtime guard refuses to configure
   against.
 
-### On-device disconnect — what actually ships since build 14
+### On-device disconnect — REWRITTEN 2026-08-28, the gate is the server's now
 
 Recorded here because the submission docs said the opposite until 2026-08-28, and it is the kind of
 claim App Review checks. The child can disconnect from Settings **whether or not a PIN exists**: with
@@ -115,6 +122,32 @@ build-14 decision ("Agar PIN kiritilmagan bo'lsa Prosta HA dialog chiqarasiz"). 
 15-minute provisioning window is **gone** — `FirstPINProvisioning.decide` takes no clock at all,
 because the clock belonged to the child. What remains is one grant per pairing, spent by an explicit
 answer to the first-run prompt.
+
+**Two things about that were wrong, and both are fixed.**
+
+1. **It never disconnected.** `performDisconnect()` called `logout()` and cleared the local session.
+   It did not call `unpairDevice()` — that function was fully written and had **no call site
+   anywhere in the app**, because the route 404'd through build 16. A child who "disconnected" kept
+   a live `deviceToken`, and the parent's app went on showing the device as connected. It is wired
+   now, and the local teardown is **gated on the server's answer** — wiping regardless would let a
+   child defeat the gate with airplane mode. `.routeMissing` still proceeds, so a deployment that
+   loses the route cannot strand every child.
+
+2. **The PIN was the wrong PIN.** The gate checked a PIN set on the CHILD's own phone. The team
+   settled this in the group chat — "ota-onadan kode so'rab localda saqlash / bu yechimni qilmaymiz",
+   "Yoq. Siz jonatasiz. Backend tekshiradi", `POST /device/unpair {"pin":"1234"}` — and the backend
+   shipped `PUT /parent/children/{id}/unpair-pin`, which stores a **parent-set** PIN as a scrypt
+   hash the child app never sees. The flow now confirms, then probes `POST /device/unpair` with no
+   `pin` (the contract's documented "succeeds with no pin at all when none is set"), and re-opens
+   the keypad for the parent's PIN on 403. 403 used to be mapped to `.revoked` alongside 401, which
+   means the old code **wiped the phone on exactly the answer that means "wrong PIN"**.
+
+⚠️ **The parent web app cannot set that PIN yet.** `app.oila360.uz`'s bundle contains no reference to
+`unpair-pin` (checked 2026-08-28 against `assets/index-Bwl31f4L.js`), so today no parent has one set
+and every child's disconnect resolves on the plain confirm. The local PIN gate is therefore kept in
+front of the server call rather than deleted — it is the only gate that exists in the field right
+now. **This is a parent-app ask, not an iOS one**, and until it ships the feature Ibrohim specified
+is only half-live.
 
 ### What the audit fixed on this branch
 
