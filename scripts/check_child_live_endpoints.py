@@ -51,21 +51,14 @@ DEFAULT_SPEC = ROOT / "OpenAPI" / "oila360_live_openapi.json"
 # An entry earns its place ONLY when the client is written to tolerate the route's absence — that is
 # what makes shipping the call site safe. Delete the entry the moment the route deploys; the gate
 # then goes back to enforcing it normally, and a still-listed operation would hide a real regression.
-DECLARED_AHEAD_OF_DEPLOYMENT = {
-    # Backend ask B1. `unpairDevice()` treats 404/405/501 as `.routeMissing` and never lets the
-    # result block the local teardown, because a child must be able to disconnect with no network.
-    #
-    # ⚠️ RE-PROBED 2026-08-28: **POST now answers 401, not 404** — the backend has SHIPPED this route
-    # since the 08-18 probe. Control `POST /api/v1/device/definitely-not-real` still 404s, and
-    # `GET /api/v1/device/unpair` 404s, so the 401 is a real guarded POST endpoint and not a
-    # catch-all. This exemption is therefore now STALE and should be deleted — but deleting it
-    # requires re-capturing `OpenAPI/oila360_live_openapi.json` from the live docs first (they are
-    # behind basic auth; credentials are in the team's Telegram and must never be written into this
-    # PUBLIC repo). Until that refresh lands the exemption stays, so the gate keeps passing, and this
-    # note is what stops it being mistaken for a still-missing route.
-    "POST /api/v1/device/unpair": "backend ask B1 — RE-PROBED 2026-08-28: POST now 401 (route is LIVE); "
-                                  "exemption pending an OpenAPI snapshot refresh",
-}
+#
+# EMPTY on purpose since 2026-08-28. Its only entry was `POST /api/v1/device/unpair` (backend ask
+# B1), carried while the route 404'd. The backend shipped it — probed 401 for an invalid Bearer, with
+# `POST /api/v1/device/definitely-not-real` still 404ing as the control — and its published
+# documentation reached the team the same day, so the path is now a real entry in
+# `OpenAPI/oila360_live_openapi.json` and the gate enforces it like any other. Deleting the exemption
+# is the point: had it stayed, a backend that later withdrew the route would have gone unreported.
+DECLARED_AHEAD_OF_DEPLOYMENT: dict[str, str] = {}
 DEFAULT_SOURCE = ROOT / "SmartOilaKids"
 
 # `path: "device/chat/messages", method: .get` — the verb always sits next to the literal, on the

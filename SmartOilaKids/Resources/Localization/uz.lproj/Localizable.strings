@@ -235,12 +235,16 @@
 "settings2.disconnect_sub" = "Ota-ona PIN kodi talab qilinadi";
 "settings2.enable" = "Yoqish";
 "disconnect2.title" = "Aloqani uzish";
-"disconnect2.body" = "Bu shu telefondagi kuzatuvni to'xtatadi va uni ulanish ekraniga qaytaradi. Yakunlash uchun ota-ona qurilmani Oila360 ilovasidan ham o'chiradi. Davom etish uchun ota-ona PIN kodini kiriting.";
+"disconnect2.body" = "Bu shu telefondagi kuzatuvni to'xtatadi va uni ulanish ekraniga qaytaradi. Davom etish uchun ota-ona PIN kodini kiriting.";
 "disconnect2.parent_managed_body" = "Bu qurilmani faqat ota-ona uzishi mumkin. Ota-onangizdan uni Oila360 ilovasidan o'chirishni so'rang.";
 "disconnect2.locked_out" = "Juda ko'p urinish. %d daqiqadan so'ng qayta urinib ko'ring.";
 "disconnect2.confirm" = "Uzish";
 "disconnect2.cancel" = "Bekor qilish";
 "disconnect2.pin_incorrect" = "PIN kod noto'g'ri. Qayta urinib ko'ring.";
+"disconnect2.server_pin_body" = "Bu telefonni uzish uchun ota-onangiz Oila360 ilovasida o'rnatgan PIN kodni kiriting.";
+"disconnect2.rate_limited" = "Juda ko'p urinish. Bir daqiqadan so'ng qayta urinib ko'ring.";
+"disconnect2.offline" = "Internet aloqasi yo'q. Uzish uchun internet kerak — qayta urinib ko'ring.";
+"disconnect2.failed" = "Uzib bo'lmadi. Qayta urinib ko'ring.";
 "disconnect2.confirm_title" = "Haqiqatan uzasizmi?";
 "disconnect2.confirm_body" = "Qurilma ota-onadan uziladi va ilova yangi o'rnatilgan holatiga qaytadi.";
 "disconnect2.confirm_yes" = "Ha, uzish";

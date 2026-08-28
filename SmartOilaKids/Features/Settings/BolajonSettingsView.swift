@@ -904,13 +904,21 @@ struct SettingsDisconnectScreen: View {
     /// until this dialog is answered — a correct PIN used to call `performDisconnect()` on the very
     /// next line, so the last irreversible step in the app had no confirmation at all.
     @State private var isConfirmingDisconnect = false
+    /// Raised when the SERVER answered 403 `UNPAIR_PIN_INVALID` — a parent has set an unpair PIN
+    /// through `PUT /parent/children/{id}/unpair-pin` and this handset has to produce it. The app
+    /// cannot know this up front (the PIN lives on the server as a scrypt hash, by design), so the
+    /// screen learns it from the first attempt and re-opens the keypad for the parent's PIN.
+    @State private var serverPINRequired = false
 
     private let pinLength = 4
 
-    private var showsPINField: Bool { entry == .enterPIN }
+    private var showsPINField: Bool { entry == .enterPIN || serverPINRequired }
     private var busy: Bool { isDisconnecting }
 
     private var bodyText: String {
+        // The server's PIN demand outranks both local variants: once it is up, the digits this
+        // screen is asking for are the parent's, not the ones set on this phone.
+        if serverPINRequired { return L10n.tr("disconnect2.server_pin_body") }
         switch entry {
         // `disconnect2.parent_managed_body` ("ask your parent to remove it in Oila360") is no longer
         // true of this screen and is deliberately not reused. The no-PIN variant borrows the confirm
@@ -1061,10 +1069,20 @@ struct SettingsDisconnectScreen: View {
         entry = DisconnectFlow.entry(hasCustomPIN: protection.hasCustomPIN)
         pin = ""
         errorText = nil
+        // Re-entering the screen must not inherit a previous visit's 403. The server is asked again
+        // from scratch, which is also what keeps the app correct after a parent CLEARS the PIN.
+        serverPINRequired = false
     }
 
     private func handlePrimary() {
         guard !busy else { return }
+        // The server already told us a PIN is required, and the confirm dialog was answered before
+        // we ever asked it. Re-confirming here would make the child answer "really disconnect?" once
+        // per wrong digit.
+        if serverPINRequired {
+            performDisconnect(pin: pin)
+            return
+        }
         // The third refusal was a `mode == .verifyPIN` guard here, which would have swallowed the
         // tap even once the button rendered. With no PIN there is nothing to verify, so the PIN step
         // is skipped exactly as the brief describes — straight to the confirm dialog.
@@ -1102,22 +1120,65 @@ struct SettingsDisconnectScreen: View {
         return String(format: L10n.tr("disconnect2.locked_out"), minutes)
     }
 
-    /// Runs only after the confirm dialog is answered — and, when a PIN exists, after it has been
-    /// validated. Clearing the session swaps the app root back to pairing, which tears down this
-    /// Settings stack. Local by design (no backend parent-PIN endpoint).
+    /// Runs only after the confirm dialog is answered — and, when a local PIN exists, after it has
+    /// been validated.
     ///
-    /// This is a LOCAL disconnect: monitoring stops, credentials and per-child data are wiped from
-    /// the phone, but `logout()` cannot revoke the `deviceToken` server-side — there is no
-    /// device-scoped revoke route (backend ask B1). The server-side link is only cut when a parent
-    /// removes the device in the Oila360 app, which is what `disconnect2.body` now tells the user.
-    private func performDisconnect() {
+    /// This screen used to be a LOCAL disconnect and nothing else: it called `logout()`, cleared the
+    /// session, and left the `deviceToken` alive on the server, so the parent's app went on showing
+    /// a child device that was still connected — the exact symptom reported in the team chat. The
+    /// revoke call existed (`unpairDevice()`) and was never wired to anything, because through build
+    /// 16 the route answered 404. It is live now, so this is what Ibrohim's brief actually asked for:
+    /// *"API ga request yuborasiz va yangi ilova o'rnatilgan holatga qaytarib qo'yasiz."*
+    ///
+    /// The teardown is now GATED ON THE SERVER'S ANSWER, which is the part that makes the parent's
+    /// PIN worth setting. Wiping the phone regardless would mean a child could defeat the whole
+    /// gate by turning on airplane mode — the request fails, the app resets, and the PIN never got
+    /// a vote. So only `.revoked` (the server cut it, or 401 says it already had) and
+    /// `.routeMissing` (a deployment without the route — refusing there would strand every child)
+    /// proceed. `.pinRequired`, `.rateLimited` and `.unreachable` leave the handset paired and say
+    /// why.
+    private func performDisconnect(pin submittedPIN: String? = nil) {
         guard !isDisconnecting else { return }
         isDisconnecting = true
+        errorText = nil
         Task {
-            try? await OilaDeviceClient.shared.logout()
-            await MainActor.run {
-                sessionStore.clearSession()
-                isDisconnecting = false
+            let outcome = await OilaDeviceClient.shared.unpairDevice(pin: submittedPIN)
+            switch outcome {
+            case .revoked, .routeMissing:
+                // Order matters: the credential is already dead server-side, and `logout()` is a
+                // best-effort tidy of the refresh session. `clearSession()` is what returns the app
+                // to the pairing screen and wipes the per-child local stores.
+                try? await OilaDeviceClient.shared.logout()
+                await MainActor.run {
+                    sessionStore.clearSession()
+                    isDisconnecting = false
+                }
+            case .pinRequired:
+                await MainActor.run {
+                    isDisconnecting = false
+                    // A wrong PIN and the first (deliberately PIN-less) probe land here alike. Only
+                    // the former is an error the child made; the probe is how the app discovers a
+                    // PIN exists at all, so it opens the keypad with no accusation attached.
+                    errorText = submittedPIN == nil ? nil : L10n.tr("disconnect2.pin_incorrect")
+                    serverPINRequired = true
+                    pin = ""
+                }
+            case .rateLimited:
+                await MainActor.run {
+                    isDisconnecting = false
+                    errorText = L10n.tr("disconnect2.rate_limited")
+                    pin = ""
+                }
+            case .unreachable:
+                await MainActor.run {
+                    isDisconnecting = false
+                    errorText = L10n.tr("disconnect2.offline")
+                }
+            case .rejected:
+                await MainActor.run {
+                    isDisconnecting = false
+                    errorText = L10n.tr("disconnect2.failed")
+                }
             }
         }
     }

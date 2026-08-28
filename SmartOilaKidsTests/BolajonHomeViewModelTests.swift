@@ -328,6 +328,26 @@ final class ChatReadReceiptPredicateTests: XCTestCase {
 /// device-wide screen time the parent sets a budget for.
 @MainActor
 final class BolajonBackendParityTests: XCTestCase {
+    /// The screen-time assertions below spell their expectations in ENGLISH ("3h", "1h 45m"), and
+    /// `screenTimeLimitText` is built out of `L10n.tr`, so they were silently asserting whatever
+    /// language the test host happened to resolve. Build 15 made **Uzbek** the default for a handset
+    /// whose locale is neither ru nor uz — which is every CI runner — and these four went red
+    /// against a perfectly correct app: "3s" IS three hours in Uzbek (soat), "45d" IS forty-five
+    /// minutes (daqiqa). The product is right and the assertions are not portable, so the language
+    /// is pinned here rather than the expectations rewritten into one particular locale's suffixes.
+    override func setUp() {
+        super.setUp()
+        L10n.setLanguage("en")
+    }
+
+    /// `L10n` is process-global, so leaving English set would leak into every test that runs after
+    /// this class. Restored through the app's own resolution rather than a hardcoded "uz", so this
+    /// teardown cannot itself become the next stale assumption about what the default is.
+    override func tearDown() {
+        L10n.setLanguage(AppLanguage.defaultForDevice.rawValue)
+        super.tearDown()
+    }
+
     private func task(
         _ id: String,
         status: String,

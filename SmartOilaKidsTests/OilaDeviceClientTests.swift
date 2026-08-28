@@ -485,11 +485,46 @@ final class OilaDeviceClientTests: XCTestCase {
         XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 404), .routeMissing)
         XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 405), .routeMissing)
         XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 501), .routeMissing)
-        // A refused Bearer cannot be used again either way, which is the state a revoke aims at.
+        // The contract is explicit that on THIS route a 401 means the call that succeeded is what
+        // revoked the token, so a retry after a dropped response must read as a completed unpair.
         XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 401), .revoked)
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 403), .revoked)
         XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 500), .rejected)
         XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 400), .rejected)
+    }
+
+    /// The single most expensive line in the old mapping: 403 sat next to 401 as `.revoked`, on the
+    /// reasoning that a refused Bearer cannot be used again either way. Under D-099 a 403 is
+    /// `UNPAIR_PIN_INVALID` and the device is STILL PAIRED, so the old mapping wiped the phone on
+    /// exactly the answer that means "wrong PIN" — handing the child the disconnect the parent's PIN
+    /// exists to withhold.
+    func testWrongPINIsNotReadAsARevoke() {
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 403), .pinRequired)
+        XCTAssertNotEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 403), .revoked)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 429), .rateLimited)
+        XCTAssertNotEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 429), .revoked)
+    }
+
+    /// The PIN-less probe is how the app discovers whether a parent set one at all, so it has to go
+    /// up with NO `pin` key — the contract's "succeeds with no `pin` at all" case. A `{"pin":""}`
+    /// would be validated as a malformed PIN instead and 403 forever.
+    func testUnpairProbeSendsNoPINKeyAndAPINIsSentWhenSupplied() async throws {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        var bodies: [[String: Any]] = []
+        TestHTTPURLProtocol.requestHandler = { request in
+            let data = TestHTTPURLProtocol.bodyData(for: request) ?? Data()
+            bodies.append(((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]) ?? [:])
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data("{\"success\":true}".utf8))
+        }
+
+        _ = await client.unpairDevice()
+        _ = await client.unpairDevice(pin: "")
+        _ = await client.unpairDevice(pin: " 4321 ")
+
+        XCTAssertEqual(bodies.count, 3)
+        XCTAssertNil(bodies[0]["pin"])
+        XCTAssertNil(bodies[1]["pin"], "an empty string is not a PIN and must not be sent as one")
+        XCTAssertEqual(bodies[2]["pin"] as? String, "4321")
     }
 
     // MARK: Device home

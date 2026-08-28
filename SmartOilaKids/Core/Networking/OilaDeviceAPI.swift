@@ -521,13 +521,22 @@ struct OilaDeviceFile {
 /// device in the Oila360 app, and `.unreachable` means the phone had no signal and the link is
 /// certainly still standing. Without the distinction the support answer to "I disconnected but the
 /// parent still sees the device" is a guess.
+///
+/// `.pinRequired` and `.rateLimited` arrived with the D-099 contract (see `unpairDevice(pin:)`) and
+/// are the two answers the caller must NOT treat as a disconnect: the handset is still paired.
 enum OilaUnpairOutcome: String {
     /// The server accepted the revoke.
     case revoked = "device_unpair_revoked"
-    /// The route is not deployed (404/405/501). Expected until backend ask B1 ships.
+    /// The route is not deployed (404/405/501). Was the norm until D-099 shipped; kept because a
+    /// deployment that loses the route again must not strand every child on this screen.
     case routeMissing = "device_unpair_route_missing"
     /// The request never reached a server — no signal, DNS, a dropped connection.
     case unreachable = "device_unpair_unreachable"
+    /// 403 `UNPAIR_PIN_INVALID`: the parent has set an unpair PIN and the one supplied was wrong or
+    /// absent. **Still paired.** The only outcome that asks the caller for something.
+    case pinRequired = "device_unpair_pin_required"
+    /// 429: more than 10 attempts a minute. Still paired; the child has to wait.
+    case rateLimited = "device_unpair_rate_limited"
     /// A server answered, but with neither a revoke nor a not-implemented. Kept distinct so a 500
     /// is never filed as "offline", which would send anyone reading this to the wrong side.
     case rejected = "device_unpair_rejected"
@@ -691,29 +700,41 @@ final class OilaDeviceClient: OilaDeviceServicing {
     /// Revoke THIS device's credential server-side (`POST /device/unpair`), authenticated with the
     /// device Bearer.
     ///
-    /// FORWARD-COMPATIBLE BY CONSTRUCTION. The route does not exist on the deployed backend yet
-    /// (backend ask B1), so 404/405/501 are reported as `.routeMissing` instead of being raised as
-    /// failures, and the day it ships this starts cutting the link with no app-side change. Building
-    /// it the other way round — waiting for the route — would mean shipping a disconnect that is
-    /// known to leave a live credential behind, which is the state the parent's app renders as a
-    /// child device that is still connected.
+    /// **The route is live since 2026-08-28** (probed: 401 for an invalid Bearer, where it answered
+    /// 404 through build 16), and it now carries the D-099 PIN contract the team settled on in the
+    /// group chat — "Yoq. Siz jonatasiz. Backend tekshiradi" / `POST /device/unpair {"pin":"1234"}`.
+    /// The PIN is the one a PARENT sets through `PUT /parent/children/{id}/unpair-pin`; it is stored
+    /// as a scrypt hash and this app never sees it, which is the whole point of moving the gate off
+    /// the handset. Pass `nil` to probe: the server answers 200 when no PIN is set and 403 when one
+    /// is, so the caller learns whether to ask without the app having to know.
     ///
-    /// It NEVER throws, deliberately: the caller must not be able to write a version of the
-    /// disconnect where this stands between the child and the teardown. The outcome is returned and
-    /// recorded for diagnosis, not as a gate.
+    /// The status mapping is the contract's, not a guess:
+    ///  * **401 ⇒ `.revoked`.** The spec is explicit that on THIS route a 401 means the call that
+    ///    succeeded is what killed the token, so a retry after a dropped response lands here and
+    ///    "retrying instead of doing the local reset strands the handset".
+    ///  * **403 ⇒ `.pinRequired`**, still paired. Mapped to `.revoked` before D-099, which would now
+    ///    wipe the phone on precisely the answer that means "wrong PIN".
+    ///  * **429 ⇒ `.rateLimited`**, still paired — more than 10 attempts a minute.
+    ///
+    /// It NEVER throws, deliberately: the outcome is returned so the caller can tell "the link is
+    /// cut" from "the child guessed wrong", which a thrown error flattens.
     ///
     /// Deliberately NOT on `OilaDeviceServicing`, for the same reason the chat/streaming protocols
     /// are separate: the existing device-API mocks would all have to implement it to keep compiling,
     /// and none of them has anything to say about unpairing.
     @discardableResult
-    func unpairDevice() async -> OilaUnpairOutcome {
+    func unpairDevice(pin: String? = nil) async -> OilaUnpairOutcome {
         let outcome: OilaUnpairOutcome
         var detail: String?
+        // An empty string is not a PIN. Sending `{"pin":""}` would be validated as a malformed PIN
+        // (400/403) rather than read as the "no PIN set" probe the caller meant.
+        let trimmedPIN = pin?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body: [String: Any] = (trimmedPIN?.isEmpty == false) ? ["pin": trimmedPIN!] : [:]
         do {
             _ = try await requestJSON(
                 path: "device/unpair",
                 method: .post,
-                body: [:],
+                body: body,
                 authorized: true,
                 // Same reasoning as `logout()`: a 401 means the credential this call exists to
                 // revoke is already dead, so minting a fresh one to announce its revocation is work
@@ -750,13 +771,17 @@ final class OilaDeviceClient: OilaDeviceServicing {
     ///
     /// 404 (no such route), 405 (the path exists for another verb) and 501 (declared but not
     /// implemented) all mean "this deployment does not have it yet" and none of them is an app
-    /// error. 401/403 mean the device Bearer was refused, which is indistinguishable from — and has
-    /// the same consequence as — a credential that has already been revoked: it cannot be used
-    /// again. Everything else is a server that answered something unexpected and is filed as such.
+    /// error. 401 means the device Bearer was refused, which on this route the contract defines as a
+    /// COMPLETED unpair — the call that worked is what revoked it. 403 is the opposite and used to
+    /// be folded in with it: `UNPAIR_PIN_INVALID`, the device is still paired, and treating it as a
+    /// revoke wiped the phone on a wrong PIN. 429 is the brute-force ceiling. Everything else is a
+    /// server that answered something unexpected and is filed as such.
     static func unpairOutcome(forStatusCode statusCode: Int) -> OilaUnpairOutcome {
         switch statusCode {
         case 404, 405, 501: return .routeMissing
-        case 401, 403: return .revoked
+        case 401: return .revoked
+        case 403: return .pinRequired
+        case 429: return .rateLimited
         default: return .rejected
         }
     }
