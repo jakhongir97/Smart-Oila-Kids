@@ -26,7 +26,7 @@ backend.
 | **Branch** | `main` @ `3817cfc` (build 16, pushed). Audit fixes on `fix/audit-2026-08-27`. |
 | **Backend (live)** | `https://api.oila360.uz/api/v1` — Bearer `deviceToken`, single long-lived token |
 | **Auth model** | Parent generates a 5-digit pairing code → child redeems via `POST /device/pair` |
-| **Android sibling** | `com.oila24.bolajon360` (native Kotlin) — **not** feature-equivalent, see below |
+| **Android sibling** | `com.oila24.bolajon360` **5.0.1** (build 6, targetSdk 36, Kotlin/Compose/Hilt) — endpoint-equivalent, see the parity table below |
 | **App Store listing** | In-place rebrand of "Smart Oila Kids" v1.0 (id 6761430412). Universal; iPad cannot be dropped (QA1623) |
 
 ## What changed in build 15 (2026-08-24)
@@ -87,10 +87,27 @@ and it is the highest-stakes claim in the repo, so:
   does. `PrivacyInfo.xcprivacy` now declares `AudioData` and `OtherDiagnosticData`.
 - **The backend and the parent web app still ship a full covert-recording feature**
   (`POST /parent/recordings` — "Trigger a covert recording on a child (audio/video)", 15s clips,
-  front/back camera selector). The **Android** child app implements it via a `recording.start` FCM
-  command with **no consent gate anywhere**. iOS ignores it, so a parent triggering a recording on an
-  iPhone gets a client-side success toast and a permanently "Still processing" archive row. **A
-  reviewer note IS needed**, and the platform-level question is a product decision, not a code one.
+  front/back camera selector), so a parent triggering a recording still gets a client-side success
+  toast and a permanently "Still processing" archive row. **A reviewer note IS needed.**
+- **CORRECTED 2026-08-28: Android does not implement it either, and this file said it did.** The
+  previous claim — "the Android child app implements it via a `recording.start` FCM command with no
+  consent gate anywhere" — was the reason the platform recording question sat here as an open product
+  decision with iOS as the odd one out. Checked against the shipping APK
+  (`com.oila24.bolajon360`, versionName **5.0.1**, versionCode 6, targetSdk 36):
+  - **zero** occurrences of `recording` anywhere in the app's own package across all 28 dex files;
+  - the Hilt graph names fourteen APIs — AppUsage, Chat, DeviceApps, DeviceFiles, DeviceStatus,
+    FcmToken, Home, Location, Lock, Pair, Sos, Stream, Task, UnPair — and **no RecordingApi**;
+  - no recording use case among the 28 (`SyncInstalledApps`, `ReportAppUsage`, `SendSos`,
+    `UnpairDevice`, …), and the only FCM command literals present are `stream.start`, `stream.stop`,
+    `stream.read`, `chat.refresh`, `lock.refresh` — **no `recording.*`**.
+  - `android/media/AudioRecord` and `MediaRecorder` DO appear, but they arrive with WebRTC/LiveKit,
+    which needs `AudioRecord` to capture the microphone for a live publish. They are not a capture
+    path of the app's own.
+
+  So recording is dead on **both** child clients and lives only in the backend and the parent app,
+  which matches Ibrohim's 6 Aug decision. **The platform-level question is therefore not an iOS
+  decision at all** — it is the parent app and the backend still offering a button that no child
+  device on either platform can answer.
 
 ## Status: AMBER — not submittable yet
 
@@ -196,6 +213,41 @@ CI extension step fixed · RC gate now rejects NO-GO · a new live-endpoint gate
       capability rather than implying it does not exist.
 - [ ] **Decide the platform recording question** above; if audio is ever enabled, re-verify the
       consent model end to end.
+
+## Android parity — read from the shipping APK, 2026-08-28
+
+Endpoint coverage is level. Every `/device/*` route the Android app calls, iOS calls too, and iOS
+calls one more (`device/apps/removal-attempt`). The gaps that remain are all **OS-imposed**, not
+unfinished work, and three of them are exactly what Ibrohim's onboarding items were about.
+
+| Capability | Android 5.0.1 | iOS (build 16 + this round) |
+|---|---|---|
+| Pair / unpair, FCM token, home, status, location batch, SOS, tasks, chat, lock state, screen-time, files | yes | yes |
+| `PUT /device/apps/sync` (installed-app catalogue + icon upload via `/device/files`) | yes — `SyncInstalledAppsUseCase`, `PackageChangeReceiver` | **impossible.** iOS exposes no installed-app enumeration at all |
+| Per-app blocking | yes — `AppBlockAccessibilityService` + `SYSTEM_ALERT_WINDOW` | **not as designed.** Backend keys locks by `packageName`; iOS Screen Time gives only opaque `ApplicationToken`s. Flag off pending the Family Controls entitlement |
+| Auto-start after reboot | yes — `RECEIVE_BOOT_COMPLETED` + `BootReceiver`, and an onboarding step (`AutoStartHelper`) | **no permission exists, and none is needed** — see below |
+| Battery-optimisation exemption | yes — `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, an onboarding step | **no equivalent.** This is why the battery step was removed: it could only ever send a child to a Settings pane with no such switch |
+| Live audio/video | yes — `StreamingService`, LiveKit | yes — LiveKit, behind the child's consent. Video is foreground-only (iOS suspends camera capture in the background) |
+| Covert recording | **no** — see the correction above | no |
+
+### Ibrohim's reboot question, answered
+
+> *"Ba'zi narsalarga dostup olinmagan. masalan telefon o'chib yonganda avtomatik ishlash degan
+> narsa. AI dan so'rab agar shunaqa narsa bor bo'lsa qilish kerak yoki o'zi ishlasa unda ok."*
+
+**There is nothing to ask for, and it works anyway.** iOS has no equivalent of Android's
+`RECEIVE_BOOT_COMPLETED` — no API, no entitlement, no Settings switch — so an onboarding step for it
+could only ever be a dead button. What iOS does instead is relaunch the app itself:
+
+- `startMonitoringSignificantLocationChanges()` is already active under `.authorizedAlways`
+  (`OilaTelemetryService`), and it **relaunches a terminated app**, including after a reboot, once
+  the phone has been unlocked once;
+- an alert push wakes it for a parent's listen/watch request;
+- `UIBackgroundModes` carries `location`, `audio` and `remote-notification`.
+
+The one real difference: after a reboot the phone must be unlocked **once** before any of that
+starts, because the Keychain is sealed until first unlock. Android's `BootReceiver` has no such wait.
+Nothing on the iOS side can close that gap, and nothing needs to be added.
 
 ## Known limits that are NOT bugs
 
