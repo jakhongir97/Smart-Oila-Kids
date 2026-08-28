@@ -1114,6 +1114,33 @@ final class DeviceAudioStreamManager: ObservableObject {
         refreshGrantedConsent()
     }
 
+    /// Mirror the ANSWERED onboarding microphone/camera steps into the standing consent.
+    ///
+    /// Ibrohim, on build 16: *"bunday narsa kerak emas. men ruxsat berdim o'zi. yana so'rayapti"* —
+    /// this thing is not needed, I already gave permission, it is asking again. He was right, and it
+    /// was not a duplicate prompt by accident: onboarding asks for the microphone and the camera
+    /// with its own explanatory copy (`perm2.microphone.*`, `perm2.camera.*`), the child answers,
+    /// iOS records the grant — and NOTHING wrote the app-level flag, because the only code that ever
+    /// called `recordConsent` was the live-session sheet. So the first listen asked the same
+    /// question a second time, with the child having already said yes once.
+    ///
+    /// The consent sheet is not being removed — it is the disclosure this feature is defended on,
+    /// and a child who skipped or declined the onboarding steps still meets it. What changes is that
+    /// answering the question ONCE now counts, which is all Ibrohim asked for.
+    ///
+    /// Takes both grants together and writes the mode in ONE call on purpose: `recordConsent(.audio)`
+    /// deliberately clears the camera flag, so mirroring the two statuses independently would let a
+    /// late microphone callback wipe a camera consent recorded a moment earlier. Idempotent, so the
+    /// caller can fire it on a status change and on the step itself without keeping track.
+    ///
+    /// No microphone ⇒ nothing recorded: there is no live session of either kind without it, and a
+    /// consent flag standing over a denied OS permission would send the session into a capture guard
+    /// that fails with no sheet to explain why.
+    func recordOnboardingMediaConsent(microphoneGranted: Bool, cameraGranted: Bool) {
+        guard isFeatureEnabled(), microphoneGranted else { return }
+        recordConsent(for: cameraGranted ? .video : .audio)
+    }
+
     /// Re-read the stored grant into the published mirror. UserDefaults is not observable, so the
     /// Settings row that offers to withdraw the grant needs something it can watch.
     private func refreshGrantedConsent() {

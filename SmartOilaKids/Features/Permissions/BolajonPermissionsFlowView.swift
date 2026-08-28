@@ -135,6 +135,10 @@ struct BolajonPermissionsFlowView: View {
     var onFinished: () -> Void = {}
 
     @StateObject private var manager = LocationPermissionManager()
+    /// Only written to (see `mirrorMediaConsent`), never read for layout — but `@ObservedObject` on
+    /// the shared instance is how every other screen reaches it, and matching that keeps the one
+    /// singleton with one ownership story.
+    @ObservedObject private var streaming = DeviceAudioStreamManager.shared
     @State private var path: [PermRoute]
 
     private let steps = BolajonPermissionStep.all
@@ -183,6 +187,23 @@ struct BolajonPermissionsFlowView: View {
             }
         }
         .bolajonNavigationTint()
+        // The OS prompt resolves asynchronously (`performAction` is fire-and-forget and refreshes
+        // these statuses from its completion handler), so the answer arrives here rather than at the
+        // tap. Both statuses are watched because the mirror writes ONE mode from the pair.
+        .onChange(of: manager.microphonePermission) { _ in mirrorMediaConsent() }
+        .onChange(of: manager.cameraAuthorizationStatus) { _ in mirrorMediaConsent() }
+    }
+
+    /// See `recordOnboardingMediaConsent`. Also called straight from the media steps because a
+    /// re-onboarding is the case `onChange` alone misses: `clearSession()` replays B1–B11 after every
+    /// unpair while the iOS grants survive it, so the status is already `.granted` when the step
+    /// opens, never changes, and the child would meet a consent sheet for a permission this phone
+    /// has held all along.
+    private func mirrorMediaConsent() {
+        streaming.recordOnboardingMediaConsent(
+            microphoneGranted: manager.microphonePermission == .granted,
+            cameraGranted: manager.cameraAuthorizationStatus == .authorized
+        )
     }
 
     private func handlePrimary(index: Int) {
@@ -208,8 +229,10 @@ struct BolajonPermissionsFlowView: View {
             manager.performAction(for: .usageStats)
         case .microphone:
             manager.performAction(for: .microphone)
+            mirrorMediaConsent()
         case .camera:
             manager.performAction(for: .camera)
+            mirrorMediaConsent()
         case .summary:
             onFinished()
             return

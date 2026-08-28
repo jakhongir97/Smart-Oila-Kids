@@ -2909,6 +2909,61 @@ final class StreamCommandParsingTests: XCTestCase {
         return manager
     }
 
+    // MARK: Onboarding consent mirror
+
+    /// The defect Ibrohim reported as *"men ruxsat berdim o'zi. yana so'rayapti"*: onboarding asked
+    /// for the microphone and the camera, the child said yes, and the first listen asked the same
+    /// question again — because nothing outside the consent sheet ever wrote the app-level flag.
+    @MainActor
+    func testAnsweringTheOnboardingStepsMeansTheFirstListenDoesNotAskAgain() {
+        let manager = makeEnabledManager(audio: false, video: false)
+
+        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: true)
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertFalse(manager.needsConsent, "the child already answered this question in onboarding")
+        XCTAssertEqual(manager.grantedConsent, .video)
+    }
+
+    /// A microphone-only onboarding grant must NOT carry the camera with it — the Guideline 5.1.2
+    /// half of the same rule the consent sheet enforces.
+    @MainActor
+    func testMicrophoneOnlyOnboardingGrantDoesNotAuthorizeTheCamera() {
+        let manager = makeEnabledManager(audio: false, video: false)
+
+        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: false)
+
+        XCTAssertEqual(manager.grantedConsent, .audio)
+    }
+
+    /// A declined (or never-answered) microphone step records nothing, so the sheet still appears.
+    /// A consent flag standing over a denied OS permission is worse than the extra prompt: the
+    /// session would go straight into a capture guard that fails with nothing on screen.
+    @MainActor
+    func testDecliningTheMicrophoneStepRecordsNoConsent() {
+        let manager = makeEnabledManager(audio: false, video: false)
+
+        manager.recordOnboardingMediaConsent(microphoneGranted: false, cameraGranted: true)
+
+        XCTAssertNil(manager.grantedConsent)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+    }
+
+    /// The mirror is fired from a status change AND from the step itself, so it runs repeatedly with
+    /// whatever the current pair of grants is. Writing one mode from the pair is what makes that
+    /// safe: mirroring the two statuses independently would let a late microphone callback call
+    /// `recordConsent(.audio)` and clear a camera consent recorded a moment earlier.
+    @MainActor
+    func testRepeatedMirroringIsIdempotentAndKeepsTheCameraGrant() {
+        let manager = makeEnabledManager(audio: false, video: false)
+
+        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: true)
+        manager.recordOnboardingMediaConsent(microphoneGranted: true, cameraGranted: true)
+
+        XCTAssertEqual(manager.grantedConsent, .video)
+    }
+
     /// An existing audio-only grant must keep working without re-prompting — splitting the key must
     /// not invalidate consent every child in the field has already given.
     @MainActor
