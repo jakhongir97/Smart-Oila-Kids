@@ -2918,7 +2918,7 @@ final class StreamCommandParsingTests: XCTestCase {
     func testAnsweringTheOnboardingStepsMeansTheFirstListenDoesNotAskAgain() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: true)
+        manager.grantOnboardingMediaConsent(microphone: true, camera: true)
         manager.requestStart(command: .debugAudio)
 
         XCTAssertFalse(manager.needsConsent, "the child already answered this question in onboarding")
@@ -2931,7 +2931,7 @@ final class StreamCommandParsingTests: XCTestCase {
     func testMicrophoneOnlyOnboardingGrantDoesNotAuthorizeTheCamera() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: false)
+        manager.grantOnboardingMediaConsent(microphone: true, camera: false)
 
         XCTAssertEqual(manager.grantedConsent, .audio)
     }
@@ -2943,7 +2943,7 @@ final class StreamCommandParsingTests: XCTestCase {
     func testDecliningTheMicrophoneStepRecordsNoConsent() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: false, cameraAllowed: true)
+        manager.grantOnboardingMediaConsent(microphone: false, camera: true)
 
         XCTAssertNil(manager.grantedConsent)
         manager.requestStart(command: .debugAudio)
@@ -2958,8 +2958,8 @@ final class StreamCommandParsingTests: XCTestCase {
     func testRepeatedMirroringIsIdempotentAndKeepsTheCameraGrant() {
         let manager = makeEnabledManager(audio: false, video: false)
 
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: true)
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: true)
+        manager.grantOnboardingMediaConsent(microphone: true, camera: true)
+        manager.grantOnboardingMediaConsent(microphone: true, camera: true)
 
         XCTAssertEqual(manager.grantedConsent, .video)
     }
@@ -2982,7 +2982,7 @@ final class StreamCommandParsingTests: XCTestCase {
         let manager = makeEnabledManager(audio: false, video: false)
 
         // Microphone answered yes; camera step not reached, so its answer is nil ⇒ `false` here.
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: false)
+        manager.grantOnboardingMediaConsent(microphone: true, camera: false)
 
         XCTAssertEqual(manager.grantedConsent, .audio, "an unanswered camera step must grant nothing")
 
@@ -2992,46 +2992,62 @@ final class StreamCommandParsingTests: XCTestCase {
         XCTAssertTrue(manager.needsConsent, "a video request must still meet the sheet")
     }
 
-    /// REGRESSION, the other half. Declining used to record NOTHING, which meant a decline could not
-    /// retract a grant an earlier step had already written — the child's one explicit refusal was
-    /// inert. A declined microphone now clears both flags.
+    /// REGRESSION (critical). The mirror is grant-only, and these three tests are why.
+    ///
+    /// The flow's answers are `@State` living for the whole of B1–B11, never reset, and the mirror
+    /// re-fires from `.onChange` on either permission status. So a STALE decline replays on every
+    /// later status change. Two earlier versions of this function could retract; with a
+    /// `revokeConsent()` behind it the replay killed a live session: the child declines the
+    /// microphone step, the parent later presses listen, the consent sheet (which RootView hangs
+    /// above the routing branch, so it draws over onboarding) is answered "Allow", the session goes
+    /// live — and the iOS permission alert's own resign/become-active cycle refreshes the status,
+    /// re-fires the mirror, and the stale `false` tears the session down.
     @MainActor
-    func testDecliningAfterAnEarlierGrantActuallyRetractsIt() {
-        let manager = makeEnabledManager(audio: true, video: true)
-        XCTAssertEqual(manager.grantedConsent, .video, "precondition: a grant is already on file")
-
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: false, cameraAllowed: false)
-
-        XCTAssertNil(manager.grantedConsent, "an explicit refusal must retract, not be ignored")
-    }
-
-    /// …and a declined CAMERA after an allowed microphone drops to audio rather than leaving the
-    /// camera flag standing.
-    @MainActor
-    func testDecliningOnlyTheCameraLeavesAudioAndDropsVideo() {
-        let manager = makeEnabledManager(audio: true, video: true)
-
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: true, cameraAllowed: false)
-
-        XCTAssertEqual(manager.grantedConsent, .audio)
-    }
-
-    /// REGRESSION. The decline branch first shipped as a bare key wipe, justified by "there is no
-    /// live session during onboarding". That premise is false — pairing completes BEFORE the flow is
-    /// routed to, and RootView hangs the consent sheet and the live indicator above the routing
-    /// branch, so a parent can start a session while the child is still on the intro step. A wipe
-    /// that leaves `needsConsent` standing also leaves the outstanding question on screen, and the
-    /// microphone publishing until the lease expires, after the child has said no.
-    @MainActor
-    func testDecliningRetractsTheOUTSTANDINGQuestionToo() {
+    func testAStaleDeclineReplayCannotRevokeAGrantMadeAfterIt() {
         let manager = makeEnabledManager(audio: false, video: false)
+
+        // The child declined the microphone step earlier in the flow.
+        manager.grantOnboardingMediaConsent(microphone: false, camera: false)
+        // Then answered the live consent sheet, which is a separate, deliberate grant.
         manager.requestStart(command: .debugAudio)
-        XCTAssertTrue(manager.needsConsent, "precondition: a live request has raised the sheet")
+        manager.grantConsentAndStart()
+        XCTAssertNotNil(manager.grantedConsent, "precondition: the sheet recorded a grant")
 
-        manager.applyOnboardingMediaAnswer(microphoneAllowed: false, cameraAllowed: false)
+        // A later status change re-fires the mirror with the STALE decline still in @State.
+        manager.grantOnboardingMediaConsent(microphone: false, camera: false)
 
-        XCTAssertFalse(manager.needsConsent, "a refusal must take the question down, not only the flag")
+        XCTAssertNotNil(manager.grantedConsent,
+                        "an onboarding step must never revoke a consent given through the sheet")
+    }
+
+    /// REGRESSION. A step the child has NOT REACHED reads as `false` at the call site, and
+    /// `recordConsent(.audio)` deliberately clears the camera flag — so answering the microphone
+    /// step used to wipe a video consent granted through the sheet minutes earlier, reintroducing
+    /// "men ruxsat berdim o'zi. yana so'rayapti" for video. Additive writes make that impossible.
+    @MainActor
+    func testAnsweringTheMicStepDoesNotWipeAVideoGrantTheSheetRecorded() {
+        let manager = makeEnabledManager(audio: true, video: true)
+        XCTAssertEqual(manager.grantedConsent, .video, "precondition: the sheet granted video")
+
+        // Microphone step answered yes; the camera step has not been reached, so it sends `false`.
+        manager.grantOnboardingMediaConsent(microphone: true, camera: false)
+
+        XCTAssertEqual(manager.grantedConsent, .video,
+                       "an unreached camera step must not read as a refusal")
+    }
+
+    /// A declined step grants nothing — that is the whole of its effect. Withdrawal lives on the
+    /// Settings consent card and the indicator's Stop button, both of which DO stop the session;
+    /// putting that power on a replayable onboarding answer is what caused the defect above.
+    @MainActor
+    func testADeclinedStepGrantsNothingAndTouchesNothingElse() {
+        let manager = makeEnabledManager(audio: false, video: false)
+
+        manager.grantOnboardingMediaConsent(microphone: false, camera: true)
+
         XCTAssertNil(manager.grantedConsent)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent, "with nothing granted, the sheet is still the gate")
     }
 
     /// An existing audio-only grant must keep working without re-prompting — splitting the key must

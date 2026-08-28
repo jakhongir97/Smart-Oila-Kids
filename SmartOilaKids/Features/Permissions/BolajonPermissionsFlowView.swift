@@ -211,14 +211,17 @@ struct BolajonPermissionsFlowView: View {
     /// surviving iOS grants from the PREVIOUS family made the microphone step write video consent
     /// before the camera step was shown, so a new child could decline the camera and still have it
     /// opened without a sheet. The `answer` state is what keeps this bound to what the child in
-    /// front of the phone actually said — and it is why an untouched step (both answers nil) writes
-    /// nothing at all, which also stops a permission flipped in the iOS Settings pane, while this
-    /// flow happens to be on screen, from recording a consent nobody was asked for.
+    /// front of the phone actually said — an unanswered step contributes `false`, so it grants
+    /// nothing, and a permission flipped in the iOS Settings pane while this flow happens to be on
+    /// screen cannot record a consent nobody was asked for.
+    ///
+    /// `false` here means "grants nothing", NEVER "revoke" — see `grantOnboardingMediaConsent`,
+    /// which is grant-only precisely because this state is long-lived and re-fired. Both answers are
+    /// still sent together, so the destination sees the whole picture in one call.
     private func mirrorMediaConsent() {
-        guard microphoneAnswer != nil || cameraAnswer != nil else { return }
-        streaming.applyOnboardingMediaAnswer(
-            microphoneAllowed: microphoneAnswer == true && manager.microphonePermission == .granted,
-            cameraAllowed: cameraAnswer == true && manager.cameraAuthorizationStatus == .authorized
+        streaming.grantOnboardingMediaConsent(
+            microphone: microphoneAnswer == true && manager.microphonePermission == .granted,
+            camera: cameraAnswer == true && manager.cameraAuthorizationStatus == .authorized
         )
     }
 
