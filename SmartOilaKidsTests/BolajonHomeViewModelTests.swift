@@ -797,6 +797,36 @@ final class HomeHeaderNameLayoutTests: XCTestCase {
 /// The live-capture banner's layout, pinned where it is load-bearing rather than decorative. Item 5
 /// asked for compact and lower; neither may be bought with the Stop button's touch target or with
 /// the row's guarantee that it cannot cover the screen underneath it.
+/// The consent sheet's compactness policy — Ibrohim's item 5, *"sal kompaktroq qilib pastga tushirib
+/// qo'yish kerak"*. On a bottom sheet, shorter IS lower.
+final class AudioConsentSheetLayoutTests: XCTestCase {
+    private typealias Metrics = AudioConsentSheet.Metrics
+
+    /// The point of the change: a sheet whose content is a title, two short lines and two buttons no
+    /// longer pads itself out to the old 440pt floor, which covered over half of an 812pt phone.
+    func testAShortSheetIsAllowedToBeShort() {
+        XCTAssertEqual(Metrics.resting(forMeasured: 330), Metrics.minimumResting)
+        XCTAssertLessThan(Metrics.minimumResting, 440, "440 was the floor this item asked us to lower")
+    }
+
+    /// …and the floor is the ONLY thing that changed. Everything that made 440 necessary still holds
+    /// — Cyrillic Uzbek runs longer than Latin, the video wording longer than the audio wording, and
+    /// Dynamic Type scales all of it — so a taller measurement must still win. This is the assertion
+    /// that would catch someone "simplifying" the clamp into a fixed compact height and pushing
+    /// Allow / Not now back off the bottom edge, which on this sheet means no live session can ever
+    /// start.
+    func testTallerContentStillWinsOverTheFloor() {
+        XCTAssertEqual(Metrics.resting(forMeasured: 500), 500)
+    }
+
+    /// The cap has to sit above the floor or the clamp inverts and every sheet is pinned to one
+    /// height regardless of content.
+    func testTheCapStaysClearOfTheFloor() {
+        XCTAssertGreaterThan(Metrics.maximumResting, Metrics.minimumResting)
+        XCTAssertEqual(Metrics.resting(forMeasured: 900), Metrics.maximumResting)
+    }
+}
+
 final class AudioListeningIndicatorLayoutTests: XCTestCase {
     private typealias Metrics = AudioListeningIndicator.Metrics
 

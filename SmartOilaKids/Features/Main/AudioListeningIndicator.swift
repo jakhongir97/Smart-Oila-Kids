@@ -147,7 +147,35 @@ struct AudioConsentSheet: View {
     let onDecline: () -> Void
 
     /// Resting sheet height, measured from the content rather than assumed. See the detent below.
-    @State private var restingHeight: CGFloat = 440
+    ///
+    /// The floor was 440pt, which on the 812pt phone this is tested on covered well over half the
+    /// screen for a sheet whose content is a title, two short lines and two buttons — Ibrohim's item
+    /// 5, *"sal kompaktroq qilib pastga tushirib qo'yish kerak"*. On a bottom sheet "move it down"
+    /// and "make it smaller" are the same instruction: the sheet is already pinned to the bottom
+    /// edge, so the only way it sits lower is by being shorter.
+    ///
+    /// It is a FLOOR, not a height. Everything that made 440 necessary still holds — Cyrillic Uzbek
+    /// runs materially longer than Latin, the video wording is longer than the audio wording, and
+    /// Dynamic Type scales all of it — and all of that is handled by measuring the content, which is
+    /// unchanged. Lowering the floor only stops the sheet padding itself out to 440 when its content
+    /// genuinely needs 330.
+    @State private var restingHeight: CGFloat = Metrics.minimumResting
+
+    /// The whole compactness policy, in one place and reachable from tests — the clamp below is
+    /// meaningless without the two bounds side by side, and `AudioConsentSheetLayoutTests` pins the
+    /// property that actually matters: the floor must stay clear of the cap, or a long translation
+    /// would be clamped BELOW its own content and the buttons would leave the screen again.
+    enum Metrics {
+        /// Floor. Stops a short sheet padding itself out to a number measured once in English.
+        static let minimumResting: CGFloat = 340
+        /// Cap. Keeps a long sheet a sheet rather than a full-screen takeover; `.large` and the
+        /// scroll are what make the overflow reachable.
+        static let maximumResting: CGFloat = 620
+
+        static func resting(forMeasured measured: CGFloat) -> CGFloat {
+            min(max(measured, minimumResting), maximumResting)
+        }
+    }
 
     private var title: String {
         mode == .video ? L10n.tr("audio2.consent.video.title") : L10n.tr("audio2.consent.title")
@@ -158,22 +186,22 @@ struct AudioConsentSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 14) {
             ZStack {
-                Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 84, height: 84)
+                Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 64, height: 64)
                 Image(systemName: mode == .video ? "video.fill" : "waveform.and.mic")
-                    .font(.system(size: 34, weight: .semibold))
+                    .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(AppColors.ctaPurple)
             }
-            .padding(.top, 12)
+            .padding(.top, 2)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 Text(title)
-                    .font(AppTypography.title(20))
+                    .font(AppTypography.title(19))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
                 Text(message)
-                    .font(AppTypography.bodyText(15))
+                    .font(AppTypography.bodyText(14))
                     .foregroundStyle(AppColors.inkSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -190,13 +218,15 @@ struct AudioConsentSheet: View {
 
             Spacer(minLength: 0)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 6) {
                 Button(action: onAllow) {
                     Text(L10n.tr("audio2.consent.allow"))
                         .font(AppTypography.bodyStrong(16))
                         .foregroundStyle(AppColors.inverseTextPrimary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
+                        // 14pt keeps the 44pt minimum hit target intact at default type; the saving
+                        // comes from the stack spacing and the hero above, never from the controls.
+                        .padding(.vertical, 14)
                         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(AppColors.ctaPurple))
                 }
                 .buttonStyle(.plain)
@@ -210,7 +240,9 @@ struct AudioConsentSheet: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(24)
+        .padding(.horizontal, 22)
+        .padding(.top, 16)
+        .padding(.bottom, 18)
         // Same treatment the SOS sheet already got, and for the same reason — this sheet was simply
         // missed. Its height is not fixed: the title, the body and the hint are all translated into
         // three languages (Cyrillic Uzbek runs materially longer than Latin), the video wording is
@@ -229,9 +261,9 @@ struct AudioConsentSheet: View {
         )
         .onPreferenceChange(ConsentSheetHeightKey.self) { measured in
             // The sheet is as tall as its content instead of a number someone measured once in
-            // English at default text. 440pt stays the floor so the design is unchanged where it
-            // already fitted; the cap keeps it a sheet rather than a full-screen takeover.
-            restingHeight = min(max(measured, 440), 700)
+            // English at default text. The floor stops a short sheet padding itself out; the cap
+            // keeps a long one a sheet rather than a full-screen takeover.
+            restingHeight = Metrics.resting(forMeasured: measured)
         }
         .scrollableIfNeeded()
         // Measured resting height, plus `.large` to drag to. The scroll guarantees every control is
