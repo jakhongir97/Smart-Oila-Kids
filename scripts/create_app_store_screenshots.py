@@ -388,6 +388,12 @@ def launch_env(shot: Shot) -> dict[str, str]:
             "SIMCTL_CHILD_SMARTOILA_DEBUG_DSN": DEMO_DSN,
             "SIMCTL_CHILD_SMARTOILA_DEBUG_PROFILE": DEMO_PROFILE,
             "SIMCTL_CHILD_SMARTOILA_DEBUG_ROUTE": shot.route,
+            # The Home header chip is computed from a Keychain credential and a recent successful
+            # contact with the backend. A capture simulator has neither, so every Home shot came out
+            # with a red "Not connected right now" across the top — an accurate reading of the
+            # simulator and a terrible primary App Store screenshot. `#if DEBUG` at the source, so it
+            # cannot exist in the archive App Review installs.
+            "SIMCTL_CHILD_SMARTOILA_DEBUG_LINK_HEALTHY": "1",
         }
     )
     if shot.setup_step:

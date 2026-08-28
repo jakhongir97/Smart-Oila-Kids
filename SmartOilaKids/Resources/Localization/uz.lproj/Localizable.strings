@@ -136,7 +136,7 @@
 "setup.welcome.title" = "Bolajon360 ga xush kelibsiz!";
 "setup.welcome.subtitle" = "Bu ilova telefoningizni ota-onangiz bilan bog'laydi — ular sizning xavfsizligingizdan xotirjam bo'lishadi.";
 "setup.welcome.feature_contact" = "Ota-onangiz bilan doim aloqada";
-"setup.welcome.feature_protection" = "Xavfli kontentdan himoya";
+"setup.welcome.feature_location" = "Ota-onangiz qayerdaligingizni ko'radi";
 "setup.welcome.feature_sos" = "Bir tugma bilan SOS xabar";
 "setup.welcome.start" = "Boshladik";
 "setup.connect.title" = "Ota-ona ilovasiga ulaymiz";

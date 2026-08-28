@@ -268,8 +268,17 @@ private struct WelcomeStepView: View {
 
                 VStack(alignment: .leading, spacing: 18) {
                     featureRow("setup.welcome.feature_contact") { ConnectionGlyph(size: 20) }
-                    featureRow("setup.welcome.feature_protection") {
-                        Image(systemName: "lock.shield.fill")
+                    // Was `setup.welcome.feature_protection` — "Protection from harmful content".
+                    // The app has no content filter, no web filter and no app blocking: the Screen
+                    // Time engine is flag-off and per-app blocking cannot work on iOS as the backend
+                    // models it. That promise sat on screen 2, before pairing, in all three
+                    // languages — the first thing App Review reads, and false. It also made any
+                    // "this app does not filter or block" line in the store listing contradict the
+                    // binary. Replaced with the capability the app actually leads on, phrased
+                    // plainly to the child, which is also the disclosure posture the rest of the app
+                    // takes.
+                    featureRow("setup.welcome.feature_location") {
+                        Image(systemName: "location.fill")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(AppColors.glyphPurple)
                     }

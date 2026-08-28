@@ -58,7 +58,11 @@ struct BolajonHomeView: View {
     /// honest: `lockState` (the telemetry service) republishes on contact and on credential loss, and
     /// `permissionManager` republishes when the child returns from Settings.app.
     private var linkHealth: LinkHealth {
-        LinkHealth.decide(
+        // Screenshot capture only, and `#if DEBUG` at the source (`AppRuntime.debugLinkHealthy`), so
+        // this branch does not exist in the archive. See that property for why the override is not a
+        // store-review mode.
+        if AppRuntime.debugLinkHealthy { return .protecting }
+        return LinkHealth.decide(
             hasCredential: lockState.hasCredential,
             offPermissions: BolajonPermissionChecklist.states(from: permissionManager)
                 .filter { $0.availability == .notGranted }.count,

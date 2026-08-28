@@ -86,6 +86,27 @@ enum AppRuntime {
 #endif
     }
 
+    /// Screenshot-only override for the Home header's link chip.
+    ///
+    /// The chip is computed from real state — a Keychain credential and a recent successful contact
+    /// with the backend — and a screenshot simulator has neither, so every captured Home shot showed
+    /// a red "Not connected right now". That is an accurate reading of the simulator and a terrible
+    /// primary App Store screenshot: the one image a shopper sees says the product is not working.
+    ///
+    /// This is the same class of hook the capture script already relies on for the SOS sheet and the
+    /// live-session banner (`SMARTOILA_DEBUG_SOS`, `SMARTOILA_DEBUG_INDICATOR`) — it makes an
+    /// ordinary state reachable in a simulator that cannot reach a server. It is **not** a
+    /// store-review mode: it is `#if DEBUG`, so it cannot exist in the archive App Review installs,
+    /// and it changes nothing for any user. Deliberately kept that way after the `storeReviewMode`
+    /// removal, which was about showing REVIEWERS different behaviour than families get.
+    static var debugLinkHealthy: Bool {
+#if DEBUG
+        return trimmed("SMARTOILA_DEBUG_LINK_HEALTHY") == "1"
+#else
+        return false
+#endif
+    }
+
 #if DEBUG
     // MARK: Dev live-audio testing
     //

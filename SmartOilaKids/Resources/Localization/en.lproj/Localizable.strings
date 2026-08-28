@@ -136,7 +136,7 @@
 "setup.welcome.title" = "Welcome to Bolajon360!";
 "setup.welcome.subtitle" = "This app links the phone with your parents so they can rest assured about your safety.";
 "setup.welcome.feature_contact" = "Always in touch with your parents";
-"setup.welcome.feature_protection" = "Protection from harmful content";
+"setup.welcome.feature_location" = "Parents can see where you are";
 "setup.welcome.feature_sos" = "One-tap SOS alert";
 "setup.welcome.start" = "Let's start";
 "setup.connect.title" = "Connecting to the parent app";

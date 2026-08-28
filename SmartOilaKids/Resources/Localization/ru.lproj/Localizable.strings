@@ -136,7 +136,7 @@
 "setup.welcome.title" = "Добро пожаловать в Bolajon360!";
 "setup.welcome.subtitle" = "Это приложение свяжет телефон с родителями — они будут спокойны за вашу безопасность.";
 "setup.welcome.feature_contact" = "Всегда на связи с родителями";
-"setup.welcome.feature_protection" = "Защита от вредного контента";
+"setup.welcome.feature_location" = "Родители видят, где вы";
 "setup.welcome.feature_sos" = "SOS-сигнал одной кнопкой";
 "setup.welcome.start" = "Начнём";
 "setup.connect.title" = "Подключаемся к приложению родителя";
