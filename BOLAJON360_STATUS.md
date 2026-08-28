@@ -22,8 +22,8 @@ backend.
 |---|---|
 | **App name (in build)** | Bolajon360 |
 | **Bundle id** | `uz.smartoila.kids` (team `3TWN5NW4BL`) |
-| **Version** | **1.1 (build 16)** — audit fixes land on `fix/audit-2026-08-27` on top of it |
-| **Branch** | `main` @ `3817cfc` (build 16, pushed). Audit fixes on `fix/audit-2026-08-27`. |
+| **Version** | **1.1 (build 17)** — cut 2026-08-28 with the unpair-contract and consent fixes |
+| **Branch** | `main`. **10 commits ahead of `origin/main` and NOT pushed** — build 17 exists only on this machine. |
 | **Backend (live)** | `https://api.oila360.uz/api/v1` — Bearer `deviceToken`, single long-lived token |
 | **Auth model** | Parent generates a 5-digit pairing code → child redeems via `POST /device/pair` |
 | **Android sibling** | `com.oila24.bolajon360` **5.0.1** (build 6, targetSdk 36, Kotlin/Compose/Hilt) — endpoint-equivalent, see the parity table below |
@@ -220,7 +220,7 @@ Endpoint coverage is level. Every `/device/*` route the Android app calls, iOS c
 calls one more (`device/apps/removal-attempt`). The gaps that remain are all **OS-imposed**, not
 unfinished work, and three of them are exactly what Ibrohim's onboarding items were about.
 
-| Capability | Android 5.0.1 | iOS (build 16 + this round) |
+| Capability | Android 5.0.1 | iOS (build 17) |
 |---|---|---|
 | Pair / unpair, FCM token, home, status, location batch, SOS, tasks, chat, lock state, screen-time, files | yes | yes |
 | `PUT /device/apps/sync` (installed-app catalogue + icon upload via `/device/files`) | yes — `SyncInstalledAppsUseCase`, `PackageChangeReceiver` | **impossible.** iOS exposes no installed-app enumeration at all |
