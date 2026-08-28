@@ -445,12 +445,20 @@ final class OilaDeviceClientTests: XCTestCase {
 
     /// No credential means no request was ever sent, so nothing was revoked. Claiming `.revoked`
     /// here would be the one outcome that actively misleads.
-    func testMissingCredentialIsNotReportedAsRevoked() async {
+    ///
+    /// It is its own case rather than `.rejected` since the teardown started depending on the
+    /// answer: `.rejected` now REFUSES to disconnect (a 500 must not wipe the phone), and folding
+    /// this in with it would strand a handset that has nothing to revoke and no retry that could
+    /// ever change that. Not a bypass — reaching this state needs a Keychain sealed before first
+    /// unlock, not anything a child can do.
+    func testMissingCredentialIsNotReportedAsRevokedOrAsAServerRefusal() async {
         let client = makeClient(tokens: InMemoryTokenStore(access: nil))
 
         let outcome = await client.unpairDevice()
 
-        XCTAssertEqual(outcome, .rejected)
+        XCTAssertEqual(outcome, .noCredential)
+        XCTAssertNotEqual(outcome, .revoked)
+        XCTAssertNotEqual(outcome, .rejected)
         XCTAssertTrue(TestHTTPURLProtocol.recordedRequests.isEmpty, "there is nothing to send")
     }
 

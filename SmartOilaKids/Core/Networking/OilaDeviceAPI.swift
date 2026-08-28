@@ -537,6 +537,13 @@ enum OilaUnpairOutcome: String {
     case pinRequired = "device_unpair_pin_required"
     /// 429: more than 10 attempts a minute. Still paired; the child has to wait.
     case rateLimited = "device_unpair_rate_limited"
+    /// No request left the app — this device holds no readable credential, so there was nothing to
+    /// revoke. Kept apart from `.revoked` (the word has to mean the SERVER acted, or the diagnostic
+    /// is worse than silence) AND from `.rejected`, because the caller must still be allowed to
+    /// finish the local teardown: with no token there is nothing a retry could ever accomplish, and
+    /// refusing would strand the handset on the disconnect screen forever. It is not a bypass —
+    /// a child cannot arrange this state, only a locked Keychain before first unlock can.
+    case noCredential = "device_unpair_no_credential"
     /// A server answered, but with neither a revoke nor a not-implemented. Kept distinct so a 500
     /// is never filed as "offline", which would send anyone reading this to the wrong side.
     case rejected = "device_unpair_rejected"
@@ -748,7 +755,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 // Nothing was sent: this device holds no readable credential, so there was nothing
                 // for the server to revoke and no request left the app. Not `.revoked` — that word
                 // has to mean the SERVER acted, or the diagnostic is worse than silence.
-                outcome = .rejected
+                outcome = .noCredential
             } else {
                 outcome = Self.unpairOutcome(forStatusCode: error.statusCode)
             }

@@ -1144,7 +1144,11 @@ struct SettingsDisconnectScreen: View {
         Task {
             let outcome = await OilaDeviceClient.shared.unpairDevice(pin: submittedPIN)
             switch outcome {
-            case .revoked, .routeMissing:
+            // `.noCredential` proceeds for the same reason `.routeMissing` does, not because it is a
+            // success: no request left the app, so no retry can ever change the answer, and refusing
+            // would strand the handset on this screen. Not a bypass — reaching it needs a Keychain
+            // sealed before first unlock, which is not something a child can arrange.
+            case .revoked, .routeMissing, .noCredential:
                 // Order matters: the credential is already dead server-side, and `logout()` is a
                 // best-effort tidy of the refresh session. `clearSession()` is what returns the app
                 // to the pairing screen and wipes the per-child local stores.
