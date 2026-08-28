@@ -112,7 +112,7 @@ and it is the highest-stakes claim in the repo, so:
 ## Status: AMBER — not submittable yet
 
 - **Build:** app + both extensions compile clean. Release build: zero warnings.
-- **Tests:** **412** XCTest methods, 0 failures. Note that "0 failures" was NOT true of `main` on
+- **Tests:** **419** XCTest methods, 0 failures. Note that "0 failures" was NOT true of `main` on
   2026-08-28 before this round: `BolajonBackendParityTests` had **5 red**, asserting English
   screen-time suffixes ("3h", "1h 45m") while build 15 made Uzbek the default for any locale that
   is neither ru nor uz — every CI runner. "3s" IS three hours in Uzbek. The app was right; the
@@ -248,6 +248,41 @@ could only ever be a dead button. What iOS does instead is relaunch the app itse
 The one real difference: after a reboot the phone must be unlocked **once** before any of that
 starts, because the Keychain is sealed until first unlock. Android's `BootReceiver` has no such wait.
 Nothing on the iOS side can close that gap, and nothing needs to be added.
+
+### The onboarding consent mirror is GRANT-ONLY — do not "fix" this
+
+Ibrohim's item 4 ("men ruxsat berdim o'zi. yana so'rayapti") is fixed by recording the child's answer
+to the onboarding microphone/camera steps as the standing live-session consent, so the sheet does not
+ask a second time. Three adversarial review passes found three successive versions of that wrong, all
+for the same reason, so the invariant is written down here:
+
+> **`grantOnboardingMediaConsent` may only ever ADD a grant. It must never clear, revoke, or tear
+> down.**
+
+The caller's state is partial and long-lived while the flags are absolute. `microphoneAnswer` /
+`cameraAnswer` are `@State` that lives for the whole of B1–B11, is never reset, and is re-sent every
+time `.onChange` fires on either permission status. Give that replay any retraction power and:
+
+- a **stale decline** replays as a revoke. With a `revokeConsent()` behind it, the iOS permission
+  alert's own resign/become-active cycle tore down a live session the child had just consented to
+  through the sheet — the sheet draws over onboarding, because RootView hangs it above the routing
+  branch and the install is already paired for all of B1–B11;
+- a step the child has **not reached** reads as `false`, and `recordConsent(.audio)` deliberately
+  clears the camera flag, so answering the microphone step wiped a video consent granted seconds
+  earlier — Ibrohim's exact complaint, reintroduced for video;
+- the two hardware paths desynchronised: a refused microphone stopped the session, a refused camera
+  left the camera publishing for the rest of the lease.
+
+Grant-only costs nothing: onboarding always starts from cleared flags (`purgeChildScopedData` step 4
+wipes them on every unpair), so within one run there is no stale grant for a decline to retract.
+**Withdrawal is not lost** — it lives on the Settings consent card and the live indicator's Stop
+button, both of which do stop the session, and both of which are the right place for it.
+
+Related, and fixed in the same round: `purgeChildScopedData` step 4 used to remove the two consent
+keys straight from `UserDefaults`, going around the manager, which keeps the consent QUESTION in
+memory. A sheet raised for the previous family therefore survived an unpair, sat modally over the
+pairing screen, and whoever tapped "Allow" wrote both keys back **after** the purge. It now also
+calls `revokeConsent()`; the raw removals stay for the injected-defaults test seam.
 
 ## Known limits that are NOT bugs
 
