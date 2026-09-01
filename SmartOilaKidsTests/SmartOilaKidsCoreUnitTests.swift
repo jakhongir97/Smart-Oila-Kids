@@ -2643,6 +2643,86 @@ private func waitForMainQueue(timeout: TimeInterval = 1) {
 // properties that matter are asymmetric on purpose: missing a START is a bug you find in testing,
 // while missing a STOP (or inventing a start) leaves a child's microphone open.
 
+// MARK: - The live-session wake as an ALERT push
+//
+// `stream.start` must move from a silent `content-available` push to an ALERT push carrying
+// `content-available: 1` at priority 10, because iOS throttles the silent kind for minutes and
+// never delivers it to a force-quit app (measured on hardware 2026-08-12; see
+// `output/doc/stream_wake_push_type_2026-08-13.md`). That is the SENDER's change, and these tests
+// pin the two client-side properties it depends on, so the flip needs no iOS release and cannot
+// regress the badge.
+
+final class PushAlertWakeWithoutInboxRowTests: XCTestCase {
+    /// The wake still routes when the push carries our disclosure title and body — the media route
+    /// reads the machine-authored event alone, so alert text is invisible to it.
+    func testAlertShapedStreamStartStillRoutesTheWake() async {
+        await PushInboxStore.shared.clearAll()
+        await MainActor.run { RuntimeDiagnosticsCenter.shared.resetPush() }
+
+        var started = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .pushShouldStartAudioStream,
+            object: nil,
+            queue: nil
+        ) { _ in started += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        PushCommandRouter.handle(
+            userInfo: [
+                "event": "stream.start",
+                "dsn": "child-alert-wake",
+                "mode": "audio",
+                "maxDurationSeconds": "120",
+                "aps": [
+                    "alert": ["title": "Ota-ona tekshiryapti", "body": "Ota-onangiz siz bilan bog'lanmoqda"],
+                    "content-available": 1
+                ]
+            ],
+            deliveryContext: .backgroundFetch
+        )
+
+        let diagnostics = await waitForPushDiagnosticsForTests { $0.lastRoute.contains("audio_start") }
+        XCTAssertTrue(diagnostics.lastRoute.contains("audio_start"))
+        XCTAssertEqual(started, 1)
+    }
+
+    /// ...and files no inbox row for it. Nothing in the app can render or clear that list, so a row
+    /// per parent check is an app-icon badge that only deleting the app can reset.
+    func testAlertShapedCommandsFileNoInboxRowWhileRealTextStillDoes() async {
+        await PushInboxStore.shared.clearAll()
+        await MainActor.run { RuntimeDiagnosticsCenter.shared.resetPush() }
+        let dsn = "child-alert-inbox"
+
+        for event in ["stream.start", "stream.stop", "status.report"] {
+            PushCommandRouter.handle(
+                userInfo: [
+                    "event": event,
+                    "dsn": dsn,
+                    "aps": [
+                        "alert": ["title": "Ota-ona tekshiryapti", "body": "Ota-onangiz siz bilan bog'lanmoqda"],
+                        "content-available": 1
+                    ]
+                ],
+                deliveryContext: .backgroundFetch
+            )
+        }
+
+        // A control that MUST still file: human text under an event that names no hardware command.
+        PushCommandRouter.handle(
+            userInfo: [
+                "event": "announcement",
+                "dsn": dsn,
+                "aps": ["alert": ["title": "E'lon", "body": "Yangi vazifa qo'shildi"]]
+            ],
+            deliveryContext: .backgroundFetch
+        )
+
+        let items = await waitForPushInboxItemsMatchingDSNForTests(count: 1, dsn: dsn)
+        XCTAssertEqual(items.count, 1, "only the announcement may occupy a row")
+        XCTAssertEqual(items.first?.event, "announcement")
+    }
+}
+
 final class PushAudioCommandRoutingTests: XCTestCase {
 
     // MARK: Human-authored text can never reach the microphone

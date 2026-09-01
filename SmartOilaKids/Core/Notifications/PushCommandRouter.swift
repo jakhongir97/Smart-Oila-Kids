@@ -171,9 +171,26 @@ private extension PushCommandRouter {
         // exist — unclearable short of deleting the app.
         //
         // Keep the diagnostics trail (recorded by the caller) and drop only the inbox row.
+        //
+        // Absence of human text is NOT a sufficient test, and the live-session wake is about to stop
+        // satisfying it. A silent `content-available` push is throttled by iOS for minutes and is
+        // never delivered to a force-quit app, so `stream.start` / `stream.stop` have to move to an
+        // ALERT push carrying `content-available: 1` at priority 10 (the sender's change; see
+        // `output/doc/stream_wake_push_type_2026-08-13.md`). That alert carries OUR OWN disclosure
+        // title — "a parent is checking in" — which iOS renders live, at the only moment it means
+        // anything. Filed as an inbox row it would resume exactly the badge climb the paragraph
+        // above describes, on the most frequent command the product has.
+        //
+        // So the media commands are dropped on the COMMAND, not on the text. Keyed on
+        // `commandHaystack` — the machine-authored event alone — because keying it on the wide
+        // haystack would let a parent suppress rows by typing "stream" into a chat message.
+        // Deliberately narrow to the two routes that open hardware plus `status.report`: those have
+        // no reading surface and no reader. A lock/chat/tasks push that ever does arrive with real
+        // human text still files a row.
         let title = payload.title?.trimmedNonEmpty
         let body = payload.body?.trimmedNonEmpty
         guard title != nil || body != nil else { return }
+        guard !suppressesInboxRow(payload) else { return }
         Task {
             await PushInboxStore.shared.append(
                 title: payload.title ?? "",
@@ -183,6 +200,13 @@ private extension PushCommandRouter {
                 isRead: openedFromInteraction
             )
         }
+    }
+
+    /// True for a machine-only command whose alert text is disclosure, not correspondence — so it
+    /// must never occupy an unreadable inbox row or the badge that counts one.
+    static func suppressesInboxRow(_ payload: PushCommandPayload) -> Bool {
+        audioRoute(forCommand: payload.commandHaystack) != nil
+            || isStatusReportCommand(payload.commandHaystack)
     }
 
     static func applyRouting(
