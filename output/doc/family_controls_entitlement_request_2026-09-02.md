@@ -154,10 +154,8 @@ specific; vague wellbeing language is what gets these declined.
 >   on `intervalDidEnd`. Per-app limits use `eventDidReachThreshold`. A `DeviceActivityReport`
 >   extension renders the child's own usage to the child, on the child's device.
 >
-> **Data handling:** usage data stays on the device. Our `DeviceActivityReport` extension renders it
-> in place and does not transmit it; we do not send per-app usage to our servers. What reaches our
-> backend is limited to the parent's own configuration (the schedule and limits the parent set) and
-> whether a restriction is currently active — never the names of the child's apps or their browsing.
+> **Data handling:** what reaches our backend is limited to the parent's own configuration (the
+> schedule and limits the parent set) and whether a restriction is currently active.
 >
 > **Disclosure to the child:** the child app is visible on the child's home screen under its own
 > name, explains during onboarding what a parent can see and control, and shows its current
@@ -226,3 +224,91 @@ Apple's "Requesting the Family Controls entitlement" documentation; Apple Develo
 per-extension requests and observed approval times. The per-bundle-ID rule and the absence of an SLA
 are both confirmed by multiple independent reports; treat the "~3 weeks" figure as typical, not
 promised.
+
+---
+
+## ⚠️ CORRECTION — 2026-09-02, after a code survey. READ THIS BEFORE FILING OR IF ALREADY FILED.
+
+The data-handling paragraph originally in §4 read: *"usage data stays on the device. Our
+`DeviceActivityReport` extension renders it in place and does not transmit it; we do not send per-app
+usage to our servers."*
+
+**The code contradicts that sentence, and it has been removed above.** Verified in the tree:
+
+- `SmartOilaKidsUsageReportExtension/SmartOilaUsageReportView.swift:6-9` — the report view's body is
+  `Color.clear`. It renders **nothing**. So "renders it in place" is false.
+- `SmartOilaKidsUsageReportExtension/SmartOilaUsageReport.swift:16-21` — `makeConfiguration` harvests
+  each app's `bundleIdentifier`, display name and duration out of the sandboxed
+  `DeviceActivityResults` and calls `sharedStore.saveSnapshot(snapshot)`, copying it into the app
+  group where the host app can read it.
+- `OilaDeviceAPI.swift:971-973` — the host app uploads `{packageName, usedSeconds}` per app to
+  `POST device/apps/usage`.
+- `OilaDeviceAPI.swift:1166-1168` — `reportRemovalAttempt(packageName:applicationName:)` sends an
+  app's **display name** to the server.
+
+Apple builds `DeviceActivityReport` as a one-way privacy sandbox: the extension may render usage for
+the user to look at, and the host app cannot read what it rendered. Copying the underlying data into
+a shared container so the app can transmit it defeats that model. **A report scene that renders
+`Color.clear` and writes to an app group has no purpose other than extraction, and reads that way to
+anyone who opens the file.** This is a plausible ground for refusing — or later revoking — a Family
+Controls entitlement.
+
+### If you have already filed with the old text
+
+Nothing filed was dishonest: `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` is `false` in
+`SmartOilaKids/Resources/Info.plist:49-50`, so the shipping binary transmits none of this today. The
+sentence is true of what ships and false of what the code is built to do. That is not a distinction
+Apple would accept, and it is not a distinction to rely on.
+
+**Do not re-file or withdraw.** Apple sends no acknowledgement to correct against, and a duplicate
+muddies the queue. Instead:
+
+1. **Make the code match the request before Screen Time ships.** The entitlement is granted against a
+   described use; shipping something materially different is the revocation risk, not the wording.
+2. **If Apple replies with questions, answer from the code**, not from this document.
+3. Re-verify before shipping:
+   `grep -rn 'packageName\|appName\|bundleIdentifier' --include='*.swift'` over every path reaching
+   `OilaDeviceAPI`. If that grep and the request text disagree, the request is not satisfied.
+
+### The two ways to make them agree
+
+**Shape A — recommended; keeps the entitlement defensible.** The report extension renders a real UI
+for the child and writes nothing to the app group. Delete the `saveSnapshot` call from
+`makeConfiguration` and give `SmartOilaUsageReportView` a genuine body. The parent's number then comes
+from a source that never touches per-app identity: a `DeviceActivityEvent` threshold on the total
+budget, firing `eventDidReachThreshold` in the monitor extension, reporting only
+`{dayKey, totalSeconds, budgetReached}`.
+
+**Shape B — only if per-app limits are non-negotiable.** Selection happens on-device via
+`FamilyActivityPicker`. The app mints an opaque local rule id per selected app; the
+`ApplicationToken` and the bundle identifier never leave the device. The wire carries
+`{ruleId, usedSeconds}`, and the parent UI labels each rule with a name **the parent typed**. This
+needs the backend change described in `screentime_backend_contract_2026-09-02.md` §3, because
+`POST /device/apps/usage` and the parent lock/limit routes are keyed on `packageName`.
+
+Either way, drop `appName` from the snapshot entry — a localized display name is app-inventory
+disclosure with no product use once the parent labels their own rules. And decide the fate of
+`POST /device/apps/removal-attempt` on iOS: reporting *"the child un-selected Instagram"* names an app
+on the child's phone to the server. Send `{ruleId}` or a bare `{tamperDetected: true}` instead.
+
+---
+
+## ⚠️ Four further blockers the entitlement does NOT solve
+
+Getting approved does not give you a working feature. Verified in the tree:
+
+1. **`SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` is `false`** (`Info.plist:49-50`) — the child is never
+   asked for authorization and no service starts.
+2. **There is no `FamilyActivityPicker` anywhere** — zero occurrences repo-wide. The selection set can
+   never become non-empty, so there is nothing to shield.
+3. **The per-app pipeline is keyed on `Application.bundleIdentifier`, which Apple leaves `nil`** for
+   apps chosen through the picker. The `packageName`↔token join cannot work as written.
+4. **The global shield is `applicationCategories = .all()` with no always-allowed set and no
+   self-exemption** (`DeviceLockShieldController.swift:24-29`, and the same four lines in the monitor
+   extension). That covers Phone, Messages and Bolajon360 itself — **a shielded child could not call
+   a parent, or open the app holding the SOS button.** Fix before this is ever applied to a real
+   child's device: `.all(except: alwaysAllowed)`, an always-allowed set collected at setup, an
+   explicit self-exemption, and a `ShieldConfiguration` extension so the child sees why they are
+   blocked. Verify on hardware what `.all()` actually does to Phone before trusting either reading.
+
+Also: authorization requests `.individual`, not `.child`, so the child can revoke it themselves.
