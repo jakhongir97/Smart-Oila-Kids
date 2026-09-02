@@ -3793,6 +3793,147 @@ final class StreamWakeObserverTests: XCTestCase {
     }
 }
 
+// MARK: - Stuck-connect reclaim
+
+/// THE DEAF DEVICE. `cbdae04` added a reclaim for a `.connecting` attempt that iOS suspended
+/// mid-connect — the watchdog is a sleeping Task, so a suspended process leaves an attempt that
+/// neither completes nor times out, and the re-entrancy guard then rejects every later wake.
+///
+/// That reclaim shipped UNREACHABLE. It lives inside `start()`, and every production entry point
+/// except the consent sheet goes through `requestStart(command:)`, which returned at its own
+/// `.connecting` guard one frame earlier — so on the push route, the only route the bug occurs on,
+/// `start()` was never entered and the reclaim never ran. Both tests below fail against that
+/// version and are the reason the guard now consults `isStuckConnecting`.
+@MainActor
+final class LiveSessionReclaimTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+    /// Released in tearDown so a wedged connect cannot outlive the test that parked it.
+    private let wedge = OSAllocatedUnfairLock(initialState: false)
+
+    override func setUp() async throws {
+        suiteName = "LiveSessionReclaimTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+        wedge.withLock { $0 = false }
+    }
+
+    override func tearDown() async throws {
+        wedge.withLock { $0 = true }
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    private func makeManager(_ publisher: FakeMediaPublisher) -> DeviceAudioStreamManager {
+        defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED")
+        let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
+        manager.isFeatureEnabled = { true }
+        manager.makePublisher = { publisher }
+        manager.isForeground = { true }
+        manager.presenceBannerWouldRender = { true }
+        manager.requestMicPermission = { true }
+        manager.requestCameraPermission = { .granted }
+        return manager
+    }
+
+    /// Parks a real attempt in `.connecting` the way a suspended background process does: the
+    /// transport's `connect()` never returns, so the watchdog's sleep never advances either.
+    private func wedgeAConnect(_ publisher: FakeMediaPublisher, on manager: DeviceAudioStreamManager) async {
+        let wedge = self.wedge
+        publisher.beforeConnectReturns = {
+            while !wedge.withLock({ $0 }) {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+        }
+        Task { await manager.start(command: .debugAudio) }
+        for _ in 0 ..< 40 where manager.state != .connecting {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+    }
+
+    func testASecondWakeReclaimsAStuckConnectInsteadOfBouncingOffIt() async {
+        let stalled = FakeMediaPublisher()
+        let manager = makeManager(stalled)
+        // A clock the test can advance: `connectTimeout` is 45s and no test may sleep it out.
+        let clock = OSAllocatedUnfairLock(initialState: TimeInterval(1_000))
+        manager.monotonicNow = { clock.withLock { $0 } }
+
+        await wedgeAConnect(stalled, on: manager)
+        XCTAssertEqual(manager.state, .connecting, "the attempt must be parked before the reclaim is tested")
+
+        // The attempt now outlives the watchdog's own timeout: a corpse, not an attempt in flight.
+        clock.withLock { $0 += TimeInterval(120) }
+
+        // The parent presses listen again. This is the line that used to return without a trace.
+        let fresh = FakeMediaPublisher()
+        manager.makePublisher = { fresh }
+        manager.requestStart(command: .debugAudio)
+        for _ in 0 ..< 40 where !manager.isLive {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertTrue(manager.isLive, "a wake arriving after the connect corpsed must reclaim it, not bounce off it")
+        XCTAssertEqual(fresh.connectCount, 1, "and it must be a NEW room, not the wedged one")
+    }
+
+    /// The same corpse, driven through the real push observer — this is Ibrohim's acceptance gate
+    /// end to end: "ota-ona tinglash bosadi va hech narsa bo'lmayapti".
+    func testAPostedPushWakeReclaimsAStuckConnect() async {
+        // `pushMatchesThisDevice` accepts an unaddressed start only on a paired install, and reads
+        // the manager's OWN defaults — setting this on `.standard` is not enough.
+        defaults.set(true, forKey: "BOLAJON_OILA_PAIRED")
+        _ = OilaDeviceIdentity.deviceDSN()
+
+        let stalled = FakeMediaPublisher()
+        let manager = makeManager(stalled)
+        let clock = OSAllocatedUnfairLock(initialState: TimeInterval(1_000))
+        manager.monotonicNow = { clock.withLock { $0 } }
+
+        await wedgeAConnect(stalled, on: manager)
+        XCTAssertEqual(manager.state, .connecting)
+
+        clock.withLock { $0 += TimeInterval(120) }
+
+        let fresh = FakeMediaPublisher()
+        manager.makePublisher = { fresh }
+        NotificationCenter.default.post(
+            name: .pushShouldStartAudioStream,
+            object: nil,
+            userInfo: [
+                PushUserInfoKeys.streamMode: "audio",
+                PushUserInfoKeys.streamMaxDurationSeconds: "120"
+            ]
+        )
+        for _ in 0 ..< 40 where !manager.isLive {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertTrue(manager.isLive, "a push wake must reclaim a corpsed connect — this is the deaf-device bug")
+        XCTAssertEqual(fresh.connectCount, 1)
+    }
+
+    /// The other half: a connect genuinely IN FLIGHT must still bounce a second wake, or the
+    /// foreground double-delivery (alert + content-available) opens two publishers.
+    func testAConnectStillInFlightStillBouncesASecondWake() async {
+        let stalled = FakeMediaPublisher()
+        let manager = makeManager(stalled)
+        let clock = OSAllocatedUnfairLock(initialState: TimeInterval(1_000))
+        manager.monotonicNow = { clock.withLock { $0 } }
+
+        await wedgeAConnect(stalled, on: manager)
+        XCTAssertEqual(manager.state, .connecting)
+
+        // Well inside the 45s watchdog: this attempt is alive, not a corpse.
+        clock.withLock { $0 += TimeInterval(5) }
+
+        let fresh = FakeMediaPublisher()
+        manager.makePublisher = { fresh }
+        manager.requestStart(command: .debugAudio)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(fresh.connectCount, 0, "a live connect must absorb the duplicate, not race a second publisher")
+        XCTAssertEqual(manager.state, .connecting)
+    }
+}
+
 // MARK: - First-PIN provisioning grant
 
 /// The disconnect PIN is the control that keeps a monitored child linked, and the gate that allows

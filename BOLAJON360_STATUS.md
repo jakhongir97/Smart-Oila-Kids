@@ -22,8 +22,8 @@ backend.
 |---|---|
 | **App name (in build)** | Bolajon360 |
 | **Bundle id** | `uz.smartoila.kids` (team `3TWN5NW4BL`) |
-| **Version** | **1.1 (build 17)** — cut 2026-08-28 with the unpair-contract and consent fixes |
-| **Branch** | `main`. **10 commits ahead of `origin/main` and NOT pushed** — build 17 exists only on this machine. |
+| **Version** | **1.1.1 (build 18)** — in the tree, not yet archived. Carries the new icon, the stuck-connect reclaim fix and the badge guard. **1.1 (build 17) is the binary live on the App Store since 2026-08-31**; the version had to move because ASC will not accept a new build under a released version. |
+| **Branch** | `main`, **2 commits ahead of `origin/main` and NOT pushed** (`44ecc5a`, `5c992ea`) plus uncommitted build-18 work. No `build-17` tag exists. Note `5c992ea` (the badge guard) postdates the App Store release, so **it is not in the live binary** — see `output/doc/background_av_wake_2026-09-01.md`. |
 | **Backend (live)** | `https://api.oila360.uz/api/v1` — Bearer `deviceToken`, single long-lived token |
 | **Auth model** | Parent generates a 5-digit pairing code → child redeems via `POST /device/pair` |
 | **Android sibling** | `com.oila24.bolajon360` **5.0.1** (build 6, targetSdk 36, Kotlin/Compose/Hilt) — endpoint-equivalent, see the parity table below |
@@ -109,7 +109,21 @@ and it is the highest-stakes claim in the repo, so:
   decision at all** — it is the parent app and the backend still offering a button that no child
   device on either platform can answer.
 
-## Status: AMBER — not submittable yet
+## Status: SHIPPED — 1.1 (build 17) went live on the App Store 2026-08-31
+
+> **Corrected 2026-09-02.** This heading read "AMBER — not submittable yet" for two days after the
+> app was public. v1.1 released 2026-08-31 10:18 UTC (app id 6761430412). Everything below that is
+> phrased as a pre-submission checklist describes a submission that already happened — read it as
+> "what was still open at submission", not as work remaining before shipping.
+>
+> **Open post-launch, and none of it is a submission blocker:**
+> 1. **The client is not accepted.** Ibrohim's gate (DM 2026-08-31): location + background
+>    audio/video. See `output/doc/acceptance_messages_2026-09-02.md`.
+> 2. **A build 18 is required** and must carry `5c992ea` before the backend flips the push type.
+>    `MARKETING_VERSION` must move too — 1.1 is released and ASC will not take a new build under it.
+> 3. **App Privacy on the live listing says "Data Not Collected"** while the binary declares 6
+>    linked types. ASC-only, no build needed.
+> 4. The iPad layout pass and the privacy-policy rewrite.
 
 - **Build:** app + both extensions compile clean. Release build: zero warnings.
 - **Tests:** **419** XCTest methods, 0 failures. Note that "0 failures" was NOT true of `main` on
@@ -323,6 +337,11 @@ paths were added by hand. Read `OpenAPI/README.md` before touching that file or 
 ## Honest readiness verdict
 
 A working, demonstrable child-safety app whose core defects have been fixed and whose gates can now
-fail. **≈85% to a shipped App Store product**, up from ~70% before this branch. The remaining gap is
-Firebase, the iPad pass, a green CI run, and the ASC/Apple artifacts — plus one product decision
-about the platform's recording surface that no amount of iOS code can settle.
+fail. **Shipped** — 1.1 (build 17) is public as of 2026-08-31. What remains is post-launch: client
+acceptance (the location and background-audio gate), build 18, the App Privacy declaration, the iPad
+pass, and the privacy-policy rewrite — plus one product decision about the platform's recording
+surface that no amount of iOS code can settle.
+
+_(This paragraph read "≈85% to a shipped App Store product … the remaining gap is Firebase, the iPad
+pass, a green CI run, and the ASC/Apple artifacts" until 2026-09-02. Firebase is live and the ASC
+artifacts were delivered in `44ecc5a`.)_

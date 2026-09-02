@@ -1,6 +1,13 @@
 # "Ovoz va video app ichida bo'lmasa ishlamayapti" — where it stands, and the one change left
 
-**Date:** 2026-09-01 · **Tree:** `main` @ `44ecc5a` (build 17, live on the App Store)
+**Date:** 2026-09-01 · **Tree:** `main` @ `44ecc5a`
+**Corrected:** 2026-09-02 — see the inline correction notes in §1 and §2.
+
+> **"Build 17" is not one artefact.** The binary live on the App Store since 2026-08-31 10:18 UTC
+> was archived before `5c992ea` (2026-09-01 19:09), so **the live build does NOT contain the badge
+> guard**, while the working tree that does contain it still reports `CURRENT_PROJECT_VERSION = 17`.
+> Never reason about what shipped from commit ancestry. Concretely: the backend must not flip
+> `stream.start` to an alert push until a build carrying `5c992ea` is LIVE, not merely submitted.
 **Reported by:** Ibrohim, on build 15, and re-raised as an acceptance condition:
 *"shu lokatsiya va audio video background zarur, busiz qabul qilolmaymiz"*.
 
@@ -10,23 +17,42 @@ This supersedes nothing; it is the current-state summary that
 
 ---
 
-## 1. The client half is done. Two causes, both fixed in build 16
+## 1. One of the two client causes was fixed in build 16. The other's fix shipped unreachable
+
+> **Corrected 2026-09-02.** This section previously read "The client half is done. Two causes, both
+> fixed in build 16." That was false, and it was the premise the whole acceptance argument rested
+> on. `cbdae04`'s reclaim was written for the push route and could not run on it — see the second
+> bullet. Fixed in the tree on 2026-09-02 with three tests; two of them fail against build 17.
 
 `cbdae04` landed the only two client-side causes that survived verification. Both produced exactly
-the reported symptom — a parent presses "listen" and nothing happens — and both are gone:
+the reported symptom — a parent presses "listen" and nothing happens:
 
 - **A wrong device clock disabled live checks permanently and silently.** `expiresAt` is minted by
   the server and compared against the child's own wall clock, which the child can change in one tap.
   With no allowance, a phone wound forward failed every wake, forever. Skew beyond 900s is now
   disbelieved and falls back to the receipt-time lease, and the drop is named apart
   (`start_dropped_stale_clock_skew`) so the phone and the sender can be told apart in the field.
-- **A suspended background process left `.connecting` behind and the device went deaf.** iOS
-  suspends a backgrounded app mid-connect, so the watchdog's sleep never advanced and the
-  re-entrancy guard rejected every later wake. An attempt that outlived the watchdog's own timeout
-  is now reclaimed, tracked on the MONOTONIC clock so the same clock tampering cannot disable it.
+- **A suspended background process left `.connecting` behind and the device went deaf. Fixed in
+  build 16 ONLY ON PAPER; genuinely fixed 2026-09-02.** iOS suspends a backgrounded app mid-connect,
+  so the watchdog's sleep never advanced and the re-entrancy guard rejected every later wake.
+  `cbdae04` added a reclaim for an attempt that outlived the watchdog's own timeout, on the MONOTONIC
+  clock so the same clock tampering cannot disable it — but it put the reclaim inside
+  `start(command:)`, and every production entry point except the consent sheet goes through
+  `requestStart(command:)`, which returned at its own `guard state != .connecting` one frame
+  earlier. On the push route — the only route the bug occurs on — `start()` was never entered and
+  the reclaim never ran. One guard was doing two jobs and only one of them was reasoned about.
+  The guard now consults `isStuckConnecting`, which is the single source of truth both it and the
+  reclaim read. Pinned by `LiveSessionReclaimTests`; the two reclaim tests fail against build 17,
+  and the third pins the in-flight bounce that must not regress.
 
-Everything downstream of the wake is proven on hardware (2026-08-12, real iPhone): push → route →
-consent → microphone → LiveKit → renewal → teardown, for audio and for video.
+Everything downstream of the wake was exercised on hardware once, on 2026-08-12: push → route →
+consent → microphone → LiveKit → renewal → teardown.
+
+> **Scope of that measurement, corrected 2026-09-02.** It was taken on the build-12/13-era tree,
+> which is four builds behind what is live, and it did not cover the case this document is about:
+> a FORCE-QUIT app. Nothing about the wake path has been observed on build 17. Do not cite
+> 2026-08-12 as evidence that build 17 works — cite it as evidence that the path worked once, on a
+> tree that has since changed.
 
 ## 2. What is left is one payload shape, and it is the sender's
 
@@ -61,7 +87,10 @@ Payloads, raw-APNs and FCM, are in `output/doc/stream_wake_push_type_2026-08-13.
 - **The foreground double-delivery is safe.** An alert+`content-available` push in the foreground
   fires both `willPresent` and `didReceiveRemoteNotification`, so the start is routed twice.
   `requestStart` treats a start while `.live` as a renewal and drops one while `.connecting`, so the
-  duplicate is absorbed. No change needed.
+  duplicate is absorbed. No change needed — but note (corrected 2026-09-02) that this is the SAME
+  guard whose unconditional form made the reclaim unreachable in §1. It now reads
+  `guard state != .connecting || isStuckConnecting`, which absorbs a duplicate landing on a connect
+  in flight while letting a wake past a corpse. `LiveSessionReclaimTests` pins both halves.
 - **Notifications-off children lose nothing.** A background push needs no alert authorization, so
   those devices keep exactly today's behaviour — and since build 13 they cannot be listened to
   off-screen anyway, for want of a disclosure channel (see §5).
@@ -120,6 +149,11 @@ shipped; if they have, sending them is a three-line change here.
 
 **To the backend (Uzbek):**
 
+> **[SUPERSEDED 2026-09-02 — do not send this version.** Its first sentence is false: only one of
+> the two client causes was actually fixed in build 16, and blaming the remainder entirely on the
+> sender was the error §1 corrects. The version to send is in
+> `output/doc/acceptance_messages_2026-09-02.md`.]**
+>
 > Salom! "Ovoz/video bola app ichida bo'lmasa ishlamayapti" bo'yicha: iOS tomonidagi ikkita sabab
 > build 16 da tuzatilgan. Qolgani — **push turi**, va u sizning tomoningizda.
 >

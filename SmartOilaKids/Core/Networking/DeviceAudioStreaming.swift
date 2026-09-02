@@ -601,7 +601,7 @@ final class DeviceAudioStreamManager: ObservableObject {
             guard state != oldValue else { return }
             // Stamped here rather than at the eight assignment sites, so a new `.connecting` path
             // added later cannot forget it and silently reintroduce the deaf-device bug.
-            connectingSinceUptime = state == .connecting ? ProcessInfo.processInfo.systemUptime : nil
+            connectingSinceUptime = state == .connecting ? monotonicNow() : nil
             syncPresenceNotification()
         }
     }
@@ -640,6 +640,10 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// recovery be disabled the same way `expiresAt` could be. Only ever compared within one process
     /// lifetime, so uptime's reset-on-reboot is irrelevant. nil whenever `state != .connecting`.
     private var connectingSinceUptime: TimeInterval?
+    /// The monotonic clock the stuck-connect reclaim is measured on. Production reads the real one;
+    /// a test advances it without sleeping out the 45s watchdog. Same seam shape as `isForeground`
+    /// and `makePublisher` — production never overrides it.
+    var monotonicNow: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     /// The server-owned lease: an outstanding auto-stop scheduled for `maxDurationSeconds` after the
     /// last start/renewal. Cancelled and rescheduled on renewal; fired only by the owning generation.
     private var leaseTask: Task<Void, Never>?
@@ -963,7 +967,11 @@ final class DeviceAudioStreamManager: ObservableObject {
         // A start racing an in-flight connect: remember the newer command so the connecting attempt
         // and its lease reflect what the parent last asked for.
         pendingCommand = command
-        guard state != .connecting else { return }
+        // Only a connect genuinely IN FLIGHT may bounce a wake. A `.connecting` that has outlived
+        // the watchdog is a corpse, and bouncing off it here returned BEFORE `start()` was spawned —
+        // so the reclaim inside `start()` was unreachable from the push route, i.e. from the only
+        // route the bug occurs on. `start()` re-applies the same test and does the teardown.
+        guard state != .connecting || isStuckConnecting else { return }
         Task { await start(command: command) }
     }
 
@@ -1069,6 +1077,21 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// armed for.
     private static let connectTimeout: UInt64 = 45
     private var connectWatchdog: Task<Void, Never>?
+
+    /// True when the current `.connecting` attempt has outlived the watchdog's own timeout and is
+    /// therefore a CORPSE, not an attempt in flight — iOS suspended the process mid-connect, so the
+    /// watchdog's sleep never advanced. ONE source of truth: `requestStart`'s re-entrancy guard and
+    /// `start()`'s reclaim have to agree, or the reclaim is unreachable from the push route, which
+    /// is the only route the bug occurs on.
+    ///
+    /// A `.connecting` with NO stamp counts as stuck. The stamp is written by `state`'s own observer,
+    /// so its absence can only mean the attempt is unaccounted for — and failing closed there is the
+    /// deaf-device bug this mechanism exists to prevent.
+    private var isStuckConnecting: Bool {
+        guard state == .connecting else { return false }
+        guard let since = connectingSinceUptime else { return true }
+        return monotonicNow() - since > TimeInterval(Self.connectTimeout)
+    }
 
     private func armConnectWatchdog(generation: UInt64) {
         connectWatchdog?.cancel()
@@ -1215,9 +1238,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         // presses listen and nothing happens, indefinitely. Reclaim an attempt that has outlived the
         // watchdog's own timeout before the guard runs. `stop()` bumps `startGeneration`, which is
         // precisely what invalidates the dead attempt if it ever does resume.
-        if state == .connecting,
-           let since = connectingSinceUptime,
-           ProcessInfo.processInfo.systemUptime - since > TimeInterval(Self.connectTimeout) {
+        if isStuckConnecting {
             recordMedia(status: "idle", event: Self.event(command.mode, "start_reclaimed_stuck_connect"))
             await stop()
         }
