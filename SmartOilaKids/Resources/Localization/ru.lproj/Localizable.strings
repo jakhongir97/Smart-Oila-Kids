@@ -353,3 +353,10 @@
 "settings2.parent_pin_locked_out" = "Слишком много попыток. Повторите позже.";
 "settings2.parent_pin_set_unavailable" = "PIN можно задать только сразу после привязки. Привяжите устройство заново в приложении Oila360.";
 "a11y.step_progress" = "Шаг %1$d из %2$d";
+
+/* Screen Time app picker */
+"common.save" = "Сохранить";
+"screentime.picker.restricted.title" = "Выберите приложения";
+"screentime.picker.allowed.title" = "Всегда разрешены";
+"screentime.picker.restricted.hint" = "Выберите приложения, к которым применяются правила. Apple позволяет сделать этот выбор только здесь, на этом телефоне.";
+"screentime.picker.allowed.hint" = "Эти приложения работают даже при блокировке. Добавьте Телефон и Сообщения, чтобы ребёнок всегда мог вам позвонить, и сам Bolajon360.";

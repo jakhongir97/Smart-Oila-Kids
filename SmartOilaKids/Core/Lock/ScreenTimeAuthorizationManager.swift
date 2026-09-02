@@ -58,9 +58,14 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
 
         do {
             if #available(iOS 16.0, *) {
-                // Use the individual flow so the child device can authorize locally
-                // without requiring a Family Sharing child-account setup.
-                try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
+                // `.child`, NOT `.individual`. Under `.individual` the child authorizes for
+                // themselves and can revoke it in Settings whenever they like — which makes every
+                // control in this module optional from the child's side, and is the wrong model for
+                // a parent-controlled product. `.child` requires the PARENT's Apple ID password to
+                // grant and to revoke. It does require the child's Apple ID to be in the parent's
+                // Family Sharing group; a device that is not gets `.unavailable` and the app says so
+                // rather than pretending the feature is on.
+                try await AuthorizationCenter.shared.requestAuthorization(for: .child)
             } else {
                 try await withCheckedThrowingContinuation { continuation in
                     AuthorizationCenter.shared.requestAuthorization { result in

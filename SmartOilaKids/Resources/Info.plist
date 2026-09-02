@@ -47,7 +47,7 @@
 	<key>SMARTOILA_MEDIA_FEATURES_ENABLED</key>
 	<true/>
 	<key>SMARTOILA_SCREEN_TIME_FEATURES_ENABLED</key>
-	<false/>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

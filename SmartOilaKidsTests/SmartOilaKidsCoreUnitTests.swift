@@ -2480,7 +2480,10 @@ final class DeviceLockScheduleSupportTests: XCTestCase {
 
 final class AppRuntimeDefaultsTests: XCTestCase {
     func testDebugRuntimeDefaultsReflectUnsetEnvironment() {
-        XCTAssertFalse(AppRuntime.screenTimeFeaturesEnabled)
+        // Screen Time is now ENABLED in Info.plist. It shipped `false`, which meant the child was
+        // never asked for authorization and no service started — the feature existed only as
+        // unreachable code. Flipping it is what makes the rest of this module run at all.
+        XCTAssertTrue(AppRuntime.screenTimeFeaturesEnabled)
         XCTAssertNil(AppRuntime.debugRoute)
         XCTAssertFalse(AppRuntime.hasDebugRoute)
         XCTAssertNil(AppRuntime.debugSetupStep)
@@ -4749,5 +4752,83 @@ final class SafeIntConversionTests: XCTestCase {
         XCTAssertTrue(parsed.isFinite)
         XCTAssertNil(OilaDeviceClient.safeInt(parsed),
                      "this is the value that used to kill the process")
+    }
+}
+
+// MARK: - Global shield safety
+
+/// THE SAFETY INVARIANT. The global shield used to be `applicationCategories = .all()` with no
+/// exception set, which on iOS covers Phone, Messages and Bolajon360 itself. A child locked that
+/// way could not call a parent and could not open the app holding the SOS button — strictly more
+/// dangerous than the dismissable cover it replaced.
+///
+/// The rule these pin: a global shield is applied ONLY when an always-allowed set exists. Not
+/// configured means clear, never shield-everything.
+@MainActor
+final class GlobalShieldSafetyTests: XCTestCase {
+    private func makeController(
+        configured: Bool,
+        onGlobal: @escaping () -> Void,
+        onClear: @escaping () -> Void
+    ) -> DeviceLockShieldController {
+        DeviceLockShieldController(
+            authorizationStatus: { .granted },
+            applyGlobalShield: onGlobal,
+            applySelectiveShield: { _ in },
+            clearRestrictions: onClear,
+            isGlobalShieldPermitted: { configured }
+        )
+    }
+
+    func testAGlobalLockWithNoAlwaysAllowedSetClearsInsteadOfShieldingEverything() {
+        // The store is unconfigured in a test host: nothing has ever written the app-group keys.
+        XCTAssertFalse(
+            ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: UserDefaults(suiteName: "GlobalShieldSafetyTests.\(UUID().uuidString)")),
+            "a fresh install must not report an always-allowed set"
+        )
+
+        var globalApplied = 0
+        var cleared = 0
+        let controller = makeController(
+            configured: false,
+            onGlobal: { globalApplied += 1 },
+            onClear: { cleared += 1 }
+        )
+
+        controller.applyLockState(true)
+
+        XCTAssertEqual(globalApplied, 0, "a shield that would cover Phone must never be applied")
+        XCTAssertGreaterThan(cleared, 0, "the lock must fail safe by clearing, not by shielding all")
+    }
+
+    func testAnEmptyStoredSelectionIsNotAValidConfiguration() {
+        let suite = "GlobalShieldSafetyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        // The flag alone must not be enough — an empty set excepts nothing, which is the exact
+        // state that put Phone behind the shield.
+        defaults.set(true, forKey: ScreenTimeAlwaysAllowedSharedStore.configuredKey)
+
+        XCTAssertFalse(
+            ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults),
+            "the configured flag without any tokens must not authorize a global shield"
+        )
+    }
+
+    func testAnUndecodableSelectionFailsClosed() {
+        let suite = "GlobalShieldSafetyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(true, forKey: ScreenTimeAlwaysAllowedSharedStore.configuredKey)
+        defaults.set(Data("not a FamilyActivitySelection".utf8),
+                     forKey: ScreenTimeAlwaysAllowedSharedStore.selectionKey)
+
+        // A storage-format change must not silently re-open the hole.
+        XCTAssertTrue(
+            ScreenTimeAlwaysAllowedSharedStore.allowedApplicationTokens(defaults: defaults).isEmpty
+        )
+        XCTAssertFalse(ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults))
     }
 }

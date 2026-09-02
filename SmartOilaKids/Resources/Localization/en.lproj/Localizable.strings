@@ -353,3 +353,10 @@
 "settings2.parent_pin_locked_out" = "Too many attempts. Try again later.";
 "settings2.parent_pin_set_unavailable" = "A PIN can only be set right after linking. Re-link this device from the Oila360 app to set one.";
 "a11y.step_progress" = "Step %1$d of %2$d";
+
+/* Screen Time app picker */
+"common.save" = "Save";
+"screentime.picker.restricted.title" = "Choose apps";
+"screentime.picker.allowed.title" = "Always allowed";
+"screentime.picker.restricted.hint" = "Pick the apps these rules apply to. Apple only lets this choice be made here, on this phone — a parent cannot pick them from the web.";
+"screentime.picker.allowed.hint" = "These apps keep working even when the phone is locked. Include Phone and Messages so your child can always call you, and Bolajon360 itself.";

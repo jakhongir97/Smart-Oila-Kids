@@ -162,7 +162,10 @@ final class DeviceLockShieldControllerTests: XCTestCase {
             authorizationStatus: authorizationStatus ?? { .granted },
             applyGlobalShield: applyGlobalShield ?? {},
             applySelectiveShield: applySelectiveShield ?? { _ in },
-            clearRestrictions: clearRestrictions ?? {}
+            clearRestrictions: clearRestrictions ?? {},
+            // These cases predate the always-allowed requirement and assert the SHIELDING
+            // behaviour, not the safety gate. The gate itself is pinned by GlobalShieldSafetyTests.
+            isGlobalShieldPermitted: { true }
         )
     }
 

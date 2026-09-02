@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C0DE000000000000000000B1 /* ScreenTimeAlwaysAllowedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE000000000000000000A1 /* ScreenTimeAlwaysAllowedStore.swift */; };
+		C0DE000000000000000000B2 /* ScreenTimeAlwaysAllowedSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE000000000000000000A2 /* ScreenTimeAlwaysAllowedSharedStore.swift */; };
+		C0DE000000000000000000B3 /* ScreenTimeAlwaysAllowedSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE000000000000000000A2 /* ScreenTimeAlwaysAllowedSharedStore.swift */; };
+		C0DE000000000000000000B4 /* ScreenTimeAppPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE000000000000000000A3 /* ScreenTimeAppPickerView.swift */; };
 		A1B2C3D4E5F60000000000E5 /* SmartOilaKidsScheduleMonitorExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A1B2C3D4E5F60000000000E6 /* SmartOilaKidsUsageReportExtension.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		02A2F11140840028AD044865 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */; };
@@ -176,6 +180,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C0DE000000000000000000A1 /* ScreenTimeAlwaysAllowedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAlwaysAllowedStore.swift; sourceTree = "<group>"; };
+		C0DE000000000000000000A2 /* ScreenTimeAlwaysAllowedSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAlwaysAllowedSharedStore.swift; sourceTree = "<group>"; };
+		C0DE000000000000000000A3 /* ScreenTimeAppPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAppPickerView.swift; sourceTree = "<group>"; };
 		000EB148968CDFEE38501FBC /* DeviceAppLockSelectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLockSelectionStore.swift; sourceTree = "<group>"; };
 		042E76FA3DD6014AFC4F2B4A /* BolajonPermissionsFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonPermissionsFlowView.swift; sourceTree = "<group>"; };
 		06DAEF47AD8DBAF461964045 /* LocationPermissionManager+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocationPermissionManager+Actions.swift"; sourceTree = "<group>"; };
@@ -311,6 +318,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C0DE000000000000000000C1 /* ScreenTime */ = {
+			isa = PBXGroup;
+			children = (
+				C0DE000000000000000000A3 /* ScreenTimeAppPickerView.swift */,
+			);
+			path = ScreenTime;
+			sourceTree = "<group>";
+		};
 		16B10C18D05E8920F64AC61F /* Tasks */ = {
 			isa = PBXGroup;
 			children = (
@@ -389,6 +404,7 @@
 		3E56C91D3D5260BD667E8B4B /* Lock */ = {
 			isa = PBXGroup;
 			children = (
+				C0DE000000000000000000A1 /* ScreenTimeAlwaysAllowedStore.swift */,
 				CE9548B0248BF51FB0A4C40A /* DeviceApplicationLockPayloadParser.swift */,
 				85A42DCFCDDCD21E9CB47D23 /* DeviceApplicationLockWebSocketService.swift */,
 				F3EC448F6E28C731606F52D2 /* DeviceApplicationRemovalAttemptCoordinator.swift */,
@@ -595,6 +611,7 @@
 		D58ADB73E84E2109E21463C9 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				C0DE000000000000000000C1 /* ScreenTime */,
 				66EDD309FE1D599BA9C5D46F /* Auth */,
 				5D62E1ADB111B2D869E35122 /* Main */,
 				F9EFC7D5BC90296C513DCEBB /* Permissions */,
@@ -615,6 +632,7 @@
 		DE9E5370C750342ED9E36AEA /* DeviceLockSchedule */ = {
 			isa = PBXGroup;
 			children = (
+				C0DE000000000000000000A2 /* ScreenTimeAlwaysAllowedSharedStore.swift */,
 				31CB267462E8296CE7B50CDD /* DeviceControlEventSharedStore.swift */,
 				95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */,
 			);
@@ -854,6 +872,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C0DE000000000000000000B3 /* ScreenTimeAlwaysAllowedSharedStore.swift in Sources */,
 				C0E98A711DFE4543A7BA3C20 /* SmartOilaKidsDeviceActivityMonitorExtension.swift in Sources */,
 				5E1C0A7B4D2F41A9B3C60011 /* L10n.swift in Sources */,
 				B1346442FED346C1AE4965C6 /* DeviceAppLimitSharedStore.swift in Sources */,
@@ -879,6 +898,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C0DE000000000000000000B4 /* ScreenTimeAppPickerView.swift in Sources */,
+				C0DE000000000000000000B2 /* ScreenTimeAlwaysAllowedSharedStore.swift in Sources */,
+				C0DE000000000000000000B1 /* ScreenTimeAlwaysAllowedStore.swift in Sources */,
 				22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */,
 				D92FB27F658843A99A64703B /* DeviceAudioStreaming.swift in Sources */,
 				1B19EA5F7FAA404FA265E868 /* DeviceChatWebSocketService.swift in Sources */,

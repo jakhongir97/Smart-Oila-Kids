@@ -8,10 +8,10 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         super.intervalDidStart(for: activity)
 
         if DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: activity.rawValue) {
-            scheduleStore.shield.applications = nil
-            scheduleStore.shield.applicationCategories = .all()
-            scheduleStore.shield.webDomains = nil
-            scheduleStore.shield.webDomainCategories = .all()
+            // Same shield the app raises, same exceptions — one implementation so the two can never
+            // drift. Without the exception set this CLEARS rather than shielding: a schedule that
+            // fires at 22:00 and covers Phone would strand the child with no way to call a parent.
+            ScreenTimeAlwaysAllowedSharedStore.applyGlobalShield(to: scheduleStore)
             if let dsn = DeviceLockScheduleActivityIdentifier.dsn(from: activity.rawValue) {
                 recordEvent(kind: .scheduleStarted, dsn: dsn)
             }

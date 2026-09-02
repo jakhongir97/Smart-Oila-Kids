@@ -353,3 +353,10 @@
 "settings2.parent_pin_locked_out" = "Juda ko‘p urinish. Keyinroq qayta urinib ko‘ring.";
 "settings2.parent_pin_set_unavailable" = "PIN kodni faqat ulangandan keyin darhol o‘rnatish mumkin. Buning uchun qurilmani Oila360 ilovasidan qayta ulang.";
 "a11y.step_progress" = "%2$d dan %1$d-qadam";
+
+/* Screen Time app picker */
+"common.save" = "Saqlash";
+"screentime.picker.restricted.title" = "Ilovalarni tanlang";
+"screentime.picker.allowed.title" = "Doim ruxsat etilgan";
+"screentime.picker.restricted.hint" = "Qoidalar qaysi ilovalarga tegishli ekanini tanlang. Apple bu tanlovni faqat shu telefonda qilishga ruxsat beradi — ota-ona uni veb-saytdan tanlay olmaydi.";
+"screentime.picker.allowed.hint" = "Bu ilovalar telefon bloklangan paytda ham ishlaydi. Telefon va Xabarlar ilovalarini qo‘shing — bola sizga doim qo‘ng‘iroq qila olsin — va Bolajon360 ning o‘zini ham.";
