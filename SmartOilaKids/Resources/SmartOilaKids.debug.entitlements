@@ -8,11 +8,16 @@
   provisioning profile. Device tokens minted that way are rejected by the sandbox gateway, which
   means the first real-device push bring-up would have failed for a reason unrelated to the code
   under test.
+
+  NOTE: editing capabilities in Xcode's UI rewrites this file and DROPS this comment. If you add a
+  capability here, restore the comment afterwards — it is the only record of why the file exists.
 -->
 <plist version="1.0">
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
+	<key>com.apple.developer.family-controls</key>
+	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.3twn5nw4bl.uz.smartoila.kids</string>

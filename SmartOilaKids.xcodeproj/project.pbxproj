@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D4E5F60000000000E5 /* SmartOilaKidsScheduleMonitorExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A1B2C3D4E5F60000000000E6 /* SmartOilaKidsUsageReportExtension.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		02A2F11140840028AD044865 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */; };
 		033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E35F67AF2A306DA50B1B2381 /* Assets.xcassets */; };
 		069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717167572124BB3D730729A1 /* OilaTelemetryService.swift */; };
@@ -125,6 +127,20 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A1B2C3D4E5F60000000000E1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FC18D17BD5B7480387B00D20;
+			remoteInfo = SmartOilaKidsScheduleMonitorExtension;
+		};
+		A1B2C3D4E5F60000000000E2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D7FAB55786594D5A927B96E4;
+			remoteInfo = SmartOilaKidsUsageReportExtension;
+		};
 		F1A0B1C2D3E4F50617283941 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
@@ -133,6 +149,31 @@
 			remoteInfo = SmartOilaKids;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1B2C3D4E5F60000000000E7 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A1B2C3D4E5F60000000000E5 /* SmartOilaKidsScheduleMonitorExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F60000000000E8 /* Embed ExtensionKit Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				A1B2C3D4E5F60000000000E6 /* SmartOilaKidsUsageReportExtension.appex in Embed ExtensionKit Extensions */,
+			);
+			name = "Embed ExtensionKit Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000EB148968CDFEE38501FBC /* DeviceAppLockSelectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLockSelectionStore.swift; sourceTree = "<group>"; };
@@ -650,10 +691,14 @@
 				EEA838EAC925999ADC328F04 /* Sources */,
 				5015AD37DC8F4C21AC444D4C /* Frameworks */,
 				28887B92E3F6E1CFF7D811DA /* Resources */,
+				A1B2C3D4E5F60000000000E7 /* Embed Foundation Extensions */,
+				A1B2C3D4E5F60000000000E8 /* Embed ExtensionKit Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1B2C3D4E5F60000000000E3 /* PBXTargetDependency */,
+				A1B2C3D4E5F60000000000E4 /* PBXTargetDependency */,
 			);
 			name = SmartOilaKids;
 			packageProductDependencies = (
@@ -943,6 +988,16 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A1B2C3D4E5F60000000000E3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC18D17BD5B7480387B00D20 /* SmartOilaKidsScheduleMonitorExtension */;
+			targetProxy = A1B2C3D4E5F60000000000E1 /* PBXContainerItemProxy */;
+		};
+		A1B2C3D4E5F60000000000E4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D7FAB55786594D5A927B96E4 /* SmartOilaKidsUsageReportExtension */;
+			targetProxy = A1B2C3D4E5F60000000000E2 /* PBXContainerItemProxy */;
+		};
 		F1A0B1C2D3E4F50617283949 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 92844C8577B27B0138F9A882 /* SmartOilaKids */;
