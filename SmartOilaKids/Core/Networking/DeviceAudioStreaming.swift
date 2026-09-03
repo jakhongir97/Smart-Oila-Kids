@@ -1407,8 +1407,38 @@ final class DeviceAudioStreamManager: ObservableObject {
             failedPublisher?.onEnded = nil
             await failedPublisher?.disconnect()
             state = .error(NetworkError.userMessage(for: error))
-            recordMedia(status: "error", event: "audio_start_failed")
+            // Classify the throw into a FIXED, identifier-free vocabulary and append it to the event,
+            // so a start that fails in the field is diagnosable from `log stream` alone. The
+            // background wake seen 2026-09-03 was INTERMITTENT — connect threw once and reached
+            // `audio_live` on the retry — and once the backend flips stream.start to an alert push we
+            // must be able to tell a transient network throw (expected, retries) from a real defect
+            // WITHOUT a debugger on the child's phone. Still greppable by "start_failed".
+            recordMedia(
+                status: "error",
+                event: Self.event(activeMode, "start_failed_\(Self.startFailureReason(for: error))")
+            )
         }
+    }
+
+    /// Compact, identifier-free classification of a start failure, for the media-log vocabulary.
+    /// Never carries a URL, host, token or message — only a fixed token, matching the
+    /// "status and event are fixed vocabularies" invariant `recordMedia` documents.
+    private static func startFailureReason(for error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            switch ns.code {
+            case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost,
+                 NSURLErrorDataNotAllowed, NSURLErrorCannotConnectToHost,
+                 NSURLErrorCannotFindHost:
+                return "offline"
+            case NSURLErrorTimedOut:
+                return "timeout"
+            default:
+                return "network"
+            }
+        }
+        return "other"
     }
 
     /// A `stream.start` that arrived while already publishing. Per the contract this is a RENEWAL,
