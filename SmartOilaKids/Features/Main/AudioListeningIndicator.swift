@@ -15,29 +15,40 @@ struct AudioListeningIndicator: View {
     /// that can never be withdrawn is not consent.
     var onStop: (() -> Void)?
 
-    /// The banner's layout numbers, in one place because two of them are load-bearing rather than
+    /// The bar's layout numbers, in one place because several are load-bearing rather than
     /// decorative: `stopHitTarget` is the only way a child can end a live session, and
-    /// `loweredBy == bottomInset` is what keeps a lowered banner from covering the screen beneath it.
-    /// Both are pinned by `AudioListeningIndicatorLayoutTests`, so a future tidy-up of the paddings
-    /// cannot quietly shrink the one control that must not be fiddly.
+    /// `topBreathing + bottomInset` is the space that keeps a BOTTOM-anchored bar from covering the
+    /// content above it or the home indicator below it. All are pinned by
+    /// `AudioListeningIndicatorLayoutTests`, so a future tidy-up of the paddings cannot quietly
+    /// shrink the one control that must not be fiddly, nor let the bar overlap what it sits on.
+    ///
+    /// This bar lives at the BOTTOM of the screen (see `RootView.disclosing`). It rises up from
+    /// below the home indicator when a session starts and drops back down when the microphone
+    /// closes — the direction is the point: a disclosure that arrives from the bottom reads as "a
+    /// tray slid up", the same vocabulary as a call bar or a now-playing strip, and its leaving is
+    /// the child's confirmation the mic actually stopped.
     enum Metrics {
-        /// Apple's minimum comfortable touch target, and the floor for this row's height.
+        /// Apple's minimum comfortable touch target, and the floor for the Stop control.
         static let stopHitTarget: CGFloat = 44
         /// Inside the capsule. Does NOT set the capsule's height — `stopHitTarget` does — so this is
-        /// pure breathing room and the first thing to give when the ask is "make it more compact".
-        static let capsulePaddingV: CGFloat = 4
-        static let capsulePaddingH: CGFloat = 14
-        /// Outside the capsule: the margin that caps its width so the labels have something to clamp
-        /// against, and the row's own top inset.
-        static let rowInsetH: CGFloat = 12
-        static let topInset: CGFloat = 2
-        /// How far the drawn capsule is pushed down inside its row, and — necessarily equal — the
-        /// bottom padding that reserves that distance so nothing below is overlapped.
-        static let loweredBy: CGFloat = 8
+        /// pure breathing room.
+        static let capsulePaddingV: CGFloat = 5
+        static let capsulePaddingH: CGFloat = 16
+        /// Side margin, so the bar is a floating card with air either side rather than a full-bleed
+        /// band. Also what caps the labels' width so a long translation clamps instead of running to
+        /// the bezel.
+        static let sideMargin: CGFloat = 14
+        /// Gap ABOVE the bar, between it and the content it protects.
+        static let topBreathing: CGFloat = 8
+        /// Gap BELOW the drawn bar, lifting it clear of the home indicator so it settles just above
+        /// the safe area rather than jammed against it.
+        static let bottomInset: CGFloat = 6
 
         static var capsuleHeight: CGFloat { stopHitTarget + capsulePaddingV * 2 }
-        /// Total height the disclosure claims in the root stack.
-        static var rowHeight: CGFloat { topInset + capsuleHeight + loweredBy }
+        /// Total height the disclosure claims in the root stack, above the safe area.
+        static var rowHeight: CGFloat { topBreathing + capsuleHeight + bottomInset }
+        /// Corner radius of the floating card. Half the capsule height keeps the ends fully round.
+        static var cornerRadius: CGFloat { capsuleHeight / 2 }
     }
 
     private var label: String {
@@ -82,46 +93,50 @@ struct AudioListeningIndicator: View {
                 Button(action: onStop) {
                     Text(L10n.tr("audio2.stop"))
                         .font(AppTypography.bodyStrong(13))
-                        // The same problem inverted: coral on the white capsule measured 3.11:1,
-                        // under the 4.5:1 that 13pt bold needs. Matches the banner's fill too.
-                        .foregroundStyle(AppColors.livePresenceCoral)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
+                        // Coral on the white capsule measured 3.11:1, under the 4.5:1 that 13pt bold
+                        // needs, so the Stop label takes the deep end of the gradient (#B20C0C):
+                        // ~7.5:1 on white, and it visually ties the button to the bar it ends.
+                        .foregroundStyle(AppColors.livePresenceCoralDeep)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
                         .background(Capsule().fill(Color.white))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(L10n.tr("audio2.stop")))
-                // 44pt, and the comment that used to sit here claimed it already was. It was 32:
-                // 13pt of text plus 5pt of padding each side is ~26pt of drawn capsule, and the
-                // `minHeight` was the only thing extending it. This is the child's ONLY way to end a
-                // session they can see running, on a banner deliberately sized to be unobtrusive —
-                // the one control in the app that must not be fiddly. `contentShape` makes the whole
-                // frame tappable rather than just the capsule inside it.
+                // 44pt. This is the child's ONLY way to end a session they can see running, on a bar
+                // deliberately sized to stay unobtrusive — the one control in the app that must not
+                // be fiddly. `contentShape` makes the whole frame tappable, not just the capsule.
                 .frame(minWidth: Metrics.stopHitTarget, minHeight: Metrics.stopHitTarget)
                 .contentShape(Rectangle())
             }
         }
-        // Compact, per the product owner's item 5. The 44pt Stop frame — not this padding — is what
-        // sets the capsule's height, so trimming the vertical padding from 9 to 4 is a real 10pt
-        // saving and takes nothing off the hit target: the capsule is now exactly the 44pt target
-        // plus 8pt of breathing room, which is as short as this row can honestly get while the only
-        // way to end a session stays a full-size control.
         .padding(.horizontal, Metrics.capsulePaddingH)
         .padding(.vertical, Metrics.capsulePaddingV)
-        .background(Capsule().fill(AppColors.livePresenceCoral))
-        .shadow(color: AppColors.livePresenceCoral.opacity(0.4), radius: 10, x: 0, y: 4)
-        // Outer margin, applied AFTER the background so it does not pad the capsule's inside. This
-        // is what caps the capsule's width — without it the hugging HStack proposed its ideal width
-        // to the labels, they never had a reason to shrink, and a long translation ran to the bezel.
-        .padding(.horizontal, Metrics.rowInsetH)
-        // Lowered, also per item 5. The offset moves the DRAWN capsule down while `bottom` reserves
-        // the same distance in the row, so the disclosure still cannot overlap the screen underneath
-        // it — that non-overlap is the entire reason RootView gives this a row of its own instead of
-        // an overlay, and it survives this change. Net against build 13: the capsule's top edge sits
-        // 4pt lower (6 → 10) while the row it occupies is 6pt shorter (68 → 62).
-        .padding(.top, Metrics.topInset)
-        .padding(.bottom, Metrics.loweredBy)
-        .offset(y: Metrics.loweredBy)
+        // A floating rounded card with a coral→deep-red gradient, so the bar reads as a solid tray
+        // rather than a flat sticker. The shadow throws UPWARD (negative y) because the bar sits at
+        // the bottom and the light it implies comes from the content above it — a downward shadow on
+        // a bottom bar looks like it is peeling off the screen.
+        .background(
+            RoundedRectangle(cornerRadius: Metrics.cornerRadius, style: .continuous)
+                .fill(AppColors.livePresenceGradient)
+        )
+        .overlay(
+            // A hairline top highlight, the standard trick that makes a gradient surface look lit
+            // rather than printed. Purely decorative; carries no contrast burden.
+            RoundedRectangle(cornerRadius: Metrics.cornerRadius, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+        )
+        .shadow(color: AppColors.livePresenceCoralDeep.opacity(0.45), radius: 14, x: 0, y: -3)
+        // Side margins, applied AFTER the background so they cap the card's width — without this the
+        // hugging HStack proposed its ideal width to the labels, they never had a reason to shrink,
+        // and a long translation ran to the bezel.
+        .padding(.horizontal, Metrics.sideMargin)
+        // The bar is a BOTTOM row: breathing room above it, a small lift above the home indicator
+        // below. `RootView.disclosing` places the whole disclosure below the app content, so this
+        // padding reserves the gaps and the bar can never overlap either neighbour — the non-overlap
+        // that is the entire reason the disclosure is a sibling row and not a floating overlay.
+        .padding(.top, Metrics.topBreathing)
+        .padding(.bottom, Metrics.bottomInset)
         .accessibilityElement(children: .contain)
         // `label`, not the audio string: VoiceOver must say "watching" when the camera is what is
         // live, exactly as the visible text does.

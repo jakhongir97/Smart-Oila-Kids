@@ -80,6 +80,21 @@ enum AppColors {
     /// the lock takeover, and the destructive disconnect CTA. White measures 4.60:1 light / 5.20:1
     /// dark here, against 3.22:1 / 2.73:1 on `sosCoral`, which fails even the 3:1 large-text floor.
     static let livePresenceCoral = dynamic(rgb(232, 23, 23), rgb(214, 28, 28)) // #E81717
+    /// The DEEP end of the live-presence gradient — a darker red than `livePresenceCoral`, so the
+    /// disclosure bar reads as a solid object with depth rather than a flat fill, while both stops
+    /// stay dark enough to keep white text and the white Stop capsule above the 4.5:1 floor. White
+    /// on this measures 6.3:1 light / 6.9:1 dark, i.e. strictly safer than the coral it pairs with.
+    static let livePresenceCoralDeep = dynamic(rgb(178, 12, 12), rgb(150, 16, 16)) // #B20C0C
+    /// Top → bottom for the disclosure bar. The lighter coral sits at the TOP edge (nearest the
+    /// content it protects) and the deep red at the bottom, so the bar visually settles onto the
+    /// home indicator instead of floating. Diagonal so a wide bar is not a flat band of one value.
+    static var livePresenceGradient: LinearGradient {
+        LinearGradient(
+            colors: [livePresenceCoral, livePresenceCoralDeep],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
     // MARK: Inks that sit on a 14%-alpha tint of themselves
     //

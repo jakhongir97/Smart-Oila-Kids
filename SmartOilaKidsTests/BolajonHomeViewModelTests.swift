@@ -831,29 +831,32 @@ final class AudioListeningIndicatorLayoutTests: XCTestCase {
     private typealias Metrics = AudioListeningIndicator.Metrics
 
     /// Stop is the child's ONLY way to end a session they can see running — a consent that cannot be
-    /// withdrawn is not consent — and it lives on a banner deliberately sized to stay unobtrusive.
-    /// The capsule shrank around it; it did not shrink.
+    /// withdrawn is not consent — and it lives on a bar deliberately sized to stay unobtrusive. The
+    /// capsule shrank around it; it did not shrink.
     func testStopKeepsAFullTouchTarget() {
         XCTAssertGreaterThanOrEqual(Metrics.stopHitTarget, 44)
         XCTAssertGreaterThanOrEqual(Metrics.capsuleHeight, Metrics.stopHitTarget,
                                     "the capsule is what the target is drawn inside")
     }
 
-    /// The banner sits lower by being OFFSET inside its row, and an offset moves pixels without
-    /// moving layout. Reserving the same distance below is what stops the drawn capsule spilling
-    /// over the screen beneath it — the non-overlap that is RootView's entire reason for giving the
-    /// disclosure a row instead of an overlay. Lower it further and the row has to grow with it.
-    func testTheDropIsPaidForSoTheBannerStillCannotOverlap() {
-        let drawnBottomEdge = Metrics.topInset + Metrics.loweredBy + Metrics.capsuleHeight
-        XCTAssertLessThanOrEqual(drawnBottomEdge, Metrics.rowHeight)
+    /// The bar is a BOTTOM sibling row: the drawn card plus the gaps above and below it must fit
+    /// inside the height the row claims, or it would overlap the content above or the home indicator
+    /// below — the non-overlap that is RootView's entire reason for giving the disclosure a row
+    /// instead of an overlay.
+    func testTheBarPlusItsGapsFitTheRowSoItCannotOverlap() {
+        let drawn = Metrics.topBreathing + Metrics.capsuleHeight + Metrics.bottomInset
+        XCTAssertEqual(drawn, Metrics.rowHeight, accuracy: 0.5)
     }
 
-    /// "sal kompaktroq qilib pastga tushirib qo'yish kerak" — build 13's row was 6pt of top padding
-    /// plus a 62pt capsule (the 44pt target in 9pt of padding). Both halves of the ask, as numbers.
-    func testTheRowIsShorterAndTheCapsuleSitsLowerThanBuild13() {
-        XCTAssertLessThan(Metrics.rowHeight, 68, "the row has to be more compact than build 13's")
-        XCTAssertGreaterThan(Metrics.topInset + Metrics.loweredBy, 6,
-                             "and the capsule has to start lower down than build 13's")
+    /// It sits at the bottom with air on both sides of the card and a lift above the home indicator,
+    /// and it stays a compact strip rather than growing into a panel.
+    func testTheBarIsCompactAndLiftedOffBothEdges() {
+        XCTAssertLessThan(Metrics.rowHeight, 72, "the bar has to stay a compact strip")
+        XCTAssertGreaterThan(Metrics.topBreathing, 0, "a gap above, so it never touches the content")
+        XCTAssertGreaterThan(Metrics.bottomInset, 0, "a lift above the home indicator")
+        XCTAssertGreaterThan(Metrics.sideMargin, 0, "air either side — a floating card, not a band")
+        XCTAssertEqual(Metrics.cornerRadius, Metrics.capsuleHeight / 2, accuracy: 0.5,
+                       "fully rounded ends")
     }
 }
 

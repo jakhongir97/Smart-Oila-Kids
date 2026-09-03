@@ -15,15 +15,16 @@ struct RootView: View {
             .background(AppColors.screenBackground.ignoresSafeArea())
     }
 
-    /// Puts `content` under the live-session disclosure row.
+    /// Puts `content` ABOVE the live-session disclosure bar, which sits at the bottom of the screen.
     ///
-    /// The banner is a SIBLING of the app, above it in a stack, not an overlay on top of it. As an
-    /// overlay it floated over whatever was already at the top of the screen — on Home that is the
-    /// header, so the child's name and the "Connected" chip sat unreadable underneath it for the
-    /// whole session, and the one piece of UI that has to be unmistakable was the one hiding
-    /// something. `safeAreaInset` does not work here either: every screen is wrapped in a
-    /// `NavigationStack`, which installs its own safe area and ignores an inset applied from outside
-    /// it. Giving the banner its own row is the only placement that cannot cover anything.
+    /// The bar is a SIBLING of the app, below it in a stack, not an overlay on top of it. As an
+    /// overlay it floated over whatever was at that screen edge — and the one piece of UI that has to
+    /// be unmistakable was the one hiding something. `safeAreaInset` does not work here either: every
+    /// screen is wrapped in a `NavigationStack`, which installs its own safe area and ignores an
+    /// inset applied from outside it. Giving the bar its own row is the only placement that cannot
+    /// cover anything. It lives at the BOTTOM because a disclosure that rises from the bottom edge
+    /// reads as a tray sliding up — the call-bar / now-playing vocabulary a child already knows — and
+    /// because the bottom of the child's home is open space, so the content above barely shifts.
     ///
     /// Both places that draw the disclosure go through this helper rather than assembling their own
     /// `VStack`, because the row is no longer just a view: it carries a transition, which needs an
@@ -32,8 +33,8 @@ struct RootView: View {
     /// drawn there at all.
     private func disclosing<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) {
-            liveSessionDisclosure
             content()
+            liveSessionDisclosure
         }
         // The row appears and disappears mid-session, and it is tall enough that everything below it
         // jumps when it does. Animating the whole stack on `isLive` is what turns "the app snapped"
@@ -50,11 +51,11 @@ struct RootView: View {
                 videoUnavailable: audioStream.videoUpgradeFailure != nil,
                 onStop: { audioStream.stopByChild() }
             )
-            // Slides down out of the status bar rather than materialising at full height. Removal
-            // matters more than insertion: when the parent hangs up, the banner leaving is the
-            // child's confirmation that the microphone actually closed, and an instant disappearance
-            // reads as a glitch rather than an answer.
-            .transition(.move(edge: .top).combined(with: .opacity))
+            // Rises up from below the home indicator rather than materialising at full height.
+            // Removal matters more than insertion: when the parent hangs up, the bar dropping back
+            // down is the child's confirmation that the microphone actually closed, and an instant
+            // disappearance reads as a glitch rather than an answer.
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
