@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1DCA71040000000000000203 /* DeviceDiagnosticsReporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000204 /* DeviceDiagnosticsReporterTests.swift */; };
+		1DCA71040000000000000201 /* DeviceDiagnosticsReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000202 /* DeviceDiagnosticsReporter.swift */; };
+		1DCA71040000000000000101 /* LocationPushSharedCredentialTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000102 /* LocationPushSharedCredentialTests.swift */; };
+		1DCA71040000000000000001 /* LocationPushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000006 /* LocationPushService.swift */; };
+		1DCA71040000000000000002 /* LocationPushSharedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000009 /* LocationPushSharedCredential.swift */; };
+		1DCA71040000000000000003 /* LocationPushSharedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000009 /* LocationPushSharedCredential.swift */; };
+		1DCA71040000000000000004 /* LocationPushRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000000A /* LocationPushRegistrar.swift */; };
+		1DCA71040000000000000005 /* SmartOilaKidsLocationPushExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000000B /* SmartOilaKidsLocationPushExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		02A2F11140840028AD044865 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */; };
 		033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E35F67AF2A306DA50B1B2381 /* Assets.xcassets */; };
 		069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717167572124BB3D730729A1 /* OilaTelemetryService.swift */; };
@@ -125,6 +133,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		1DCA71040000000000000016 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1DCA71040000000000000011;
+			remoteInfo = SmartOilaKidsLocationPushExtension;
+		};
 		F1A0B1C2D3E4F50617283941 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
@@ -134,7 +149,30 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		1DCA71040000000000000010 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1DCA71040000000000000005 /* SmartOilaKidsLocationPushExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		1DCA71040000000000000204 /* DeviceDiagnosticsReporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiagnosticsReporterTests.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000202 /* DeviceDiagnosticsReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiagnosticsReporter.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000102 /* LocationPushSharedCredentialTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPushSharedCredentialTests.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000006 /* LocationPushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPushService.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1DCA71040000000000000008 /* SmartOilaKidsLocationPushExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKidsLocationPushExtension.entitlements; sourceTree = "<group>"; };
+		1DCA71040000000000000009 /* LocationPushSharedCredential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPushSharedCredential.swift; sourceTree = "<group>"; };
+		1DCA7104000000000000000A /* LocationPushRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPushRegistrar.swift; sourceTree = "<group>"; };
+		1DCA7104000000000000000B /* SmartOilaKidsLocationPushExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SmartOilaKidsLocationPushExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		000EB148968CDFEE38501FBC /* DeviceAppLockSelectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLockSelectionStore.swift; sourceTree = "<group>"; };
 		042E76FA3DD6014AFC4F2B4A /* BolajonPermissionsFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonPermissionsFlowView.swift; sourceTree = "<group>"; };
 		06DAEF47AD8DBAF461964045 /* LocationPermissionManager+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocationPermissionManager+Actions.swift"; sourceTree = "<group>"; };
@@ -270,6 +308,24 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1DCA7104000000000000000C /* SmartOilaKidsLocationPushExtension */ = {
+			isa = PBXGroup;
+			children = (
+				1DCA71040000000000000006 /* LocationPushService.swift */,
+				1DCA71040000000000000007 /* Info.plist */,
+				1DCA71040000000000000008 /* SmartOilaKidsLocationPushExtension.entitlements */,
+			);
+			path = SmartOilaKidsLocationPushExtension;
+			sourceTree = "<group>";
+		};
+		1DCA7104000000000000000D /* LocationPush */ = {
+			isa = PBXGroup;
+			children = (
+				1DCA71040000000000000009 /* LocationPushSharedCredential.swift */,
+			);
+			path = LocationPush;
+			sourceTree = "<group>";
+		};
 		16B10C18D05E8920F64AC61F /* Tasks */ = {
 			isa = PBXGroup;
 			children = (
@@ -309,6 +365,7 @@
 				1C454AAD40464E05A0321D36 /* SmartOilaKidsUsageReportExtension */,
 				87DBFEFC58E64E618B8FA3B3 /* SmartOilaKidsScheduleMonitorExtension */,
 				F1A0B1C2D3E4F50617283944 /* SmartOilaKidsTests */,
+				1DCA7104000000000000000C /* SmartOilaKidsLocationPushExtension */,
 				636D6521AAF7E23CDDCA2C68 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -316,6 +373,7 @@
 		3259826AA2818E7D2DAA8C16 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				1DCA7104000000000000000D /* LocationPush */,
 				3759284A6614AE980D5F50F0 /* DeviceAppLimits */,
 				DE9E5370C750342ED9E36AEA /* DeviceLockSchedule */,
 				9B1763B1E02BE42B5917AB9B /* ScreenTimeUsage */,
@@ -406,6 +464,7 @@
 				79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */,
 				3F046CE501D64E17BB552F1A /* SmartOilaKidsScheduleMonitorExtension.appex */,
 				F1A0B1C2D3E4F50617283942 /* SmartOilaKidsTests.xctest */,
+				1DCA7104000000000000000B /* SmartOilaKidsLocationPushExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -520,6 +579,8 @@
 		C1555C3164EF0C23E9D187FC /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				1DCA71040000000000000202 /* DeviceDiagnosticsReporter.swift */,
+				1DCA7104000000000000000A /* LocationPushRegistrar.swift */,
 				F3F053E4C25DD32A0EE0D609 /* OilaDeviceAPI.swift */,
 				94C925FD951F4E88BF801EDC /* DeviceAudioStreaming.swift */,
 				90BE4393B632412F9FC38C67 /* DeviceChatWebSocketService.swift */,
@@ -602,6 +663,8 @@
 				F1A0B1C2D3E4F506172839A1 /* SettingsProtectionControllerTests.swift */,
 				F1A0B1C2D3E4F506172839A3 /* BolajonHomeViewModelTests.swift */,
 				F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */,
+				1DCA71040000000000000204 /* DeviceDiagnosticsReporterTests.swift */,
+				1DCA71040000000000000102 /* LocationPushSharedCredentialTests.swift */,
 				F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */,
 			);
 			path = SmartOilaKidsTests;
@@ -643,6 +706,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		1DCA71040000000000000011 /* SmartOilaKidsLocationPushExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1DCA71040000000000000014 /* Build configuration list for PBXNativeTarget "SmartOilaKidsLocationPushExtension" */;
+			buildPhases = (
+				1DCA7104000000000000000E /* Sources */,
+				1DCA7104000000000000000F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SmartOilaKidsLocationPushExtension;
+			packageProductDependencies = (
+			);
+			productName = SmartOilaKidsLocationPushExtension;
+			productReference = 1DCA7104000000000000000B /* SmartOilaKidsLocationPushExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		92844C8577B27B0138F9A882 /* SmartOilaKids */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4706FBD956A243CB5168CB9F /* Build configuration list for PBXNativeTarget "SmartOilaKids" */;
@@ -650,10 +731,12 @@
 				EEA838EAC925999ADC328F04 /* Sources */,
 				5015AD37DC8F4C21AC444D4C /* Frameworks */,
 				28887B92E3F6E1CFF7D811DA /* Resources */,
+				1DCA71040000000000000010 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				1DCA71040000000000000015 /* PBXTargetDependency */,
 			);
 			name = SmartOilaKids;
 			packageProductDependencies = (
@@ -763,11 +846,19 @@
 				D7FAB55786594D5A927B96E4 /* SmartOilaKidsUsageReportExtension */,
 				FC18D17BD5B7480387B00D20 /* SmartOilaKidsScheduleMonitorExtension */,
 				F1A0B1C2D3E4F50617283946 /* SmartOilaKidsTests */,
+				1DCA71040000000000000011 /* SmartOilaKidsLocationPushExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		1DCA7104000000000000000F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		016FEE1A47E64DDB987343BB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -805,6 +896,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1DCA7104000000000000000E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1DCA71040000000000000001 /* LocationPushService.swift in Sources */,
+				1DCA71040000000000000002 /* LocationPushSharedCredential.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		74C668DDF1D44CEBADBAF1C0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -834,6 +934,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1DCA71040000000000000201 /* DeviceDiagnosticsReporter.swift in Sources */,
+				1DCA71040000000000000003 /* LocationPushSharedCredential.swift in Sources */,
+				1DCA71040000000000000004 /* LocationPushRegistrar.swift in Sources */,
 				22BCEF732C10225235B04EF9 /* OilaDeviceAPI.swift in Sources */,
 				D92FB27F658843A99A64703B /* DeviceAudioStreaming.swift in Sources */,
 				1B19EA5F7FAA404FA265E868 /* DeviceChatWebSocketService.swift in Sources */,
@@ -936,6 +1039,8 @@
 				F1A0B1C2D3E4F506172839A0 /* SettingsProtectionControllerTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A2 /* BolajonHomeViewModelTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283A01 /* OilaDeviceClientTests.swift in Sources */,
+				1DCA71040000000000000203 /* DeviceDiagnosticsReporterTests.swift in Sources */,
+				1DCA71040000000000000101 /* LocationPushSharedCredentialTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A4 /* BolajonPermissionChecklistTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -943,6 +1048,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		1DCA71040000000000000015 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1DCA71040000000000000011 /* SmartOilaKidsLocationPushExtension */;
+			targetProxy = 1DCA71040000000000000016 /* PBXContainerItemProxy */;
+		};
 		F1A0B1C2D3E4F50617283949 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 92844C8577B27B0138F9A882 /* SmartOilaKids */;
@@ -974,6 +1084,59 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		1DCA71040000000000000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsLocationPushExtension/SmartOilaKidsLocationPushExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 19;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
+				INFOPLIST_FILE = SmartOilaKidsLocationPushExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.location-push";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1DCA71040000000000000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsLocationPushExtension/SmartOilaKidsLocationPushExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 19;
+				DEVELOPMENT_TEAM = 3TWN5NW4BL;
+				INFOPLIST_FILE = SmartOilaKidsLocationPushExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "uz.smartoila.kids.location-push";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		10CF93DEB7724EFD99390308 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1303,6 +1466,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1DCA71040000000000000014 /* Build configuration list for PBXNativeTarget "SmartOilaKidsLocationPushExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1DCA71040000000000000012 /* Debug */,
+				1DCA71040000000000000013 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		3A1916603E6F4D1BAF62FF3B /* Build configuration list for PBXNativeTarget "SmartOilaKidsScheduleMonitorExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

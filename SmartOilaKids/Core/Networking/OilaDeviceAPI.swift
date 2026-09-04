@@ -288,18 +288,32 @@ struct OilaDeviceStatus {
     /// it does not know" — was an assumption, and it was wrong.
     let locationAuthorization: String?
 
-    /// Explicit init purely so `locationAuthorization` can default: the synthesized memberwise one
+    /// `diagnostics` — why this handset can or cannot do what the parent expects (backend decision
+    /// D-102). Keys and values come from `DeviceDiagnosticsReporter`; see the contract rules there.
+    ///
+    /// This is the surface that supersedes `locationAuthorization` above. The backend declared
+    /// `diagnostics` on `PostDeviceStatusDto` and mirrored it onto the parent's `ChildStatusDto`,
+    /// but it never declared `locationAuthorization` — so that field stays held back and this one
+    /// carries the same information in the vocabulary the contract actually accepts.
+    ///
+    /// Empty means "measured nothing"; the key is then dropped from the body rather than sent as an
+    /// empty object, because the contract reads a missing key as "never reported".
+    let diagnostics: [String: String]?
+
+    /// Explicit init purely so the optional fields can default: the synthesized memberwise one
     /// would have forced every existing three-field call site (and its test doubles) to change.
     init(
         battery: Int?,
         networkType: String?,
         soundMode: String?,
-        locationAuthorization: String? = nil
+        locationAuthorization: String? = nil,
+        diagnostics: [String: String]? = nil
     ) {
         self.battery = battery
         self.networkType = networkType
         self.soundMode = soundMode
         self.locationAuthorization = locationAuthorization
+        self.diagnostics = diagnostics
     }
 }
 
@@ -959,6 +973,15 @@ final class OilaDeviceClient: OilaDeviceServicing {
         if let battery = status.battery { body["battery"] = battery }
         if let network = status.networkType { body["networkType"] = network }
         if let sound = status.soundMode { body["soundMode"] = sound }
+        // `diagnostics` IS declared (D-102), so unlike `locationAuthorization` it is safe to send —
+        // but only with keys the schema documents, because the same `forbidNonWhitelisted` rule
+        // applies inside the map: one unrecognised key 400s the whole liveness post.
+        // `DeviceDiagnosticsReporter.emittableKeys` is the allow-list, and it is filtered again here
+        // rather than trusted, so a future caller cannot widen it by accident.
+        if let diagnostics = status.diagnostics {
+            let permitted = diagnostics.filter { DeviceDiagnosticsReporter.emittableKeys.contains($0.key) }
+            if !permitted.isEmpty { body["diagnostics"] = permitted }
+        }
         // Send even when every field is nil. The backend derives "device offline" from how long it
         // has been since it last heard from this device, so the REQUEST ITSELF is the liveness
         // signal and an empty `{}` is explicitly valid (every field in PostDeviceStatusDto is
@@ -1474,6 +1497,11 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 fieldErrors: []
             )
         }
+        // Keep the location-push extension's credential copy in step with the real token. Without
+        // this the copy would be whatever the token was at the last telemetry start, so the first
+        // push after a rotation would upload with a dead bearer and be answered with a 401 that
+        // nobody is awake to see.
+        Task { @MainActor in LocationPushRegistrar.shared.publishSharedCredential() }
         if let refresh = tokens.refreshToken, !secureTokens.storeRefreshToken(refresh) {
             throw OilaAPIError(
                 statusCode: -1,

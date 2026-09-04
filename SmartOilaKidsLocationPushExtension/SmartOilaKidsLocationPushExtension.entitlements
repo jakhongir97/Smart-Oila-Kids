@@ -2,19 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>aps-environment</key>
-	<string>development</string>
-	<key>com.apple.developer.location.push</key>
-	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.3twn5nw4bl.uz.smartoila.kids</string>
 	</array>
-	<!-- The application-identifier group MUST stay first: it is the default access group, and
-	     SecureTokenStore's items live in it. See the note in SmartOilaKids.entitlements. -->
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)uz.smartoila.kids</string>
 		<string>$(AppIdentifierPrefix)uz.smartoila.kids.shared</string>
 	</array>
 </dict>

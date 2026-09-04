@@ -1,7 +1,10 @@
+import AVFAudio
+import AVFoundation
 import CoreLocation
 import Foundation
 import Network
 import UIKit
+import UserNotifications
 
 // oila360 telemetry pipeline (Bolajon360). Replaces the legacy WebSocket geo service
 // (GeoBackgroundService → backend.smart-oila.uz) for the redesigned flow:
@@ -409,6 +412,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
         applyAuthorization(locationManager.authorizationStatus)
 
+        // Refresh the extension's credential copy at launch: the push arrives when the app is NOT
+        // running, so the copy must already be on disk, and a token rotation in a previous run
+        // leaves it stale. Registering the push address itself is NOT done here — the
+        // `applyAuthorization` call above already did it, and calling
+        // `startMonitoringLocationPushes` twice in one runloop turn leaves two completions racing
+        // over the same stored token.
+        LocationPushRegistrar.shared.publishSharedCredential()
+
         restorePendingSOS()
 
         flushTimer = Timer.scheduledTimer(withTimeInterval: flushInterval, repeats: true) { [weak self] _ in
@@ -585,6 +596,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.lastContactKey)
         UserDefaults.standard.removeObject(forKey: Self.lockConfirmedAtKey)
         hasCredential = true
+        // Same reasoning as the SOS outbox and the contact stamp above: the location-push address
+        // and the extension's credential copy belong to the pairing that made them. Left behind,
+        // they would let a push sent for the previous family be answered by this handset.
+        LocationPushRegistrar.shared.teardown()
     }
 
     // MARK: - SOS outbox
@@ -770,6 +785,19 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     private func applyAuthorization(_ status: CLAuthorizationStatus) {
         guard isRunning else { return }
+        // A downgrade out of Always makes the location-push address undeliverable, and an upgrade
+        // into it makes one mintable — and neither transition otherwise touches this service, so
+        // without this the address would only ever be refreshed at launch.
+        LocationPushRegistrar.shared.refreshRegistration(authorization: status)
+        // Report the change NOW, not at the next 300 s tick.
+        //
+        // A revocation is the one status change that can stop the app being able to report at all:
+        // the `default` branch below halts location updates, the process is suspended shortly after,
+        // and the heartbeat stops with it. Waiting for the timer means the news of the revocation
+        // dies with the process, and the parent is left looking at a stale `granted` forever —
+        // which is precisely the failure `diagnostics` exists to end. Battery and network changes
+        // already post immediately for the same reason.
+        Task { await postStatusForEvent() }
         switch status {
         case .authorizedAlways:
             // Info.plist declares UIBackgroundModes=location, so background updates are safe.
@@ -1030,7 +1058,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             battery: battery,
             networkType: networkType,
             soundMode: nil,
-            locationAuthorization: Self.locationAuthorizationName(for: locationManager.authorizationStatus)
+            locationAuthorization: Self.locationAuthorizationName(for: locationManager.authorizationStatus),
+            diagnostics: await currentDiagnostics()
         )
         do {
             try await service.postDeviceStatus(status)
@@ -1040,6 +1069,29 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         } catch {
             // Ignore transient status-post failures.
         }
+    }
+
+    /// Assemble the `diagnostics` map for the next status post.
+    ///
+    /// Read at post time rather than cached, because every value here can change while the app is
+    /// backgrounded and never tells anyone: the child can revoke location from Settings, iOS can
+    /// downgrade "Always" from its own reminder, Low Power Mode flips on at 20%.
+    ///
+    /// Values are read directly rather than through `LocationPermissionManager`, which is a
+    /// view-scoped `ObservableObject`. Telemetry runs with no UI at all after a background launch,
+    /// so depending on it would make the map silently empty in exactly the situation it explains.
+    private func currentDiagnostics() async -> [String: String] {
+        let notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        let locationServices = await DeviceDiagnosticsReporter.readLocationServicesEnabled()
+        return DeviceDiagnosticsReporter.map(
+            location: locationManager.authorizationStatus,
+            locationServicesEnabled: locationServices,
+            notifications: notifications,
+            microphone: AVAudioSession.sharedInstance().recordPermission,
+            camera: AVCaptureDevice.authorizationStatus(for: .video),
+            backgroundRefresh: UIApplication.shared.backgroundRefreshStatus,
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+        )
     }
 
     private func refreshLock(alreadyClaimed: Bool = false) async {
