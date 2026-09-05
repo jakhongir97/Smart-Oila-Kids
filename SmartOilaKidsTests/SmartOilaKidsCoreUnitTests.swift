@@ -4073,6 +4073,42 @@ final class LocationAcceptanceTests: XCTestCase {
         )
     }
 
+    /// The shape the parent actually complained about: a hub with straight spokes radiating out of
+    /// it, drawn over an afternoon the child spent in one building. Every spoke is a cell-tower fix
+    /// whose apparent movement is smaller than its own uncertainty — the child never went anywhere,
+    /// and the map said they crossed the district and came back a dozen times.
+    func testCoarseFixThatMovedLessThanItsOwnUncertaintyIsRefused() {
+        XCTAssertFalse(
+            OilaTelemetryService.acceptsFix(accuracy: 2500, distanceFromLast: 1200, lastAcceptedAge: 3600),
+            "1.2 km of 'movement' on a 2.5 km-accurate fix is the tower moving, not the child"
+        )
+        XCTAssertTrue(
+            OilaTelemetryService.acceptsFix(accuracy: 2500, distanceFromLast: 40_000, lastAcceptedAge: 3600),
+            "…while a trip to another city clears any tower's uncertainty and must still be reported"
+        )
+    }
+
+    /// A stale pin that gets a SHARP answer is refreshed whatever the displacement. This is the
+    /// stationary child whose phone was asleep for an hour: nothing moved, but the parent should see
+    /// a recent timestamp rather than a position quietly aging into "offline".
+    func testSharpFixRefreshesAStalePinWithoutMoving() {
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 20, distanceFromLast: 0, lastAcceptedAge: 3600))
+        XCTAssertFalse(
+            OilaTelemetryService.acceptsFix(accuracy: 20, distanceFromLast: 0, lastAcceptedAge: 60),
+            "inside the stale window the displacement rule still applies"
+        )
+    }
+
+    /// Past 5 km a fix is not a position, it is a province. Nothing is uploaded and the parent gets
+    /// an honest gap — which the route page can draw as a gap — instead of a confident wrong vertex.
+    func testAFixVaguerThanFiveKilometresIsNeverAccepted() {
+        XCTAssertFalse(OilaTelemetryService.acceptsFix(accuracy: 5001, distanceFromLast: nil))
+        XCTAssertFalse(
+            OilaTelemetryService.acceptsFix(accuracy: 5001, distanceFromLast: 50_000, lastAcceptedAge: 3600)
+        )
+        XCTAssertTrue(OilaTelemetryService.acceptsFix(accuracy: 5000, distanceFromLast: nil))
+    }
+
     func testUnknownAccuracyIsRefused() {
         // CoreLocation reports a negative horizontalAccuracy when it has no confidence at all; the
         // caller maps that to nil. That is not a location.
@@ -4165,13 +4201,14 @@ final class StatusProbeLocationTests: XCTestCase {
         XCTAssertNil(OilaTelemetryService.probeFix(from: nil, newerThan: nil))
     }
 
-    /// CoreLocation's "no confidence" sentinel is a negative accuracy. It must travel as an ABSENT
-    /// `accuracy` — `PostLocationBatchDto` would otherwise be handed a negative metre count.
-    func testInvalidAccuracyIsSentAsAbsentRatherThanNegative() throws {
-        let fix = try XCTUnwrap(
-            OilaTelemetryService.probeFix(from: location(at: Date(), accuracy: -1), newerThan: nil)
-        )
-        XCTAssertNil(fix.accuracy)
+    /// A negative `horizontalAccuracy` condemns the COORDINATE, not just the accuracy figure —
+    /// `CLLocationEssentials.h` calls it "negative if the lateral location is invalid". The probe
+    /// used to null the accuracy and upload the coordinate anyway, and the backend takes it
+    /// (`accuracy` is not required by `LocationPointDto`), so a parent tapping "check in now" could
+    /// be handed a meaningless pin as the answer to exactly the question they asked. Answer with
+    /// status alone instead; `sosUsableLocation` has always worked this way.
+    func testAnInvalidCoordinateIsNotSentAtAll() {
+        XCTAssertNil(OilaTelemetryService.probeFix(from: location(at: Date(), accuracy: -1), newerThan: nil))
     }
 }
 

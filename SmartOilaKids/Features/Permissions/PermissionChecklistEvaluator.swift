@@ -16,7 +16,10 @@ enum PermissionChecklistEvaluator {
     static func isSatisfied(_ requirement: PermissionRequirement, in snapshot: PermissionStatusSnapshot) -> Bool {
         switch requirement {
         case .location:
-            return isLocationSatisfied(snapshot.locationAuthorizationStatus)
+            return isLocationSatisfied(
+                snapshot.locationAuthorizationStatus,
+                accuracy: snapshot.locationAccuracyAuthorization
+            )
         case .usageStats:
             return snapshot.screenTimePermissionStatus == .granted
         case .notifications:
@@ -49,7 +52,10 @@ enum PermissionChecklistEvaluator {
                 return L10n.tr("permissions.status_tap_to_allow")
             }
         case .location:
-            if isLocationSatisfied(snapshot.locationAuthorizationStatus) {
+            if isLocationSatisfied(
+                snapshot.locationAuthorizationStatus,
+                accuracy: snapshot.locationAccuracyAuthorization
+            ) {
                 return L10n.tr("permissions.status_granted")
             }
             switch snapshot.locationAuthorizationStatus {
@@ -60,7 +66,10 @@ enum PermissionChecklistEvaluator {
             case .denied, .restricted:
                 return L10n.tr("permissions.status_open_settings")
             case .authorizedAlways:
-                return L10n.tr("permissions.status_granted")
+                // Reaching here means Always is granted and the row is still unsatisfied, which
+                // leaves exactly one cause: Precise Location is off. Naming it is the whole point —
+                // "granted" here was the message that hid a 5 km-wide trail behind a green row.
+                return L10n.tr("permissions.status_location_precise_required")
             @unknown default:
                 return L10n.tr("permissions.status_open_settings")
             }
@@ -130,7 +139,11 @@ enum PermissionChecklistEvaluator {
             case .denied, .restricted:
                 return L10n.tr("permissions.action_open_settings")
             case .authorizedAlways:
-                return nil
+                // Only reachable with Precise off — `primaryActionTitle` returns early for a
+                // satisfied requirement. There is no prompt for this one: `requestTemporaryFull-
+                // AccuracyAuthorization` grants it until the app is next relaunched, which for a
+                // child's phone is hours, so Settings is the only durable route.
+                return L10n.tr("permissions.action_open_settings")
             @unknown default:
                 return L10n.tr("permissions.action_open_settings")
             }
@@ -183,8 +196,14 @@ enum PermissionChecklistEvaluator {
 
 
 
-    private static func isLocationSatisfied(_ status: CLAuthorizationStatus) -> Bool {
-        status == .authorizedAlways
+    /// Always AND Precise. Both halves are load-bearing and neither is visible on its own: a
+    /// downgrade to "While Using" stops the background trail, and Precise off keeps it running while
+    /// making every point 1–5 km wide. The row is green only when the app can actually do the job.
+    private static func isLocationSatisfied(
+        _ status: CLAuthorizationStatus,
+        accuracy: CLAccuracyAuthorization
+    ) -> Bool {
+        status == .authorizedAlways && accuracy == .fullAccuracy
     }
 
     private static func isLocationOnboardingSatisfied(_ status: CLAuthorizationStatus) -> Bool {

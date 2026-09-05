@@ -26,7 +26,14 @@ extension LocationPermissionManager {
     func requestLocationPermission() {
         switch locationAuthorizationStatus {
         case .authorizedAlways:
-            break
+            // Always is granted, so the only reason this row can still be tapped is Precise Location
+            // being off. iOS offers no durable prompt for it — `requestTemporaryFullAccuracy-
+            // Authorization` lasts until the app is next relaunched — so Settings is the honest
+            // destination. Without this branch the button was inert on the one handset shape where
+            // the permission looks perfect and every fix is kilometres wide.
+            if locationAccuracyAuthorization == .reducedAccuracy {
+                openAppSettings()
+            }
         case .notDetermined:
             requestWhenInUseLocationAuthorization()
         case .authorizedWhenInUse:

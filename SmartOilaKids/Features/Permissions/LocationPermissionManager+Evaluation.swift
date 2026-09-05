@@ -7,6 +7,7 @@ import UserNotifications
 extension LocationPermissionManager {
     func refreshStatuses() {
         setLocationAuthorizationStatus(currentLocationAuthorizationStatus())
+        setLocationAccuracyAuthorization(currentLocationAccuracyAuthorization())
         let currentMicrophonePermission = AVAudioSession.sharedInstance().recordPermission
         let currentCameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
         setMicrophonePermission(currentMicrophonePermission)

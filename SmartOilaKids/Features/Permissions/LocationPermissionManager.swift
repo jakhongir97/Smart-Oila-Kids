@@ -9,6 +9,7 @@ import UserNotifications
 final class LocationPermissionManager: NSObject, ObservableObject {
     @Published private(set) var locationIsNotGranted = true
     @Published private(set) var locationAuthorizationStatus: CLAuthorizationStatus = .notDetermined
+    @Published private(set) var locationAccuracyAuthorization: CLAccuracyAuthorization = .fullAccuracy
     @Published private(set) var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var microphonePermission: AVAudioSession.RecordPermission = .undetermined
     @Published private(set) var cameraAuthorizationStatus: AVAuthorizationStatus = .notDetermined
@@ -36,6 +37,10 @@ final class LocationPermissionManager: NSObject, ObservableObject {
 
     func setLocationAuthorizationStatus(_ value: CLAuthorizationStatus) {
         locationAuthorizationStatus = value
+    }
+
+    func setLocationAccuracyAuthorization(_ value: CLAccuracyAuthorization) {
+        locationAccuracyAuthorization = value
     }
 
     func setNotificationAuthorizationStatus(_ value: UNAuthorizationStatus) {
@@ -67,6 +72,10 @@ final class LocationPermissionManager: NSObject, ObservableObject {
         locationManager.authorizationStatus
     }
 
+    func currentLocationAccuracyAuthorization() -> CLAccuracyAuthorization {
+        locationManager.accuracyAuthorization
+    }
+
     func requestWhenInUseLocationAuthorization() {
         locationManager.requestWhenInUseAuthorization()
     }
@@ -87,6 +96,7 @@ final class LocationPermissionManager: NSObject, ObservableObject {
     func statusSnapshot() -> PermissionStatusSnapshot {
         PermissionStatusSnapshot(
             locationAuthorizationStatus: locationAuthorizationStatus,
+            locationAccuracyAuthorization: locationAccuracyAuthorization,
             notificationAuthorizationStatus: notificationAuthorizationStatus,
             microphonePermission: microphonePermission,
             cameraAuthorizationStatus: cameraAuthorizationStatus,

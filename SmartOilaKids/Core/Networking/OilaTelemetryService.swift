@@ -268,12 +268,31 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// reporting after a background relaunch is far coarser than the ceiling, and a 3 km-accurate
     /// "they are across town" beats a pin frozen since this morning.
     nonisolated private static let staleFixAge: TimeInterval = 600
+    /// The outer bound on the stale branch below. A reading vaguer than this is not a position at
+    /// all — it is "somewhere in this province" — and drawing a route vertex from it is what turns a
+    /// quiet stretch into a straight line across the map. 5 km is the coarsest cell/Wi-Fi answer
+    /// worth keeping; beyond it nothing is uploaded and the parent gets an honest gap instead.
+    nonisolated private static let maxStaleAccuracyM: Double = 5_000
+
+    /// The last accepted fix, persisted. See `restoreLastAcceptedFix`.
+    private static let lastAcceptedFixKey = "OILA_LAST_ACCEPTED_FIX"
+
+    /// Identifier of the single re-centred region used as a relaunch trigger. One region, always
+    /// replaced rather than added to, so the app can never leak toward the 20-region system limit.
+    nonisolated static let relaunchRegionIdentifier = "oila.telemetry.relaunch"
+    /// Radius of that region. Region monitoring is Wi-Fi/cell assisted and Apple's own guidance is
+    /// that anything under ~100 m is unreliable, so a tighter circle would buy inaccuracy rather
+    /// than resolution. At 150 m it fires well before significant-location monitoring, whose
+    /// threshold is ~500 m and can be several kilometres in practice.
+    nonisolated static let relaunchRegionRadiusM: Double = 150
 
     /// The last fix that passed `accepts`, and when. Android keeps the same pair (`lastAccepted`),
     /// and updates it ONLY on acceptance — so a stationary child with drifting GPS never ratchets
     /// the reference point.
     private var lastAcceptedFix: CLLocation?
     private var lastAcceptedFixAt: Date?
+    /// Centre of the region currently armed as a relaunch trigger, or nil when none is.
+    private var relaunchRegionCentre: CLLocationCoordinate2D?
     /// Undelivered panic alerts awaiting retry. See `enqueueUndeliveredSOS`.
     private var pendingSOS: [OilaPendingSOS] = []
     /// Guards `flushPendingSOS` against overlapping runs — see the note there.
@@ -345,6 +364,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // preceded by stop() (unpair / invalidation), which clears the persisted store — so this
         // can only inherit fixes from a killed-then-relaunched run of the SAME session.
         restorePendingFixes()
+        // …and the reference point the queue is measured against. See `restoreLastAcceptedFix`.
+        restoreLastAcceptedFix()
 
         UIDevice.current.isBatteryMonitoringEnabled = true
 
@@ -520,6 +541,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lastAcceptedFix = held
         lastAcceptedFixAt = fix.ts
         persistPendingFixes()
+        persistLastAcceptedFix()
     }
 
     /// The pure half of `queueFreshestKnownFixForProbe`, split out for the same reason `acceptsFix`
@@ -527,16 +549,21 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// unreachable from a test.
     ///
     /// Returns nil when there is no fix at all (location never authorized, or nothing resolved yet)
-    /// or when the newest one is not newer than what has already been reported. A negative
-    /// `horizontalAccuracy` is CoreLocation's "invalid" sentinel and is sent as an absent `accuracy`
-    /// rather than as a negative number, matching `ingestLocations`.
+    /// or when the newest one is not newer than what has already been reported.
+    ///
+    /// A negative `horizontalAccuracy` REFUSES the fix. `CLLocationEssentials.h` defines it as
+    /// "negative if the lateral location is invalid" — the sentinel condemns the COORDINATE, not
+    /// merely the accuracy figure. This used to null the accuracy and upload the coordinate anyway,
+    /// which the backend accepts (`accuracy` is not in `LocationPointDto.required`), so a parent who
+    /// tapped "check in now" could be shown a meaningless pin as a confident answer. `sosUsableLocation`
+    /// and the location-push extension already refuse it; this is the last path that did not.
     nonisolated static func probeFix(from location: CLLocation?, newerThan alreadyReported: Date?) -> OilaLocationFix? {
-        guard let location else { return nil }
+        guard let location, location.horizontalAccuracy >= 0 else { return nil }
         if let alreadyReported, location.timestamp <= alreadyReported { return nil }
         return OilaLocationFix(
             lat: location.coordinate.latitude,
             lng: location.coordinate.longitude,
-            accuracy: location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil,
+            accuracy: location.horizontalAccuracy,
             ts: location.timestamp
         )
     }
@@ -569,9 +596,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
         isRefreshingLock = false
         lockRefreshRequestedWhileBusy = false
+        locationManager.stopMonitoringVisits()
+        clearRelaunchRegion()
         // A new pairing must not measure displacement from the previous child's last position.
         lastAcceptedFix = nil
         lastAcceptedFixAt = nil
+        persistLastAcceptedFix()
         networkType = nil
         lastStatusPostAt = nil
         lastPostedBattery = nil
@@ -732,6 +762,101 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         pendingFixes = Array(restored.suffix(maxQueuedFixes))
     }
 
+    /// Carry the acceptance gate's reference point across a process death.
+    ///
+    /// `lastAcceptedFix` was in-memory only, so every relaunch — and on a child's phone iOS
+    /// relaunches this app constantly, for a significant-location change, for a silent push, after a
+    /// jetsam kill — started with no reference at all. Two things followed. The 30 s interval and
+    /// the 15 m displacement floor were skipped for the first fix each time, so a phone being
+    /// woken repeatedly re-uploaded near-identical points; and `lastAcceptedAge` was nil, which took
+    /// the "nothing recent" escape hatch and admitted a fix of any accuracy. The gate only means
+    /// what it says if it survives the kill.
+    /// Keep a single circular region centred on the child as a RELAUNCH trigger.
+    ///
+    /// This is aimed at one specific handset: the one whose process keeps being killed — force-quit
+    /// by the child, or evicted under memory pressure — where standard updates stop the moment the
+    /// process dies and the only thing left is significant-location monitoring. SLC fires at roughly
+    /// 500 m and, in practice, often much further; those relaunch points, joined up, ARE the long
+    /// straight chords the parent sees drawn across the city. Region monitoring is documented
+    /// alongside SLC and visits as surviving termination (`CLLocationManager.h:57-60`), and a 150 m
+    /// circle fires far sooner, so the app is brought back with a real fix while the child is still
+    /// on the same street rather than in the next district.
+    ///
+    /// Always-only, like every other relaunch source: iOS delivers none of this to a When-In-Use app.
+    private func updateRelaunchRegion(around location: CLLocation) {
+        guard locationManager.authorizationStatus == .authorizedAlways else { return }
+        guard CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self) else { return }
+        guard Self.shouldRecentreRelaunchRegion(
+            currentCentre: relaunchRegionCentre,
+            newFix: location
+        ) else { return }
+
+        clearRelaunchRegion()
+        let region = CLCircularRegion(
+            center: location.coordinate,
+            radius: Self.relaunchRegionRadiusM,
+            identifier: Self.relaunchRegionIdentifier
+        )
+        // Exit only. An entry notification for a region the child is already standing in is either
+        // never delivered or delivered immediately, and neither is a signal worth waking for.
+        region.notifyOnEntry = false
+        region.notifyOnExit = true
+        relaunchRegionCentre = location.coordinate
+        locationManager.startMonitoring(for: region)
+    }
+
+    /// Stop whatever this app is monitoring under its own identifier.
+    ///
+    /// Reads back `monitoredRegions` rather than trusting local state: regions survive the process,
+    /// so after a relaunch the region armed by the PREVIOUS run is still live while
+    /// `relaunchRegionCentre` is nil. Without this the app would accumulate one stale region per
+    /// launch against a hard system limit of 20, and the oldest — arbitrarily far away — would keep
+    /// firing.
+    private func clearRelaunchRegion() {
+        for region in locationManager.monitoredRegions
+        where region.identifier == Self.relaunchRegionIdentifier {
+            locationManager.stopMonitoring(for: region)
+        }
+        relaunchRegionCentre = nil
+    }
+
+    private func persistLastAcceptedFix() {
+        guard let lastAcceptedFix, let lastAcceptedFixAt else {
+            UserDefaults.standard.removeObject(forKey: Self.lastAcceptedFixKey)
+            return
+        }
+        let stored = OilaLocationFix(
+            lat: lastAcceptedFix.coordinate.latitude,
+            lng: lastAcceptedFix.coordinate.longitude,
+            accuracy: lastAcceptedFix.horizontalAccuracy >= 0 ? lastAcceptedFix.horizontalAccuracy : nil,
+            ts: lastAcceptedFixAt
+        )
+        if let data = try? JSONEncoder().encode(stored) {
+            UserDefaults.standard.set(data, forKey: Self.lastAcceptedFixKey)
+        }
+    }
+
+    private func restoreLastAcceptedFix() {
+        guard let data = UserDefaults.standard.data(forKey: Self.lastAcceptedFixKey),
+              let stored = try? JSONDecoder().decode(OilaLocationFix.self, from: data) else {
+            lastAcceptedFix = nil
+            lastAcceptedFixAt = nil
+            return
+        }
+        lastAcceptedFix = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: stored.lat, longitude: stored.lng),
+            altitude: 0,
+            // A stored fix always carries a known accuracy — the gate refuses anything else — so the
+            // fallback is unreachable in practice. It resolves to the ceiling rather than to a
+            // negative sentinel so that a hand-edited defaults entry degrades to "coarse but usable"
+            // instead of poisoning `isMuchBetterThanLast` with an invalid comparison.
+            horizontalAccuracy: stored.accuracy ?? Self.maxAcceptedAccuracyM,
+            verticalAccuracy: -1,
+            timestamp: stored.ts
+        )
+        lastAcceptedFixAt = stored.ts
+    }
+
     /// Flush the queue immediately (e.g. on backgrounding). Takes a background-task
     /// assertion so the final upload isn't killed by app suspension.
     ///
@@ -789,6 +914,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // into it makes one mintable — and neither transition otherwise touches this service, so
         // without this the address would only ever be refreshed at launch.
         LocationPushRegistrar.shared.refreshRegistration(authorization: status)
+        // Tell the CHILD, who is the only person standing next to the switch. Rate-limited to once
+        // a day per reason inside the notifier; see there for why a downgrade is silent otherwise.
+        LocationAssuranceNotifier.evaluate(
+            authorization: status,
+            accuracy: locationManager.accuracyAuthorization
+        )
         // Report the change NOW, not at the next 300 s tick.
         //
         // A revocation is the one status change that can stop the app being able to report at all:
@@ -813,14 +944,51 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             locationManager.pausesLocationUpdatesAutomatically = false
             locationManager.startUpdatingLocation()
             locationManager.startMonitoringSignificantLocationChanges()
+            // Visits survive a relaunch in a way standard updates do not: CoreLocation documents
+            // visit monitoring as delivering "even across application relaunch events"
+            // (`CLLocationManager.h`), so a child whose process was killed still produces an arrival
+            // at school and a departure from it. Each one is a real, GPS-grade coordinate, which is
+            // exactly what the stretch between two SLC chords is missing.
+            locationManager.startMonitoringVisits()
+            // Re-arm the relaunch circle around the last known position at once, rather than
+            // waiting for the first accepted fix of this run — which, on a phone that was just
+            // relaunched in the background, may be minutes away.
+            if let anchor = lastAcceptedFix ?? locationManager.location {
+                updateRelaunchRegion(around: anchor)
+            }
         case .authorizedWhenInUse:
-            locationManager.allowsBackgroundLocationUpdates = false
-            locationManager.pausesLocationUpdatesAutomatically = true
+            // KEEP background delivery alive after a downgrade.
+            //
+            // This branch used to set `allowsBackgroundLocationUpdates = false`, and that single
+            // line is what silenced a downgraded handset. `CLLocationManager.h:456-464` is explicit:
+            // an app authorized only for When-In-Use that STARTED updates in the foreground with
+            // `allowsBackgroundLocationUpdates == YES` keeps receiving them in the background, with
+            // the status-bar indicator showing, "until location updates are stopped or your app is
+            // killed by the user". iOS was willing to keep delivering; we were the ones switching it
+            // off — at the exact moment the child had just answered the system's background-usage
+            // reminder with "Change to Only While Using", so the trail died on the spot and nothing
+            // said why.
+            //
+            // Always is still what the product needs, and `diagnostics` reports the downgrade so the
+            // parent sees it. This is the difference between a degraded trail and no trail.
+            locationManager.allowsBackgroundLocationUpdates = true
+            // Auto-pause would hand back the very delivery this branch exists to preserve, and iOS
+            // does not resume it on its own. Same reasoning as the Always branch above.
+            locationManager.pausesLocationUpdatesAutomatically = false
             locationManager.startUpdatingLocation()
+            // Neither of these is delivered to a When-In-Use app — `CLLocationManager.h:57-60`
+            // documents launch/relaunch for visit, region and significant-change monitoring as
+            // Always-only — so stop them rather than leave them armed and mute.
+            locationManager.stopMonitoringSignificantLocationChanges()
+            locationManager.stopMonitoringVisits()
+            clearRelaunchRegion()
         default:
             // Location declined in onboarding — telemetry degrades to status-only.
             locationManager.pausesLocationUpdatesAutomatically = true
             locationManager.stopUpdatingLocation()
+            locationManager.stopMonitoringSignificantLocationChanges()
+            locationManager.stopMonitoringVisits()
+            clearRelaunchRegion()
         }
     }
 
@@ -1251,6 +1419,68 @@ extension OilaTelemetryService: CLLocationManagerDelegate {
         }
     }
 
+    /// A visit is an arrival at, or a departure from, a place the child actually stayed.
+    ///
+    /// This is the one location source iOS keeps delivering to a relaunched app, so on a handset
+    /// whose process keeps being killed it is the only thing standing between "home at 08:00" and
+    /// "school at 14:00" — the stretch that was being drawn as a single straight line. The
+    /// coordinate is GPS-grade, unlike the significant-change fixes filling the same gap.
+    ///
+    /// `departureDate` is `Date.distantFuture` while the child is still there; the arrival is the
+    /// honest timestamp in that case. Everything goes through the same gate as a normal update, so
+    /// a visit at a place already reported is dropped exactly like a duplicate fix.
+    nonisolated func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+        let isOngoing = visit.departureDate == Date.distantFuture
+        let timestamp = isOngoing ? visit.arrivalDate : visit.departureDate
+        guard visit.horizontalAccuracy >= 0, CLLocationCoordinate2DIsValid(visit.coordinate) else { return }
+        let location = CLLocation(
+            coordinate: visit.coordinate,
+            altitude: 0,
+            horizontalAccuracy: visit.horizontalAccuracy,
+            verticalAccuracy: -1,
+            timestamp: timestamp
+        )
+        Task { @MainActor [weak self] in
+            guard let self, self.isRunning else { return }
+            // Visits are delivered out of order with respect to standard updates — a departure is
+            // reported once CoreLocation is confident it happened, which can be minutes after newer
+            // fixes have already been accepted. `ingestLocations` reads a fix older than its
+            // reference as a CLOCK that moved backwards and drops the reference to recover, so
+            // handing it a backdated visit would clear the gate's memory every time the child left
+            // somewhere. A visit the trail has already moved past adds nothing anyway.
+            if let lastAt = self.lastAcceptedFixAt, location.timestamp <= lastAt { return }
+            self.ingestLocations([location])
+        }
+    }
+
+    /// The child left the circle, which means this process may have been relaunched for it.
+    ///
+    /// `requestLocation()` is what turns the wake into a POINT: the region crossing itself carries
+    /// no usable coordinate, and without asking, the app would be woken and then go straight back to
+    /// sleep having reported nothing. The answer arrives through `didUpdateLocations` and re-centres
+    /// the region on the way past.
+    nonisolated func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+        guard region.identifier == Self.relaunchRegionIdentifier else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.isRunning else { return }
+            self.relaunchRegionCentre = nil
+            self.locationManager.requestLocation()
+        }
+    }
+
+    /// A region that could not be armed is worse than no region: the app would believe it has a
+    /// relaunch trigger it does not have. Drop the local record so the next accepted fix re-arms.
+    nonisolated func locationManager(
+        _ manager: CLLocationManager,
+        monitoringDidFailFor region: CLRegion?,
+        withError error: Error
+    ) {
+        guard region?.identifier == Self.relaunchRegionIdentifier else { return }
+        Task { @MainActor [weak self] in
+            self?.relaunchRegionCentre = nil
+        }
+    }
+
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // Transient CoreLocation errors are expected (e.g. kCLErrorLocationUnknown); queue keeps state.
     }
@@ -1271,18 +1501,53 @@ extension OilaTelemetryService {
     ///   flat 100 m ceiling would reject every one of them and the child's map would freeze wherever
     ///   they were when the process was last killed. Once a RECENT fix exists the ceiling applies in
     ///   full again, so this cannot degrade normal tracking.
+    /// - **…but a coarse fix must have moved further than its own uncertainty.** The stale branch
+    ///   used to admit ANY fix with a known accuracy, and that is the rule that drew the spiderweb
+    ///   the parent complained about: repeated cell-tower fixes all resolve to roughly the same
+    ///   tower centroid, so a child sitting still for an afternoon produced a hub with 2 km spokes
+    ///   radiating out of it, each spoke a straight line to a neighbouring tower's guess. A 3 km-
+    ///   accurate reading 2 km from the last one has not established that the child moved at all.
+    ///   Requiring `distance >= accuracyFactor * accuracy` keeps the case the branch exists for —
+    ///   real travel across a city, which clears any tower's uncertainty by an order of magnitude —
+    ///   and drops the noise. A fix that is merely stale but SHARP is still taken unconditionally,
+    ///   because refreshing a pin the parent is watching is worth more than the displacement rule.
     nonisolated static func acceptsFix(
         accuracy: Double?,
         distanceFromLast: Double?,
         lastAcceptedAge: TimeInterval? = nil
     ) -> Bool {
         guard let accuracy, accuracy >= 0 else { return false }
-        // Nothing to compare against, or nothing recent: a coarse position beats no position.
-        guard let distanceFromLast, let lastAcceptedAge, lastAcceptedAge <= staleFixAge else {
-            return true
+        // Nothing to compare against — the first fix of a run anchors the trail. Still bounded:
+        // "somewhere in this province" is not a starting point, it is a lie with a timestamp.
+        guard let distanceFromLast, let lastAcceptedAge else {
+            return accuracy <= maxStaleAccuracyM
+        }
+        if lastAcceptedAge > staleFixAge {
+            // A good fix while the pin is stale: take it regardless of displacement, so a stationary
+            // child's map still shows a recent timestamp rather than aging into "offline".
+            if accuracy <= maxAcceptedAccuracyM { return true }
+            guard accuracy <= maxStaleAccuracyM else { return false }
+            return distanceFromLast >= accuracyFactor * accuracy
         }
         guard accuracy <= maxAcceptedAccuracyM else { return false }
         return distanceFromLast >= max(minDisplacementM, accuracyFactor * accuracy)
+    }
+
+    /// Whether the relaunch region has to be moved, given where it is now and where the child is.
+    ///
+    /// Pure so the hysteresis is testable: re-centring on every fix would tear down and rebuild a
+    /// system region several times a minute for a child walking down a street, which costs battery
+    /// and — because a freshly started region does not fire until the device has left and re-entered
+    /// it — can leave the app with no relaunch trigger at all during the rebuild. The region is
+    /// moved only once the child is genuinely outside it.
+    nonisolated static func shouldRecentreRelaunchRegion(
+        currentCentre: CLLocationCoordinate2D?,
+        newFix: CLLocation,
+        radius: Double = relaunchRegionRadiusM
+    ) -> Bool {
+        guard let currentCentre else { return true }
+        let centre = CLLocation(latitude: currentCentre.latitude, longitude: currentCentre.longitude)
+        return newFix.distance(from: centre) > radius
     }
 
     /// Applies the gate to a CoreLocation batch and queues whatever survives.
@@ -1354,6 +1619,12 @@ extension OilaTelemetryService {
         guard !accepted.isEmpty else { return }
         pendingFixes = Array((pendingFixes + accepted).suffix(maxQueuedFixes))
         persistPendingFixes()
+        persistLastAcceptedFix()
+        // Re-centre on the newest ACCEPTED fix — the gate has already established it is a real
+        // position the child has actually reached.
+        if let lastAcceptedFix {
+            updateRelaunchRegion(around: lastAcceptedFix)
+        }
     }
 }
 

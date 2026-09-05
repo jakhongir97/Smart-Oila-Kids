@@ -47,6 +47,7 @@
 "permissions.status_granted" = "Granted";
 "permissions.status_tap_to_allow" = "Tap to allow";
 "permissions.status_location_always_required" = "Allow \"Always\" in location settings";
+"permissions.status_location_precise_required" = "Turn on Precise Location";
 "permissions.status_open_settings" = "Open Settings";
 "permissions.status_unavailable" = "Unavailable on this build";
 "permissions.details.body_2" = "Location lets parent see child position and safety events.";
@@ -114,8 +115,15 @@
 "notifications.device_control.remote_lock_unenforceable_title_plural" = "%@ locked apps need app controls";
 "notifications.device_control.remote_lock_unenforceable_body" = "A parent locked %@, but this iPhone has not added it to Screen Time app controls yet, so iOS cannot enforce that lock.";
 "notifications.device_control.remote_lock_unenforceable_body_plural" = "A parent locked %@ apps, but this iPhone has not added them to Screen Time app controls yet, so iOS cannot enforce those locks.";
+"notifications.location_assurance.background_denied_title" = "Location stops when you close the app";
+"notifications.location_assurance.background_denied_body" = "Bolajon360 is set to \"While Using the App\", so your family cannot see where you are once the app is closed. Open Settings and choose \"Always\".";
+"notifications.location_assurance.denied_title" = "Location is off";
+"notifications.location_assurance.denied_body" = "Bolajon360 cannot see where you are. Open Settings and allow location so your family knows you are safe.";
+"notifications.location_assurance.reduced_accuracy_title" = "Your location is only approximate";
+"notifications.location_assurance.reduced_accuracy_body" = "Precise Location is off, so your family sees you kilometres away from where you really are. Open Settings and turn on Precise Location.";
 
 "diagnostics.geo_readiness_value_background_ready" = "Background ready";
+"diagnostics.geo_readiness_value_reduced_accuracy" = "Approximate only";
 "diagnostics.geo_readiness_value_foreground_only" = "Foreground only";
 "diagnostics.geo_readiness_value_not_authorized" = "Action needed";
 "diagnostics.geo_readiness_value_not_linked" = "Not linked";

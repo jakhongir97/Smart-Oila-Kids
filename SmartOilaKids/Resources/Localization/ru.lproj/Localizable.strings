@@ -47,6 +47,7 @@
 "permissions.status_granted" = "Разрешено";
 "permissions.status_tap_to_allow" = "Нажмите, чтобы разрешить";
 "permissions.status_location_always_required" = "Включите \"Всегда\" в геолокации";
+"permissions.status_location_precise_required" = "Включите «Точная геопозиция»";
 "permissions.status_open_settings" = "Откройте Настройки";
 "permissions.status_unavailable" = "Недоступно в этой сборке";
 "permissions.details.body_2" = "Геолокация позволяет родителю видеть местоположение ребенка и события безопасности.";
@@ -114,8 +115,15 @@
 "notifications.device_control.remote_lock_unenforceable_title_plural" = "%@ заблокированных приложений требуют контроля";
 "notifications.device_control.remote_lock_unenforceable_body" = "Родитель заблокировал %@, но этот iPhone ещё не добавил его в Screen Time, поэтому iOS не может применить эту блокировку.";
 "notifications.device_control.remote_lock_unenforceable_body_plural" = "Родитель заблокировал %@ приложений, но этот iPhone ещё не добавил их в Screen Time, поэтому iOS не может применить эти блокировки.";
+"notifications.location_assurance.background_denied_title" = "Геолокация выключается, когда вы закрываете приложение";
+"notifications.location_assurance.background_denied_body" = "Для Bolajon360 выбрано «При использовании», поэтому родные не видят, где вы, после закрытия приложения. Откройте Настройки и выберите «Всегда».";
+"notifications.location_assurance.denied_title" = "Геолокация отключена";
+"notifications.location_assurance.denied_body" = "Bolajon360 не видит, где вы. Откройте Настройки и разрешите геолокацию, чтобы родные знали, что вы в порядке.";
+"notifications.location_assurance.reduced_accuracy_title" = "Ваше местоположение показывается примерно";
+"notifications.location_assurance.reduced_accuracy_body" = "«Точная геопозиция» выключена, поэтому родные видят вас за километры от того места, где вы находитесь. Откройте Настройки и включите её.";
 
 "diagnostics.geo_readiness_value_background_ready" = "Фон готов";
+"diagnostics.geo_readiness_value_reduced_accuracy" = "Только примерно";
 "diagnostics.geo_readiness_value_foreground_only" = "Только foreground";
 "diagnostics.geo_readiness_value_not_authorized" = "Нужно действие";
 "diagnostics.geo_readiness_value_not_linked" = "Не привязано";

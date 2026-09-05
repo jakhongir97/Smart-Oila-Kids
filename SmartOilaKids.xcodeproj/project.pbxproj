@@ -10,6 +10,7 @@
 		1DCA71040000000000000203 /* DeviceDiagnosticsReporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000204 /* DeviceDiagnosticsReporterTests.swift */; };
 		1DCA71040000000000000201 /* DeviceDiagnosticsReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000202 /* DeviceDiagnosticsReporter.swift */; };
 		1DCA71040000000000000101 /* LocationPushSharedCredentialTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000102 /* LocationPushSharedCredentialTests.swift */; };
+		1DCA71040000000000000303 /* LocationAssuranceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000304 /* LocationAssuranceTests.swift */; };
 		1DCA71040000000000000001 /* LocationPushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000006 /* LocationPushService.swift */; };
 		1DCA71040000000000000002 /* LocationPushSharedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000009 /* LocationPushSharedCredential.swift */; };
 		1DCA71040000000000000003 /* LocationPushSharedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000009 /* LocationPushSharedCredential.swift */; };
@@ -60,6 +61,7 @@
 		6E27C030E7CD94583976FDFB /* BolajonSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960DB08C9B3AA4CDF8B04423 /* BolajonSettingsView.swift */; };
 		7035D0F4DFA51CF3C677B465 /* DeviceLockScheduleMonitorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D119B18D174C7731B54000FC /* DeviceLockScheduleMonitorController.swift */; };
 		71A59BA0288247CD5A37B313 /* DeviceControlIntegrityNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA294B762F324E710755FF2E /* DeviceControlIntegrityNotifier.swift */; };
+		1DCA71040000000000000302 /* LocationAssuranceNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000301 /* LocationAssuranceNotifier.swift */; };
 		72F6D3C5E18214B1604AD294 /* LocationPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1242F15864F04C95AF65E92C /* LocationPermissionManager.swift */; };
 		754174CD1B095C5878B7A610 /* ScreenTimeUsageCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8AAD14D93BEA1AEC4822E4 /* ScreenTimeUsageCoordinator.swift */; };
 		754174CE1B095C5878B7A610 /* DeviceApplicationUsageReportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8AAD15D93BEA1AEC4822E4 /* DeviceApplicationUsageReportCoordinator.swift */; };
@@ -167,6 +169,7 @@
 		1DCA71040000000000000204 /* DeviceDiagnosticsReporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiagnosticsReporterTests.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000202 /* DeviceDiagnosticsReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiagnosticsReporter.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000102 /* LocationPushSharedCredentialTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPushSharedCredentialTests.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000304 /* LocationAssuranceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationAssuranceTests.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000006 /* LocationPushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPushService.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1DCA71040000000000000008 /* SmartOilaKidsLocationPushExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKidsLocationPushExtension.entitlements; sourceTree = "<group>"; };
@@ -255,6 +258,7 @@
 		C678BBB83DEE8F99F76A03EE /* BolajonTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonTasksView.swift; sourceTree = "<group>"; };
 		C9624025CFAF4D5BB40E0534 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CA294B762F324E710755FF2E /* DeviceControlIntegrityNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceControlIntegrityNotifier.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000301 /* LocationAssuranceNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationAssuranceNotifier.swift; sourceTree = "<group>"; };
 		CE1622297DBE6E8EBC5D18CF /* PushInboxStore+Read.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PushInboxStore+Read.swift"; sourceTree = "<group>"; };
 		CE9548B0248BF51FB0A4C40A /* DeviceApplicationLockPayloadParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceApplicationLockPayloadParser.swift; sourceTree = "<group>"; };
 		D119B18D174C7731B54000FC /* DeviceLockScheduleMonitorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockScheduleMonitorController.swift; sourceTree = "<group>"; };
@@ -560,6 +564,7 @@
 			children = (
 				20547D1D3DB7FEC2DDCFBDB4 /* DeviceControlEventBridge.swift */,
 				CA294B762F324E710755FF2E /* DeviceControlIntegrityNotifier.swift */,
+				1DCA71040000000000000301 /* LocationAssuranceNotifier.swift */,
 				80AC7AE910384F475050947C /* DeviceControlRecoveryNotifier.swift */,
 				431DBC98997C4C755E64823D /* PushCommandPayload.swift */,
 				07FF2F04EB7460062D6EF53B /* PushCommandRouter.swift */,
@@ -665,6 +670,7 @@
 				F1A0B1C2D3E4F50617283A02 /* OilaDeviceClientTests.swift */,
 				1DCA71040000000000000204 /* DeviceDiagnosticsReporterTests.swift */,
 				1DCA71040000000000000102 /* LocationPushSharedCredentialTests.swift */,
+				1DCA71040000000000000304 /* LocationAssuranceTests.swift */,
 				F1A0B1C2D3E4F506172839A5 /* BolajonPermissionChecklistTests.swift */,
 			);
 			path = SmartOilaKidsTests;
@@ -964,6 +970,7 @@
 				DFF8E9E8A7FB4B1A9393BDC1 /* DeviceControlEventBridge.swift in Sources */,
 				6B4971FF763DA73DA6DA8EF5 /* DeviceControlEventSharedStore.swift in Sources */,
 				71A59BA0288247CD5A37B313 /* DeviceControlIntegrityNotifier.swift in Sources */,
+				1DCA71040000000000000302 /* LocationAssuranceNotifier.swift in Sources */,
 				A88641B7F9CD0A50083576B3 /* DeviceControlRecoveryNotifier.swift in Sources */,
 				E869FC25FABA547134DDBABE /* DeviceGlobalLockPayloadParser.swift in Sources */,
 				1B6F7C60D4C4D1BC1EFA8072 /* DeviceLockCoordinator.swift in Sources */,
@@ -1041,6 +1048,7 @@
 				F1A0B1C2D3E4F50617283A01 /* OilaDeviceClientTests.swift in Sources */,
 				1DCA71040000000000000203 /* DeviceDiagnosticsReporterTests.swift in Sources */,
 				1DCA71040000000000000101 /* LocationPushSharedCredentialTests.swift in Sources */,
+				1DCA71040000000000000303 /* LocationAssuranceTests.swift in Sources */,
 				F1A0B1C2D3E4F506172839A4 /* BolajonPermissionChecklistTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

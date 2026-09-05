@@ -74,7 +74,7 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         Task { @MainActor in
             RuntimeDiagnosticsCenter.shared.updateLifecycle(
                 applicationState: SettingsDiagnosticsValueMapper.applicationState(application.applicationState),
-                lastEvent: launchOptions?[.remoteNotification] == nil ? "launch" : "launch_remote_notification",
+                lastEvent: Self.launchReason(launchOptions),
                 lastForegroundAt: application.applicationState == .active ? launchDate : nil,
                 eventDate: launchDate
             )
@@ -99,6 +99,22 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     /// Same reasoning as `_ = DeviceAudioStreamManager.shared` above: make it a launch-time fact
     /// instead of a side effect of rendering. `start()` is `guard !isRunning`-idempotent, so the
     /// `.onAppear` path stays correct and simply finds it already running.
+    /// Why iOS started this process, as one word for the diagnostics snapshot.
+    ///
+    /// `launchOptions[.location]` is the one that was missing and the one that matters here: it is
+    /// present when the app was relaunched by CoreLocation — a significant-location change, a
+    /// region crossing, a visit — after being terminated. Without it there was no way to tell a
+    /// child's phone that keeps being killed and relaunched (chords across the map, an SLC point at
+    /// each end) from one where background location was simply never running. Both looked like
+    /// "launch". The value rides the lifecycle snapshot the parent's diagnostics already read.
+    static func launchReason(_ launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> String {
+        // Checked FIRST: a location relaunch can also carry a remote notification, and the location
+        // half is the rarer, more diagnostic of the two.
+        if launchOptions?[.location] != nil { return "launch_location" }
+        if launchOptions?[.remoteNotification] != nil { return "launch_remote_notification" }
+        return "launch"
+    }
+
     private func armTelemetryIfPaired() {
         // Gate on exactly what `syncGeoService` gates on, plus a real credential. Telemetry before
         // onboarding completes would fire an OS permission prompt mid-setup, and telemetry without

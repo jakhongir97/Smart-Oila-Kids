@@ -7,6 +7,11 @@ import UserNotifications
 enum SettingsDiagnosticsValueMapper {
     enum GeoTrackingReadiness: Equatable {
         case backgroundReady
+        /// Always is granted, but Precise Location is off. The app is tracking and will keep
+        /// tracking — every fix is simply 1–5 km wide, which on a map is a different town. This is
+        /// the one location failure with NO other symptom: the pin moves, the device is online, the
+        /// permission row is green, and the trail is wrong. It earns its own case for that reason.
+        case reducedAccuracy
         case foregroundOnly
         case notAuthorized
         case notLinked
@@ -104,9 +109,12 @@ enum SettingsDiagnosticsValueMapper {
         }
     }
 
+    /// - Parameter accuracyAuthorization: defaults to `.fullAccuracy` so a caller that has not yet
+    ///   read it reports what it can see rather than accusing the child of something unverified.
     static func geoTrackingReadiness(
         dsn: String?,
-        locationAuthorizationStatus: CLAuthorizationStatus
+        locationAuthorizationStatus: CLAuthorizationStatus,
+        accuracyAuthorization: CLAccuracyAuthorization = .fullAccuracy
     ) -> GeoTrackingReadiness {
         guard normalizedTrackingDSN(dsn) != nil else {
             return .notLinked
@@ -114,7 +122,10 @@ enum SettingsDiagnosticsValueMapper {
 
         switch locationAuthorizationStatus {
         case .authorizedAlways:
-            return .backgroundReady
+            // Checked only under Always: under When-In-Use the missing background grant is the
+            // larger problem and naming the accuracy one instead would send the child to the wrong
+            // switch in Settings.
+            return accuracyAuthorization == .reducedAccuracy ? .reducedAccuracy : .backgroundReady
         case .authorizedWhenInUse:
             return .foregroundOnly
         case .notDetermined, .denied, .restricted:
@@ -128,6 +139,8 @@ enum SettingsDiagnosticsValueMapper {
         switch readiness {
         case .backgroundReady:
             return L10n.tr("diagnostics.geo_readiness_value_background_ready")
+        case .reducedAccuracy:
+            return L10n.tr("diagnostics.geo_readiness_value_reduced_accuracy")
         case .foregroundOnly:
             return L10n.tr("diagnostics.geo_readiness_value_foreground_only")
         case .notAuthorized:
@@ -188,7 +201,7 @@ enum SettingsDiagnosticsValueMapper {
         let readinessValue = geoTrackingReadinessValue(readiness)
 
         switch readiness {
-        case .backgroundReady, .foregroundOnly:
+        case .backgroundReady, .reducedAccuracy, .foregroundOnly:
             guard let lastLocationAt else {
                 return String(
                     format: L10n.tr("settings.diagnostics_geo_summary_no_fix"),
@@ -219,6 +232,10 @@ enum SettingsDiagnosticsValueMapper {
         case .backgroundReady:
             guard let lastLocationAt else { return .waitingForFix }
             return now.timeIntervalSince(lastLocationAt) <= liveThreshold ? .live : .stale
+        case .reducedAccuracy:
+            // Not `.live`, however fresh the fix is. A recent 3 km-wide answer is the failure this
+            // case exists to name, and a green "Live" badge over it is the lie being fixed.
+            return .actionNeeded
         case .foregroundOnly:
             return .foregroundOnly
         case .notAuthorized:
@@ -253,7 +270,7 @@ enum SettingsDiagnosticsValueMapper {
         let readinessValue = geoTrackingReadinessValue(readiness)
 
         switch readiness {
-        case .backgroundReady, .foregroundOnly:
+        case .backgroundReady, .reducedAccuracy, .foregroundOnly:
             guard let lastLocationAt else {
                 return String(
                     format: L10n.tr("main.parent_tracking_summary_no_fix"),
@@ -290,7 +307,7 @@ enum SettingsDiagnosticsValueMapper {
         }
 
         switch readiness {
-        case .backgroundReady, .foregroundOnly:
+        case .backgroundReady, .reducedAccuracy, .foregroundOnly:
             let localCoordinates = geoCoordinates(latitude: localLatitude, longitude: localLongitude)
             if localCoordinates != "-" {
                 return String(
@@ -348,7 +365,10 @@ enum SettingsDiagnosticsValueMapper {
                 return L10n.tr("main.parent_tracking_action_checking")
             }
             return L10n.tr("main.parent_tracking_action_check_now")
-        case .notAuthorized:
+        case .reducedAccuracy, .notAuthorized:
+            // Both send the child to the same place, and in both cases "check now" would just
+            // re-fetch the same wrong answer. `locationActionTitle` is the permission checklist's
+            // own wording, so the two screens cannot drift apart.
             return locationActionTitle
         case .notLinked:
             return nil

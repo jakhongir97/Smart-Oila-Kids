@@ -47,6 +47,7 @@
 "permissions.status_granted" = "Ruxsat berilgan";
 "permissions.status_tap_to_allow" = "Ruxsat berish uchun bosing";
 "permissions.status_location_always_required" = "Lokatsiyada \"Har doim\"ni yoqing";
+"permissions.status_location_precise_required" = "\"Aniq joylashuv\"ni yoqing";
 "permissions.status_open_settings" = "Sozlamalarni oching";
 "permissions.status_unavailable" = "Bu buildda mavjud emas";
 "permissions.details.body_2" = "Lokatsiya ota-onaga bolaning joylashuvi va xavfsizlik holatini ko‘rsatadi.";
@@ -114,8 +115,15 @@
 "notifications.device_control.remote_lock_unenforceable_title_plural" = "%@ ta bloklangan ilova nazoratni talab qiladi";
 "notifications.device_control.remote_lock_unenforceable_body" = "Ota-ona %@ ni blokladi, lekin bu iPhone uni hali Screen Time nazoratiga qo'shmagan, shuning uchun iOS bu blokni qo'llay olmaydi.";
 "notifications.device_control.remote_lock_unenforceable_body_plural" = "Ota-ona %@ ta ilovani blokladi, lekin bu iPhone ularni hali Screen Time nazoratiga qo'shmagan, shuning uchun iOS bu bloklarni qo'llay olmaydi.";
+"notifications.location_assurance.background_denied_title" = "Ilovani yopsangiz, joylashuv to‘xtaydi";
+"notifications.location_assurance.background_denied_body" = "Bolajon360 uchun \"Ilovadan foydalanilganda\" tanlangan, shuning uchun ilova yopilgach oilangiz qayerdaligingizni ko‘rmaydi. Sozlamalarni oching va \"Har doim\"ni tanlang.";
+"notifications.location_assurance.denied_title" = "Joylashuv o‘chirilgan";
+"notifications.location_assurance.denied_body" = "Bolajon360 qayerdaligingizni ko‘rmayapti. Sozlamalarni oching va joylashuvga ruxsat bering — oilangiz xotirjam bo‘lsin.";
+"notifications.location_assurance.reduced_accuracy_title" = "Joylashuvingiz taxminiy ko‘rsatilmoqda";
+"notifications.location_assurance.reduced_accuracy_body" = "\"Aniq joylashuv\" o‘chirilgan, shuning uchun oilangiz sizni haqiqiy joydan kilometrlar narida ko‘radi. Sozlamalarni oching va uni yoqing.";
 
 "diagnostics.geo_readiness_value_background_ready" = "Fon tayyor";
+"diagnostics.geo_readiness_value_reduced_accuracy" = "Faqat taxminiy";
 "diagnostics.geo_readiness_value_foreground_only" = "Faqat foreground";
 "diagnostics.geo_readiness_value_not_authorized" = "Amal kerak";
 "diagnostics.geo_readiness_value_not_linked" = "Ulanmagan";
