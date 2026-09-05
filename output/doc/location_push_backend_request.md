@@ -2,6 +2,21 @@
 
 **Send to:** the backend owner, in the team group.
 **Copy for the product owner afterwards:** the last block, explaining why this needs a new build.
+**Formal contract:** `output/doc/location_integration_spec.md` (v1.1). Send it alongside — this file
+is the ask, that file is the specification, and it answers the follow-up questions.
+
+> **Status, 2026-09-05.** The `.p8` is **verified against Apple**: a probe signed with key
+> `LM7QD5RP9H` / team `3TWN5NW4BL` is answered `400 BadDeviceToken`, not `403 InvalidProviderToken`,
+> which means Apple accepted the provider JWT and rejected only the deliberately-fake device token.
+> The topic `uz.smartoila.kids.location-query` is **not** yet proven — APNs rejects on the device
+> token before it examines the topic, so only a real handset can confirm it.
+>
+> Also worth saying when you send this: **most of the location work in build 20 does not depend on
+> this request at all.** Background delivery surviving a "While Using" downgrade, visit and region
+> relaunch, the acceptance gate no longer drawing a web of straight lines around a stationary child,
+> and the child being told when their own settings have broken tracking — all of that ships in the
+> next build with no server change. The two asks below buy the one thing none of it can: a position
+> from a phone that is not running and whose owner has not moved.
 
 ---
 
@@ -92,8 +107,15 @@ Steps 1 and 4 are done and tested. Steps 2 and 3 are the message below.
 > **2. Send the push directly through APNs.**
 >
 > **FCM cannot send this.** FCM sets its own topic and push type and they cannot be overridden. So
-> this push has to bypass FCM and go straight to APNs. We already have the `.p8` key. Token-based
-> auth (JWT/ES256) only — certificate auth does not work for this push type at all.
+> this push has to bypass FCM and go straight to APNs. We already have the `.p8` key, and I have
+> **checked it against Apple** — the signature and the key/team pair are accepted; the only thing
+> rejected was the fake device token I probed with. Token-based auth (JWT/ES256) only — certificate
+> auth does not work for this push type at all.
+>
+> One practical note that will cost you an hour otherwise: **do not mint a new JWT per request.**
+> Apple throttles frequent provider-token refresh, and when it does it answers
+> `403 InvalidProviderToken` — which reads exactly like a bad key. Cache the JWT and reuse it for
+> up to an hour. I hit this while testing and briefly concluded the key was broken; it was not.
 >
 > ```
 > POST https://api.push.apple.com/3/device/<LOCATION_PUSH_TOKEN>     (production)
@@ -204,8 +226,16 @@ Steps 1 and 4 are done and tested. Steps 2 and 3 are the message below.
 >
 > **FCM buni yubora olmaydi** — FCM o'zining topic va push-type'ini qo'yadi, uni o'zgartirib
 > bo'lmaydi. Shuning uchun bu push FCM'ni chetlab o'tib, to'g'ridan-to'g'ri APNs'ga ketishi kerak.
-> Bizda allaqachon `.p8` kalit bor (project-level, ikkala environment uchun ham ishlaydi).
-> Token-based auth (JWT/ES256) — sertifikat bilan bu push turi umuman ishlamaydi.
+> Bizda allaqachon `.p8` kalit bor (project-level, ikkala environment uchun ham ishlaydi) va men uni
+> **Apple'da tekshirib ko'rdim** — kalit va imzo qabul qilindi, faqat men ataylab noto'g'ri qo'ygan
+> qurilma tokeni rad etildi. Token-based auth (JWT/ES256) — sertifikat bilan bu push turi umuman
+> ishlamaydi.
+>
+> Bir amaliy maslahat, aks holda bir soat vaqtingizni oladi: **har so'rovga yangi JWT yasamang.**
+> Apple tez-tez yangilanadigan provider token'ni throttle qiladi va o'shanda `403
+> InvalidProviderToken` qaytaradi — bu xuddi kalit noto'g'ridek ko'rinadi. JWT'ni cache qilib, bir
+> soatgacha qayta ishlating. Men test paytida shunga duch keldim va kalit buzuq deb o'ylab qoldim —
+> aslida kalit joyida edi.
 >
 > ```
 > POST https://api.push.apple.com/3/device/<LOCATION_PUSH_TOKEN>     (prod)

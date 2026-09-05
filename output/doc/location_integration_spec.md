@@ -2,11 +2,12 @@
 
 | | |
 |---|---|
-| **Version** | 1.0 |
-| **Date** | 2026-09-04 |
+| **Version** | 1.1 |
+| **Date** | 2026-09-05 |
 | **Applies to** | iOS child application `uz.smartoila.kids`, build 20 and later |
 | **Backend** | `https://api.oila360.uz/api/v1` — ingest surface (`docs/ingestion.json`) and control surface (`docs/api.json`) |
-| **Status** | Client changes implemented and unit-tested. Two backend items outstanding (§7). No device testing yet. |
+| **Status** | **Every client-side change is implemented and green (479 unit tests, 0 warnings).** Two backend items block the last feature (§7.1); everything else on this list works without them. No device testing yet. |
+| **Changes in 1.1** | §3.1.1 (five relaunch sources, three of them new), the acceptance-gate rules in §3.1, the persisted gate reference, Precise Location surfaced on the device (§4.4, §6/F5), and §8 rewritten to what actually shipped. The 500 m stale cap proposed in 1.0 was **not** implemented — §3.1 explains what replaced it and why. |
 
 This document is the contract between the iOS child application and the backend for everything
 concerning a child's location: what the device measures, what it transmits, what the server must
@@ -39,12 +40,13 @@ testing and fail in the field.
 | C1 | iOS has no equivalent of an Android foreground service. There is no way to guarantee a process keeps running. | Continuous tracking survives only while the process lives. |
 | C2 | Under **Always** authorization with the `location` background mode, iOS exempts the app from normal suspension while location updates are running. | A correctly configured Always device does produce a dense trail. |
 | C3 | Under **While Using**, background delivery ends when the process is killed, and no monitoring API can relaunch the app. | A While-Using child reports only while the app is on screen. |
-| C4 | After a force-quit or a memory eviction, only significant-change, region or visit monitoring can relaunch the app — and only under Always. Significant-change fires at roughly 500 m. | Every trip after a kill begins with a gap of several hundred metres. |
+| C4 | After a force-quit or a memory eviction, only significant-change, region or visit monitoring can relaunch the app — and only under Always. Significant-change fires at roughly 500 m, often much further. | Every trip after a kill begins with a gap. The client now arms all three (§3.1.1) so the gap is as short as iOS allows. |
 | C5 | iOS periodically shows Always apps a background-usage reminder offering "Change to Only While Using". One tap moves the device from C2 to C3, anywhere on the device, without the app running. | Authorization can be lost silently at any moment. |
 | C6 | `requestAlwaysAuthorization()` prompts **once per installation**. After that it is a silent no-op. | The app cannot recover C5 by itself. Only Settings can. |
 | C7 | A **location push** launches the app's Location Push Service Extension even when the app is not running — but only under Always. | This is the only server-initiated position on iOS. |
 | C8 | Reduced accuracy ("Precise Location" off) still reports as an authorized state, while every fix degrades to roughly 1–5 km. | A child can look fully permitted and still be untrackable. |
 | C9 | Keychain items protected `AfterFirstUnlock` are unreadable until the phone is unlocked once after a reboot. | A rebooted phone cannot authenticate until first unlock. |
+| C10 | A cell/Wi-Fi fix reports 1–3 km of uncertainty, and repeated ones resolve to roughly the same tower centroid. | Admitting them as route vertices draws a hub with kilometre-long spokes around a child who never moved. The uncertainty must be compared against the claimed movement, on both sides of the wire (§3.1, §6.2). |
 
 ---
 
@@ -77,7 +79,9 @@ location-push extension.
 | Accuracy ceiling | 100 m | Rejects cell-tower-only fixes that place a child on the wrong side of a city. |
 | Displacement floor | `max(15 m, 1.5 × accuracy)` | Prevents GPS noise drawing a walk around a stationary child. |
 | Better-fix exception | A fix ≥ 20 m more accurate is accepted inside the 30 s window | A sharper reading of the same place is worth more than the interval saves. |
-| Stale rule | After 600 s with no accepted fix, a coarse fix is accepted | After a background relaunch, coarse is all that is available. Capped at 500 m from build 20. |
+| Stale rule | After 600 s with no accepted fix: a fix ≤ 100 m is accepted regardless of displacement; a coarser one only if it has moved **further than `1.5 × accuracy`** | After a background relaunch, coarse is all that is available — but a 3 km-accurate fix 1 km from the last one has not established that the child moved at all (C10). A flat 500 m cap was considered and rejected: it would discard the genuine cross-city travel this branch exists to carry. |
+| Absolute ceiling | 5000 m | Beyond this a reading is a province, not a position. Nothing is uploaded, and the parent gets a gap the route page can draw as a gap. |
+| Gate reference | Persisted across process death | Was in-memory only. Every relaunch — and a child's phone is relaunched constantly — skipped the interval and displacement rules for its first fix and took the stale branch with no reference to compare against. |
 | Queue cap | 400 fixes (≈ 3.3 h offline) | Oldest are dropped beyond this. |
 | Upload chunk | 250 items | Below the 500 `maxItems` limit even after a failed batch is requeued. |
 | Retry | Failed batch is re-queued, bounded; drain stops at the first failure | Order is preserved. |
@@ -86,6 +90,28 @@ location-push extension.
 **Server obligations:** accept a batch whose timestamps are in the past (an offline backlog is
 normal); reject the whole batch on a malformed `ts` (documented, and the client depends on it);
 treat `accepted` as a write receipt only.
+
+#### 3.1.1 Where the fixes come from
+
+Five independent sources feed the single endpoint above. **The server cannot tell them apart, and
+does not need to** — this table exists so that a gap in the data can be reasoned about rather than
+guessed at. Everything except the first two requires **Always**; iOS delivers none of them to a
+While-Using app.
+
+| Source | Runs when | Relaunches a killed app | Typical accuracy | Notes |
+|---|---|---|---|---|
+| Standard updates | Process alive, any authorization | no | 5–65 m | The dense trail. Under Always the process is exempt from suspension while these run (C2). |
+| Significant-change | Always | **yes** | 0.1–3 km | Fires at ~500 m or more. Its relaunch points, joined up, are the long chords the parent sees. |
+| Visit monitoring | Always | **yes** | GPS-grade | New in build 20. Arrivals and departures at places the child actually stayed — real coordinates inside the stretch that was previously one straight line. |
+| Relaunch region | Always | **yes** | GPS-grade | New in build 20. One 150 m circle re-centred on the child with hysteresis; brings a killed process back long before significant-change would. Exactly one region is ever armed, and a region left behind by a previous process is torn down on the next launch. |
+| Location-push extension | Always, **server-initiated** | **yes** | GPS-grade | §5. The only source that does not need the child to move. **Blocked on B1/B2.** |
+
+Two consequences worth stating plainly:
+
+- **A quiet stretch is not proof the app is broken.** Under Always with the process alive and the
+  child stationary, zero fixes is the correct output (F11).
+- **Only the last row is under the server's control.** Everything above it depends on the child
+  moving. That is the entire argument for B1 and B2.
 
 ### 3.2 `POST /api/v1/device/status`
 
@@ -178,7 +204,7 @@ Ordered by value. The client can measure all of these today; none may be sent un
 
 | Proposed key | Values | Why it matters | Cost to client |
 |---|---|---|---|
-| `locationPrecise` | `granted`/`denied` | **Highest value of the four.** With Precise Location off, every other key still reads `granted` while fixes degrade to 1–5 km. Today this state is completely invisible and looks exactly like a device with bad GPS. | one property read (`CLLocationManager.accuracyAuthorization`) |
+| `locationPrecise` | `granted`/`denied` | **Highest value of the four, and the only failure in §6 that the server still cannot see.** With Precise Location off, every other key reads `granted` while fixes degrade to 1–5 km. As of build 20 the client reads it, refuses to mark its own permission row green without it, and tells the child on their own phone — but it has nowhere to put it on the wire, so the **parent** still cannot be told. One key closes that. | zero — already read and published locally |
 | `locationPushReady` | `granted`/`denied` | Whether this handset has a usable location-push address. Lets the server skip pushes that cannot be delivered instead of spending the child's battery discovering it. | already computed |
 | `motionActivity` | 4 values | Motion & Fitness authorization improves visit and significant-change quality. | one property read |
 | `screenTimeAuthorization` | 4 values | Distinct from `usageAccess`; relevant only if Family Controls ships. | already computed |
@@ -279,11 +305,11 @@ use to identify it.
 
 | # | Cause | What the parent sees | How to detect it |
 |---|---|---|---|
-| F1 | Authorization downgraded to While Using (C5) | Points only while the app is open; long straight lines between | `locationBackground: denied` |
+| F1 | Authorization downgraded to While Using (C5) | Points while the app is open, and — from build 20 — for as long afterwards as the process survives; long straight lines across every kill | `locationBackground: denied` |
 | F2 | Child denied location | No new points at all | `location: denied` + `locationServices: granted` |
 | F3 | Location Services off device-wide | No new points at all | `location: denied` + `locationServices: denied` |
 | F4 | Screen Time / MDM restriction | No new points at all | `location: unavailable` |
-| F5 | Precise Location off (C8) | Points arrive but land 1–5 km wrong | **Not currently detectable.** Needs `locationPrecise` (§4.4). Heuristic until then: sustained `accuracy > 500` on every fix. |
+| F5 | Precise Location off (C8) | Points arrive but land 1–5 km wrong | **Still not detectable server-side.** Needs `locationPrecise` (§4.4, B3). The child is now warned on the device, so this may self-resolve — but nobody on the server or parent side can see it or confirm it. Heuristic until then: sustained `accuracy > 500 m` on every fix from one device. |
 | F6 | App force-quit or evicted (C4) | Gap, then the trail resumes ~500 m later | `lastSeenAt` stale while `diagnostics` still `granted`, and `diagnosticsAt` is old |
 | F7 | Phone off / no signal | Gap, then a burst of backdated points | Backlog arrives with old `ts`, fresh `lastSeenAt` |
 | F8 | Low Power Mode | Sparser trail | `lowPowerMode: denied` |
@@ -291,6 +317,7 @@ use to identify it.
 | F10 | Rebooted, not yet unlocked (C9) | Silence until first unlock | `lastSeenAt` stale; no diagnostics either |
 | F11 | Stationary child | No new points — **correct behaviour, not a fault** | `lastSeenAt` fresh, newest fix old |
 | F12 | Offline backlog exceeded 400 fixes | Oldest points of a long offline stretch are missing | Not detectable server-side. Accepted limitation. |
+| F13 | Coarse fixes drawn as route vertices (C10) | A hub with kilometre-long spokes radiating from it, over a period the child spent in one building | `accuracy` on the stored points. Build 20 stops the client producing this; **historical rows already in the database still contain it**, and any client that draws a confident line between two 3 km-accurate points will still render it. See §6.2. |
 
 **F11 is the one that must not be mistaken for a failure.** A stationary child legitimately produces
 no fixes while the device checks in normally. The distinction between F11 and F6 is precisely
@@ -314,6 +341,24 @@ else:
 
 `15 min` should be a single server-side constant. The clients currently disagree about what
 "online" means; a server-derived state removes the disagreement.
+
+### 6.2 Rendering obligations — the half no permission can fix
+
+Two of the shapes in the reported complaint are produced *after* the data is correct, by drawing it
+as though it were more certain than it is. Neither is an iOS problem and neither is fixed by
+anything in §7.1.
+
+1. **A gap must look like a gap.** A polyline drawn straight through a two-hour hole asserts that
+   the child travelled that line. They may have; the data does not say so. Any gap beyond a
+   threshold — 10 minutes is a reasonable start — should be drawn broken, and ideally carry the
+   reason from §6.1.
+2. **Uncertainty must survive to the screen.** `accuracy` is already on every stored point. A fix
+   with `accuracy: 2500` is a 2.5 km circle, and joining two of them with a confident line is the
+   spiderweb in F13. Render coarse points differently — a circle rather than a vertex, or excluded
+   from the polyline while still listed — and the same underlying data stops reading as a fault.
+
+Also worth separating: a **stop** cluster and a **movement** row are different claims, and merging
+them makes a walk look like a series of stops.
 
 ---
 
@@ -356,19 +401,44 @@ duplicate points.
 
 ## 8. Client work completed in build 20
 
+Everything in this table is implemented, unit-tested and on the branch. **Only the last two rows
+depend on the backend**; the rest improve the trail on their own, in the next build, with no server
+change of any kind.
+
+### 8.1 Keeping the app reporting
+
 | Change | Effect |
 |---|---|
-| `diagnostics` map now sent on every status post | §4.2 — eight keys |
-| Status posted immediately on authorization change | A revocation is reported before the process is suspended, instead of dying with it |
+| While Using no longer disables background delivery | The single line that silenced a downgraded handset. `CLLocationManager.h:456-464` keeps delivering to a When-In-Use app that started updates in the foreground with background updates enabled; the client was switching that off in exactly the branch iOS reaches after the child answers the system reminder with "Change to Only While Using". A downgraded device now reports until it is killed, instead of stopping on the spot. |
+| Visit monitoring armed under Always | Real GPS-grade arrivals and departures inside the stretch that was drawn as one chord. Survives relaunch. |
+| 150 m relaunch region, re-centred with hysteresis | Brings a killed process back far sooner than significant-change's ~500 m. One region only, and a region orphaned by a previous process is torn down rather than left to fire from wherever it was armed. |
 | Location Push Service Extension added and embedded | §5.3 |
-| Location-push address minted under Always, torn down on unpair | §5.1 — held pending B1 |
-| While Using no longer disables background delivery | A downgraded device keeps reporting until it is killed, rather than going silent immediately |
-| Stale-fix rule capped at 500 m accuracy; probe path gated | Prevents km-scale fixes being drawn as real positions |
-| Lateral-invalid fixes refused | A coordinate iOS marks invalid is no longer uploaded as a confident pin |
-| Unit tests | Diagnostics mapping and the extension credential bridge |
 
-**Known client-side gap not fixed in build 20:** the parent-initiated "check in now" probe path
-still uploads a fix without an accuracy ceiling. Tracked separately.
+### 8.2 Not manufacturing movement that did not happen
+
+| Change | Effect |
+|---|---|
+| Stale branch bounded by the fix's own uncertainty | A coarse fix must have travelled further than `1.5 × accuracy`. Removes the hub-and-spokes shape (F13) while keeping genuine cross-city travel. |
+| Absolute 5000 m ceiling | Nothing vaguer than a province is uploaded at all. |
+| Gate reference persisted across process death | The 30 s interval, the 15 m floor and the staleness test now mean what they say on a phone that is relaunched constantly. |
+| Lateral-invalid fixes refused everywhere | Including the parent's "check in now" probe, which previously nulled the accuracy and uploaded the coordinate anyway. The gap in v1.0 of this document is closed. |
+
+### 8.3 Making the reason visible
+
+| Change | Effect |
+|---|---|
+| `diagnostics` map sent on every status post | §4.2 — eight keys |
+| Status posted immediately on authorization change | A revocation is reported before the process is suspended, instead of dying with it |
+| Precise Location read and enforced locally | The permission row is no longer green without it, diagnostics readiness has its own state instead of claiming "Background ready", and a fresh 3 km-wide fix is not badged "Live". **Cannot reach the parent until B3.** |
+| On-device notification to the child | At most one a day per reason, never for a restriction the child cannot lift. The child is standing next to the switch; every other signal in this document has to travel to the parent and back. |
+| `launchOptions[.location]` recorded as a launch reason | A handset being relaunched by CoreLocation after repeated kills is no longer indistinguishable from one where background location never ran. |
+
+### 8.4 Held, waiting on the backend
+
+| Change | Blocked by |
+|---|---|
+| Location-push address minted under Always, torn down on unpair — held, never transmitted | **B1.** `forbidNonWhitelisted` means sending an undeclared field 400s the request, and that request is also the liveness ping. |
+| `locationPrecise` measured but not sent | **B3.** Same reason. |
 
 ---
 
@@ -387,6 +457,13 @@ Neither side can claim this works until the following has been run once, on real
 | V7 | Force-quit, send push, child on While Using | Nothing arrives, and the parent sees the reason rather than an unexplained gap |
 | V8 | Reboot, do not unlock, send a push | No fix; no crash; device recovers after first unlock |
 | V9 | Airplane mode 30 min, then restore | Backlog uploads with original timestamps |
+| V10 | Force-quit, then walk 1 km **without** any push | A fix within ~150 m of the kill point (relaunch region), not ~500 m or more. This is the one that measures §3.1.1 rows 3–4. |
+| V11 | Always granted, Precise Location off | Permission row is not green, device diagnostics reads "Approximate only", child receives one notification. Parent still sees nothing — that is B3. |
+| V12 | Sit still for an afternoon with a weak GPS signal indoors | **No hub-and-spokes.** Zero or few points, not a web of kilometre-long lines (F13). |
+
+**The measurement that settles the original argument** is not in this table because it needs two
+handsets: the same account, an iOS and an Android phone in one pocket, one 1 km walk, and a count of
+the points each produced. Every other test here proves a mechanism; that one produces a number.
 
 Test tooling in the repository: `scripts/apns_location_push_probe.sh` sends a real location push
 without any backend code, for V6–V8.
@@ -402,3 +479,8 @@ without any backend code, for V6–V8.
 4. **Push rate policy** — the final sweep interval and per-child cap for §5.5.
 5. **Android parity** — does the Android client send `diagnostics`, and with which keys? The parent
    UI must handle both key sets.
+6. **Historical rows.** Data already stored by earlier builds contains the coarse fixes described in
+   F13. Build 20 stops producing them; it cannot remove them. Whether to exclude them on read — for
+   example, dropping `accuracy > 1000` from the drawn polyline while keeping them in the list — is a
+   server and web decision, and it is the only one that changes what a parent sees **today**, on the
+   data that is already there, without waiting for a new build to reach the family.
