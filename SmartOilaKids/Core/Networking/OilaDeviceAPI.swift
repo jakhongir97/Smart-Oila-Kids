@@ -978,7 +978,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
         // applies inside the map: one unrecognised key 400s the whole liveness post.
         // `DeviceDiagnosticsReporter.emittableKeys` is the allow-list, and it is filtered again here
         // rather than trusted, so a future caller cannot widen it by accident.
-        if let diagnostics = status.diagnostics {
+        if let diagnostics = status.diagnostics, !Self.diagnosticsRejectedByServer {
             let permitted = diagnostics.filter { DeviceDiagnosticsReporter.emittableKeys.contains($0.key) }
             if !permitted.isEmpty { body["diagnostics"] = permitted }
         }
@@ -988,8 +988,36 @@ final class OilaDeviceClient: OilaDeviceServicing {
         // optional). Skipping the call on an empty body — which is what this did — made a charged,
         // stationary phone on Wi-Fi look offline: on iOS the snapshot is often all-nil (soundMode
         // is unreadable, battery/network unchanged) and so nothing was ever sent.
-        _ = try await requestJSON(path: "device/status", method: .post, body: body, authorized: true)
+        do {
+            _ = try await requestJSON(path: "device/status", method: .post, body: body, authorized: true)
+        } catch let error as OilaAPIError where error.statusCode == 400 && body["diagnostics"] != nil {
+            // Give up the diagnostics rather than the heartbeat.
+            //
+            // This request is the liveness signal — the backend decides "offline" from how long it
+            // has been since the last one — so a 400 here does not lose a diagnostics map, it takes
+            // every iOS child in the fleet off the parent's screen. That has already happened once:
+            // `locationAuthorization` was appended to this body before the backend declared it, and
+            // because nothing inspected the error, every status post 400'd silently for as long as
+            // the field was there.
+            //
+            // `diagnostics` is declared today and the keys are filtered twice, so this should never
+            // fire. It exists because "should never" is exactly what was believed last time, and
+            // the cost of being wrong is the whole fleet. Drop the map for the rest of the process,
+            // resend immediately without it, and let the ping keep working exactly as it did in
+            // build 19. A relaunch tries again, so a transient server-side problem heals itself.
+            Self.diagnosticsRejectedByServer = true
+            body.removeValue(forKey: "diagnostics")
+            Task { @MainActor in
+                RuntimeDiagnosticsCenter.shared.updateLifecycle(lastEvent: "status_diagnostics_rejected")
+            }
+            _ = try await requestJSON(path: "device/status", method: .post, body: body, authorized: true)
+        }
     }
+
+    /// Set once, if ever, by the 400 handler above. Static because the fleet-wide symptom is what
+    /// matters and every client instance shares the same server; deliberately NOT persisted, so a
+    /// backend fix takes effect on the next launch without anything having to clear a flag.
+    nonisolated(unsafe) private static var diagnosticsRejectedByServer = false
 
     func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse {
         let payload: [[String: Any]] = items.map { ["packageName": $0.packageName, "usedSeconds": $0.usedSeconds] }

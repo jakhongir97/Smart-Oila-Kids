@@ -17,6 +17,23 @@ enum AppRuntime {
         return false
     }
 
+    /// Server-initiated positions via the Location Push Service Extension. **OFF in build 20.**
+    ///
+    /// The feature is complete on the device and inert without the backend: nothing can send a
+    /// location push until the server accepts the third token and calls APNs directly, so switching
+    /// it on today buys a family nothing. What it would cost is real — the extension carries
+    /// `com.apple.developer.location.push` and a second Keychain access group, which means a new
+    /// App ID, new capabilities on the existing one, and regenerated provisioning profiles before
+    /// the app can be archived at all. Build 20 exists to deliver the location fixes that need none
+    /// of that, with exactly build 19's signing story.
+    ///
+    /// While this is off, `LocationPushRegistrar` never asks CoreLocation for an address and never
+    /// writes the extension's credential copy. Turning it on is this flag, the two entitlement
+    /// keys, and re-adding the embed phase — see `output/doc/location_push_backend_request.md`.
+    static var locationPushEnabled: Bool {
+        featureFlag("SMARTOILA_LOCATION_PUSH_ENABLED")
+    }
+
     static var showGeoDebugOverlay: Bool {
         configuredBool("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY") ?? false
     }

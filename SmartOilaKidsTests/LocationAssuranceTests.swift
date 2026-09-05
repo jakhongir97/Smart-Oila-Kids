@@ -400,3 +400,52 @@ final class RelaunchRegionTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(OilaTelemetryService.relaunchRegionRadiusM, 100)
     }
 }
+
+/// Build 20 is the first build that puts anything new in the `POST /device/status` body, and that
+/// request is the fleet's liveness signal. These pin the two rules that keep a diagnostics mistake
+/// from becoming an outage.
+final class StatusDiagnosticsSafetyTests: XCTestCase {
+    /// One unrecognised key 400s the whole request under the backend's `forbidNonWhitelisted`
+    /// validation — and the map is built from device state, so it is the one part of the body that
+    /// could grow a key nobody reviewed.
+    func testOnlyDocumentedKeysAreEmittable() {
+        XCTAssertEqual(
+            DeviceDiagnosticsReporter.emittableKeys,
+            [
+                "location", "locationBackground", "locationServices",
+                "notifications", "microphone", "camera",
+                "backgroundRefresh", "lowPowerMode"
+            ]
+        )
+    }
+
+    /// The Android-only concepts must be ABSENT, not `unavailable`: the contract reads a missing key
+    /// as "never reported" and forbids rendering it as a fault, so claiming `unavailable` would put
+    /// a permanent dead row on the parent's screen.
+    func testAndroidOnlyKeysAreNeverEmitted() {
+        for key in ["batteryOptimization", "usageAccess", "accessibility", "overlay", "autoStart"] {
+            XCTAssertFalse(DeviceDiagnosticsReporter.emittableKeys.contains(key), key)
+        }
+    }
+
+    /// Every value the mapper can produce has to be one of the four the schema's enum allows.
+    func testEveryEmittedValueIsInTheSchemaEnum() {
+        let allowed: Set<String> = ["granted", "denied", "not_determined", "unavailable"]
+        let statuses: [CLAuthorizationStatus] = [.authorizedAlways, .authorizedWhenInUse, .denied, .restricted, .notDetermined]
+        for status in statuses {
+            for servicesEnabled in [true, false] {
+                let map = DeviceDiagnosticsReporter.map(
+                    location: status,
+                    locationServicesEnabled: servicesEnabled,
+                    notifications: .denied,
+                    microphone: .denied,
+                    camera: .denied,
+                    backgroundRefresh: .denied,
+                    lowPowerMode: true
+                )
+                XCTAssertTrue(map.keys.allSatisfy(DeviceDiagnosticsReporter.emittableKeys.contains), "\(status)")
+                XCTAssertTrue(map.values.allSatisfy(allowed.contains), "\(status)")
+            }
+        }
+    }
+}

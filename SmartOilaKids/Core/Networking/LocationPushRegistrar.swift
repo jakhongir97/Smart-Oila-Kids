@@ -61,6 +61,15 @@ final class LocationPushRegistrar {
     /// Safe to call repeatedly — CoreLocation returns the current token rather than rotating it, and
     /// the app should re-read it on every launch because it can change.
     func refreshRegistration(authorization: CLAuthorizationStatus) {
+        // Build 20 ships with the feature stood down (`AppRuntime.locationPushEnabled`). Asking
+        // CoreLocation for the address without the entitlement in the signed profile would fail on
+        // every launch and record a `lastError` that reads like a provisioning bug rather than a
+        // deliberate configuration — and the address would be useless anyway, because no server can
+        // send to it yet.
+        guard AppRuntime.locationPushEnabled else {
+            lastError = "location push disabled in this build"
+            return
+        }
         guard authorization == .authorizedAlways else {
             if isMonitoring {
                 manager.stopMonitoringLocationPushes()
@@ -104,6 +113,10 @@ final class LocationPushRegistrar {
     /// telemetry start; it is a single Keychain write and it is what keeps a push answerable after
     /// the access token rotates.
     func publishSharedCredential() {
+        // Same reason, plus a specific one: the shared Keychain group is not in build 20's
+        // entitlements, so every write here would answer `errSecMissingEntitlement` and put a
+        // recurring failure in the diagnostics timeline for a feature nobody switched on.
+        guard AppRuntime.locationPushEnabled else { return }
         let status = LocationPushSharedCredential.publish(
             accessToken: SecureTokenStore.oila.accessToken(),
             baseURL: AppConfig.oilaAPIBaseURL,
@@ -125,6 +138,9 @@ final class LocationPushRegistrar {
     /// Drop the copy and the address. Called from telemetry teardown, which is the unpair and
     /// confirmed-invalidation path — a device that is no longer paired must not be able to answer a
     /// push for the family it has left.
+    /// Deliberately NOT gated on `AppRuntime.locationPushEnabled`: this is the unpair path, and a
+    /// device that carried an address while the flag was on must still be able to drop it after the
+    /// flag goes off. Clearing something that was never written is free.
     func teardown() {
         if isMonitoring {
             manager.stopMonitoringLocationPushes()

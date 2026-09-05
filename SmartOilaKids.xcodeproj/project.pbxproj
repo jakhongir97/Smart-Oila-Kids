@@ -15,7 +15,6 @@
 		1DCA71040000000000000002 /* LocationPushSharedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000009 /* LocationPushSharedCredential.swift */; };
 		1DCA71040000000000000003 /* LocationPushSharedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000009 /* LocationPushSharedCredential.swift */; };
 		1DCA71040000000000000004 /* LocationPushRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000000A /* LocationPushRegistrar.swift */; };
-		1DCA71040000000000000005 /* SmartOilaKidsLocationPushExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000000B /* SmartOilaKidsLocationPushExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		02A2F11140840028AD044865 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D85B2EFE2C0DE9B65976354 /* SessionStore.swift */; };
 		033D503AA7D778345ABFFFE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E35F67AF2A306DA50B1B2381 /* Assets.xcassets */; };
 		069D602F38322AC0DCE61523 /* OilaTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717167572124BB3D730729A1 /* OilaTelemetryService.swift */; };
@@ -135,13 +134,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		1DCA71040000000000000016 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 1DCA71040000000000000011;
-			remoteInfo = SmartOilaKidsLocationPushExtension;
-		};
 		F1A0B1C2D3E4F50617283941 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2A1B11DB51DD89B22A0A6A7A /* Project object */;
@@ -152,17 +144,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		1DCA71040000000000000010 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				1DCA71040000000000000005 /* SmartOilaKidsLocationPushExtension.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -737,12 +718,10 @@
 				EEA838EAC925999ADC328F04 /* Sources */,
 				5015AD37DC8F4C21AC444D4C /* Frameworks */,
 				28887B92E3F6E1CFF7D811DA /* Resources */,
-				1DCA71040000000000000010 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				1DCA71040000000000000015 /* PBXTargetDependency */,
 			);
 			name = SmartOilaKids;
 			packageProductDependencies = (
@@ -1056,11 +1035,6 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		1DCA71040000000000000015 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 1DCA71040000000000000011 /* SmartOilaKidsLocationPushExtension */;
-			targetProxy = 1DCA71040000000000000016 /* PBXContainerItemProxy */;
-		};
 		F1A0B1C2D3E4F50617283949 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 92844C8577B27B0138F9A882 /* SmartOilaKids */;
@@ -1098,7 +1072,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsLocationPushExtension/SmartOilaKidsLocationPushExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsLocationPushExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1125,7 +1099,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsLocationPushExtension/SmartOilaKidsLocationPushExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsLocationPushExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1151,7 +1125,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1178,7 +1152,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1205,7 +1179,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.debug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bolajon360;
@@ -1228,7 +1202,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsScheduleMonitorExtension/SmartOilaKidsScheduleMonitorExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsScheduleMonitorExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1255,7 +1229,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKids/Resources/SmartOilaKids.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKids/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Bolajon360;
@@ -1341,7 +1315,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = SmartOilaKidsUsageReportExtension/SmartOilaKidsUsageReportExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				INFOPLIST_FILE = SmartOilaKidsUsageReportExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1367,7 +1341,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -1394,7 +1368,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = 3TWN5NW4BL;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
