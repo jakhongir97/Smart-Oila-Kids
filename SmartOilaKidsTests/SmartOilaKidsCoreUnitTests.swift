@@ -4149,6 +4149,220 @@ final class LocationAcceptanceTests: XCTestCase {
     }
 }
 
+// MARK: - Route shape inside the time floor
+
+/// The three rules that let a fix through `minFixIntervalS`. Each is a distinct claim about the
+/// fix — sharper, further, or turning — and each fails closed on the sentinel values CoreLocation
+/// uses for "unknown".
+final class RouteShapeTests: XCTestCase {
+    // MARK: better fix
+
+    func testASharperFixOfTheSamePlaceIsTaken() {
+        XCTAssertTrue(OilaTelemetryService.isMateriallyBetterFix(accuracy: 10, previousAccuracy: 40))
+    }
+
+    func testAFixThatIsNotMateriallySharperIsNot() {
+        // 20 m improvement is the floor; 19 is not enough.
+        XCTAssertFalse(OilaTelemetryService.isMateriallyBetterFix(accuracy: 21, previousAccuracy: 40))
+        XCTAssertTrue(OilaTelemetryService.isMateriallyBetterFix(accuracy: 20, previousAccuracy: 40))
+    }
+
+    func testBetterThanACoarseFixIsStillNotARouteVertex() {
+        // The bug this closes: the stale branch admits a 2.5 km fix, and a 900 m one is "better" —
+        // and used to skip the ceiling entirely on the strength of that.
+        XCTAssertFalse(OilaTelemetryService.isMateriallyBetterFix(accuracy: 900, previousAccuracy: 2500))
+        XCTAssertFalse(OilaTelemetryService.isMateriallyBetterFix(accuracy: 101, previousAccuracy: 2500))
+        XCTAssertTrue(OilaTelemetryService.isMateriallyBetterFix(accuracy: 100, previousAccuracy: 2500))
+    }
+
+    func testUnknownAccuracyIsNeverBetter() {
+        XCTAssertFalse(OilaTelemetryService.isMateriallyBetterFix(accuracy: nil, previousAccuracy: 2500))
+        XCTAssertFalse(OilaTelemetryService.isMateriallyBetterFix(accuracy: -1, previousAccuracy: 2500))
+    }
+
+    // MARK: displacement ceiling
+
+    func testSixtyMetresOfRoadEarnsAVertexInsideTheInterval() {
+        XCTAssertTrue(OilaTelemetryService.exceedsDisplacementCeiling(elapsed: 5, distanceFromLast: 60))
+        XCTAssertFalse(OilaTelemetryService.exceedsDisplacementCeiling(elapsed: 5, distanceFromLast: 59))
+    }
+
+    func testABufferedBurstIsNotASprint() {
+        // 60 m in under the burst floor is a replayed buffer, not movement.
+        XCTAssertFalse(OilaTelemetryService.exceedsDisplacementCeiling(elapsed: 1, distanceFromLast: 60))
+        XCTAssertTrue(OilaTelemetryService.exceedsDisplacementCeiling(elapsed: 2, distanceFromLast: 60))
+    }
+
+    func testNoReferenceMeansNoCeiling() {
+        XCTAssertFalse(OilaTelemetryService.exceedsDisplacementCeiling(elapsed: 5, distanceFromLast: nil))
+    }
+
+    func testTheCeilingOnlyBindsAboveWalkingPace() {
+        // 60 m / 30 s = 2 m/s. A child walking at 1.4 m/s covers 42 m in the whole window, so the
+        // ceiling never fires for them and the time floor governs exactly as before.
+        let walkingDistanceInWindow = 1.4 * 30
+        XCTAssertFalse(OilaTelemetryService.exceedsDisplacementCeiling(elapsed: 29, distanceFromLast: walkingDistanceInWindow))
+    }
+
+    // MARK: corners
+
+    private func turn(
+        from previous: Double? = 0,
+        to course: Double,
+        courseAccuracy: Double = 5,
+        speed: Double = 10,
+        speedAccuracy: Double = 1,
+        accuracy: Double? = 10,
+        distance: Double? = 20
+    ) -> Bool {
+        OilaTelemetryService.isSignificantHeadingChange(
+            from: previous,
+            to: course,
+            courseAccuracy: courseAccuracy,
+            speed: speed,
+            speedAccuracy: speedAccuracy,
+            accuracy: accuracy,
+            distanceFromLast: distance
+        )
+    }
+
+    func testANinetyDegreeTurnAtCitySpeedIsACorner() {
+        XCTAssertTrue(turn(from: 0, to: 90))
+        XCTAssertTrue(turn(from: 90, to: 180))
+    }
+
+    func testALaneDriftIsNotACorner() {
+        XCTAssertFalse(turn(from: 0, to: 20))
+        XCTAssertTrue(turn(from: 0, to: 25))
+    }
+
+    func testHeadingWrapsAroundNorth() {
+        // 359° → 5° is a 6° drift, not a 354° spin.
+        XCTAssertFalse(turn(from: 359, to: 5))
+        // 270° → 0° is a real 90° right turn.
+        XCTAssertTrue(turn(from: 270, to: 0))
+        // …and 10° → 350° is 20° of drift the other way.
+        XCTAssertFalse(turn(from: 10, to: 350))
+    }
+
+    func testNoHeadingIsNotATurn() {
+        XCTAssertFalse(turn(from: nil, to: 90))
+        XCTAssertFalse(turn(from: -1, to: 90))
+        XCTAssertFalse(turn(from: 0, to: -1))
+    }
+
+    func testAPedestrianCannotTurn() {
+        // 2 m/s is a brisk walk. Course at walking pace is noise.
+        XCTAssertFalse(turn(from: 0, to: 90, speed: 2))
+        XCTAssertFalse(turn(from: 0, to: 90, speed: 3.9))
+        XCTAssertTrue(turn(from: 0, to: 90, speed: 4))
+    }
+
+    func testAnUncertainHeadingIsNotATurn() {
+        XCTAssertFalse(turn(from: 0, to: 90, courseAccuracy: 45))
+        XCTAssertFalse(turn(from: 0, to: 90, courseAccuracy: -1))
+        XCTAssertTrue(turn(from: 0, to: 90, courseAccuracy: 10))
+    }
+
+    func testAnUncertainSpeedIsNotATurn() {
+        XCTAssertFalse(turn(from: 0, to: 90, speedAccuracy: -1))
+    }
+
+    func testAVagueFixCannotPlaceACorner() {
+        XCTAssertFalse(turn(from: 0, to: 90, accuracy: 31))
+        XCTAssertFalse(turn(from: 0, to: 90, accuracy: nil))
+        XCTAssertTrue(turn(from: 0, to: 90, accuracy: 30))
+    }
+
+    func testACornerStillHasToClearTheFloor() {
+        // The 15 m floor is inside the rule; the accuracy-scaled floor is waived by the caller.
+        XCTAssertFalse(turn(from: 0, to: 90, distance: 14))
+        XCTAssertTrue(turn(from: 0, to: 90, distance: 15))
+        XCTAssertFalse(turn(from: 0, to: 90, distance: nil))
+    }
+}
+
+// MARK: - Visits
+
+/// `CLVisit` arrivals go into the queue on their own terms: the interval and displacement rules
+/// are meaningless for a dwell centroid, so only the accuracy ceiling, a sanity bound on the
+/// arrival time, and dedup against the previous report apply.
+final class VisitAcceptanceTests: XCTestCase {
+    private let tashkentCity = CLLocationCoordinate2D(latitude: 41.3111, longitude: 69.2797)
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func accepts(
+        accuracy: Double = 40,
+        coordinate: CLLocationCoordinate2D? = nil,
+        arrivedAgo: TimeInterval = 300,
+        lastReported: OilaReportedVisit? = nil
+    ) -> Bool {
+        OilaTelemetryService.acceptsVisit(
+            accuracy: accuracy,
+            coordinate: coordinate ?? tashkentCity,
+            arrivedAt: now.addingTimeInterval(-arrivedAgo),
+            lastReported: lastReported,
+            now: now
+        )
+    }
+
+    private func reported(metresAway: Double = 0, arrivedAgo: TimeInterval) -> OilaReportedVisit {
+        // ~1 m of latitude is 1/111_000 degrees.
+        OilaReportedVisit(
+            lat: tashkentCity.latitude + metresAway / 111_000,
+            lng: tashkentCity.longitude,
+            at: now.addingTimeInterval(-arrivedAgo)
+        )
+    }
+
+    func testTheFirstVisitIsQueued() {
+        XCTAssertTrue(accepts())
+    }
+
+    func testACoarseVisitIsRefused() {
+        // A Wi-Fi-derived 800 m visit is the same spiderweb vertex as any other coarse fix.
+        XCTAssertFalse(accepts(accuracy: 101))
+        XCTAssertFalse(accepts(accuracy: 800))
+        XCTAssertTrue(accepts(accuracy: 100))
+        XCTAssertFalse(accepts(accuracy: -1))
+    }
+
+    func testTheSecondReportOfTheSameStopIsOneStop() {
+        // CoreLocation reports a visit as it begins and again as it ends, same place, same arrival.
+        XCTAssertFalse(accepts(arrivedAgo: 300, lastReported: reported(arrivedAgo: 300)))
+        XCTAssertFalse(accepts(arrivedAgo: 300, lastReported: reported(metresAway: 24, arrivedAgo: 330)))
+    }
+
+    func testReturningToTheSamePlaceLaterIsANewStop() {
+        XCTAssertTrue(accepts(arrivedAgo: 300, lastReported: reported(arrivedAgo: 1500)))
+    }
+
+    func testANearbyPlaceIsANewStop() {
+        XCTAssertTrue(accepts(arrivedAgo: 300, lastReported: reported(metresAway: 30, arrivedAgo: 300)))
+    }
+
+    func testAnUnknownArrivalTimeIsRefused() {
+        // `arrivalDate` is `distantPast` when CoreLocation has no value for it.
+        XCTAssertFalse(OilaTelemetryService.acceptsVisit(
+            accuracy: 40, coordinate: tashkentCity, arrivedAt: .distantPast, lastReported: nil, now: now
+        ))
+    }
+
+    func testAStaleVisitIsNotNews() {
+        XCTAssertFalse(accepts(arrivedAgo: 7 * 3600))
+        XCTAssertTrue(accepts(arrivedAgo: 5 * 3600))
+    }
+
+    func testAnArrivalInTheFutureIsRefused() {
+        XCTAssertFalse(accepts(arrivedAgo: -120))
+        XCTAssertTrue(accepts(arrivedAgo: -30))
+    }
+
+    func testAnInvalidCoordinateIsRefused() {
+        XCTAssertFalse(accepts(coordinate: kCLLocationCoordinate2DInvalid))
+    }
+}
+
 // MARK: - status.report probe location
 
 /// The probe deliberately does NOT run through the acceptance gate above: a parent who tapped

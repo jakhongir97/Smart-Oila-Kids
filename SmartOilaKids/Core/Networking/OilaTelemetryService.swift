@@ -213,9 +213,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// The location BATCH window. Every `flushInterval` the queued fixes are packaged into one
     /// `POST /device/location/batch` — Ibrohim's "30 sekund paket qilib, bitta collection qilib
-    /// jo'natadi". Set to 30s to match the Android child app: a walk produces at most one accepted
-    /// fix per window (see `minFixIntervalS`), so a moving child yields one point every 30s and a
-    /// stationary one yields an empty window that sends nothing.
+    /// jo'natadi". Set to 30s to match the Android child app. A walking child still yields about
+    /// one point per window (see `minFixIntervalS`); a child in a car yields one per
+    /// `maxDisplacementM` of road instead, so a window can carry several. A stationary one yields
+    /// an empty window that sends nothing.
     private let flushInterval: TimeInterval = 30
     private let statusInterval: TimeInterval = 300
     private let lockInterval: TimeInterval = 30
@@ -224,11 +225,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// turn every transition into a request; the `statusInterval` timer covers the device anyway.
     /// It never throttles the timer itself, nor the backgrounding post in `flushNow()`.
     private let eventStatusMinimumGap: TimeInterval = 60
-    /// 400 fixes ≈ 3.3 hours of continuous offline movement at the 30s cadence below. Kept under the
-    /// backend's `maxItems: 500` on `PostLocationBatchDto` even after a failed batch is requeued on
-    /// top of newer fixes; `flushLocations` also slices its uploads so the ceiling can never be the
-    /// thing that 400s a whole queue.
-    private let maxQueuedFixes = 400
+    /// Offline depth. 1200 fixes is ~1.6 hours of continuous driving at the `maxDisplacementM`
+    /// cadence, or ~10 hours at walking pace — the same 3+ hours the old 400 bought when every
+    /// fix was 30 s apart. Past the cap the OLDEST fixes are dropped (`suffix`), which is the start
+    /// of an offline stretch: exactly the part of a route a dead-signal tunnel exists to lose, so
+    /// this must not be smaller than a long drive. The backend's `maxItems: 500` on
+    /// `PostLocationBatchDto` is NOT what this bounds — `flushLocations` slices every upload to
+    /// `locationUploadChunk` regardless of queue depth.
+    private let maxQueuedFixes = 1200
     /// Largest slice sent in one `POST /device/location/batch`. The DTO allows 500; 250 leaves room
     /// and keeps a failed upload cheap to retry.
     private static let locationUploadChunk = 250
@@ -262,7 +266,59 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private static let minFixIntervalS: TimeInterval = 30
     /// A fix at least this much more accurate than the last accepted one is taken even inside the
     /// interval — a better answer to the same question is worth more than the interval saves.
-    private static let accuracyImprovementM: Double = 20
+    nonisolated private static let accuracyImprovementM: Double = 20
+
+    // MARK: Route shape
+    //
+    // The 30 s floor above governs how OFTEN a fix is taken. Route shape is governed by how FAR
+    // apart consecutive fixes are, and the two are only the same thing on foot. In a car at 50 km/h
+    // a 30 s floor is a fix every ~420 m, and a 600–900 m block detour fits entirely inside one
+    // chord: the parent's map draws a straight line through streets the child never used. The
+    // three rules below let a fix through the time gate when the route needs a vertex there.
+
+    /// Displacement CEILING: a fix this far from the last accepted one is taken regardless of the
+    /// clock. Binds only above 60 m / 30 s = 2 m/s (7.2 km/h) — a walking or stationary child is
+    /// governed by the time floor exactly as before, so the anti-noise defence is untouched. The
+    /// effective spacing is `max(60, accuracyFactor × accuracy)` plus the delivery quantum, NOT a
+    /// flat 60 m: `acceptsFix` still applies its accuracy-scaled floor after this rule, so a vague
+    /// fix has to travel further before it is believed.
+    nonisolated static let maxDisplacementM: Double = 60
+    /// Floor under the ceiling. CoreLocation replays buffered bursts with near-identical timestamps
+    /// after a wake, and without this a burst that happens to span 60 m would be taken as a sprint.
+    /// Below the ~4 s it takes to cover 60 m at 50 km/h, so it never binds in a moving vehicle.
+    nonisolated static let burstFloorS: TimeInterval = 2
+    /// A heading change this large inside the time gate is a corner, and a corner with no vertex is
+    /// cut. 25° is well above the course jitter of a fix that satisfies `maxCourseAccuracyDeg`,
+    /// and well below a real 90° city turn.
+    nonisolated static let significantHeadingChangeDeg: Double = 25
+    /// A turn is only a turn at vehicular speed. 4 m/s (14.4 km/h) is above any walking pace, so a
+    /// pedestrian pacing at a bus stop cannot produce a stream of "turns". Below this, course is
+    /// noise anyway — CoreLocation derives it from motion, and there is little.
+    nonisolated static let minTurnSpeedMS: Double = 4
+    /// Course jitter above this is not a heading. iOS reports −1 when it has no confidence.
+    nonisolated static let maxCourseAccuracyDeg: Double = 10
+    /// A corner vertex is only worth having if it is sharp; a 60 m-accurate fix at a 15 m corner
+    /// says nothing about the corner.
+    nonisolated static let maxTurnFixAccuracyM: Double = 30
+
+    // MARK: Visits
+    //
+    // `CLVisit` is delivered twice for one stop — once as it begins, once as it ends — with the
+    // same `arrivalDate`. These bound the dedup, and refuse a visit CoreLocation has no real
+    // arrival time for (`distantPast`) or that predates any plausible session.
+
+    /// Two visits closer than this AND closer in time than `visitDedupIntervalS` are one visit.
+    nonisolated static let visitDedupDistanceM: Double = 25
+    nonisolated static let visitDedupIntervalS: TimeInterval = 60
+    /// A visit whose arrival is older than this is not news; the trail has long moved past it.
+    nonisolated static let maxVisitAgeS: TimeInterval = 6 * 3600
+
+    /// The outbox is JSON-encoded whole on every write. Online the queue is a handful of fixes and
+    /// that is free; offline with a full queue it is 1200 objects rewritten on every accepted fix,
+    /// which in a car is several times a minute. Above this depth the rewrite is throttled to one
+    /// per `pendingFixesPersistMinGapS`; a kill inside the gap loses at most that much route.
+    private static let pendingFixesAlwaysPersistBelow = 50
+    private static let pendingFixesPersistMinGapS: TimeInterval = 10
     /// How old the last accepted fix may be before quality stops being the priority. Past this, ANY
     /// fix with a known accuracy is queued: the significant-location-change source that keeps
     /// reporting after a background relaunch is far coarser than the ceiling, and a 3 km-accurate
@@ -291,6 +347,19 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// the reference point.
     private var lastAcceptedFix: CLLocation?
     private var lastAcceptedFixAt: Date?
+    /// Heading of the last accepted fix that HAD one (degrees, 0–360). Kept across an accepted fix
+    /// with no course (a stop at a light reports −1) so the heading before the stop is still the
+    /// reference for the turn after it. Persisted separately from the fix — `OilaLocationFix` is
+    /// the wire shape and the persisted backlog decodes as `[OilaLocationFix]`; a new stored
+    /// property there would silently drop every queued offline fix on upgrade.
+    private var lastAcceptedCourse: Double?
+    private static let lastAcceptedCourseKey = "OILA_LAST_ACCEPTED_COURSE"
+    /// The last visit that was queued, for dedup across the two reports CoreLocation makes of one
+    /// stop — and across the relaunches between them.
+    private var lastReportedVisit: OilaReportedVisit?
+    private static let lastReportedVisitKey = "OILA_LAST_REPORTED_VISIT"
+    /// When the outbox was last written whole. See `pendingFixesPersistMinGapS`.
+    private var lastPendingFixesPersistAt: Date?
     /// Centre of the region currently armed as a relaunch trigger, or nil when none is.
     private var relaunchRegionCentre: CLLocationCoordinate2D?
     /// Undelivered panic alerts awaiting retry. See `enqueueUndeliveredSOS`.
@@ -326,11 +395,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // order of magnitude worse than the Android sibling's (that app asks the fused provider for
         // PRIORITY_HIGH_ACCURACY). Deliberately NOT `Best`/`BestForNavigation`: those hold the
         // receiver at full duty cycle and are the real battery cost. The extra fixes this produces
-        // are paid for by the acceptance gate and the 30s floor in `ingestLocations`.
+        // are paid for by the acceptance gate in `ingestLocations`.
         locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        // 15 m to match the batch acceptance floor (`minDisplacementM`) and the Android child app —
-        // CoreLocation itself suppresses sub-15 m moves so a stationary child never wakes the queue.
-        locationManager.distanceFilter = 15
+        // Tell CoreLocation what the receiver is being duty-cycled FOR. This was never set, so it
+        // sat at `.other` for the life of the app — the one hint that says nothing — on a child
+        // who spends part of every day in a car. Automotive is the profile the complaint was
+        // filed against, and it is the one where the default hint costs the most: CoreLocation
+        // uses it to choose how aggressively to keep a vehicular fix current. It has no effect on
+        // a walking child beyond the auto-pause heuristic, which `applyAuthorization` disables.
+        locationManager.activityType = .automotiveNavigation
+        // 5 m, not 15. The acceptance floor is still `max(minDisplacementM, …)` in `acceptsFix`,
+        // so a stationary child's QUEUE is unchanged — this only changes what CoreLocation is
+        // willing to hand `ingestLocations` at all. The corner rule needs it: the chord across a
+        // 25° heading change at a 15 m turning radius is 6.5 m, and at a 15 m filter the OS
+        // suppressed that fix before the rule could ever see it. Cost is delegate callbacks, not
+        // uploads or radio.
+        locationManager.distanceFilter = 5
         // Safe default until the authorization is known; `applyAuthorization` turns it off for
         // `.authorizedAlways` only (see there for why).
         locationManager.pausesLocationUpdatesAutomatically = true
@@ -366,6 +446,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         restorePendingFixes()
         // …and the reference point the queue is measured against. See `restoreLastAcceptedFix`.
         restoreLastAcceptedFix()
+        // …and the last visit queued, so the second report of one stop is still recognised as the
+        // same stop after the relaunch that routinely happens between the two.
+        restoreLastReportedVisit()
 
         UIDevice.current.isBatteryMonitoringEnabled = true
 
@@ -601,7 +684,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // A new pairing must not measure displacement from the previous child's last position.
         lastAcceptedFix = nil
         lastAcceptedFixAt = nil
+        lastAcceptedCourse = nil
         persistLastAcceptedFix()
+        lastReportedVisit = nil
+        persistLastReportedVisit()
         networkType = nil
         lastStatusPostAt = nil
         lastPostedBattery = nil
@@ -746,11 +832,58 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     private func persistPendingFixes() {
+        lastPendingFixesPersistAt = Date()
         if pendingFixes.isEmpty {
             UserDefaults.standard.removeObject(forKey: Self.pendingFixesKey)
         } else if let data = try? JSONEncoder().encode(pendingFixes) {
             UserDefaults.standard.set(data, forKey: Self.pendingFixesKey)
         }
+    }
+
+    /// The per-fix write, bounded. Every accepted fix used to re-encode the whole outbox, which is
+    /// the right trade while the queue is short (online, it is) and the wrong one when it is a
+    /// 1200-entry offline backlog being rewritten several times a minute in a car. Flushes and
+    /// visits still write unconditionally — they change the queue in ways worth a kill surviving.
+    private func persistPendingFixesThrottled() {
+        if pendingFixes.count <= Self.pendingFixesAlwaysPersistBelow {
+            persistPendingFixes()
+            return
+        }
+        guard let lastPendingFixesPersistAt,
+              Date().timeIntervalSince(lastPendingFixesPersistAt) < Self.pendingFixesPersistMinGapS
+        else {
+            persistPendingFixes()
+            return
+        }
+    }
+
+    /// Insert keeping the queue chronological. A visit's arrival is reported minutes after it
+    /// happened, behind fixes the trail has already moved past; appending it would put an older
+    /// point after newer ones, and `queueFreshestKnownFixForProbe` reads `pendingFixes.last` as
+    /// "the newest queued fix". Requeues on upload failure prepend a whole slice and stay ordered
+    /// by construction, so this is the only path that needs to search.
+    private func enqueueSorted(_ fix: OilaLocationFix) {
+        let index = pendingFixes.firstIndex { $0.ts > fix.ts } ?? pendingFixes.endIndex
+        pendingFixes.insert(fix, at: index)
+        if pendingFixes.count > maxQueuedFixes {
+            pendingFixes = Array(pendingFixes.suffix(maxQueuedFixes))
+        }
+    }
+
+    private func persistLastReportedVisit() {
+        guard let lastReportedVisit, let data = try? JSONEncoder().encode(lastReportedVisit) else {
+            UserDefaults.standard.removeObject(forKey: Self.lastReportedVisitKey)
+            return
+        }
+        UserDefaults.standard.set(data, forKey: Self.lastReportedVisitKey)
+    }
+
+    private func restoreLastReportedVisit() {
+        guard let data = UserDefaults.standard.data(forKey: Self.lastReportedVisitKey) else {
+            lastReportedVisit = nil
+            return
+        }
+        lastReportedVisit = try? JSONDecoder().decode(OilaReportedVisit.self, from: data)
     }
 
     private func restorePendingFixes() {
@@ -821,6 +954,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     private func persistLastAcceptedFix() {
+        if let lastAcceptedCourse {
+            UserDefaults.standard.set(lastAcceptedCourse, forKey: Self.lastAcceptedCourseKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.lastAcceptedCourseKey)
+        }
         guard let lastAcceptedFix, let lastAcceptedFixAt else {
             UserDefaults.standard.removeObject(forKey: Self.lastAcceptedFixKey)
             return
@@ -837,10 +975,14 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     private func restoreLastAcceptedFix() {
+        // A stored course is only meaningful alongside the fix it was measured on; the key is
+        // absent (not 0, which is a real heading — due north) when there was none.
+        lastAcceptedCourse = UserDefaults.standard.object(forKey: Self.lastAcceptedCourseKey) as? Double
         guard let data = UserDefaults.standard.data(forKey: Self.lastAcceptedFixKey),
               let stored = try? JSONDecoder().decode(OilaLocationFix.self, from: data) else {
             lastAcceptedFix = nil
             lastAcceptedFixAt = nil
+            lastAcceptedCourse = nil
             return
         }
         lastAcceptedFix = CLLocation(
@@ -1419,37 +1561,51 @@ extension OilaTelemetryService: CLLocationManagerDelegate {
         }
     }
 
-    /// A visit is an arrival at, or a departure from, a place the child actually stayed.
+    /// A visit is an arrival at a place the child actually stayed — a GPS-grade coordinate of a
+    /// stop, timestamped when they got there.
     ///
-    /// This is the one location source iOS keeps delivering to a relaunched app, so on a handset
-    /// whose process keeps being killed it is the only thing standing between "home at 08:00" and
-    /// "school at 14:00" — the stretch that was being drawn as a single straight line. The
-    /// coordinate is GPS-grade, unlike the significant-change fixes filling the same gap.
+    /// This used to be handed to `ingestLocations` behind a "newer than the last accepted fix"
+    /// guard, and that guard refused every visit while the process was alive: CoreLocation reports
+    /// a visit only once it is confident of it, minutes after the arrival, by which time standard
+    /// updates had accepted newer fixes on the approach and the visit read as stale. So on a
+    /// running app no stop ever reached the wire, and a day's history showed one stop in fifteen
+    /// hours. The doc comment claimed the opposite.
     ///
-    /// `departureDate` is `Date.distantFuture` while the child is still there; the arrival is the
-    /// honest timestamp in that case. Everything goes through the same gate as a normal update, so
-    /// a visit at a place already reported is dropped exactly like a duplicate fix.
+    /// The visit now goes into the queue on its own terms — `acceptsVisit` — and is INSERTED IN
+    /// ORDER rather than appended, because its arrival time is behind the head of the queue. It
+    /// never touches the gate's reference point: a backdated timestamp there would poison the
+    /// interval for the next real fix.
+    ///
+    /// Arrival only. CoreLocation reports one stop twice — as it begins, then as it ends — with
+    /// the same `arrivalDate`. The departure carries the same coordinate and a later time, which
+    /// would give a stop its duration, but until the history and latest endpoints are confirmed to
+    /// order by `ts` rather than by insertion, a second backdated point at the same place risks the
+    /// live pin jumping backwards for no gain. `acceptsVisit` dedups the second report.
     nonisolated func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
-        let isOngoing = visit.departureDate == Date.distantFuture
-        let timestamp = isOngoing ? visit.arrivalDate : visit.departureDate
-        guard visit.horizontalAccuracy >= 0, CLLocationCoordinate2DIsValid(visit.coordinate) else { return }
-        let location = CLLocation(
-            coordinate: visit.coordinate,
-            altitude: 0,
-            horizontalAccuracy: visit.horizontalAccuracy,
-            verticalAccuracy: -1,
-            timestamp: timestamp
-        )
+        let coordinate = visit.coordinate
+        let accuracy = visit.horizontalAccuracy
+        let arrivedAt = visit.arrivalDate
         Task { @MainActor [weak self] in
             guard let self, self.isRunning else { return }
-            // Visits are delivered out of order with respect to standard updates — a departure is
-            // reported once CoreLocation is confident it happened, which can be minutes after newer
-            // fixes have already been accepted. `ingestLocations` reads a fix older than its
-            // reference as a CLOCK that moved backwards and drops the reference to recover, so
-            // handing it a backdated visit would clear the gate's memory every time the child left
-            // somewhere. A visit the trail has already moved past adds nothing anyway.
-            if let lastAt = self.lastAcceptedFixAt, location.timestamp <= lastAt { return }
-            self.ingestLocations([location])
+            guard Self.acceptsVisit(
+                accuracy: accuracy,
+                coordinate: coordinate,
+                arrivedAt: arrivedAt,
+                lastReported: self.lastReportedVisit
+            ) else { return }
+            self.enqueueSorted(OilaLocationFix(
+                lat: coordinate.latitude,
+                lng: coordinate.longitude,
+                accuracy: accuracy,
+                ts: arrivedAt
+            ))
+            self.lastReportedVisit = OilaReportedVisit(
+                lat: coordinate.latitude,
+                lng: coordinate.longitude,
+                at: arrivedAt
+            )
+            self.persistLastReportedVisit()
+            self.persistPendingFixes()
         }
     }
 
@@ -1511,6 +1667,73 @@ extension OilaTelemetryService {
     ///   real travel across a city, which clears any tower's uncertainty by an order of magnitude —
     ///   and drops the noise. A fix that is merely stale but SHARP is still taken unconditionally,
     ///   because refreshing a pin the parent is watching is worth more than the displacement rule.
+    /// Whether a fix inside `minFixIntervalS` is a materially sharper reading of the same place.
+    ///
+    /// Bounded by the ceiling. "Better than the last" is relative, and the last can be a 2.5 km
+    /// stale-branch reading; a 900 m fix is better than that and still not a route vertex. Without
+    /// the bound this exception was the one path into the queue that never met `maxAcceptedAccuracyM`.
+    nonisolated static func isMateriallyBetterFix(accuracy: Double?, previousAccuracy: Double) -> Bool {
+        guard let accuracy, accuracy >= 0, accuracy <= maxAcceptedAccuracyM else { return false }
+        return accuracy <= previousAccuracy - accuracyImprovementM
+    }
+
+    /// Whether a fix inside `minFixIntervalS` has covered enough ground that the route needs a
+    /// vertex there regardless of the clock. See `maxDisplacementM`.
+    nonisolated static func exceedsDisplacementCeiling(elapsed: TimeInterval, distanceFromLast: Double?) -> Bool {
+        guard elapsed >= burstFloorS, let distanceFromLast else { return false }
+        return distanceFromLast >= maxDisplacementM
+    }
+
+    /// Whether the child's heading has changed enough, at enough speed and with enough confidence,
+    /// that skipping this fix would cut a corner off the drawn route.
+    ///
+    /// Every guard fails closed. `course`, `courseAccuracy`, `speed` and `speedAccuracy` are all
+    /// −1 when CoreLocation has no value; a fix that cannot prove it is a moving vehicle with a
+    /// confident heading is not a turn, whatever the numbers say. The wrap-around form makes
+    /// 359° → 5° read as 6°, not 354°.
+    nonisolated static func isSignificantHeadingChange(
+        from previousCourse: Double?,
+        to course: Double,
+        courseAccuracy: Double,
+        speed: Double,
+        speedAccuracy: Double,
+        accuracy: Double?,
+        distanceFromLast: Double?
+    ) -> Bool {
+        guard let previousCourse, previousCourse >= 0, course >= 0 else { return false }
+        guard speedAccuracy >= 0, speed >= minTurnSpeedMS else { return false }
+        guard courseAccuracy >= 0, courseAccuracy <= maxCourseAccuracyDeg else { return false }
+        guard let accuracy, accuracy >= 0, accuracy <= maxTurnFixAccuracyM else { return false }
+        guard let distanceFromLast, distanceFromLast >= minDisplacementM else { return false }
+        let delta = abs((course - previousCourse + 540).truncatingRemainder(dividingBy: 360) - 180)
+        return delta >= significantHeadingChangeDeg
+    }
+
+    /// Whether a `CLVisit` arrival is worth a point of its own.
+    ///
+    /// The interval and displacement rules are meaningless for a dwell centroid — it is BY
+    /// DEFINITION close to the last fix and reported late — so this applies only what still means
+    /// something: the accuracy ceiling (a Wi-Fi-derived 800 m visit is the same spiderweb vertex
+    /// as any other coarse fix), a sanity bound on the arrival time (`distantPast` when CoreLocation
+    /// does not know it), and dedup against the previous visit, since one stop is reported twice.
+    nonisolated static func acceptsVisit(
+        accuracy: Double,
+        coordinate: CLLocationCoordinate2D,
+        arrivedAt: Date,
+        lastReported: OilaReportedVisit?,
+        now: Date = Date()
+    ) -> Bool {
+        guard accuracy >= 0, accuracy <= maxAcceptedAccuracyM else { return false }
+        guard CLLocationCoordinate2DIsValid(coordinate) else { return false }
+        guard arrivedAt > now.addingTimeInterval(-maxVisitAgeS),
+              arrivedAt <= now.addingTimeInterval(60) else { return false }
+        guard let lastReported else { return true }
+        let moved = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            .distance(from: CLLocation(latitude: lastReported.lat, longitude: lastReported.lng))
+        let elapsed = abs(arrivedAt.timeIntervalSince(lastReported.at))
+        return moved >= visitDedupDistanceM || elapsed >= visitDedupIntervalS
+    }
+
     nonisolated static func acceptsFix(
         accuracy: Double?,
         distanceFromLast: Double?,
@@ -1570,6 +1793,7 @@ extension OilaTelemetryService {
             // against `Date()` would see them all as "now" and keep exactly one, silently throwing
             // away the journey we queued the buffer for.
             var isMuchBetterThanLast = false
+            var waivesDisplacementRule = false
             if let lastAt = lastAcceptedFixAt {
                 let elapsed = location.timestamp.timeIntervalSince(lastAt)
                 if elapsed < 0 {
@@ -1582,19 +1806,52 @@ extension OilaTelemetryService {
                     // looking healthy. Drop the poisoned reference instead and take this fix.
                     lastAcceptedFix = nil
                     lastAcceptedFixAt = nil
+                    lastAcceptedCourse = nil
                 } else if elapsed < Self.minFixIntervalS {
+                    // Inside the time floor. Three things let a fix through anyway, and they are
+                    // different claims: a sharper reading of the SAME place, a vertex the ROUTE
+                    // needs because the child has covered real ground, or a CORNER.
                     let previousAccuracy = lastAcceptedFix?.horizontalAccuracy ?? .greatestFiniteMagnitude
-                    isMuchBetterThanLast = (accuracy ?? .greatestFiniteMagnitude)
-                        <= previousAccuracy - Self.accuracyImprovementM
-                    guard isMuchBetterThanLast else { continue }
+                    isMuchBetterThanLast = Self.isMateriallyBetterFix(
+                        accuracy: accuracy,
+                        previousAccuracy: previousAccuracy
+                    )
+                    let hasTravelledFar = Self.exceedsDisplacementCeiling(
+                        elapsed: elapsed,
+                        distanceFromLast: distance
+                    )
+                    let hasTurned = Self.isSignificantHeadingChange(
+                        from: lastAcceptedCourse,
+                        to: location.course,
+                        courseAccuracy: location.courseAccuracy,
+                        speed: location.speed,
+                        speedAccuracy: location.speedAccuracy,
+                        accuracy: accuracy,
+                        distanceFromLast: distance
+                    )
+                    guard isMuchBetterThanLast || hasTravelledFar || hasTurned else { continue }
+                    // A turn fix has already proven it is moving (speed, course confidence) and
+                    // has cleared the 15 m floor inside the rule itself; the accuracy-scaled floor
+                    // in `acceptsFix` exists to stop a STATIONARY child's jitter drawing a walk,
+                    // and would refuse the apex of a tight corner for a reason that cannot apply.
+                    if hasTurned { waivesDisplacementRule = true }
                 }
             }
 
-            // A sharper reading of the SAME place is the whole point of the exception above, so it
-            // must not then be failed for not having moved. Without this the escape hatch was
+            // A sharper reading of the SAME place is the whole point of the better-fix exception,
+            // so it must not then be failed for not having moved. Without this the escape hatch was
             // unreachable: everything that took it was rejected one line later by the displacement
             // rule, since a better fix of a stationary child has a displacement near zero.
-            if !isMuchBetterThanLast {
+            //
+            // What the waiver does NOT cover is the accuracy ceiling. It used to: a fix that was
+            // merely "better than the last" skipped `acceptsFix` altogether, and since the stale
+            // branch legitimately admits a 2.5 km reading, a 900 m one arriving after it was
+            // queued as a confident route vertex — the spiderweb the stale-branch hardening was
+            // written to end, still reachable through this door. `isMateriallyBetterFix` now
+            // refuses anything over the ceiling, and the turn waiver checks it here explicitly.
+            if isMuchBetterThanLast || waivesDisplacementRule {
+                guard let accuracy, accuracy <= Self.maxAcceptedAccuracyM else { continue }
+            } else {
                 let age = lastAcceptedFixAt.map { location.timestamp.timeIntervalSince($0) }
                 guard Self.acceptsFix(
                     accuracy: accuracy,
@@ -1614,11 +1871,13 @@ extension OilaTelemetryService {
             // Updated only on acceptance, so a rejected noisy fix never becomes the reference point.
             lastAcceptedFix = location
             lastAcceptedFixAt = location.timestamp
+            // A fix with no heading (stopped at a light: −1) keeps the previous one as reference.
+            if location.course >= 0 { lastAcceptedCourse = location.course }
         }
 
         guard !accepted.isEmpty else { return }
         pendingFixes = Array((pendingFixes + accepted).suffix(maxQueuedFixes))
-        persistPendingFixes()
+        persistPendingFixesThrottled()
         persistLastAcceptedFix()
         // Re-centre on the newest ACCEPTED fix — the gate has already established it is a real
         // position the child has actually reached.
@@ -1647,6 +1906,14 @@ struct OilaPendingSOS: Codable, Equatable {
     var id = UUID()
     var context: OilaSOSContext
     var queuedAt: Date
+}
+
+/// The last `CLVisit` that was queued, persisted so the dedup in `acceptsVisit` survives the
+/// relaunch that routinely separates the two reports CoreLocation makes of one stop.
+struct OilaReportedVisit: Codable, Equatable {
+    let lat: Double
+    let lng: Double
+    let at: Date
 }
 
 /// Supplies a one-shot SOS context. Abstracted so the Home view model's SOS call can be
