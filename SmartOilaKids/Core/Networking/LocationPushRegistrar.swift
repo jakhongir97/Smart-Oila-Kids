@@ -61,11 +61,11 @@ final class LocationPushRegistrar {
     /// Safe to call repeatedly — CoreLocation returns the current token rather than rotating it, and
     /// the app should re-read it on every launch because it can change.
     func refreshRegistration(authorization: CLAuthorizationStatus) {
-        // Build 20 ships with the feature stood down (`AppRuntime.locationPushEnabled`). Asking
-        // CoreLocation for the address without the entitlement in the signed profile would fail on
-        // every launch and record a `lastError` that reads like a provisioning bug rather than a
-        // deliberate configuration — and the address would be useless anyway, because no server can
-        // send to it yet.
+        // Build 20 shipped the feature stood down; from build 21 the entitlement is in the
+        // signed profile and this is on by default (`AppRuntime.locationPushEnabled`). The guard
+        // stays so a build can be switched off by configuration without touching signing: asking
+        // CoreLocation for the address without the entitlement fails on every launch and records
+        // a `lastError` that reads like a provisioning bug rather than a deliberate choice.
         guard AppRuntime.locationPushEnabled else {
             lastError = "location push disabled in this build"
             return
@@ -113,9 +113,9 @@ final class LocationPushRegistrar {
     /// telemetry start; it is a single Keychain write and it is what keeps a push answerable after
     /// the access token rotates.
     func publishSharedCredential() {
-        // Same reason, plus a specific one: the shared Keychain group is not in build 20's
-        // entitlements, so every write here would answer `errSecMissingEntitlement` and put a
-        // recurring failure in the diagnostics timeline for a feature nobody switched on.
+        // Same reason, plus a specific one: with the feature switched off by configuration the
+        // shared Keychain group may not be in the signed entitlements, and every write here would
+        // answer `errSecMissingEntitlement` and put a recurring failure in the diagnostics timeline.
         guard AppRuntime.locationPushEnabled else { return }
         let status = LocationPushSharedCredential.publish(
             accessToken: SecureTokenStore.oila.accessToken(),

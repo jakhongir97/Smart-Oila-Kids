@@ -17,21 +17,24 @@ enum AppRuntime {
         return false
     }
 
-    /// Server-initiated positions via the Location Push Service Extension. **OFF in build 20.**
+    /// Server-initiated positions via the Location Push Service Extension. **ON from build 21.**
     ///
-    /// The feature is complete on the device and inert without the backend: nothing can send a
-    /// location push until the server accepts the third token and calls APNs directly, so switching
-    /// it on today buys a family nothing. What it would cost is real — the extension carries
-    /// `com.apple.developer.location.push` and a second Keychain access group, which means a new
-    /// App ID, new capabilities on the existing one, and regenerated provisioning profiles before
-    /// the app can be archived at all. Build 20 exists to deliver the location fixes that need none
-    /// of that, with exactly build 19's signing story.
+    /// Build 20 shipped this stood down: the extension carries
+    /// `com.apple.developer.location.push` and a second Keychain access group, which needed a new
+    /// App ID, a capability on the existing one, and regenerated profiles before the app could be
+    /// archived at all. That portal work is done (2026-09-06, App ID
+    /// `uz.smartoila.kids.location-push` with App Groups + Location Push Service Extension; the
+    /// same capability on `uz.smartoila.kids`), the two entitlement keys are back in both
+    /// entitlements files, and the embed phase + target dependency are back in the project.
     ///
-    /// While this is off, `LocationPushRegistrar` never asks CoreLocation for an address and never
-    /// writes the extension's credential copy. Turning it on is this flag, the two entitlement
-    /// keys, and re-adding the embed phase — see `output/doc/location_push_backend_request.md`.
+    /// On by default; `SMARTOILA_LOCATION_PUSH_ENABLED=0` in the environment or Info.plist turns
+    /// it off without a rebuild of the signing story. While off, `LocationPushRegistrar` never asks
+    /// CoreLocation for an address and never writes the extension's credential copy. The feature
+    /// is still inert until the backend accepts `locationPushToken` and calls APNs directly — see
+    /// `output/doc/backend_task_location_push_2026-09-06.md` — but the device side is now live, so
+    /// the day the backend ships nothing else has to change on the phone.
     static var locationPushEnabled: Bool {
-        featureFlag("SMARTOILA_LOCATION_PUSH_ENABLED")
+        configuredBool("SMARTOILA_LOCATION_PUSH_ENABLED") ?? true
     }
 
     static var showGeoDebugOverlay: Bool {

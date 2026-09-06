@@ -4,9 +4,31 @@
 <dict>
 	<key>aps-environment</key>
 	<string>production</string>
+	<key>com.apple.developer.location.push</key>
+	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.3twn5nw4bl.uz.smartoila.kids</string>
+	</array>
+	<!--
+	  ORDER IS LOAD-BEARING. Security/SecItem.h: "The application-identifier entitlement contains
+	  the application's single access group, unless there is a keychain-access-groups entitlement
+	  present. The latter has as its value a list of access groups; THE FIRST ITEM IN THIS LIST IS
+	  THE DEFAULT ACCESS GROUP."
+
+	  `SecureTokenStore` writes the device tokens with no explicit `kSecAttrAccessGroup`, so they
+	  live in whatever the default group is. Every child paired in the field has them under the
+	  application-identifier group. Listing only the new shared group here would silently move the
+	  default, and the app would stop finding the credentials of every device already paired — an
+	  unrecoverable unpair on update, caught by SecureTokenStoreTests going all-nil.
+
+	  So the application-identifier group stays FIRST and remains the default; the shared group is
+	  additive, and only `LocationPushSharedCredential` addresses it explicitly.
+	-->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)uz.smartoila.kids</string>
+		<string>$(AppIdentifierPrefix)uz.smartoila.kids.shared</string>
 	</array>
 </dict>
 </plist>
