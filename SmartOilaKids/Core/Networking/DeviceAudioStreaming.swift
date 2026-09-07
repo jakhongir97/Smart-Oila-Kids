@@ -323,6 +323,51 @@ enum MediaPublisherFactory {
 #endif
     }
 
+    /// Logger for the microphone arming. Deliberately NOT `DeviceAudioStreamManager.log`: that type
+    /// is `@MainActor`, so its statics are main-actor isolated and unreachable from this enum.
+    private static let armingLog = Logger(subsystem: "uz.smartoila.kids", category: "media")
+
+    /// Hold the microphone capture pipeline open (or let it go), so that a `stream.start` arriving
+    /// while the app is backgrounded is an UN-MUTE of a running engine rather than a fresh start.
+    ///
+    /// Why this exists at all is in `AppRuntime.microphonePrearmEnabled`. What matters here is the
+    /// order, which was established by measurement on an iPhone 12 mini (iOS 26.6.1) and is not
+    /// obvious from the SDK surface:
+    ///
+    /// 1. `setRecordingAlwaysPreparedMode(true)` alone is NOT enough. It only INITIALISES the
+    ///    pipeline — the device reports `isSessionRecording: 0` afterwards, so nothing is running to
+    ///    survive backgrounding and the later background start is still a refused `StartIO`.
+    /// 2. `startLocalRecording()` is what actually opens the microphone without needing a `Room`,
+    ///    and it is the state that makes a later background publish legal.
+    /// 3. `isAutomaticDeactivationEnabled = false` is load-bearing. Without it the SDK deactivates
+    ///    the shared `AVAudioSession` when a `Room` tears down — measured as
+    ///    `powerd … SessionEnded … SmartOilaKids` about ten seconds after a lease ended — which
+    ///    silently disarms us and puts the NEXT background request back in the refused path.
+    ///
+    /// Arming must be requested while the app is in the foreground: the arming is itself a capture
+    /// start, and iOS refuses it from the background like any other. A failure is logged rather than
+    /// thrown so that a device which cannot arm still behaves exactly as it did before — a
+    /// foreground listen keeps working — instead of taking the streaming feature down with it.
+    static func setMicrophoneArmed(_ armed: Bool) async {
+#if canImport(LiveKit)
+        do {
+            try await AudioManager.shared.setRecordingAlwaysPreparedMode(armed)
+            if armed {
+                AudioManager.shared.audioSession.isAutomaticDeactivationEnabled = false
+                try AudioManager.shared.startLocalRecording()
+            } else {
+                AudioManager.shared.audioSession.isAutomaticDeactivationEnabled = true
+                try AudioManager.shared.stopLocalRecording()
+            }
+            armingLog.notice(
+                "media armed=\(armed ? "yes" : "no", privacy: .public) mic_pipeline")
+        } catch {
+            armingLog.error(
+                "media armed_failed \(String(describing: error), privacy: .public)")
+        }
+#endif
+    }
+
     /// True once the LiveKit SPM package is linked. Surfaced in diagnostics so it's obvious whether
     /// the build can actually publish yet.
     static var isLiveKitLinked: Bool {
@@ -714,6 +759,9 @@ final class DeviceAudioStreamManager: ObservableObject {
             self, selector: #selector(onWakeStart(_:)), name: .pushShouldStartAudioStream, object: nil)
         NotificationCenter.default.addObserver(
             self, selector: #selector(onWakeStop(_:)), name: .pushShouldStopAudioStream, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(onAudioSessionInterruption(_:)),
+            name: AVAudioSession.interruptionNotification, object: nil)
     }
 
     /// Mirror the live session into a system notification.
@@ -1549,7 +1597,10 @@ final class DeviceAudioStreamManager: ObservableObject {
         needsConsent = false
         refreshGrantedConsent()
         // Withdrawing consent must also end anything running under it — otherwise "I take it back"
-        // leaves the microphone open until the server lease happens to expire.
+        // leaves the microphone open until the server lease happens to expire. `stop()` ends the
+        // session; the arming is deliberately longer-lived than any session, so it has to be closed
+        // explicitly or the indicator would stay lit under a revoked consent.
+        disarmMicrophone()
         Task { await stop() }
     }
 
@@ -1577,6 +1628,49 @@ final class DeviceAudioStreamManager: ObservableObject {
             // naming the wrong hardware. Every other event in this file already goes through
             // `Self.event`, which is why the inconsistency survived.
             recordMedia(status: "idle", event: Self.event(activeMode, "stopped"))
+        }
+        // Tearing the room down can stop the microphone IO that makes the NEXT background start
+        // legal, and a parent listening twice in a row is the ordinary case — the second request
+        // must not be the one that lands back in `CMSUtility_IsAllowedToStartRecording`. Safe from
+        // the background: if the IO is still running this changes nothing, and if it is not, the
+        // attempt fails into `armed_failed` rather than leaving the arming a guess.
+        rearmMicrophone()
+    }
+
+    /// Re-establish the microphone arming after anything that can tear it down.
+    ///
+    /// Silently does nothing when the arming is switched off, when streaming is off, or before the
+    /// child has consented — arming is a capture start, and it must never precede the consent that
+    /// authorises it.
+    func rearmMicrophone() {
+        guard AppRuntime.microphonePrearmEnabled, isFeatureEnabled(), grantedConsent != nil else { return }
+        Task { await MediaPublisherFactory.setMicrophoneArmed(true) }
+    }
+
+    /// Close the held-open microphone. Consent withdrawal is the one event that must reach the
+    /// hardware immediately: `stop()` ends any live session, but the arming outlives a session by
+    /// design, so without this "I take it back" would leave the microphone open and the system
+    /// indicator lit.
+    func disarmMicrophone() {
+        Task { await MediaPublisherFactory.setMicrophoneArmed(false) }
+    }
+
+    /// A phone call — or any other interruption — stops our capture, and iOS will not let us start
+    /// it again from the background on our own. `.ended` is the one moment the system does allow the
+    /// capture back (`sessionIsResumingRecordingAfterInterruption`), so the arming is re-taken here
+    /// rather than waiting for the child to happen to open the app again. If the re-arm is refused
+    /// anyway, `setMicrophoneArmed` records `armed_failed` and the device degrades to
+    /// foreground-only listening instead of pretending to be armed.
+    @objc private func onAudioSessionInterruption(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            Self.log.notice("media armed=interrupted mic_pipeline")
+        case .ended:
+            rearmMicrophone()
+        @unknown default:
+            break
         }
     }
 

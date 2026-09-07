@@ -37,6 +37,31 @@ enum AppRuntime {
         configuredBool("SMARTOILA_LOCATION_PUSH_ENABLED") ?? true
     }
 
+    /// Whether the microphone capture pipeline is held open while the child device is idle, so a
+    /// `stream.start` that arrives while the app is in the background can be served at all.
+    ///
+    /// iOS refuses to START microphone capture from a backgrounded process — measured on device
+    /// (iOS 26.6.1): `CMSUtility_IsAllowedToStartRecording … is in the background and isn't allowed
+    /// to start recording  hasEntitlementToStartRecordingInTheBackground=NO`, then
+    /// `AUIOClient_StartIO failed (2003329396)`. The `audio` background mode only lets a capture
+    /// that is ALREADY RUNNING continue. So the only way a parent can listen while the child's phone
+    /// is in a pocket is to open the microphone while the app is on screen and never close it: the
+    /// push then un-mutes a running engine, which iOS does permit (it is the same path that makes a
+    /// renewal work today while a cold start does not).
+    ///
+    /// The cost is deliberate and visible: iOS shows the orange microphone indicator for this app
+    /// for as long as the arming holds, and the capture costs battery. That is the honest trade —
+    /// the alternative is a listen request that silently does nothing whenever the child is not
+    /// looking at the app.
+    ///
+    /// On by default; `SMARTOILA_MIC_PREARM_ENABLED=0` in the environment or Info.plist turns the
+    /// arming off without touching the streaming feature itself. While off, listening still works
+    /// whenever the child has the app on screen, and a background request fails the way it did
+    /// before this flag existed — `audio_start_failed_*` rather than anything new.
+    static var microphonePrearmEnabled: Bool {
+        configuredBool("SMARTOILA_MIC_PREARM_ENABLED") ?? true
+    }
+
     static var showGeoDebugOverlay: Bool {
         configuredBool("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY") ?? false
     }

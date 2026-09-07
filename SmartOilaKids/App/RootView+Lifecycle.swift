@@ -127,6 +127,15 @@ extension RootView {
         }
 
         guard newValue == .active else { return }
+        // Arm the microphone while we are demonstrably on screen.
+        //
+        // iOS refuses a FRESH capture start from a backgrounded process, so a parent who presses
+        // "listen" while the child's phone is in a pocket would otherwise get nothing at all.
+        // Un-muting an engine that is already running IS permitted in the background — which is why
+        // a renewal works today and a cold start does not — and being on screen is the only moment
+        // the start itself is legal. See `AppRuntime.microphonePrearmEnabled` for the trade this
+        // makes and how to turn it off.
+        DeviceAudioStreamManager.shared.rearmMicrophone()
         OilaTelemetryService.shared.refreshLockNow()
         OilaTelemetryService.shared.postStatusNow()
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
