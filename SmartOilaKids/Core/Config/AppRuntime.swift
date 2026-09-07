@@ -54,12 +54,21 @@ enum AppRuntime {
     /// the alternative is a listen request that silently does nothing whenever the child is not
     /// looking at the app.
     ///
-    /// On by default; `SMARTOILA_MIC_PREARM_ENABLED=0` in the environment or Info.plist turns the
-    /// arming off without touching the streaming feature itself. While off, listening still works
-    /// whenever the child has the app on screen, and a background request fails the way it did
-    /// before this flag existed — `audio_start_failed_*` rather than anything new.
+    /// **OFF by default, deliberately.** The arming works — measured on device, a backgrounded phone
+    /// goes live 3.1s after the push — but holding a child's microphone open around the clock to buy
+    /// that is a price this product declined to pay: the indicator is lit permanently, the battery
+    /// drains continuously, and an open microphone is one defect away from being a live one. The
+    /// microphone is to open when a parent asks for a session and close when it ends, not before.
+    ///
+    /// The mechanism is kept, tested and one flag from returning, because the constraint it answers
+    /// has not gone away: with the arming off, a `stream.start` that arrives while the app is in the
+    /// background CANNOT open the microphone at all (`hasEntitlementToStartRecordingInTheBackground`
+    /// is NO and `AUIOClient_StartIO` fails 2003329396). Listening therefore works only while the
+    /// child has the app on screen until the on-demand path lands.
+    ///
+    /// `SMARTOILA_MIC_PREARM_ENABLED=1` in the environment or Info.plist turns it back on.
     static var microphonePrearmEnabled: Bool {
-        configuredBool("SMARTOILA_MIC_PREARM_ENABLED") ?? true
+        configuredBool("SMARTOILA_MIC_PREARM_ENABLED") ?? false
     }
 
     static var showGeoDebugOverlay: Bool {
