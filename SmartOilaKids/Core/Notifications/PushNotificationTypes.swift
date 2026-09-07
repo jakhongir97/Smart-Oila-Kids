@@ -44,6 +44,11 @@ enum LocalNotificationID {
     /// Android child app does it (one notification id, re-posted): a child who has been away should
     /// come back to one banner, not one per message.
     static let chatMessage = "oila.chat.message"
+    /// "Your parent wants to listen" — posted when a `stream.start` arrives while the app is off
+    /// screen, where iOS will not let the microphone open. Tapping it brings the app forward, which
+    /// is the only moment the start is permitted. A fixed id, so a second request REPLACES the first
+    /// rather than stacking; withdrawn as soon as the request is consumed, stopped or expires.
+    static let listenRequest = "oila.live-stream.request"
     /// Prefixes; the schedulers append a UUID so each event gets its own banner.
     static let integrityPrefix = "device-control.integrity."
     static let recoveryPrefix = "device-control.recovery."
@@ -56,6 +61,7 @@ enum LocalNotificationID {
     /// to open the chat, which `SmartOilaKidsAppDelegate.didReceive` handles explicitly.
     static func isLocallyScheduled(_ identifier: String) -> Bool {
         identifier == livePresence
+            || identifier == listenRequest
             || identifier == chatMessage
             || identifier.hasPrefix(integrityPrefix)
             || identifier.hasPrefix(recoveryPrefix)

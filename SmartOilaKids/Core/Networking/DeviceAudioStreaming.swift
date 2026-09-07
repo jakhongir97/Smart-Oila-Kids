@@ -296,6 +296,114 @@ enum StreamWakeAddressing {
     }
 }
 
+// MARK: - Parked start requests
+
+// Lives here rather than in its own file on purpose: the project's pbxproj lists sources
+// explicitly and is NOT safe to regenerate (`xcodegen generate` drops the Location Push extension
+// embed — 735 lines, verified 2026-09-07), so a new file would mean hand-editing the project. This
+// type is only ever used by the manager below and needs `StreamCommand` and `StreamMode` from this
+// same file, so co-locating costs nothing.
+
+/// A `stream.start` that arrived while this app was in the background, parked until the child brings
+/// the app on screen.
+///
+/// It exists because iOS refuses to open the microphone for a backgrounded process at all —
+/// `CMSUtility_IsAllowedToStartRecording` reports
+/// `hasEntitlementToStartRecordingInTheBackground=NO` and `AUIOClient_StartIO` fails 2003329396,
+/// measured on device. Being on screen is the only moment the start is permitted, so a request that
+/// lands while the child's phone is in a pocket has to wait for one rather than fail silently.
+///
+/// Persisted rather than held in memory (`DeviceAudioStreamManager.pendingCommand` is in-memory)
+/// because the process that receives the push is usually a background wake: iOS may suspend or
+/// terminate it long before the child sees the banner and taps it. Shaped after `PushDeepLinkStore`.
+private struct PendingStreamRequest: Codable {
+    let mode: String
+    /// `AVCaptureDevice.Position.rawValue`; nil means audio-only, exactly as in `StreamCommand`.
+    let cameraPositionRawValue: Int?
+    let maxDurationSeconds: Int
+    let createdAt: Date
+}
+
+actor PendingStreamRequestStore {
+    static let shared = PendingStreamRequestStore()
+
+    init(userDefaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = Date.init) {
+        self.userDefaults = userDefaults
+        self.now = now
+    }
+
+    /// How long a parked request stays acceptable. A parent who pressed "listen" and walked away
+    /// must not have the microphone open the moment their child next picks the phone up an hour
+    /// later — the request is an invitation with a short life, not a standing order.
+    ///
+    /// Five minutes is chosen against the human loop rather than any protocol value: long enough for
+    /// a child to notice a banner, unlock and tap, short enough that the parent is plausibly still
+    /// waiting. The server can shorten it in practice simply by sending `stream.stop`.
+    static let acceptanceWindow: TimeInterval = 300
+
+    func save(_ command: StreamCommand) {
+        let payload = PendingStreamRequest(
+            mode: command.mode.rawValue,
+            cameraPositionRawValue: command.cameraPosition?.rawValue,
+            maxDurationSeconds: command.maxDurationSeconds,
+            createdAt: now()
+        )
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        userDefaults.set(data, forKey: storageKey)
+    }
+
+    /// Hand back the parked request, if one is still within the acceptance window, and clear it.
+    ///
+    /// The returned command carries a FRESH `receivedAt` and no `expiresAt`, which deliberately
+    /// re-bases the lease on the child's tap. The alternative — honouring the original window — is
+    /// what a strict reading of "the lease is server-owned" asks for, and it does not survive
+    /// contact with this flow: a 120-second lease parked behind a banner is already expired by the
+    /// time anyone taps, so every request would open the microphone and close it in the same breath.
+    ///
+    /// The session stays bounded in every direction that matters: `maxDurationSeconds` still ends it
+    /// on its own, `stream.stop` still ends it early, the parent's renewals still drive it, and the
+    /// presence banner still discloses it for as long as it runs. What the re-base costs is at most
+    /// one extra `maxDurationSeconds` of listening after a parent has stopped waiting — bounded,
+    /// disclosed, and far cheaper than a feature that cannot work at all.
+    func consume() -> StreamCommand? {
+        guard let data = userDefaults.data(forKey: storageKey),
+              let payload = try? JSONDecoder().decode(PendingStreamRequest.self, from: data) else {
+            return nil
+        }
+        userDefaults.removeObject(forKey: storageKey)
+
+        guard now().timeIntervalSince(payload.createdAt) <= Self.acceptanceWindow else { return nil }
+        guard let mode = StreamMode(rawValue: payload.mode) else { return nil }
+
+        let camera = payload.cameraPositionRawValue.flatMap(AVCaptureDevice.Position.init(rawValue:))
+        return StreamCommand(
+            mode: mode,
+            cameraPosition: camera,
+            maxDurationSeconds: payload.maxDurationSeconds,
+            expiresAt: nil
+        )
+    }
+
+    /// True when a request is parked and still acceptable. Read-only: used to decide whether the
+    /// banner should still be on screen, without consuming the request behind it.
+    func hasPending() -> Bool {
+        guard let data = userDefaults.data(forKey: storageKey),
+              let payload = try? JSONDecoder().decode(PendingStreamRequest.self, from: data) else {
+            return false
+        }
+        return now().timeIntervalSince(payload.createdAt) <= Self.acceptanceWindow
+    }
+
+    func clear() {
+        userDefaults.removeObject(forKey: storageKey)
+    }
+
+    /// Seam for the acceptance window, so a test can age a parked request without sleeping.
+    private let now: @Sendable () -> Date
+    private let userDefaults: UserDefaults
+    private let storageKey = "OILA_PENDING_STREAM_REQUEST"
+}
+
 // MARK: - Publisher seam
 //
 // A transport-agnostic seam so the app compiles WITH or WITHOUT the LiveKit SPM package. The real
@@ -635,6 +743,9 @@ final class DeviceAudioStreamManager: ObservableObject {
     enum State: Equatable {
         case idle
         case connecting
+        /// A parent asked while the app was off screen, where iOS forbids opening the microphone.
+        /// The request is parked and a banner is up; the child's tap is what starts it.
+        case awaitingChildTap
         case live
         case disabled             // SMARTOILA_MEDIA_FEATURES_ENABLED is off
         case unsupported          // SDK not linked
@@ -833,6 +944,7 @@ final class DeviceAudioStreamManager: ObservableObject {
     private static let presenceRepostInterval: TimeInterval = 30
 
     private static let presenceNotificationID = LocalNotificationID.livePresence
+    private static let listenRequestNotificationID = LocalNotificationID.listenRequest
 
     /// Decide what a live session does when the app leaves the screen.
     ///
@@ -1012,6 +1124,20 @@ final class DeviceAudioStreamManager: ObservableObject {
             Task { await renew(command: command) }
             return
         }
+        // A FRESH capture cannot be opened from the background. iOS refuses it outright —
+        // `CMSUtility_IsAllowedToStartRecording` reports
+        // `hasEntitlementToStartRecordingInTheBackground=NO` and `AUIOClient_StartIO` fails
+        // 2003329396, measured on device 3/3 — so pressing on from here would mint a stream token,
+        // join a LiveKit room and burn the connect watchdog on an attempt that cannot succeed, then
+        // surface as a generic connect error. Park it for the child's tap instead.
+        //
+        // Deliberately BELOW the `.live` branch: a renewal is an un-mute of a running engine, which
+        // the background permits and which is the one case that must keep working with the phone in
+        // a pocket. Only a cold start is deferred.
+        guard isForeground() else {
+            parkForChildTap(command)
+            return
+        }
         // A start racing an in-flight connect: remember the newer command so the connecting attempt
         // and its lease reflect what the parent last asked for.
         pendingCommand = command
@@ -1021,6 +1147,66 @@ final class DeviceAudioStreamManager: ObservableObject {
         // route the bug occurs on. `start()` re-applies the same test and does the teardown.
         guard state != .connecting || isStuckConnecting else { return }
         Task { await start(command: command) }
+    }
+
+    /// Hold a background request until the child brings the app forward, and tell them it is there.
+    ///
+    /// The banner IS the feature on a locked phone: without it the request is invisible and the
+    /// parent waits on a spinner for something that can never happen. Its tap opens the app, and the
+    /// foreground transition is what actually starts the session (see `consumePendingListenRequest`)
+    /// — which also means a child who opens the app on their own within the window starts it too,
+    /// exactly as if they had tapped the banner.
+    private func parkForChildTap(_ command: StreamCommand) {
+        state = .awaitingChildTap
+        Task { await PendingStreamRequestStore.shared.save(command) }
+        postListenRequestNotification(for: command.mode)
+        recordMedia(status: "awaiting_child_tap", event: Self.event(command.mode, "start_deferred_background"))
+    }
+
+    /// Start a request that was parked for the child's tap, if one is still within its acceptance
+    /// window. Called on every foreground transition — the tap on the banner is only one of the ways
+    /// the app comes forward, and none of the others should lose the request.
+    func consumePendingListenRequest() {
+        guard isFeatureEnabled() else { return }
+        Task { [weak self] in
+            guard let command = await PendingStreamRequestStore.shared.consume() else {
+                await self?.clearListenRequestNotification(resettingState: true)
+                return
+            }
+            guard let self else { return }
+            await self.clearListenRequestNotification(resettingState: false)
+            self.requestStart(command: command)
+        }
+    }
+
+    /// Withdraw the request banner. `resettingState` returns the manager to `.idle` when the request
+    /// died rather than started — an `.awaitingChildTap` that outlives its request would otherwise
+    /// leave the UI claiming a parent is waiting when nobody is.
+    @MainActor
+    private func clearListenRequestNotification(resettingState: Bool) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.listenRequestNotificationID])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.listenRequestNotificationID])
+        if resettingState, state == .awaitingChildTap {
+            state = .idle
+        }
+    }
+
+    private func postListenRequestNotification(for mode: StreamMode) {
+        let content = UNMutableNotificationContent()
+        content.title = L10n.tr(mode == .video ? "audio2.request.video.title" : "audio2.request.title")
+        content.body = L10n.tr("audio2.request.body")
+        // Unlike the presence banner this one exists to be NOTICED — it is a request waiting on a
+        // person, not a disclosure running alongside something already happening.
+        content.sound = .default
+        // Inert until the App ID carries the Time Sensitive Notifications capability, and correct
+        // the moment it does — the same trade `syncPresenceNotification` documents. It matters here
+        // too: under a Focus mode this banner is suppressed, and a suppressed banner is a listen
+        // request the child never sees.
+        content.interruptionLevel = .timeSensitive
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: Self.listenRequestNotificationID, content: content, trigger: nil)
+        )
     }
 
     func grantConsentAndStart() {
@@ -1629,6 +1815,10 @@ final class DeviceAudioStreamManager: ObservableObject {
             // `Self.event`, which is why the inconsistency survived.
             recordMedia(status: "idle", event: Self.event(activeMode, "stopped"))
         }
+        // A stop also cancels a request that never got its tap: the parent has stopped waiting, so
+        // the banner must go and the parked command must not be able to open the microphone later.
+        Task { await PendingStreamRequestStore.shared.clear() }
+        clearListenRequestNotification(resettingState: true)
         // Tearing the room down can stop the microphone IO that makes the NEXT background start
         // legal, and a parent listening twice in a row is the ordinary case — the second request
         // must not be the one that lands back in `CMSUtility_IsAllowedToStartRecording`. Safe from

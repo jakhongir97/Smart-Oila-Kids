@@ -329,6 +329,9 @@
 "audio2.watching" = "Ota-ona kuzatyapti";
 "audio2.camera_unavailable" = "Kamera ochilmadi — faqat ovoz";
 "audio2.stop" = "To'xtatish";
+"audio2.request.title" = "Ota-onangiz eshitmoqchi";
+"audio2.request.video.title" = "Ota-onangiz ko'rmoqchi";
+"audio2.request.body" = "Boshlash uchun bosing";
 "audio2.consent.title" = "Jonli ovozga ruxsat berasizmi?";
 "audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. U yoniq bo'lganda yuqorida doim qizil belgi ko'rinadi.";
 "audio2.consent.video.title" = "Jonli videoga ruxsat berasizmi?";

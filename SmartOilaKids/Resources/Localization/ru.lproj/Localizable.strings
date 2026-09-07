@@ -329,6 +329,9 @@
 "audio2.watching" = "Родитель смотрит";
 "audio2.camera_unavailable" = "Камера не открылась — только звук";
 "audio2.stop" = "Стоп";
+"audio2.request.title" = "Родитель хочет послушать";
+"audio2.request.video.title" = "Родитель хочет посмотреть";
+"audio2.request.body" = "Нажмите, чтобы начать";
 "audio2.consent.title" = "Разрешить живой звук?";
 "audio2.consent.body" = "Родитель может слушать то, что вокруг вас, ради вашей безопасности. Пока это включено, вверху всегда виден красный индикатор.";
 "audio2.consent.video.title" = "Разрешить живое видео?";

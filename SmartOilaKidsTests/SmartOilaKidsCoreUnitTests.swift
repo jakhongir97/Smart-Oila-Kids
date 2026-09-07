@@ -3547,6 +3547,45 @@ final class LiveSessionLifecycleTests: XCTestCase {
     }
 
     /// A manager wired to fakes, with consent already granted for `mode`.
+    /// The parked request is re-based on the child's tap: a lease measured from the ORIGINAL push
+    /// is already spent by the time anyone taps, so honouring it would open the microphone and close
+    /// it in the same breath.
+    func testAParkedRequestComesBackWithALeaseMeasuredFromTheTap() async {
+        let store = PendingStreamRequestStore(userDefaults: defaults)
+        let original = StreamCommand(
+            mode: .audio,
+            cameraPosition: nil,
+            maxDurationSeconds: 120,
+            expiresAt: Date().addingTimeInterval(-600),
+            receivedAt: Date().addingTimeInterval(-600)
+        )
+
+        await store.save(original)
+        let consumed = await store.consume()
+
+        XCTAssertEqual(consumed?.mode, .audio)
+        XCTAssertEqual(consumed?.maxDurationSeconds, 120)
+        XCTAssertNil(consumed?.expiresAt, "the server window described the wait, not the session")
+        XCTAssertGreaterThan(consumed?.remainingLeaseSeconds ?? 0, 0, "the tap must buy a usable session")
+        let second = await store.consume()
+        XCTAssertNil(second, "consuming a request must clear it")
+    }
+
+    /// A parent who pressed listen and walked away must not have the microphone open the moment
+    /// their child next picks the phone up an hour later.
+    func testAParkedRequestExpiresAfterTheAcceptanceWindow() async {
+        let clock = OSAllocatedUnfairLock(initialState: Date())
+        let store = PendingStreamRequestStore(userDefaults: defaults, now: { clock.withLock { $0 } })
+        await store.save(.debugAudio)
+        let armed = await store.hasPending()
+        XCTAssertTrue(armed)
+
+        clock.withLock { $0 = $0.addingTimeInterval(PendingStreamRequestStore.acceptanceWindow + 1) }
+
+        let consumed = await store.consume()
+        XCTAssertNil(consumed, "a request older than the acceptance window must not open the microphone")
+    }
+
     private func makeManager(
         publisher: FakeMediaPublisher,
         foreground: Bool = true,
@@ -3580,6 +3619,71 @@ final class LiveSessionLifecycleTests: XCTestCase {
         XCTAssertEqual(publisher.connectCount, 1)
         XCTAssertEqual(publisher.connectedMode, .audio)
         XCTAssertEqual(publisher.disconnectCount, 0)
+    }
+
+    // MARK: - A parent asking while the child's phone is in a pocket
+
+    /// iOS refuses to open the microphone for a backgrounded process, so a cold start from a push
+    /// must not even try: no token mint, no room join, no watchdog burned on an attempt that cannot
+    /// succeed. It parks for the child's tap instead, and says so.
+    func testABackgroundStartIsParkedForTheChildTapInsteadOfOpeningTheMicrophone() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher, foreground: false)
+
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertEqual(manager.state, .awaitingChildTap, "a background start must park, not connect")
+        XCTAssertEqual(publisher.connectCount, 0, "nothing may reach the transport before the tap")
+        XCTAssertFalse(manager.isLive)
+    }
+
+    /// The same request with the app on screen must behave exactly as it always has — the parking
+    /// path is for the background only, and must not become a tap the child has to make while they
+    /// are already looking at the app.
+    func testAForegroundStartIsNotParked() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher, foreground: true)
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertTrue(manager.isLive)
+        XCTAssertEqual(publisher.connectCount, 1)
+    }
+
+    /// THE CASE THAT MUST NOT REGRESS. A renewal is an un-mute of an engine that is already running,
+    /// which iOS permits in the background — it is the one path that keeps a live session alive with
+    /// the phone in a pocket. Parking it would silently end every session the moment the child
+    /// locked the screen.
+    func testARenewalIsNotParkedWhenTheAppIsInTheBackground() async {
+        let publisher = FakeMediaPublisher()
+        let onScreen = OSAllocatedUnfairLock(initialState: true)
+        let manager = makeManager(publisher: publisher)
+        manager.isForeground = { onScreen.withLock { $0 } }
+
+        await manager.start(command: .debugAudio)
+        XCTAssertTrue(manager.isLive)
+
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertNotEqual(manager.state, .awaitingChildTap, "a live session must renew, never park")
+        XCTAssertTrue(manager.isLive)
+    }
+
+    /// A stop is the parent saying they have stopped waiting. The parked request must not be able to
+    /// open the microphone afterwards.
+    func testStopClearsARequestThatWasWaitingForTheChildTap() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher, foreground: false)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(manager.state, .awaitingChildTap)
+
+        await manager.stop()
+
+        XCTAssertNotEqual(manager.state, .awaitingChildTap)
+        let store = PendingStreamRequestStore(userDefaults: defaults)
+        let leftover = await store.consume()
+        XCTAssertNil(leftover, "a stop must leave nothing behind that could open the microphone later")
     }
 
     func testStopTearsTheTransportDownAndLeavesNoLiveState() async {

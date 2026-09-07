@@ -136,6 +136,13 @@ extension RootView {
         // the start itself is legal. See `AppRuntime.microphonePrearmEnabled` for the trade this
         // makes and how to turn it off.
         DeviceAudioStreamManager.shared.rearmMicrophone()
+        // A parent may have asked while this app was off screen, where iOS forbids opening the
+        // microphone. Being on screen is the moment that becomes legal, so any parked request is
+        // started here — whether the child arrived by tapping the request banner or opened the app
+        // on their own.
+        if AppRuntime.audioStreamingEnabled {
+            DeviceAudioStreamManager.shared.consumePendingListenRequest()
+        }
         OilaTelemetryService.shared.refreshLockNow()
         OilaTelemetryService.shared.postStatusNow()
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
