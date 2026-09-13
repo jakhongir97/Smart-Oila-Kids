@@ -1,4 +1,5 @@
 import Foundation
+import os
 import ManagedSettings
 
 enum ScreenTimeUsageSnapshotUserInfoKey {
@@ -198,7 +199,26 @@ private extension ScreenTimeUsageCoordinator {
 
     func refreshSnapshotIfNeeded(for dsn: String, expectedStatus: String) -> Bool {
         let sharedStore = ScreenTimeUsageSharedStore()
-        guard let snapshot = sharedStore.loadSnapshot(dsn: dsn),
+        // What does the app ACTUALLY see in the shared container? The extension reports writing a
+        // snapshot the app then cannot find, with the same dsn and the same day, across process
+        // restarts — so this prints the container's own key list rather than trusting either side's
+        // idea of where the data lives.
+        if let shared = ScreenTimeUsageAppGroup.sharedUserDefaults() {
+            let keys = shared.dictionaryRepresentation().keys
+                .filter { $0.hasPrefix("SCREEN_TIME") }
+                .sorted()
+            Self.log.notice(
+                "screentime_group suite=\(ScreenTimeUsageAppGroup.identifier, privacy: .public) keys=\(keys.joined(separator: ","), privacy: .public)"
+            )
+        } else {
+            Self.log.error("screentime_group suite=UNAVAILABLE")
+        }
+
+        let loaded = sharedStore.loadSnapshot(dsn: dsn)
+        Self.log.notice(
+            "screentime_snapshot_read dsn=\(dsn, privacy: .public) want_day=\(self.currentDayKey, privacy: .public) got=\(loaded == nil ? "none" : "day=\(loaded!.dayKey) apps=\(loaded!.entries.count)", privacy: .public)"
+        )
+        guard let snapshot = loaded,
               snapshot.dayKey == currentDayKey else {
             latestSnapshot = nil
             updateDiagnostics(
@@ -260,6 +280,8 @@ private extension ScreenTimeUsageCoordinator {
             .nilIfEmpty
     }
 
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
+
     func updateDiagnostics(
         status: String? = nil,
         dsn: String? = nil,
@@ -268,6 +290,12 @@ private extension ScreenTimeUsageCoordinator {
         lastError: String? = nil,
         lastCollectedAt: Date? = nil
     ) {
+        // The usage lane is invisible from the outside until it works, and "no data" in the parent
+        // app has half a dozen possible causes. One line per state change makes the failing stage
+        // readable off a device with idevicesyslog.
+        Self.log.notice(
+            "screentime_usage status=\(status ?? "-", privacy: .public) apps=\(selectedApps ?? -1, privacy: .public) snapshot=\(lastSnapshot ?? "-", privacy: .public) error=\(lastError ?? "-", privacy: .public)"
+        )
         RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(
             status: status,
             dsn: dsn,

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct DeviceApplicationUsageReportItemRequest: Codable, Equatable {
     let packageName: String
@@ -648,6 +649,8 @@ private extension DeviceApplicationUsageReportCoordinator {
         }
     }
 
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
+
     static func defaultDiagnosticsUpdater(
         status: String?,
         dsn: String?,
@@ -658,6 +661,9 @@ private extension DeviceApplicationUsageReportCoordinator {
         lastUploadAt: Date?,
         lastError: String?
     ) {
+        log.notice(
+            "screentime_usage_post status=\(status ?? "-", privacy: .public) queued=\(queuedBatchCount ?? -1, privacy: .public) payload=\(lastPayload ?? "-", privacy: .public) response=\(lastResponse ?? "-", privacy: .public) error=\(lastError ?? "-", privacy: .public)"
+        )
         Task { @MainActor in
             RuntimeDiagnosticsCenter.shared.updateAppLimitsUsage(
                 status: status,

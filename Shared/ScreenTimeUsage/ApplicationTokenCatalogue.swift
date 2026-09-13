@@ -1,5 +1,6 @@
 import Foundation
 import ManagedSettings
+import os
 
 /// The bridge from a bundle id the SERVER knows to an `ApplicationToken` the SYSTEM will act on.
 ///
@@ -14,16 +15,28 @@ import ManagedSettings
 ///
 /// There is exactly one place iOS hands out both halves at once: inside a `DeviceActivityReport`
 /// extension, `DeviceActivityData.ApplicationActivity.application` carries a non-nil
-/// `bundleIdentifier` AND a usable `token`. The report extension therefore writes what it learns
-/// here, and the app reads it back to turn `lockedPackages` into a shield.
+/// `bundleIdentifier` AND a usable `token`.
 ///
-/// Consequences worth stating plainly, because they shape the product:
-/// * An app the child has never opened has never appeared in a report, so it has no token and
-///   cannot be blocked individually yet. The whole-device lock does not have this problem — it
-///   needs no tokens at all.
-/// * Tokens are voided if authorization is revoked and re-granted, so a stale entry can stop
-///   matching. Entries are re-learned on every report pass, and a token that no longer resolves is
-///   simply inert rather than harmful.
+/// ⚠️ AND THAT PLACE CANNOT SHARE THEM. Measured on the same device, same App Group, same second:
+///
+///     extension: read_back=apps=8  ext_keys=SCREEN_TIME_APPLICATION_TOKENS_V1,
+///                …_USAGE_SNAPSHOT_…, …_HISTORY_INDEX_…, …_HISTORY_SNAPSHOT_…
+///     app:       keys=SCREEN_TIME_USAGE_BRIDGE_CONFIGURATION          ← only its OWN write
+///
+/// The report extension writes successfully, reads its own writes back, and the app — holding the
+/// identical `com.apple.security.application-groups` entitlement, across process restarts — sees
+/// none of it. Its container is redirected by the privacy sandbox Apple describes for shield
+/// configuration extensions ("prevents your extension from … moving sensitive content outside the
+/// extension's address space"); the same applies here.
+///
+/// So this type works, and is kept, but NOTHING FILLS IT on iOS 26 by this route. The consequences
+/// are the product's, not the code's:
+/// * per-app usage cannot be exported from iOS at all — it exists only inside an extension that
+///   may render it on the child's screen and may not hand it to anyone;
+/// * per-app blocking cannot be driven by a bundle id from the server, because no token for that
+///   bundle id can ever reach the app process. The only supply of tokens the app can keep is
+///   `FamilyActivityPicker`, which needs one human tap on the child's phone.
+/// The whole-device lock has neither problem: it needs no identity at all, and it is proven.
 struct ApplicationTokenCatalogue {
     struct Entry: Codable, Equatable {
         /// Lower-cased, so it matches what the usage reporter sends the server.
@@ -37,6 +50,10 @@ struct ApplicationTokenCatalogue {
     /// that a 6 MB extension also has to read.
     static let maximumEntries = 300
     static let storageKey = "SCREEN_TIME_APPLICATION_TOKENS_V1"
+
+    /// Posted whenever the map grows, so the app can re-apply blocks that were unenforceable until
+    /// this moment. Darwin, because the writer is usually the report extension.
+    static let didChangeDarwinNotification = "uz.smartoila.kids.application-tokens-changed"
 
     init(userDefaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()) {
         self.userDefaults = userDefaults
@@ -70,6 +87,19 @@ struct ApplicationTokenCatalogue {
 
         guard let data = try? JSONEncoder().encode(Array(merged)) else { return }
         userDefaults.set(data, forKey: Self.storageKey)
+        Self.log.notice(
+            "token_catalogue merged=\(newEntries.count, privacy: .public) total=\(merged.count, privacy: .public)"
+        )
+        // Tell the app, which may be sitting on a block it could not enforce a second ago. The
+        // write above happens in the report EXTENSION as often as in the app, so this crosses a
+        // process boundary — hence a Darwin notification rather than NotificationCenter.
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(Self.didChangeDarwinNotification as CFString),
+            nil,
+            nil,
+            true
+        )
     }
 
     func clear() {
@@ -97,4 +127,6 @@ struct ApplicationTokenCatalogue {
     }
 
     private let userDefaults: UserDefaults?
+
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
 }

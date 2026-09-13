@@ -104,6 +104,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
 
         if lockStateObserver == nil {
             observeLockState()
+            observeTokenCatalogue()
         }
 
         applyNow()
@@ -253,6 +254,22 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
     }
 
+    /// The token catalogue grew — an app the child just opened may be one the parent blocked days
+    /// ago, and it is enforceable for the first time now.
+    private func observeTokenCatalogue() {
+        let name = ApplicationTokenCatalogue.didChangeDarwinNotification as CFString
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, _, _, _, _ in
+                Task { @MainActor in ScreenTimeEnforcementCoordinator.shared.applyNow() }
+            },
+            name,
+            nil,
+            .deliverImmediately
+        )
+    }
+
     /// A recognized `GET /device/lock/state` response has been applied by `OilaTelemetryService`.
     ///
     /// Internal rather than private so a test can drive the exact transition the notification
@@ -293,6 +310,7 @@ private extension String {
 }
 
 #if DEBUG
+import DeviceActivity
 import FamilyControls
 import ManagedSettings
 import os
@@ -349,6 +367,11 @@ extension ScreenTimeEnforcementCoordinator {
                 )
             }
             Self.proofLog.notice("proof step=cleared_all stores=default+4_named")
+            return
+        }
+        if ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] == "6" {
+            hasRunProof = true
+            runMonitorWriteProof()
             return
         }
         if ["4", "5"].contains(ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] ?? "") {
@@ -498,6 +521,51 @@ extension ScreenTimeEnforcementCoordinator {
             try? await Task.sleep(nanoseconds: UInt64(max(10, seconds) * 1_000_000_000))
             controller.clear()
             Self.proofLog.notice("proof step=shipping_path_cleared")
+        }
+    }
+
+    /// Mode 6: can the DEVICE ACTIVITY MONITOR extension write to the App Group?
+    ///
+    /// The report extension cannot — measured: it reads back its own writes while the app sees a
+    /// container holding only the app's own key. The monitor extension is a different kind
+    /// (`com.apple.product-type.app-extension`, not the privacy-sandboxed report one), and the
+    /// answer decides whether iOS can report ANY usage to a parent: if it can write, threshold
+    /// events are a usable channel; if it cannot, per-app usage is unreportable on iOS, full stop.
+    ///
+    /// Apple: "The application extension's DeviceActivityMonitor may begin receiving callbacks as
+    /// soon as the system calls this method if the activity's scheduled interval is ongoing" — so a
+    /// schedule covering right now fires `intervalDidStart` within seconds, and that callback
+    /// already writes a `DeviceControlEventSharedStore` row in this repo.
+    func runMonitorWriteProof() {
+        Task { @MainActor in
+            let center = DeviceActivityCenter()
+            let activity = DeviceActivityName("smartoila.proof.monitor-write")
+            let schedule = DeviceActivitySchedule(
+                intervalStart: DateComponents(hour: 0, minute: 0),
+                intervalEnd: DateComponents(hour: 23, minute: 59),
+                repeats: true
+            )
+
+            let storeBefore = DeviceControlEventSharedStore()
+            let before = storeBefore.loadPendingEvents().count
+            do {
+                center.stopMonitoring([activity])
+                try center.startMonitoring(activity, during: schedule)
+                Self.proofLog.notice("monitor_proof started activities=\(center.activities.count, privacy: .public) events_before=\(before, privacy: .public)")
+            } catch {
+                Self.proofLog.error("monitor_proof start_failed error=\(String(describing: error), privacy: .public)")
+                return
+            }
+
+            for attempt in 1...12 {
+                try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                let events = DeviceControlEventSharedStore().loadPendingEvents()
+                Self.proofLog.notice("monitor_proof poll=\(attempt, privacy: .public) events=\(events.count, privacy: .public) kinds=\(events.map(\.kind.rawValue).joined(separator: ","), privacy: .public)")
+                if events.count > before { break }
+            }
+
+            center.stopMonitoring([activity])
+            Self.proofLog.notice("monitor_proof stopped")
         }
     }
 

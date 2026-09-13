@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One row of `PUT /device/apps/sync` — `AppSyncItemDto` exactly: `packageName` + `name`, both
 /// required, camelCase, 1...255 characters.
@@ -183,6 +184,8 @@ actor DeviceAppLockSyncCoordinator {
         return nil
     }
 
+    private static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
+
     private func updateDiagnostics(
         status: String? = nil,
         endpoint: String? = nil,
@@ -191,6 +194,9 @@ actor DeviceAppLockSyncCoordinator {
         lastError: String? = nil,
         lastSyncAt: Date? = nil
     ) {
+        Self.log.notice(
+            "screentime_sync status=\(status ?? "-", privacy: .public) payload=\(lastPayload ?? "-", privacy: .public) error=\(lastError ?? "-", privacy: .public)"
+        )
         Task { @MainActor in
             RuntimeDiagnosticsCenter.shared.updateAppLockSync(
                 status: status,

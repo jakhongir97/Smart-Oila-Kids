@@ -1,5 +1,6 @@
 import Foundation
 import ManagedSettings
+import os
 
 /// Writes the parent's intent into iOS: which apps are hidden, and whether the whole device is
 /// shielded.
@@ -161,18 +162,29 @@ final class BlockedApplicationsController {
             return
         }
 
+        // The resolution is computed BEFORE the change guard, and is part of it. What we ask iOS
+        // to block can change while the server's list does not: the token catalogue learns a token
+        // the first time the child opens an app, and at that moment a block the parent set days ago
+        // becomes enforceable for the first time. Comparing only (auth, lock, bundle ids) makes
+        // that moment invisible, and the block silently never lands. Measured on device: the
+        // catalogue filled to 8 apps and nothing re-applied.
+        let resolution = tokenCatalogue.resolve(bundleIds: resolved)
+
         guard status != lastAppliedStatus
                 || wholeDeviceLocked != appliedWholeDeviceLock
-                || resolved != appliedBundleIds else {
+                || resolved != appliedBundleIds
+                || resolution.tokens != appliedTokens else {
             return
         }
 
         lastAppliedStatus = status
         appliedWholeDeviceLock = wholeDeviceLocked
         appliedBundleIds = resolved
-
-        let resolution = tokenCatalogue.resolve(bundleIds: resolved)
+        appliedTokens = resolution.tokens
         unresolvedBundleIds = resolution.unresolved
+        Self.log.notice(
+            "screentime_resolve asked=\(resolved.count, privacy: .public) tokens=\(resolution.tokens.count, privacy: .public) unresolved=\(resolution.unresolved.joined(separator: ","), privacy: .public)"
+        )
         applyAction(wholeDeviceLocked, resolution.tokens, resolved)
         persistAppliedState()
     }
@@ -202,16 +214,20 @@ final class BlockedApplicationsController {
     func clear() {
         appliedWholeDeviceLock = false
         appliedBundleIds = []
+        appliedTokens = []
         unresolvedBundleIds = []
         lastAppliedStatus = nil
         clearAction()
         persistAppliedState()
     }
 
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
+
     private let tokenCatalogue: ApplicationTokenCatalogue
     private let userDefaults: UserDefaults
     private let authorizationStatusAction: AuthorizationStatusAction
     private let applyAction: ApplyAction
     private let clearAction: () -> Void
+    private var appliedTokens: Set<ApplicationToken> = []
     private var lastAppliedStatus: ScreenTimePermissionStatus?
 }
