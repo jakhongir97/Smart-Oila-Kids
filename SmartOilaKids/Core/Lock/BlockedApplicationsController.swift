@@ -74,8 +74,16 @@ final class BlockedApplicationsController {
             // apps (see the note above) and writing a setting that does nothing would make the
             // diagnostics screen lie about what is enforced.
             if wholeDeviceLocked {
+                // `.all(except:)` when a parent has chosen apps that must survive a lock (Phone and
+                // Messages, typically), plain `.all()` otherwise — which is exactly the behaviour
+                // proven on hardware, with Apple's own exemption keeping Bolajon360 and its SOS
+                // button reachable either way. The exception set is a refinement, never a
+                // precondition: a lock that refuses to apply until someone completes a setup step
+                // is a lock the parent pressed and did not get.
                 store.shield.applications = nil
-                store.shield.applicationCategories = .all()
+                store.shield.applicationCategories = Self.categoryPolicy(
+                    alwaysAllowed: ScreenTimeAlwaysAllowedSharedStore.allowedApplicationTokens()
+                )
                 store.shield.webDomains = nil
                 store.shield.webDomainCategories = .all()
             } else {
@@ -88,6 +96,17 @@ final class BlockedApplicationsController {
         self.clearAction = { DeviceLockManagedSettingsStoreFactory.clearAllSettings(store) }
         // `clearAllSettings()` on the DEFAULT store wipes every setting this app has written
         // there, which is exactly the intent: this controller is the only writer of that store.
+    }
+
+    /// The shield policy for a whole-device lock, as a pure function of the exception set.
+    ///
+    /// Pinned by a test because the empty case is the one that must never change: an unconfigured
+    /// phone still gets a FULL lock. A previous design refused to shield at all until a parent had
+    /// completed a setup step, which turns "block the phone" into a button that does nothing.
+    nonisolated static func categoryPolicy(
+        alwaysAllowed: Set<ApplicationToken>
+    ) -> ShieldSettings.ActivityCategoryPolicy<Application> {
+        alwaysAllowed.isEmpty ? .all() : .all(except: alwaysAllowed)
     }
 
     /// Apps this build refuses to hide, whatever the server says.

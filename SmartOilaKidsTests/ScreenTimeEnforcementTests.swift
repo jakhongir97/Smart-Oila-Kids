@@ -1,3 +1,4 @@
+import ManagedSettings
 import XCTest
 @testable import SmartOilaKids
 
@@ -262,6 +263,61 @@ final class BlockedApplicationsControllerTests: XCTestCase {
         XCTAssertEqual(applied.count, 1)
         XCTAssertTrue(controller.appliedBundleIds.isEmpty)
         XCTAssertFalse(controller.appliedWholeDeviceLock)
+    }
+}
+
+/// The always-allowed set is a REFINEMENT of the whole-device lock, never a precondition for it.
+/// The branch this was ported from had it the other way around — no set, no shield — which would
+/// have turned the one Screen Time feature proven on hardware into a button that does nothing.
+final class AlwaysAllowedExceptionsTests: XCTestCase {
+    private var suiteNames: [String] = []
+
+    private func makeDefaults() -> UserDefaults {
+        let name = "AlwaysAllowedExceptionsTests.\(UUID().uuidString)"
+        suiteNames.append(name)
+        return UserDefaults(suiteName: name)!
+    }
+
+    override func tearDown() {
+        for name in suiteNames {
+            UserDefaults.standard.removePersistentDomain(forName: name)
+        }
+        suiteNames = []
+        super.tearDown()
+    }
+
+    func testAnEmptyExceptionSetStillLocksTheWholeDevice() {
+        XCTAssertEqual(BlockedApplicationsController.categoryPolicy(alwaysAllowed: []), .all())
+    }
+
+    /// A fresh device has no exception set, and that is the normal state — not a broken one.
+    func testAFreshDeviceIsSimplyUnconfigured() {
+        let defaults = makeDefaults()
+
+        XCTAssertFalse(ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults))
+        XCTAssertTrue(ScreenTimeAlwaysAllowedSharedStore.allowedApplicationTokens(defaults: defaults).isEmpty)
+    }
+
+    /// "Configured" with nothing in it excepts nothing, so it must not read as configured — that
+    /// would let a UI claim Phone is protected when it is not.
+    func testAnEmptyStoredSelectionIsNotAValidConfiguration() {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: ScreenTimeAlwaysAllowedSharedStore.configuredKey)
+
+        XCTAssertFalse(ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults))
+    }
+
+    /// Tokens are voided when authorization is revoked, so a stored blob can stop decoding. It must
+    /// fail closed to "no exceptions" — a full lock — rather than throwing or excepting garbage.
+    func testAnUndecodableSelectionFailsClosed() {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: ScreenTimeAlwaysAllowedSharedStore.configuredKey)
+        defaults.set(Data("not a FamilyActivitySelection".utf8),
+                     forKey: ScreenTimeAlwaysAllowedSharedStore.selectionKey)
+
+        XCTAssertTrue(ScreenTimeAlwaysAllowedSharedStore.allowedApplicationTokens(defaults: defaults).isEmpty)
+        XCTAssertFalse(ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults))
+        XCTAssertEqual(BlockedApplicationsController.categoryPolicy(alwaysAllowed: []), .all())
     }
 }
 

@@ -14,6 +14,9 @@
 		1DCA71040000000000000407 /* ScreenTimeEnforcementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000408 /* ScreenTimeEnforcementTests.swift */; };
 		1DCA71040000000000000001 /* LocationPushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000006 /* LocationPushService.swift */; };
 		1DCA71040000000000000401 /* AppCatalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000402 /* AppCatalogue.swift */; };
+		1DCA71040000000000000411 /* ScreenTimeAlwaysAllowedSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000412 /* ScreenTimeAlwaysAllowedSharedStore.swift */; };
+		1DCA71040000000000000413 /* ScreenTimeAlwaysAllowedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000414 /* ScreenTimeAlwaysAllowedStore.swift */; };
+		1DCA71040000000000000415 /* ScreenTimeAppPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000416 /* ScreenTimeAppPickerView.swift */; };
 		1DCA71040000000000000403 /* BlockedApplicationsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000404 /* BlockedApplicationsController.swift */; };
 		1DCA71040000000000000405 /* ScreenTimeEnforcementCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000406 /* ScreenTimeEnforcementCoordinator.swift */; };
 		1DCA71040000000000000002 /* LocationPushSharedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000009 /* LocationPushSharedCredential.swift */; };
@@ -203,6 +206,9 @@
 		1DCA71040000000000000204 /* DeviceDiagnosticsReporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiagnosticsReporterTests.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000202 /* DeviceDiagnosticsReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiagnosticsReporter.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000402 /* AppCatalogue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCatalogue.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000412 /* ScreenTimeAlwaysAllowedSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAlwaysAllowedSharedStore.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000414 /* ScreenTimeAlwaysAllowedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAlwaysAllowedStore.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000416 /* ScreenTimeAppPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeAppPickerView.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000404 /* BlockedApplicationsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedApplicationsController.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000406 /* ScreenTimeEnforcementCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeEnforcementCoordinator.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000102 /* LocationPushSharedCredentialTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPushSharedCredentialTests.swift; sourceTree = "<group>"; };
@@ -449,6 +455,7 @@
 		3E56C91D3D5260BD667E8B4B /* Lock */ = {
 			isa = PBXGroup;
 			children = (
+				1DCA71040000000000000414 /* ScreenTimeAlwaysAllowedStore.swift */,
 				1DCA71040000000000000402 /* AppCatalogue.swift */,
 				1DCA71040000000000000404 /* BlockedApplicationsController.swift */,
 				1DCA71040000000000000406 /* ScreenTimeEnforcementCoordinator.swift */,
@@ -660,9 +667,18 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		1DCA71040000000000000417 /* ScreenTime */ = {
+			isa = PBXGroup;
+			children = (
+				1DCA71040000000000000416 /* ScreenTimeAppPickerView.swift */,
+			);
+			path = ScreenTime;
+			sourceTree = "<group>";
+		};
 		D58ADB73E84E2109E21463C9 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				1DCA71040000000000000417 /* ScreenTime */,
 				66EDD309FE1D599BA9C5D46F /* Auth */,
 				5D62E1ADB111B2D869E35122 /* Main */,
 				F9EFC7D5BC90296C513DCEBB /* Permissions */,
@@ -683,6 +699,7 @@
 		DE9E5370C750342ED9E36AEA /* DeviceLockSchedule */ = {
 			isa = PBXGroup;
 			children = (
+				1DCA71040000000000000412 /* ScreenTimeAlwaysAllowedSharedStore.swift */,
 				31CB267462E8296CE7B50CDD /* DeviceControlEventSharedStore.swift */,
 				95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */,
 			);
@@ -989,6 +1006,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				1DCA71040000000000000401 /* AppCatalogue.swift in Sources */,
+				1DCA71040000000000000411 /* ScreenTimeAlwaysAllowedSharedStore.swift in Sources */,
+				1DCA71040000000000000413 /* ScreenTimeAlwaysAllowedStore.swift in Sources */,
+				1DCA71040000000000000415 /* ScreenTimeAppPickerView.swift in Sources */,
 				1DCA71040000000000000403 /* BlockedApplicationsController.swift in Sources */,
 				1DCA71040000000000000405 /* ScreenTimeEnforcementCoordinator.swift in Sources */,
 				1DCA71040000000000000201 /* DeviceDiagnosticsReporter.swift in Sources */,

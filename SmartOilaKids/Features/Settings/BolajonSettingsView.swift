@@ -1,3 +1,4 @@
+import FamilyControls
 import SwiftUI
 import UIKit
 
@@ -62,6 +63,11 @@ struct SettingsRootView: View {
     @State private var pinFlowIntent: ParentPINFlowIntent?
     /// True while the language sheet is up.
     @State private var isLanguagePickerPresented = false
+    @ObservedObject private var alwaysAllowed = ScreenTimeAlwaysAllowedStore.shared
+    @ObservedObject private var screenTimeAuthorization = ScreenTimeAuthorizationManager.shared
+    @State private var isAlwaysAllowedPickerPresented = false
+    /// The picker edits a copy; `onDone` is what commits it, so a swipe-to-dismiss discards.
+    @State private var alwaysAllowedSelection = FamilyActivitySelection()
 
     /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). Every row
     /// in the checklist now reports a real OS status, so every row can count toward this.
@@ -129,6 +135,18 @@ struct SettingsRootView: View {
                     // A row titled "Connection status" whose value was the constant "Connected to
                     // parent" answered its own question wrongly on every degraded device. It now
                     // reports the real state, and becomes tappable when there is something to fix.
+                    // Only when Screen Time is actually usable: the picker is the ONLY way to
+                    // obtain an ApplicationToken on iOS, and the set it collects is what keeps
+                    // Phone and Messages reachable while a parent's whole-device lock is up.
+                    // Hidden rather than disabled when the feature is off, so the screen never
+                    // offers a control that cannot do anything.
+                    if AppRuntime.screenTimeFeaturesEnabled,
+                       screenTimeAuthorization.status == .granted {
+                        row(glyph: .symbol("checkmark.shield.fill"), tint: AppColors.glyphPurple,
+                            title: "settings2.always_allowed",
+                            subtitle: "settings2.always_allowed_sub",
+                            action: { isAlwaysAllowedPickerPresented = true })
+                    }
                     row(glyph: .connection, tint: AppColors.glyphPurple,
                         title: "settings2.connection",
                         subtitleLiteral: linkHealth.isHealthy
@@ -182,6 +200,14 @@ struct SettingsRootView: View {
             LanguagePickerSheet()
                 .environmentObject(sessionStore)
         }
+        .sheet(isPresented: $isAlwaysAllowedPickerPresented) {
+            ScreenTimeAppPickerView(
+                purpose: .alwaysAllowed,
+                selection: $alwaysAllowedSelection,
+                onDone: { selection in alwaysAllowed.update(selection) }
+            )
+        }
+        .onAppear { alwaysAllowedSelection = alwaysAllowed.selection }
     }
 
     /// Set the disconnect PIN when there is none; otherwise offer change + remove, both of which
