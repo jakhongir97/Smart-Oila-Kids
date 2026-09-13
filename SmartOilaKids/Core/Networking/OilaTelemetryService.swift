@@ -1524,7 +1524,18 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         if appLimits != state.appLimits { appLimits = state.appLimits }
         if deviceLocalTime != state.deviceLocalTime { deviceLocalTime = state.deviceLocalTime }
         if scheduleRangeText != state.scheduleRangeText { scheduleRangeText = state.scheduleRangeText }
+        // Announce the applied state rather than exposing the publishers: the per-app half is no
+        // longer informational — `ScreenTimeEnforcementCoordinator` turns it into real
+        // ManagedSettings blocks — and a notification keeps that consumer out of this service's
+        // dependency graph, which its own tests rely on staying small.
+        NotificationCenter.default.post(name: .oilaLockStateDidChange, object: nil)
     }
+}
+
+extension Notification.Name {
+    /// Posted on the main actor after every recognized `GET /device/lock/state` response has been
+    /// applied — whole-device lock, blocked packages and per-app limits together.
+    static let oilaLockStateDidChange = Notification.Name("smartoila.oila.lockStateDidChange")
 }
 
 extension OilaTelemetryService: CLLocationManagerDelegate {

@@ -2480,7 +2480,11 @@ final class DeviceLockScheduleSupportTests: XCTestCase {
 
 final class AppRuntimeDefaultsTests: XCTestCase {
     func testDebugRuntimeDefaultsReflectUnsetEnvironment() {
-        XCTAssertFalse(AppRuntime.screenTimeFeaturesEnabled)
+        // Screen Time ships ON from build 23: the Info.plist key is `<true/>` and the app now
+        // carries `com.apple.developer.family-controls`. The assertion is kept (rather than
+        // deleted) because it is the tripwire that says which way the shipped flag points — if it
+        // ever fails, someone turned the whole app-blocking lane off without meaning to.
+        XCTAssertTrue(AppRuntime.screenTimeFeaturesEnabled)
         XCTAssertNil(AppRuntime.debugRoute)
         XCTAssertFalse(AppRuntime.hasDebugRoute)
         XCTAssertNil(AppRuntime.debugSetupStep)

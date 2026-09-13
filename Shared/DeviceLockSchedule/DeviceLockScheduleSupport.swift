@@ -5,6 +5,10 @@ enum DeviceLockManagedSettingsStoreName {
     static let runtime = "SmartOilaKidsLock"
     static let schedule = "SmartOilaKidsScheduleLock"
     static let limit = "SmartOilaKidsLimitLock"
+    /// Server-driven per-app blocking and the whole-device shield
+    /// (`BlockedApplicationsController`). A store of its own because iOS composes stores by taking
+    /// the most restrictive result, while two writers sharing one store overwrite each other.
+    static let enforcement = "SmartOilaKidsEnforcement"
 }
 
 enum DeviceLockScheduleActivityIdentifier {

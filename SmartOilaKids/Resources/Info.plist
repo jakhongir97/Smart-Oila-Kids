@@ -30,6 +30,43 @@
 	<false/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!--
+	  Probe schemes for the installed-app catalogue (AppCatalogue.swift).
+	  canOpenURL returns false for ANY scheme that is not declared here, even when the app IS
+	  installed, so this array and AppCatalogue.probeSchemes must stay identical — pinned by
+	  AppCatalogueTests.testEveryProbeSchemeIsDeclaredInTheInfoPlist.
+	  Apple caps this key at 50 entries for apps linked with the iOS 15+ SDK and at 25 for apps
+	  linked with the iOS 27 SDK, and does not document which entries survive an overflow. We
+	  ship 25 so the list never has to be cut when the toolchain moves.
+	-->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tg</string>
+		<string>snssdk1233</string>
+		<string>instagram</string>
+		<string>youtube</string>
+		<string>whatsapp</string>
+		<string>roblox</string>
+		<string>fb1036341366506456</string>
+		<string>fb752573801798020</string>
+		<string>brawlstars</string>
+		<string>fb2036793259884297</string>
+		<string>minecraft</string>
+		<string>snapchat</string>
+		<string>discord</string>
+		<string>fb</string>
+		<string>fb-messenger</string>
+		<string>clashroyale</string>
+		<string>clashofclans</string>
+		<string>mobilelegends</string>
+		<string>googlechrome</string>
+		<string>yandexbrowser-open-url</string>
+		<string>chatgpt</string>
+		<string>spotify</string>
+		<string>twitter</string>
+		<string>reddit</string>
+		<string>com.epicgames.fortnite</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
@@ -47,7 +84,7 @@
 	<key>SMARTOILA_MEDIA_FEATURES_ENABLED</key>
 	<true/>
 	<key>SMARTOILA_SCREEN_TIME_FEATURES_ENABLED</key>
-	<false/>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

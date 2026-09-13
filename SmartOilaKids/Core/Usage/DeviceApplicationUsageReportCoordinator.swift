@@ -641,6 +641,10 @@ private extension DeviceApplicationUsageReportCoordinator {
     ) async {
         await MainActor.run {
             DeviceAppLimitMonitorController.shared.applyUsageReportResponse(response, dsn: dsn)
+            // The same response, read the other way: `lockedPackages` and the per-app limit rows
+            // are bundle ids, which can be blocked directly without the picker-minted tokens the
+            // limit monitor needs. This is the fastest path a parent's block has to the OS.
+            ScreenTimeEnforcementCoordinator.shared.applyUsageReportResponse(response)
         }
     }
 

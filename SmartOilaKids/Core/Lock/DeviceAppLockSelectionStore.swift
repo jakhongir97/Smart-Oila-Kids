@@ -216,15 +216,7 @@ final class DeviceAppLockSelectionStore: ObservableObject {
                     localizedDisplayName: application.localizedDisplayName
                 )
 
-                return DeviceAppLockSyncEntry(
-                    packageName: bundleIdentifier,
-                    appName: appName,
-                    isLocked: activeLockedApplicationIdentifiers.contains(bundleIdentifier),
-                    usedTime: ScreenTimeUsageCoordinator.shared.usedTime(
-                        for: bundleIdentifier,
-                        dsn: currentDSN
-                    )
-                )
+                return DeviceAppLockSyncEntry(packageName: bundleIdentifier, name: appName)
             }
             .sorted { lhs, rhs in
                 lhs.packageName.localizedCaseInsensitiveCompare(rhs.packageName) == .orderedAscending

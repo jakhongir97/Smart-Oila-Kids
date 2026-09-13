@@ -264,18 +264,8 @@ final class DeviceAppLockSyncCoordinatorTests: XCTestCase {
     func testUpdateNormalizesDSNSortsEntriesAndSkipsEquivalentSignatures() async {
         let service = DeviceAppLockSyncServiceSpy()
         let coordinator = DeviceAppLockSyncCoordinator(service: service)
-        let alpha = DeviceAppLockSyncEntry(
-            packageName: "com.example.alpha",
-            appName: "Alpha",
-            isLocked: true,
-            usedTime: 10
-        )
-        let beta = DeviceAppLockSyncEntry(
-            packageName: "com.example.beta",
-            appName: "Beta",
-            isLocked: false,
-            usedTime: 20
-        )
+        let alpha = DeviceAppLockSyncEntry(packageName: "com.example.alpha", name: "Alpha")
+        let beta = DeviceAppLockSyncEntry(packageName: "com.example.beta", name: "Beta")
 
         await coordinator.update(dsn: " child-sync ", entries: [beta, alpha])
         await coordinator.update(dsn: "child-sync", entries: [alpha, beta])
@@ -293,12 +283,7 @@ final class DeviceAppLockSyncCoordinatorTests: XCTestCase {
     func testRetryNowForcesSyncForUnchangedState() async {
         let service = DeviceAppLockSyncServiceSpy()
         let coordinator = DeviceAppLockSyncCoordinator(service: service)
-        let entry = DeviceAppLockSyncEntry(
-            packageName: "com.example.camera",
-            appName: "Camera",
-            isLocked: true,
-            usedTime: 33
-        )
+        let entry = DeviceAppLockSyncEntry(packageName: "com.example.camera", name: "Camera")
 
         await coordinator.update(dsn: "child-sync", entries: [entry])
         await coordinator.retryNow()
@@ -314,12 +299,7 @@ final class DeviceAppLockSyncCoordinatorTests: XCTestCase {
     func testBlankDSNResetsSignatureAndAllowsFutureResync() async {
         let service = DeviceAppLockSyncServiceSpy()
         let coordinator = DeviceAppLockSyncCoordinator(service: service)
-        let entry = DeviceAppLockSyncEntry(
-            packageName: "com.example.mail",
-            appName: "Mail",
-            isLocked: false,
-            usedTime: 5
-        )
+        let entry = DeviceAppLockSyncEntry(packageName: "com.example.mail", name: "Mail")
 
         await coordinator.update(dsn: "child-sync", entries: [entry])
         await coordinator.update(dsn: "   ", entries: [entry])
@@ -336,12 +316,7 @@ final class DeviceAppLockSyncCoordinatorTests: XCTestCase {
     func testFailureSchedulesRetryUntilStateIsCleared() async {
         let service = DeviceAppLockSyncServiceSpy(results: [.failure(DeviceAppLockSyncTestError.offline)])
         let coordinator = DeviceAppLockSyncCoordinator(service: service)
-        let entry = DeviceAppLockSyncEntry(
-            packageName: "com.example.maps",
-            appName: "Maps",
-            isLocked: true,
-            usedTime: 12
-        )
+        let entry = DeviceAppLockSyncEntry(packageName: "com.example.maps", name: "Maps")
 
         await coordinator.update(dsn: "child-sync", entries: [entry])
         await coordinator.update(dsn: nil, entries: [])

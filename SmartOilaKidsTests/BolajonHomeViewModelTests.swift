@@ -154,6 +154,8 @@ private final class SOSServiceSpy: OilaDeviceServicing {
     func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse {
         DeviceApplicationUsageReportResponse(lockedPackages: [], stats: [])
     }
+    private(set) var syncedApps: [DeviceAppLockSyncEntry] = []
+    func syncInstalledApps(items: [DeviceAppLockSyncEntry]) async throws { syncedApps = items }
     func fetchLockState() async throws -> OilaLockState { throw Unimplemented() }
     /// `GET /device/apps/screen-time`. Nil by default: the card must stay hidden unless a test
     /// deliberately supplies a figure.

@@ -54,13 +54,13 @@ private extension ScreenTimeUsageReportBridgeView {
             .compactMap { normalizedIdentifier($0.bundleIdentifier) }
             .sorted()
 
-        guard !selectedIdentifiers.isEmpty else {
-            return nil
-        }
-
+        // An empty selection is no longer "nothing to measure". Without a picked set the report is
+        // run device-wide, which is what makes per-app usage possible at all on a phone where
+        // nobody ever opened `FamilyActivityPicker` — and the report extension is the one place
+        // Apple does hand out real bundle identifiers.
+        let scope = selectedIdentifiers.isEmpty ? "device" : selectedIdentifiers.joined(separator: ",")
         let dayKey = ScreenTimeUsageDayFormatter.dayKey(for: Date())
-        let identity = "\(normalizedDSN)|\(dayKey)|\(selectedIdentifiers.joined(separator: ","))"
-        return identity
+        return "\(normalizedDSN)|\(dayKey)|\(scope)"
     }
 
     @available(iOS 16.0, *)
@@ -70,11 +70,15 @@ private extension ScreenTimeUsageReportBridgeView {
         }
 
         let selectedTokens = Set(Array(appLockStore.selection.applications).compactMap(\.token))
+        let dayInterval = ScreenTimeUsageDayFormatter.dayInterval(containing: Date())
+
+        // `applications: []` is not "no apps", it is "no filter" — the whole device. That is the
+        // wanted scope here; a non-empty picker selection narrows it only because a parent who
+        // deliberately picked apps should not then be shown every app.
         guard !selectedTokens.isEmpty else {
-            return nil
+            return DeviceActivityFilter(segment: .daily(during: dayInterval))
         }
 
-        let dayInterval = ScreenTimeUsageDayFormatter.dayInterval(containing: Date())
         return DeviceActivityFilter(
             segment: .daily(during: dayInterval),
             applications: selectedTokens

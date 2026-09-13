@@ -1,40 +1,50 @@
 import Foundation
 
+/// One row of `PUT /device/apps/sync` — `AppSyncItemDto` exactly: `packageName` + `name`, both
+/// required, camelCase, 1...255 characters.
+///
+/// The shape is the contract, not a convenience: the API runs `forbidNonWhitelisted`, so the
+/// snake_case `package_name`/`app_name`/`is_locked`/`used_time` this type used to serialise would
+/// have been rejected with a 400 on all four keys. The lock flag and today's usage are NOT part of
+/// this endpoint — the parent sets locks through `PUT /parent/children/{id}/apps/{packageName}/lock`
+/// and usage rides `POST /device/apps/usage`.
 struct DeviceAppLockSyncEntry: Codable, Equatable, Hashable {
     let packageName: String
-    let appName: String
-    let isLocked: Bool
-    let usedTime: Int
-
-    enum CodingKeys: String, CodingKey {
-        case packageName = "package_name"
-        case appName = "app_name"
-        case isLocked = "is_locked"
-        case usedTime = "used_time"
-    }
+    let name: String
 }
 
 protocol DeviceAppLockSyncServicing {
     func syncApplications(_ entries: [DeviceAppLockSyncEntry], dsn: String) async throws
 }
 
-/// Thrown by the parked transport so the coordinator can tell "not wired yet" apart from a real
-/// network failure. A transport that does not exist cannot be fixed by retrying.
+/// Thrown when there is nothing the endpoint will accept, so the coordinator can tell "nothing to
+/// send" apart from a real network failure. Retrying an empty catalogue cannot help — only a new
+/// probe result can — so this case cancels the retry instead of scheduling one.
 struct DeviceAppLockSyncUnavailableError: LocalizedError {
     var errorDescription: String? {
-        "App-lock sync is not wired to PUT /device/apps/sync yet"
+        "No installed apps to sync (PUT /device/apps/sync requires at least one item)"
     }
 }
 
-/// PARKED transport (legacy backend decommissioned; runs only behind the Screen-Time flag,
-/// off in v1). Reimplement against the oila360 device API (`PUT /device/apps/sync`, which exists
-/// on the server) when v1.1 enforcement ships.
+/// Live transport for the installed-app catalogue: `PUT /device/apps/sync`.
+///
+/// It replaces a stub that threw `DeviceAppLockSyncUnavailableError`, which was correct while iOS
+/// had nothing to send — Apple offers no way to enumerate installed apps. The catalogue probe
+/// (`InstalledAppProbe`) is what gives this endpoint something true to say.
+///
+/// `SyncAppsDto` declares `minItems: 1`, so an empty catalogue is not "sync nothing", it is a 400.
+/// Callers must skip the request instead; this transport refuses it loudly rather than sending it.
 final class DeviceAppLockSyncService: DeviceAppLockSyncServicing {
-    init() {}
+    init(client: OilaDeviceServicing = OilaDeviceClient.shared) {
+        self.client = client
+    }
 
     func syncApplications(_ entries: [DeviceAppLockSyncEntry], dsn: String) async throws {
-        throw DeviceAppLockSyncUnavailableError()
+        guard !entries.isEmpty else { throw DeviceAppLockSyncUnavailableError() }
+        try await client.syncInstalledApps(items: entries)
     }
+
+    private let client: OilaDeviceServicing
 }
 
 actor DeviceAppLockSyncCoordinator {
@@ -92,12 +102,12 @@ actor DeviceAppLockSyncCoordinator {
                 lastSyncAt: Date()
             )
         } catch is DeviceAppLockSyncUnavailableError {
-            // Report the parked state as parked. Scheduling a retry here used to leave the
-            // diagnostics screen cycling "retrying"/"failed: Invalid URL" against an endpoint the
-            // app never attempts to call, which reads as a live transport that is merely broken.
+            // Nothing to send is not a failure: `SyncAppsDto` requires at least one item, and only
+            // a fresh probe can change that. Retrying would leave the diagnostics screen cycling
+            // "retrying"/"failed" against a request the app is deliberately not making.
             cancelRetry()
             updateDiagnostics(
-                status: "parked",
+                status: "empty",
                 endpoint: endpoint,
                 dsn: dsn,
                 lastPayload: payloadSummary(),
@@ -144,23 +154,13 @@ actor DeviceAppLockSyncCoordinator {
 
     private func signatureForCurrentState(dsn: String) -> String {
         let fingerprint = currentEntries
-            .map { entry in
-                "\(entry.packageName)|\(entry.appName)|\(entry.isLocked ? 1 : 0)|\(entry.usedTime)"
-            }
+            .map { entry in "\(entry.packageName)|\(entry.name)" }
             .joined(separator: ",")
         return "\(dsn)|\(fingerprint)"
     }
 
     private func payloadSummary() -> String {
-        let lockedCount = currentEntries.reduce(into: 0) { count, entry in
-            if entry.isLocked {
-                count += 1
-            }
-        }
-        let totalUsedTime = currentEntries.reduce(into: 0) { result, entry in
-            result += max(0, entry.usedTime)
-        }
-        return "\(currentEntries.count) apps, \(lockedCount) locked, \(totalUsedTime)s"
+        "\(currentEntries.count) apps"
     }
 
     private func resetRetryState() {

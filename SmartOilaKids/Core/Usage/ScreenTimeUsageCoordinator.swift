@@ -67,18 +67,9 @@ final class ScreenTimeUsageCoordinator: ObservableObject {
             return
         }
 
-        guard !selectedIdentifiers.isEmpty else {
-            cancelRefresh()
-            _ = refreshSnapshotIfNeeded(for: currentDSN, expectedStatus: "no_targets")
-            updateDiagnostics(
-                status: "no_targets",
-                dsn: currentDSN,
-                selectedApps: 0,
-                lastSnapshot: snapshotSummary(latestSnapshot),
-                lastError: "-"
-            )
-            return
-        }
+        // No early return for an empty selection any more: the bridge runs the report device-wide
+        // in that case, so "no apps picked" is the normal, fully-working configuration rather than
+        // a dead end. `selectedApps: 0` in diagnostics is how that reads on the screen.
 
         guard #available(iOS 16.0, *) else {
             cancelRefresh()

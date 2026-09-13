@@ -584,6 +584,9 @@ protocol OilaDeviceServicing {
     /// Report app-usage deltas (`POST /device/apps/usage`); the response is the enforcement
     /// state (locked packages + per-app limit/remaining) that drives on-device app-limit locking.
     func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse
+    /// Publish the installed-app catalogue this device can see (`PUT /device/apps/sync`), so the
+    /// parent's app list is populated for an iPhone child the same way it is for an Android one.
+    func syncInstalledApps(items: [DeviceAppLockSyncEntry]) async throws
     func fetchLockState() async throws -> OilaLockState
     /// Today's device-wide screen time vs the parent's daily budget
     /// (`GET /device/apps/screen-time`). Nil when the response shape isn't recognized.
@@ -1025,6 +1028,21 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let object = (data as? [String: Any]) ?? [:]
         let jsonData = try JSONSerialization.data(withJSONObject: object)
         return try JSONDecoder().decode(DeviceApplicationUsageReportResponse.self, from: jsonData)
+    }
+
+    /// `PUT /device/apps/sync` — `SyncAppsDto { items: [{ packageName, name }] }`.
+    ///
+    /// The body is built by hand rather than encoded from the struct so the wire shape is visible
+    /// at the call site: the API rejects any undeclared property outright (`forbidNonWhitelisted`),
+    /// and this route shares a device with the status heartbeat, so a 400 here is not a lost app
+    /// list, it is a support call. `minItems: 1` and `maxItems: 1000` are the server's, and the
+    /// cap is applied here because sending 1001 apps fails the whole batch rather than the tail.
+    func syncInstalledApps(items: [DeviceAppLockSyncEntry]) async throws {
+        let payload: [[String: Any]] = items
+            .prefix(1000)
+            .map { ["packageName": $0.packageName, "name": $0.name] }
+        guard !payload.isEmpty else { return }
+        _ = try await requestJSON(path: "device/apps/sync", method: .put, body: ["items": payload], authorized: true)
     }
 
     func fetchLockState() async throws -> OilaLockState {

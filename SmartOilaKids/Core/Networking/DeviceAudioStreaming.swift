@@ -327,7 +327,7 @@ private struct PendingStreamRequest: Codable {
 actor PendingStreamRequestStore {
     static let shared = PendingStreamRequestStore()
 
-    init(userDefaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = Date.init) {
+    init(userDefaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = { Date() }) {
         self.userDefaults = userDefaults
         self.now = now
     }
@@ -1170,11 +1170,11 @@ final class DeviceAudioStreamManager: ObservableObject {
         guard isFeatureEnabled() else { return }
         Task { [weak self] in
             guard let command = await PendingStreamRequestStore.shared.consume() else {
-                await self?.clearListenRequestNotification(resettingState: true)
+                self?.clearListenRequestNotification(resettingState: true)
                 return
             }
             guard let self else { return }
-            await self.clearListenRequestNotification(resettingState: false)
+            self.clearListenRequestNotification(resettingState: false)
             self.requestStart(command: command)
         }
     }

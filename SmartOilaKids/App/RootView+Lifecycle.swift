@@ -167,6 +167,9 @@ extension RootView {
            AppRuntime.screenTimeFeaturesEnabled {
             Task {
                 await lockCoordinator.refreshNow()
+                // Foreground is where a newly installed app is discovered: re-probe before the
+                // sync coordinator is asked to retry, so a retry has the fresh catalogue.
+                await ScreenTimeEnforcementCoordinator.shared.refreshNow()
                 await DeviceAppLockSyncCoordinator.shared.retryNow()
                 await DeviceApplicationUsageReportCoordinator.shared.retryNow()
                 await ScreenTimeUsageCoordinator.shared.retryNow()
@@ -211,9 +214,13 @@ private extension RootView {
     func syncLockService(with dsn: String?, armRecoveryCheck: Bool = false) {
         guard AppRuntime.screenTimeFeaturesEnabled else {
             lockCoordinator.stop()
+            ScreenTimeEnforcementCoordinator.shared.stop()
             return
         }
         lockCoordinator.start(dsn: dsn, armRecoveryCheck: armRecoveryCheck)
+        // Server-driven per-app blocking rides the lock state `OilaTelemetryService` already
+        // polls, so it starts and stops with the same DSN the rest of the lock lane uses.
+        ScreenTimeEnforcementCoordinator.shared.start(dsn: dsn)
     }
 
     func syncPushToken(with dsn: String?) async {
