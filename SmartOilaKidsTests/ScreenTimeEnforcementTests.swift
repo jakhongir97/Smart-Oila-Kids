@@ -179,16 +179,37 @@ final class BlockedApplicationsControllerTests: XCTestCase {
     private struct Applied: Equatable {
         let wholeDeviceLocked: Bool
         let bundleIds: [String]
+        let tokenCount: Int
     }
 
     private func makeController(
         status: @escaping () -> ScreenTimePermissionStatus,
         record: @escaping (Applied) -> Void
     ) -> BlockedApplicationsController {
-        BlockedApplicationsController(
+        // A per-test defaults suite, because the controller now persists what it applied so a cold
+        // launch does not unblock the phone — and that persistence must not leak between tests or
+        // into the app host's own domain.
+        let suiteName = "BlockedApplicationsControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        suiteNames.append(suiteName)
+        return BlockedApplicationsController(
             authorizationStatus: status,
-            apply: { locked, ids in record(Applied(wholeDeviceLocked: locked, bundleIds: ids)) }
+            apply: { locked, tokens, ids in
+                record(Applied(wholeDeviceLocked: locked, bundleIds: ids, tokenCount: tokens.count))
+            },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
         )
+    }
+
+    private var suiteNames: [String] = []
+
+    override func tearDown() {
+        for name in suiteNames {
+            UserDefaults.standard.removePersistentDomain(forName: name)
+        }
+        suiteNames = []
+        super.tearDown()
     }
 
     /// Without authorization every ManagedSettings write is a silent no-op. Claiming otherwise is
@@ -210,7 +231,7 @@ final class BlockedApplicationsControllerTests: XCTestCase {
 
         controller.apply(wholeDeviceLocked: true, lockedPackages: ["com.zhiliaoapp.musically"], limitReached: [])
 
-        XCTAssertEqual(applied, [Applied(wholeDeviceLocked: true, bundleIds: ["com.zhiliaoapp.musically"])])
+        XCTAssertEqual(applied, [Applied(wholeDeviceLocked: true, bundleIds: ["com.zhiliaoapp.musically"], tokenCount: 0)])
     }
 
     /// The lock state is re-read every 30 seconds. Re-writing the same policy would be a
@@ -246,8 +267,24 @@ final class BlockedApplicationsControllerTests: XCTestCase {
 
 @MainActor
 final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
+    private var suiteNames: [String] = []
+
+    /// `UserDefaults(suiteName:)` writes a real preference domain on disk, and
+    /// `removePersistentDomain(forName: defaults.description)` — the obvious-looking cleanup —
+    /// removes nothing, because `description` is not the suite name. Keeping the names is the
+    /// only way the suites actually go away.
     private func makeDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "ScreenTimeEnforcementCoordinatorTests.\(UUID().uuidString)")!
+        let name = "ScreenTimeEnforcementCoordinatorTests.\(UUID().uuidString)"
+        suiteNames.append(name)
+        return UserDefaults(suiteName: name)!
+    }
+
+    override func tearDown() {
+        for name in suiteNames {
+            UserDefaults.standard.removePersistentDomain(forName: name)
+        }
+        suiteNames = []
+        super.tearDown()
     }
 
     func testACatalogueProbeIsDueOnlyWhenItHasNeverRunOrHasAged() {
@@ -291,13 +328,17 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
 
     func testTheProbeResultIsSyncedAndStamped() async {
         let defaults = makeDefaults()
-        defer { UserDefaults().removePersistentDomain(forName: defaults.description) }
         var synced: [(String?, [DeviceAppLockSyncEntry])] = []
         let now = Date(timeIntervalSince1970: 1_800_000_000)
 
         let coordinator = ScreenTimeEnforcementCoordinator(
             lockState: { .released },
-            blockedApplications: BlockedApplicationsController(authorizationStatus: { .denied }, apply: { _, _ in }),
+            blockedApplications: BlockedApplicationsController(
+                authorizationStatus: { .denied },
+                apply: { _, _, _ in },
+                tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+                userDefaults: defaults
+            ),
             authorizationStatus: { .granted },
             canOpenScheme: { $0 == "tg" },
             syncUpdate: { dsn, entries in synced.append((dsn, entries)) },
@@ -310,7 +351,10 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(synced.count, 1)
         XCTAssertEqual(synced.first?.0, "child-1")
-        XCTAssertEqual(synced.first?.1.map(\.packageName), ["ph.telegra.Telegraph"])
+        // Lower-cased on the wire, matching what the usage reporter sends, so the server holds one
+        // row per app rather than two spellings of the same one.
+        XCTAssertEqual(synced.first?.1.map(\.packageName), ["ph.telegra.telegraph"])
+        XCTAssertEqual(synced.first?.1.map(\.name), ["Telegram"])
         XCTAssertEqual(defaults.object(forKey: ScreenTimeEnforcementCoordinator.lastCatalogueSyncKey) as? Date, now)
 
         coordinator.stop()
@@ -321,12 +365,16 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
     /// empty probe is not sent, and not stamped either, so the next foreground tries again.
     func testAnEmptyProbeIsNeitherSentNorStamped() async {
         let defaults = makeDefaults()
-        defer { UserDefaults().removePersistentDomain(forName: defaults.description) }
         var synced: [(String?, [DeviceAppLockSyncEntry])] = []
 
         let coordinator = ScreenTimeEnforcementCoordinator(
             lockState: { .released },
-            blockedApplications: BlockedApplicationsController(authorizationStatus: { .denied }, apply: { _, _ in }),
+            blockedApplications: BlockedApplicationsController(
+                authorizationStatus: { .denied },
+                apply: { _, _, _ in },
+                tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+                userDefaults: defaults
+            ),
             authorizationStatus: { .granted },
             canOpenScheme: { _ in false },
             syncUpdate: { dsn, entries in synced.append((dsn, entries)) },
@@ -347,11 +395,12 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
     /// through bundle ids alone, with nothing picked on the child's phone.
     func testServerLockStateReachesTheBlockedApplicationsStore() async {
         let defaults = makeDefaults()
-        defer { UserDefaults().removePersistentDomain(forName: defaults.description) }
         var applied: [(Bool, [String])] = []
         let blocked = BlockedApplicationsController(
             authorizationStatus: { .granted },
-            apply: { locked, ids in applied.append((locked, ids)) }
+            apply: { locked, _, ids in applied.append((locked, ids)) },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
         )
 
         let coordinator = ScreenTimeEnforcementCoordinator(
@@ -372,6 +421,12 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
 
         coordinator.start(dsn: "child-1")
 
+        // Starting alone must NOT touch the OS: until the server has answered this launch, "we
+        // know nothing" would otherwise be applied as "no restrictions" and lift a live lock.
+        XCTAssertTrue(applied.isEmpty)
+
+        coordinator.handleLockStateDidChange()
+
         XCTAssertEqual(applied.count, 1)
         XCTAssertEqual(applied.first?.0, false)
         XCTAssertEqual(applied.first?.1, ["com.zhiliaoapp.musically", "com.roblox.robloxmobile"])
@@ -382,13 +437,51 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
 
     /// The usage response is the freshest enforcement signal there is — it answers the device's own
     /// upload, minutes before the next lock poll would carry the same block.
-    func testAUsageResponseBlocksWithoutWaitingForTheNextLockPoll() {
+    /// The counterpart of the rule above: a parent's UNBLOCK must survive the usage lane. The lock
+    /// poll is authoritative, so anything the last usage response said is retired when it lands —
+    /// otherwise a removed block would be re-applied forever from a stale cache.
+    func testTheAuthoritativeLockPollRetiresWhatTheUsageResponseSaid() {
         let defaults = makeDefaults()
-        defer { UserDefaults().removePersistentDomain(forName: defaults.description) }
         var applied: [(Bool, [String])] = []
         let blocked = BlockedApplicationsController(
             authorizationStatus: { .granted },
-            apply: { locked, ids in applied.append((locked, ids)) }
+            apply: { locked, _, ids in applied.append((locked, ids)) },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
+        )
+        let coordinator = ScreenTimeEnforcementCoordinator(
+            lockState: { .released },
+            blockedApplications: blocked,
+            authorizationStatus: { .granted },
+            canOpenScheme: { _ in false },
+            syncUpdate: { _, _ in },
+            userDefaults: defaults,
+            now: { Date(timeIntervalSince1970: 1_800_000_000) }
+        )
+        coordinator.start(dsn: "child-1")
+
+        coordinator.applyUsageReportResponse(
+            DeviceApplicationUsageReportResponse(lockedPackages: ["com.burbn.instagram"], stats: [])
+        )
+        XCTAssertEqual(applied.last?.1, ["com.burbn.instagram"])
+
+        // The parent removes the block; the next poll carries an empty list.
+        coordinator.handleLockStateDidChange()
+
+        XCTAssertEqual(applied.last?.1, [])
+        XCTAssertTrue(blocked.appliedBundleIds.isEmpty)
+
+        coordinator.stop()
+    }
+
+    func testAUsageResponseBlocksWithoutWaitingForTheNextLockPoll() {
+        let defaults = makeDefaults()
+        var applied: [(Bool, [String])] = []
+        let blocked = BlockedApplicationsController(
+            authorizationStatus: { .granted },
+            apply: { locked, _, ids in applied.append((locked, ids)) },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
         )
 
         let coordinator = ScreenTimeEnforcementCoordinator(

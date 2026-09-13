@@ -34,6 +34,11 @@ extension RootView {
         )
         syncGeoService(with: localServiceDSN)
         syncLockService(with: localServiceDSN, armRecoveryCheck: shouldArmLaunchRecovery)
+#if DEBUG
+        // `SMARTOILA_SCREEN_TIME_PROOF=1` only — the on-device check that bundle-id blocking
+        // really hides a third-party app. Never reachable in Release.
+        ScreenTimeEnforcementCoordinator.shared.runProofIfRequested()
+#endif
         clearPersistedBackgroundTimestamp()
         lastBackgroundedAt = nil
         Task {

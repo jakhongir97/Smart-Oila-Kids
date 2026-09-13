@@ -80,6 +80,8 @@
 		95E3958D70744828A5896930 /* BolajonChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3B3AE1E539B44AAA4E9A234 /* BolajonChatView.swift */; };
 		98CADBC9DDB254BE59119ADD /* ScreenTimeAuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083AE2B30276D09934C7C631 /* ScreenTimeAuthorizationManager.swift */; };
 		9C7A2A347700F00EB29AED4D /* ScreenTimeUsageSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */; };
+		1DCA7104000000000000040A /* ApplicationTokenCatalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000409 /* ApplicationTokenCatalogue.swift */; };
+		1DCA7104000000000000040B /* ApplicationTokenCatalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000409 /* ApplicationTokenCatalogue.swift */; };
 		A151511ADA32FE25E7DF70A8 /* ScreenTimeUsageAppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B23147D0A5327CED850D5FA /* ScreenTimeUsageAppGroup.swift */; };
 		A17C0FE500000000000000F2 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A17C0FE500000000000000F1 /* GoogleService-Info.plist */; };
 		A1BB0EC03DC37ED6656C144B /* RuntimeDiagnosticsCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AA203AA13030A6560B31897 /* RuntimeDiagnosticsCenter.swift */; };
@@ -257,6 +259,7 @@
 		6F2B0DC3B30C434F83993B11 /* SmartOilaKidsUsageReportExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartOilaKidsUsageReportExtension.entitlements; sourceTree = "<group>"; };
 		717167572124BB3D730729A1 /* OilaTelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OilaTelemetryService.swift; sourceTree = "<group>"; };
 		78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageSharedStore.swift; sourceTree = "<group>"; };
+		1DCA71040000000000000409 /* ApplicationTokenCatalogue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationTokenCatalogue.swift; sourceTree = "<group>"; };
 		79329B526E874CA7A0FFC10C /* SmartOilaKidsUsageReportExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = SmartOilaKidsUsageReportExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		7D6EA548F1CF7F9E1A410269 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
 		80AC7AE910384F475050947C /* DeviceControlRecoveryNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceControlRecoveryNotifier.swift; sourceTree = "<group>"; };
@@ -585,6 +588,7 @@
 				6B23147D0A5327CED850D5FA /* ScreenTimeUsageAppGroup.swift */,
 				C4C1A8005C2E6130F0254562 /* ScreenTimeUsageSharedModels.swift */,
 				78414B2658CB70EDE6CCD52B /* ScreenTimeUsageSharedStore.swift */,
+				1DCA71040000000000000409 /* ApplicationTokenCatalogue.swift */,
 			);
 			path = ScreenTimeUsage;
 			sourceTree = "<group>";
@@ -976,6 +980,7 @@
 				942E3A223251455EACACA6F1 /* ScreenTimeUsageAppGroup.swift in Sources */,
 				1BAA26AFBC94468B99A31FED /* ScreenTimeUsageSharedModels.swift in Sources */,
 				AB12EDC2467F4FE3AEBB40B0 /* ScreenTimeUsageSharedStore.swift in Sources */,
+				1DCA7104000000000000040B /* ApplicationTokenCatalogue.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1066,6 +1071,7 @@
 				ACF90C412AB10A271B7BDFBB /* ScreenTimeUsageReportBridgeView.swift in Sources */,
 				588D71E3F79950E6A3546C98 /* ScreenTimeUsageSharedModels.swift in Sources */,
 				9C7A2A347700F00EB29AED4D /* ScreenTimeUsageSharedStore.swift in Sources */,
+				1DCA7104000000000000040A /* ApplicationTokenCatalogue.swift in Sources */,
 				61B80B9F1BC6B50E2B10DED8 /* SecureTokenStore.swift in Sources */,
 				02A2F11140840028AD044865 /* SessionStore.swift in Sources */,
 				549053EC342E9E528DD2F8DC /* SettingsDiagnosticsValueMapper.swift in Sources */,

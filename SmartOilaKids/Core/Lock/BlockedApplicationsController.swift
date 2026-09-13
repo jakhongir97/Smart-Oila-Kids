@@ -4,66 +4,89 @@ import ManagedSettings
 /// Writes the parent's intent into iOS: which apps are hidden, and whether the whole device is
 /// shielded.
 ///
-/// This is the only place in the app that blocks an app the child did not pick. It works because
-/// `ManagedSettings.Application` has a public `init(bundleIdentifier:)`, so a bundle id that
-/// arrived from the server can be blocked directly — no `FamilyActivityPicker`, no
-/// `ApplicationToken`, nothing the child has to tap. Apple's wording on the property it writes:
-/// *"The system hides blocked applications and prevents the user from launching them … up to 50
-/// applications."*
+/// This is the only place in the app that blocks an app the child did not pick, and what it does
+/// NOT use is the point. `ManagedSettings.Application(bundleIdentifier:)` is public, Apple
+/// documents `blockedApplications` as hiding those apps, and on a real device it does nothing:
+/// measured on an iPhone 12 mini (iOS 26.6.1, authorization approved, entitlement signed on the
+/// app and both extensions), four third-party bundle ids were written, read back intact, and not
+/// one icon changed. A category shield on the same store, in the same session, dimmed every app
+/// on the phone. So the system honours our policies — it just will not act on an `Application`
+/// built from a string.
+///
+/// Therefore:
+///
+/// * **whole-device lock** → `shield.applicationCategories = .all()`. Needs no identity at all,
+///   and is proven on hardware.
+/// * **per-app block** → `shield.applications = Set<ApplicationToken>`, with the tokens resolved
+///   from `ApplicationTokenCatalogue`, which the usage-report extension fills in as it sees apps.
+///   An app the child has never opened has no token yet and cannot be blocked individually — the
+///   honest limit of the design, surfaced as `unresolvedBundleIds` rather than hidden.
 ///
 /// Two rules are not negotiable and both are enforced here rather than at the call sites:
 ///
-/// 1. **Never exceed 50.** Developers report that past the cap iOS blocks *nothing* instead of the
-///    first 50 — a silent, total failure of the feature. `AppCatalogue.maximumBlockedApplications`.
+/// 1. **Never exceed 50.** Apple caps a shield at 50 application tokens, and developers report
+///    that past the cap iOS shields *nothing* instead of the first 50 — a silent, total failure.
 /// 2. **Never block the phone, Settings, or ourselves.** A child who cannot call a parent, cannot
 ///    reach Settings to restore permission, or cannot open Bolajon360 to press SOS is a safety
 ///    problem, not a strict parental control. (Apple exempts the authorized app from `.all()`
-///    shields anyway; this makes the same promise for the per-app list, which it does not cover.)
+///    anyway; this makes the same promise for the per-app list, which it does not cover.)
 ///
-/// It owns a dedicated `ManagedSettingsStore` (`SmartOilaKidsEnforcement`) so it never fights the
-/// schedule and app-limit stores written by `DeviceLockScheduleMonitorController` and the monitor
-/// extension. Apple combines stores by taking the most restrictive result, so separate stores
-/// compose; a shared one would let whichever wrote last erase the other's policy.
+/// It writes the DEFAULT `ManagedSettingsStore()`, and that is a measured decision, not a default
+/// left in place. On an iPhone 12 mini (iOS 26.6.1, authorization approved, entitlement signed on
+/// the app and both extensions) the same policy was applied twice, three minutes apart:
+///
+///   * `ManagedSettingsStore()` + `shield.applicationCategories = .all()` — every app dimmed with
+///     an hourglass badge within seconds, Bolajon360 itself still usable. Enforced.
+///   * `ManagedSettingsStore(named: "SmartOilaKidsEnforcement")`, identical policy — nothing
+///     happened at all. Not enforced.
+///
+/// Apple documents named stores as composing (most restrictive wins) and we have no explanation
+/// for the difference, but a parental control that does nothing is not a trade worth making for
+/// tidiness. Note the same applies to the older `runtime`/`schedule`/`limit` named stores in this
+/// repo: nothing they have ever written can have taken effect on a device like this one.
 @MainActor
 final class BlockedApplicationsController {
-    /// `(wholeDeviceLocked, blockedBundleIds)` — injected so tests never touch ManagedSettings,
-    /// which is unavailable in the simulator without the entitlement and silently no-ops.
-    typealias ApplyAction = (Bool, [String]) -> Void
+    /// `(wholeDeviceLocked, blockedTokens, blockedBundleIds)` — injected so tests never touch
+    /// ManagedSettings, which silently no-ops in the simulator without the entitlement. The bundle
+    /// ids come along only so a test (and the diagnostics screen) can see WHICH apps the tokens
+    /// stand for; the OS is given tokens.
+    typealias ApplyAction = (Bool, Set<ApplicationToken>, [String]) -> Void
     typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
 
     static let shared = BlockedApplicationsController()
 
     init(
         authorizationStatus: AuthorizationStatusAction? = nil,
-        apply: ApplyAction? = nil
+        apply: ApplyAction? = nil,
+        tokenCatalogue: ApplicationTokenCatalogue = ApplicationTokenCatalogue(),
+        userDefaults: UserDefaults = .standard
     ) {
-        let store = DeviceLockManagedSettingsStoreFactory.make(
-            named: DeviceLockManagedSettingsStoreName.enforcement
-        )
+        self.tokenCatalogue = tokenCatalogue
+        self.userDefaults = userDefaults
+        let store = ManagedSettingsStore()
 
         self.authorizationStatusAction = authorizationStatus ?? {
             ScreenTimeAuthorizationManager.shared.status
         }
-        self.applyAction = apply ?? { wholeDeviceLocked, bundleIds in
-            // Written in this order on purpose: widen the block before narrowing it, so a change
-            // from "whole device" to "three apps" never leaves a window with neither applied.
-            store.application.blockedApplications = bundleIds.isEmpty
-                ? nil
-                : Set(bundleIds.map { Application(bundleIdentifier: $0) })
-
+        self.applyAction = apply ?? { wholeDeviceLocked, tokens, _ in
+            // `blockedApplications` is deliberately never written: it is inert for third-party
+            // apps (see the note above) and writing a setting that does nothing would make the
+            // diagnostics screen lie about what is enforced.
             if wholeDeviceLocked {
                 store.shield.applications = nil
                 store.shield.applicationCategories = .all()
                 store.shield.webDomains = nil
                 store.shield.webDomainCategories = .all()
             } else {
-                store.shield.applications = nil
+                store.shield.applications = tokens.isEmpty ? nil : tokens
                 store.shield.applicationCategories = nil
                 store.shield.webDomains = nil
                 store.shield.webDomainCategories = nil
             }
         }
         self.clearAction = { DeviceLockManagedSettingsStoreFactory.clearAllSettings(store) }
+        // `clearAllSettings()` on the DEFAULT store wipes every setting this app has written
+        // there, which is exactly the intent: this controller is the only writer of that store.
     }
 
     /// Apps this build refuses to hide, whatever the server says.
@@ -114,9 +137,12 @@ final class BlockedApplicationsController {
         return resolved
     }
 
-    /// Number of blocked ids currently applied — for diagnostics and tests.
+    /// What is currently applied — for diagnostics and tests.
     private(set) var appliedBundleIds: [String] = []
     private(set) var appliedWholeDeviceLock = false
+    /// Apps the server asked us to block that have no token yet, so iOS cannot act on them. A
+    /// parent must be able to tell "blocked" from "we were told to, and could not".
+    private(set) var unresolvedBundleIds: [String] = []
 
     func apply(wholeDeviceLocked: Bool, lockedPackages: [String], limitReached: [String]) {
         let status = authorizationStatusAction()
@@ -144,16 +170,46 @@ final class BlockedApplicationsController {
         lastAppliedStatus = status
         appliedWholeDeviceLock = wholeDeviceLocked
         appliedBundleIds = resolved
-        applyAction(wholeDeviceLocked, resolved)
+
+        let resolution = tokenCatalogue.resolve(bundleIds: resolved)
+        unresolvedBundleIds = resolution.unresolved
+        applyAction(wholeDeviceLocked, resolution.tokens, resolved)
+        persistAppliedState()
     }
+
+    /// Seed the change-detection cache from what a previous launch applied, WITHOUT writing
+    /// anything.
+    ///
+    /// ManagedSettings state outlives the process, so on a cold launch the phone is still shielded
+    /// while this object thinks nothing is applied. Left uncorrected, the first `apply` of an
+    /// empty server state (which is what an offline launch has) reads as a change and clears a
+    /// lock the parent never lifted. Restoring the cache makes that first call a no-op instead.
+    func restorePersistedState() {
+        let defaults = userDefaults
+        appliedWholeDeviceLock = defaults.bool(forKey: Self.persistedGlobalLockKey)
+        appliedBundleIds = defaults.stringArray(forKey: Self.persistedBundleIdsKey) ?? []
+        lastAppliedStatus = (appliedWholeDeviceLock || !appliedBundleIds.isEmpty) ? .granted : nil
+    }
+
+    private func persistAppliedState() {
+        userDefaults.set(appliedWholeDeviceLock, forKey: Self.persistedGlobalLockKey)
+        userDefaults.set(appliedBundleIds, forKey: Self.persistedBundleIdsKey)
+    }
+
+    nonisolated static let persistedGlobalLockKey = "SCREEN_TIME_APPLIED_GLOBAL_LOCK"
+    nonisolated static let persistedBundleIdsKey = "SCREEN_TIME_APPLIED_BUNDLE_IDS"
 
     func clear() {
         appliedWholeDeviceLock = false
         appliedBundleIds = []
+        unresolvedBundleIds = []
         lastAppliedStatus = nil
         clearAction()
+        persistAppliedState()
     }
 
+    private let tokenCatalogue: ApplicationTokenCatalogue
+    private let userDefaults: UserDefaults
     private let authorizationStatusAction: AuthorizationStatusAction
     private let applyAction: ApplyAction
     private let clearAction: () -> Void

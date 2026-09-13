@@ -1,5 +1,6 @@
 import DeviceActivity
 import ExtensionKit
+import ManagedSettings
 import Foundation
 import SwiftUI
 import _DeviceActivity_SwiftUI
@@ -41,6 +42,13 @@ private extension SmartOilaUsageReport {
         guard let configuration else { return nil }
 
         var aggregatedUsage: [String: AggregatedUsage] = [:]
+        // The token half of the bridge. This extension is the only place iOS hands out a bundle
+        // identifier and a usable `ApplicationToken` for the SAME app, and the app needs both: the
+        // server speaks bundle ids, while ManagedSettings only acts on tokens. Measured on an
+        // iPhone 12 mini (iOS 26.6.1): a shield built from `Application(bundleIdentifier:)` is
+        // accepted, reads back correctly, and does nothing at all.
+        var tokenEntries: [ApplicationTokenCatalogue.Entry] = []
+        let seenAt = Date()
 
         for await deviceActivity in data {
             for await activitySegment in deviceActivity.activitySegments {
@@ -58,6 +66,17 @@ private extension SmartOilaUsageReport {
                             ?? bundleIdentifier
                         let usedTime = max(0, Int(applicationActivity.totalActivityDuration.rounded()))
 
+                        if let token = applicationActivity.application.token {
+                            tokenEntries.append(
+                                ApplicationTokenCatalogue.Entry(
+                                    bundleId: bundleIdentifier,
+                                    displayName: applicationActivity.application.localizedDisplayName,
+                                    token: token,
+                                    lastSeenAt: seenAt
+                                )
+                            )
+                        }
+
                         if var aggregatedEntry = aggregatedUsage[bundleIdentifier] {
                             aggregatedEntry.usedTime += usedTime
                             aggregatedUsage[bundleIdentifier] = aggregatedEntry
@@ -71,6 +90,8 @@ private extension SmartOilaUsageReport {
                 }
             }
         }
+
+        ApplicationTokenCatalogue().merge(tokenEntries)
 
         let entries = aggregatedUsage
             .map { packageName, usage in

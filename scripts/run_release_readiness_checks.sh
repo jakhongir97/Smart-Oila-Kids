@@ -29,7 +29,7 @@ echo
 # ratchet carries two operations of slack, and deleting the /device/unpair call site -- the one that
 # lets a child disconnect -- would still print PASS here while CI failed on the same tree.
 echo "== Child endpoints vs the LIVE spec =="
-python3 scripts/check_child_live_endpoints.py --min-endpoints 26
+python3 scripts/check_child_live_endpoints.py --min-endpoints 27
 echo
 
 echo "== Child-vs-parent parity gap budget =="

@@ -60,4 +60,4 @@ jobs:
         # which PRINTS it on every run -- the gate's job is to notice the gap, not look away from
         # it. See OpenAPI/README.md.
         run: |
-          python3 scripts/check_child_live_endpoints.py --min-endpoints 26
+          python3 scripts/check_child_live_endpoints.py --min-endpoints 27

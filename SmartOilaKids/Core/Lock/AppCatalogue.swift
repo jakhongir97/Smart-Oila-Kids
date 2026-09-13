@@ -4,8 +4,10 @@ import Foundation
 ///
 /// The three abilities are independent and the catalogue is where that asymmetry lives:
 ///
-/// * `bundleId` drives BLOCKING — `Application(bundleIdentifier:)` fed to
-///   `ManagedSettingsStore.application.blockedApplications`. Apple's cap is 50 apps.
+/// * `bundleId` is the IDENTITY the server and this app agree on. It does NOT block by itself:
+///   `blockedApplications` built from `Application(bundleIdentifier:)` was measured inert on iOS
+///   26.6.1 (see `BlockedApplicationsController`), so a bundle id is resolved to an
+///   `ApplicationToken` via `ApplicationTokenCatalogue` before anything is enforced.
 /// * `scheme` drives DETECTION — `UIApplication.canOpenURL("<scheme>://")`. It is nil for most
 ///   entries, because iOS has no API that lists installed apps outside the EU and a scheme is the
 ///   only silent probe. **An app with no scheme can still be blocked, it just cannot be listed.**
@@ -27,9 +29,10 @@ struct AppCatalogueEntry: Equatable, Hashable {
 }
 
 enum AppCatalogue {
-    /// Ordered by how often a Bolajon360 parent actually asks about the app. The order is
-    /// load-bearing twice: it is the order the parent's list is built in, and it is the order
-    /// `BlockedApplicationsController` keeps when it has to drop entries past Apple's 50-app cap.
+    /// Ordered by how often a Bolajon360 parent actually asks about the app. The order decides
+    /// which apps are PROBED first and therefore the order of the list the parent sees; it does
+    /// not decide which blocks survive Apple's 50-app cap — that is the server's order, kept by
+    /// `BlockedApplicationsController.resolveBlockedBundleIds`.
     static let all: [AppCatalogueEntry] = [
         // Messaging, social and video — the apps parents name unprompted.
         AppCatalogueEntry(name: "Telegram", bundleId: "ph.telegra.Telegraph", scheme: "tg", category: "messaging"),
@@ -156,6 +159,14 @@ enum InstalledAppProbe {
     /// caller gets an empty array and is expected to skip the request rather than 400 the device's
     /// own liveness path.
     nonisolated static func syncEntries(for installed: [AppCatalogueEntry]) -> [DeviceAppLockSyncEntry] {
-        installed.map { DeviceAppLockSyncEntry(packageName: $0.bundleId, name: $0.name) }
+        // Lower-cased on purpose. The usage-report extension lower-cases every bundle id it sends
+        // to `POST /device/apps/usage`, so sending the catalogue's canonical casing here would
+        // publish the SAME app under two primary keys — `RU.WILDBERRIES.MOBILEAPP` in the app list
+        // and `ru.wildberries.mobileapp` in the usage rows — and the parent panel could never join
+        // them. The real casing is restored on the way back in, where iOS needs it, by
+        // `AppCatalogue.canonicalBundleId`.
+        installed.map {
+            DeviceAppLockSyncEntry(packageName: AppCatalogue.normalizedBundleId($0.bundleId), name: $0.name)
+        }
     }
 }

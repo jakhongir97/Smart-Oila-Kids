@@ -205,6 +205,13 @@ final class DeviceAppLockSelectionStore: ObservableObject {
         )
     }
 
+    /// Rows for `PUT /device/apps/sync` derived from a picker selection.
+    ///
+    /// Returns `[]` on every device that has never shown a picker, which is all of them today —
+    /// and an empty push MUST NOT reach `DeviceAppLockSyncCoordinator`, because that coordinator
+    /// has one slot and `ScreenTimeEnforcementCoordinator` fills it with the real, probe-derived
+    /// catalogue. An empty push would overwrite the catalogue and cancel its retry. The guard
+    /// lives at the call site (`notifyConfigurationChanged`), where the decision is visible.
     func syncEntries() -> [DeviceAppLockSyncEntry] {
         selection.applications
             .compactMap { application -> DeviceAppLockSyncEntry? in
@@ -320,6 +327,12 @@ private extension DeviceAppLockSelectionStore {
         )
         let dsn = currentDSN
         let entries = syncEntries()
+        // An empty selection must not reach the sync coordinator: it has a single slot, and
+        // `ScreenTimeEnforcementCoordinator` fills it with the probe-derived installed-app
+        // catalogue. Pushing `[]` here would replace that catalogue with nothing and cancel its
+        // retry, so the parent's app list would empty itself minutes after being published — on
+        // every device, because no device has a picker selection today.
+        guard !entries.isEmpty else { return }
         Task {
             await syncUpdate(dsn, entries)
         }
