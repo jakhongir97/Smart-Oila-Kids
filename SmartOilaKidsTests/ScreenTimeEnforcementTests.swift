@@ -1,3 +1,4 @@
+import FamilyControls
 import ManagedSettings
 import XCTest
 @testable import SmartOilaKids
@@ -172,6 +173,27 @@ final class BlockedApplicationsResolverTests: XCTestCase {
         )
 
         XCTAssertEqual(resolved, ["RU.WILDBERRIES.MOBILEAPP"])
+    }
+}
+
+/// The rule behind the false "Screen Time permission removed" alarm that fired on every launch.
+final class ScreenTimeAuthorizationPendingAnswerTests: XCTestCase {
+    func testALaunchTimeNotDeterminedOnAGrantedPhoneIsPending() {
+        XCTAssertTrue(ScreenTimeAuthorizationManager.isPendingAnswer(
+            rawStatus: .notDetermined, previousStatus: .granted, sinceLaunch: 0.4, markedUnavailable: false))
+    }
+
+    func testARealAnswerIsNeverPending() {
+        XCTAssertFalse(ScreenTimeAuthorizationManager.isPendingAnswer(
+            rawStatus: .denied, previousStatus: .granted, sinceLaunch: 0.4, markedUnavailable: false), "a denial is real at any time")
+        XCTAssertFalse(ScreenTimeAuthorizationManager.isPendingAnswer(
+            rawStatus: .approved, previousStatus: .granted, sinceLaunch: 0.4, markedUnavailable: false))
+        XCTAssertFalse(ScreenTimeAuthorizationManager.isPendingAnswer(
+            rawStatus: .notDetermined, previousStatus: .notDetermined, sinceLaunch: 0.4, markedUnavailable: false), "never granted: nothing to keep")
+        XCTAssertFalse(ScreenTimeAuthorizationManager.isPendingAnswer(
+            rawStatus: .notDetermined, previousStatus: .granted, sinceLaunch: ScreenTimeAuthorizationManager.launchGracePeriod + 1, markedUnavailable: false), "past the grace period a notDetermined is a revocation")
+        XCTAssertFalse(ScreenTimeAuthorizationManager.isPendingAnswer(
+            rawStatus: .notDetermined, previousStatus: .granted, sinceLaunch: 0.4, markedUnavailable: true))
     }
 }
 
