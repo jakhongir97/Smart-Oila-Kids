@@ -586,6 +586,11 @@ extension ScreenTimeEnforcementCoordinator {
             runMonitorScheduleWriteProof()
             return
         }
+        if ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] == "8" {
+            hasRunProof = true
+            ScreenTimeLabelProof.run()
+            return
+        }
         if ["4", "5"].contains(ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] ?? "") {
             hasRunProof = true
             runShippingPathProof()

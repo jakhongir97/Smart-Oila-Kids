@@ -395,3 +395,8 @@
 "screentime.restricted.usage_unsupported" = "On this iOS version blocking works, but per-app time needs iOS 17.4 or newer.";
 "screentime.restricted.too_many" = "Apple allows at most %d apps. Only the first %d are blocked and timed — remove some.";
 "screentime.label.taken" = "used by another icon";
+"screentime.restricted.guided_title" = "Apps to set up";
+"screentime.restricted.guided_hint" = "Blocked on the web or found on this phone, not set up yet. Tap one, tick that single app in Apple's picker, save — done.";
+"screentime.restricted.guided_cta" = "Set up";
+"screentime.restricted.guided_nothing" = "No new app was ticked for %@. Open it again and tick that app.";
+"screentime.restricted.guided_ambiguous" = "%2$d apps were ticked at once, so %1$@ could not be told apart. They are kept — tap each one below and choose its name.";

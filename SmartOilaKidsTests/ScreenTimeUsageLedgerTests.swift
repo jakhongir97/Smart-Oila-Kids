@@ -399,6 +399,43 @@ final class ScreenTimeRestrictedAppsStoreTests: XCTestCase {
         XCTAssertEqual(catalogue.entry(for: token)?.displayName, "Hay Day 2", "a blank name is refused")
     }
 
+    /// The guided step: the one newly ticked icon is the app whose button opened the picker.
+    func testTheOneNewlyPickedTokenTakesTheImpliedLabel() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, onChange: {})
+        let telegram = AppCatalogue.entry(forBundleId: "ph.telegra.Telegraph")!
+        let a = try makeToken("AQ=="), b = try makeToken("Ag=="), c = try makeToken("Aw==")
+
+        let before = try makeSelection([a])
+        store.updateSelection(before)
+
+        XCTAssertEqual(store.labelNewlyPicked(previous: before, current: try makeSelection([a, b]), as: telegram), .labelled)
+        XCTAssertEqual(catalogue.entry(for: b)?.bundleId, "ph.telegra.telegraph")
+
+        let youtube = AppCatalogue.entry(forBundleId: "com.google.ios.youtube")!
+        XCTAssertEqual(store.labelNewlyPicked(previous: store.selection, current: store.selection, as: youtube), .nothingNew)
+        XCTAssertNil(catalogue.entries().first { $0.bundleId == "com.google.ios.youtube" })
+
+        let two = try makeSelection([a, b, c, try makeToken("BA==")])
+        XCTAssertEqual(store.labelNewlyPicked(previous: store.selection, current: two, as: youtube), .ambiguous(2))
+        XCTAssertEqual(store.rows.count, 4, "the selection is kept even when the label cannot be implied")
+    }
+
+    /// The short list: what the parent asked about and has not labelled yet, in catalogue order.
+    func testPendingTargetsAreTheUnlabelledAppsTheParentAskedAbout() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, onChange: {})
+        catalogue.merge([.init(bundleId: "ph.telegra.telegraph", displayName: "Telegram", token: try makeToken("AQ=="), lastSeenAt: Date())])
+        let targets = store.pendingTargets(
+            lockedPackages: ["ph.telegra.telegraph", "com.google.ios.youtube", "not.in.catalogue"],
+            limitedPackages: ["NET.WHATSAPP.WHATSAPP"],
+            installed: [AppCatalogue.entry(forBundleId: "com.zhiliaoapp.musically")!]
+        )
+        XCTAssertEqual(targets.map(\.name), ["TikTok", "YouTube", "WhatsApp"], "labelled Telegram and unknown packages are out; catalogue order")
+    }
+
     func testTheSelectionSurvivesARelaunch() throws {
         let defaults = makeDefaults()
         let token = try makeToken("AQ==")

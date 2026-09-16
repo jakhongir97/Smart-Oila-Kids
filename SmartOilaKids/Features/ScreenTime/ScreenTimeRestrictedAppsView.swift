@@ -15,10 +15,26 @@ struct ScreenTimeRestrictedAppsView: View {
     @ObservedObject private var store = ScreenTimeRestrictedAppsStore.shared
     @ObservedObject private var authorization = ScreenTimeAuthorizationManager.shared
 
+    @ObservedObject private var telemetry = OilaTelemetryService.shared
+
     @State private var isPickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
     /// The row whose label sheet is open.
     @State private var labelling: ScreenTimeRestrictedAppsStore.Row?
+    /// The guided step: the catalogue app the parent is setting up right now. While set, the
+    /// picker's result labels itself — the one newly ticked icon is this app.
+    @State private var guidedTarget: AppCatalogueEntry?
+    @State private var guidedSelectionBefore = FamilyActivitySelection()
+    @State private var guidedMessage: String?
+    @State private var installed: [AppCatalogueEntry] = []
+
+    private var pendingTargets: [AppCatalogueEntry] {
+        store.pendingTargets(
+            lockedPackages: telemetry.lockedPackages,
+            limitedPackages: telemetry.appLimits.map(\.packageName),
+            installed: installed
+        )
+    }
 
     var body: some View {
         BolajonScreen(intent: .lavender, background: AppColors.screenBackground, title: L10n.tr("screentime.restricted.title")) {
@@ -38,10 +54,38 @@ struct ScreenTimeRestrictedAppsView: View {
                     }
                 }
 
+                // The guided step first: the apps the parent already asked about, one tap each.
+                if !pendingTargets.isEmpty, authorization.status == .granted {
+                    Text(L10n.tr("screentime.restricted.guided_title"))
+                        .font(AppTypography.bodyStrong(14))
+                        .foregroundStyle(AppColors.inkPrimary)
+                        .padding(.horizontal, 2)
+                    Text(L10n.tr("screentime.restricted.guided_hint"))
+                        .font(AppTypography.bodyText(13))
+                        .foregroundStyle(AppColors.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 2)
+                    VStack(spacing: 10) {
+                        ForEach(pendingTargets, id: \.bundleId) { entry in
+                            guidedRow(entry)
+                        }
+                    }
+                }
+
+                if let guidedMessage {
+                    InfoCard {
+                        Text(guidedMessage)
+                            .font(AppTypography.bodyText(14))
+                            .foregroundStyle(AppColors.sosCoral)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 BolajonPrimaryButton(
                     title: L10n.tr(store.rows.isEmpty ? "screentime.restricted.pick" : "screentime.restricted.pick_again"),
                     disabled: authorization.status != .granted
                 ) {
+                    guidedTarget = nil
                     draftSelection = store.selection
                     isPickerPresented = true
                 }
@@ -93,7 +137,21 @@ struct ScreenTimeRestrictedAppsView: View {
             ScreenTimeAppPickerView(
                 purpose: .restricted,
                 selection: $draftSelection,
-                onDone: { selection in store.updateSelection(selection) }
+                onDone: { selection in
+                    guard let target = guidedTarget else {
+                        store.updateSelection(selection)
+                        return
+                    }
+                    guidedTarget = nil
+                    switch store.labelNewlyPicked(previous: guidedSelectionBefore, current: selection, as: target) {
+                    case .labelled:
+                        guidedMessage = nil
+                    case .nothingNew:
+                        guidedMessage = L10n.tr("screentime.restricted.guided_nothing", target.name)
+                    case .ambiguous(let count):
+                        guidedMessage = L10n.tr("screentime.restricted.guided_ambiguous", target.name, count)
+                    }
+                }
             )
         }
         .sheet(item: $labelling) { row in
@@ -105,7 +163,39 @@ struct ScreenTimeRestrictedAppsView: View {
                 }
             }
         }
-        .onAppear { authorization.refreshStatus() }
+        .onAppear {
+            authorization.refreshStatus()
+            installed = InstalledAppProbe.installedEntries(canOpen: ScreenTimeEnforcementCoordinator.shared.canOpenScheme)
+        }
+    }
+
+    /// "<App> — Sozlash": opens the picker with this app as the implied label.
+    private func guidedRow(_ entry: AppCatalogueEntry) -> some View {
+        Button {
+            AppHaptics.selection()
+            guidedMessage = nil
+            guidedTarget = entry
+            guidedSelectionBefore = store.selection
+            draftSelection = store.selection
+            isPickerPresented = true
+        } label: {
+            InfoCard(padding: 14) {
+                HStack(spacing: 12) {
+                    Text(entry.name)
+                        .font(AppTypography.bodyStrong(15))
+                        .foregroundStyle(AppColors.inkPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(L10n.tr("screentime.restricted.guided_cta"))
+                        .font(AppTypography.bodyStrong(13))
+                        .foregroundStyle(AppColors.glyphPurple)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColors.inkTertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func appRow(_ row: ScreenTimeRestrictedAppsStore.Row) -> some View {

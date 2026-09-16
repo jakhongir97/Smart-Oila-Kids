@@ -134,6 +134,52 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         label(token, bundleId: bundleId, name: trimmed)
     }
 
+    /// The guided step: the parent tapped "set up <entry>", the picker came back, and exactly ONE
+    /// new app is in it — that token IS the entry, no name-choosing needed. The selection is
+    /// committed either way; only the label depends on the count.
+    enum GuidedOutcome: Equatable {
+        case labelled
+        case nothingNew
+        case ambiguous(Int)
+    }
+
+    @discardableResult
+    func labelNewlyPicked(
+        previous: FamilyActivitySelection,
+        current: FamilyActivitySelection,
+        as entry: AppCatalogueEntry
+    ) -> GuidedOutcome {
+        let added = current.applicationTokens.subtracting(previous.applicationTokens)
+        updateSelection(current)
+        switch added.count {
+        case 0:
+            return .nothingNew
+        case 1:
+            label(added.first!, as: entry)
+            return .labelled
+        default:
+            Self.log.notice("restricted_apps guided ambiguous added=\(added.count, privacy: .public) target=\(entry.bundleId, privacy: .public)")
+            return .ambiguous(added.count)
+        }
+    }
+
+    /// Catalogue apps the parent has asked about — blocked or limited on the web, or found installed
+    /// by the probe — that carry no label yet. This is the short list the guided step shows, in
+    /// catalogue order; the long icon list is the fallback for everything else.
+    func pendingTargets(
+        lockedPackages: [String],
+        limitedPackages: [String],
+        installed: [AppCatalogueEntry]
+    ) -> [AppCatalogueEntry] {
+        let labelled = Set(catalogue.entries().map(\.bundleId))
+        let wanted = Set((lockedPackages + limitedPackages).map(AppCatalogue.normalizedBundleId))
+            .union(installed.map { AppCatalogue.normalizedBundleId($0.bundleId) })
+        return AppCatalogue.all.filter { entry in
+            let id = AppCatalogue.normalizedBundleId(entry.bundleId)
+            return wanted.contains(id) && !labelled.contains(id)
+        }
+    }
+
     func removeLabel(for token: ApplicationToken) {
         guard let entry = catalogue.entry(for: token) else { return }
         catalogue.remove(bundleId: entry.bundleId)

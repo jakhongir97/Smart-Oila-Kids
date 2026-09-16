@@ -395,3 +395,8 @@
 "screentime.restricted.usage_unsupported" = "На этой версии iOS блокировка работает, но время по приложениям требует iOS 17.4 или новее.";
 "screentime.restricted.too_many" = "Apple разрешает не более %d приложений. Блокируются и учитываются только первые %d — уберите лишние.";
 "screentime.label.taken" = "занято другой иконкой";
+"screentime.restricted.guided_title" = "Приложения для настройки";
+"screentime.restricted.guided_hint" = "Заблокированы на сайте или найдены на этом телефоне, но ещё не настроены. Нажмите, отметьте одно это приложение в списке Apple, сохраните — готово.";
+"screentime.restricted.guided_cta" = "Настроить";
+"screentime.restricted.guided_nothing" = "Для %@ не отмечено новое приложение. Откройте снова и отметьте это приложение.";
+"screentime.restricted.guided_ambiguous" = "Отмечено сразу %2$d приложений, поэтому %1$@ не удалось определить. Они сохранены — нажмите на каждое ниже и выберите название.";

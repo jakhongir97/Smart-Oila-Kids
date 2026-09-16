@@ -395,3 +395,8 @@
 "screentime.restricted.usage_unsupported" = "Bu iOS versiyasida bloklash ishlaydi, lekin ilova bo'yicha vaqt uchun iOS 17.4 yoki yangiroq kerak.";
 "screentime.restricted.too_many" = "Apple ko'pi bilan %d ta ilovaga ruxsat beradi. Faqat birinchi %d tasi bloklanadi va hisoblanadi — ortiqchasini olib tashlang.";
 "screentime.label.taken" = "boshqa belgi uchun ishlatilgan";
+"screentime.restricted.guided_title" = "Sozlanadigan ilovalar";
+"screentime.restricted.guided_hint" = "Web'da bloklangan yoki shu telefonda topilgan, lekin hali sozlanmagan. Bosing, Apple ro'yxatida faqat o'sha ilovani belgilang, saqlang — tayyor.";
+"screentime.restricted.guided_cta" = "Sozlash";
+"screentime.restricted.guided_nothing" = "%@ uchun yangi ilova belgilanmadi. Qayta ochib o'sha ilovani belgilang.";
+"screentime.restricted.guided_ambiguous" = "Birdaniga %2$d ta ilova belgilandi, shuning uchun %1$@ ni ajratib bo'lmadi. Ular saqlandi — quyida har biriga bosib nomini tanlang.";

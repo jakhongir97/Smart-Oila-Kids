@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1DCA7104000000000000042F /* ScreenTimeLabelProof.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000042E /* ScreenTimeLabelProof.swift */; };
 		1DCA7104000000000000042D /* ScreenTimeUsageUploadLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000042B /* ScreenTimeUsageUploadLock.swift */; };
 		1DCA7104000000000000042C /* ScreenTimeUsageUploadLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000042B /* ScreenTimeUsageUploadLock.swift */; };
 		1DCA7104000000000000042A /* ScreenTimeUsageLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA71040000000000000429 /* ScreenTimeUsageLedgerTests.swift */; };
@@ -218,6 +219,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		1DCA7104000000000000042E /* ScreenTimeLabelProof.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeLabelProof.swift; sourceTree = "<group>"; };
 		1DCA7104000000000000042B /* ScreenTimeUsageUploadLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageUploadLock.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000429 /* ScreenTimeUsageLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageLedgerTests.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000427 /* ScreenTimeRestrictedAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeRestrictedAppsView.swift; sourceTree = "<group>"; };
@@ -697,6 +699,7 @@
 		1DCA71040000000000000417 /* ScreenTime */ = {
 			isa = PBXGroup;
 			children = (
+				1DCA7104000000000000042E /* ScreenTimeLabelProof.swift */,
 				1DCA71040000000000000427 /* ScreenTimeRestrictedAppsView.swift */,
 				1DCA71040000000000000416 /* ScreenTimeAppPickerView.swift */,
 			);
@@ -1042,6 +1045,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1DCA7104000000000000042F /* ScreenTimeLabelProof.swift in Sources */,
 				1DCA7104000000000000042C /* ScreenTimeUsageUploadLock.swift in Sources */,
 				1DCA71040000000000000428 /* ScreenTimeRestrictedAppsView.swift in Sources */,
 				1DCA71040000000000000426 /* ScreenTimeRestrictedAppsStore.swift in Sources */,
