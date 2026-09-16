@@ -118,10 +118,10 @@ enum ScreenTimeUsageMonitoring {
         for event in events {
             armed[DeviceActivityEvent.Name(event.name)] = makeEvent(token: event.token, thresholdSeconds: event.thresholdSeconds)
         }
-        // Stop first: a start on a running activity is documented as a replacement, but a stop
-        // makes that true on every iOS this ships on, and the interval-start guard
-        // (`ScreenTimeUsageLedger.armedDay`) absorbs the callback a restart may trigger.
-        stopMonitoring([activity])
+        // No `stopMonitoring` first. Measured 2026-09-16: a stop/start pair makes iOS deliver
+        // `intervalDidEnd` + `intervalDidStart` for the running interval on EVERY re-arm — one
+        // forced "day is over" upload per rung. A start on a running activity replaces its events
+        // (the staircase kept climbing after this change, which is the proof).
         try startMonitoring(activity, schedule, armed)
         ledger.setArmedDay(dayKey)
         // Today now exists in the ledger even before the first step, so an upload can state a

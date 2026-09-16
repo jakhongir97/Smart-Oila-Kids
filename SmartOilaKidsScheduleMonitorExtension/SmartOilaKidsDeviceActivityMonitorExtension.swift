@@ -55,7 +55,18 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
 
         if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
             // The day is over; what the ledger holds for it is final. Send it while a process is
-            // awake to do so — the app may not be for hours.
+            // awake to do so — the app may not be for hours. Only when the day REALLY ended: iOS
+            // also delivers this for a restart of the running interval (measured 2026-09-16: one
+            // per re-arm), and those must not each force an upload.
+            let now = Date()
+            let components = Calendar.current.dateComponents([.hour, .minute], from: now)
+            let dayRolledOver = ScreenTimeUsageDayFormatter.dayKey(for: now) != usageLedger.armedDay()
+                || (components.hour == 23 && components.minute == 59)
+                || (components.hour == 0 && (components.minute ?? 0) < 2)
+            guard dayRolledOver else {
+                Self.log.notice("schedule_monitor usage_interval_end ignored reason=restart_not_day_end")
+                return
+            }
             uploadUsage(reason: "interval_end", force: true)
             return
         }
