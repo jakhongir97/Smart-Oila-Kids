@@ -1,0 +1,223 @@
+import Combine
+import FamilyControls
+import Foundation
+import ManagedSettings
+import os
+
+/// The apps a parent can block and measure on this iPhone, and what each one is called.
+///
+/// WHY A PARENT HAS TO DO THIS ON THE CHILD'S PHONE. The server speaks bundle ids; iOS acts only on
+/// `ApplicationToken`s, which come out of `FamilyActivityPicker` and nowhere else, and — the part
+/// that makes this screen exist — the token is OPAQUE to the app: `Application.bundleIdentifier`
+/// and `.localizedDisplayName` are nil outside Apple's own extensions (Apple doc + Frameworks
+/// Engineer, forum thread 764988), and the one extension that sees both cannot share them
+/// (`ApplicationTokenCatalogue`, measured). SwiftUI's `Label(token)` renders the true icon and name
+/// for a HUMAN, so the parent is the bridge: pick the apps, then say which one each is.
+///
+/// Two stores, one truth:
+///  * the picked `FamilyActivitySelection` lives here, in the App Group, so a re-install of the
+///    label screen shows the same icons;
+///  * every label is an `ApplicationTokenCatalogue.Entry` — bundle id ↔ token — which is exactly
+///    what `BlockedApplicationsController` resolves server blocks against and what
+///    `ScreenTimeUsageMonitoring` arms thresholds for. Labelling an app is what makes it real.
+///
+/// An app the parent cannot find in the catalogue gets a device-minted id (`ios.app.<8 hex>`) and
+/// the name the parent typed; the server treats it like any other package, so it can be blocked
+/// and measured too — it simply cannot be probed by `canOpenURL`.
+@MainActor
+final class ScreenTimeRestrictedAppsStore: ObservableObject {
+    static let shared = ScreenTimeRestrictedAppsStore()
+
+    /// One picked app, as the label screen shows it.
+    struct Row: Identifiable, Equatable {
+        let token: ApplicationToken
+        /// The label, when the parent has given one.
+        let bundleId: String?
+        let name: String?
+
+        var id: String { ScreenTimeRestrictedAppsStore.tokenKey(token) }
+        var isLabelled: Bool { bundleId != nil }
+    }
+
+    @Published private(set) var selection = FamilyActivitySelection(includeEntireCategory: true)
+    /// Rows in a stable order (by token key), so the list does not reshuffle as labels land.
+    @Published private(set) var rows: [Row] = []
+
+    init(
+        defaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults(),
+        catalogue: ApplicationTokenCatalogue = ApplicationTokenCatalogue(),
+        ledger: ScreenTimeUsageLedger = ScreenTimeUsageLedger(),
+        onChange: (() -> Void)? = nil
+    ) {
+        self.defaults = defaults
+        self.catalogue = catalogue
+        self.ledger = ledger
+        self.onChange = onChange ?? {
+            ScreenTimeEnforcementCoordinator.shared.restrictedAppsDidChange()
+        }
+        load()
+    }
+
+    /// Labelled apps, in catalogue-entry form — what the enforcement and usage lanes consume.
+    ///
+    /// The WHOLE catalogue, not the picker selection filtered through it: enforcement
+    /// (`BlockedApplicationsController`) and arming (`ScreenTimeUsageMonitoring`) read the catalogue
+    /// directly, so this must be the same set or the screen would show fewer apps than the phone
+    /// acts on (review finding, 2026-09-16). `rows` is the union for the same reason.
+    var labelledEntries: [ApplicationTokenCatalogue.Entry] {
+        catalogue.entries()
+    }
+
+    /// Re-read everything from the App Group. Called when the unpair wipe has removed the domain
+    /// underneath this object — its in-memory rows must not outlive the family they belonged to.
+    func reloadFromDisk() {
+        selection = FamilyActivitySelection(includeEntireCategory: true)
+        load()
+    }
+
+    var labelledCount: Int { rows.filter(\.isLabelled).count }
+    var unlabelledCount: Int { rows.count - labelledCount }
+    /// Categories were ticked but no app came out of it — the pre-`includeEntireCategory` shape
+    /// of a stored selection. The screen tells the parent to pick again rather than showing nothing.
+    var hasOnlyCategories: Bool { rows.isEmpty && !selection.categoryTokens.isEmpty }
+
+    // MARK: - Mutations
+
+    /// A new picker result. Labels for apps that are no longer picked are dropped, because a block
+    /// or a threshold on a token the parent removed would be a rule nobody can see.
+    func updateSelection(_ newSelection: FamilyActivitySelection) {
+        let removedTokens = selection.applicationTokens.subtracting(newSelection.applicationTokens)
+        for entry in catalogue.entries() where removedTokens.contains(entry.token) {
+            catalogue.remove(bundleId: entry.bundleId)
+        }
+        selection = newSelection
+        persistSelection()
+        rebuildRows()
+        Self.log.notice("restricted_apps selection apps=\(newSelection.applicationTokens.count, privacy: .public) categories=\(newSelection.categoryTokens.count, privacy: .public)")
+        onChange()
+    }
+
+    /// "This icon is <catalogue app>." One bundle id maps to one token: labelling a second token
+    /// with the same app moves the label, it does not duplicate it.
+    func label(_ token: ApplicationToken, as entry: AppCatalogueEntry) {
+        label(token, bundleId: entry.bundleId, name: entry.name)
+    }
+
+    /// Bundle ids labelled on OTHER tokens — the label sheet marks these, because giving the same
+    /// name to a second icon MOVES the label (one bundle id, one token) rather than duplicating it.
+    func bundleIdsLabelledElsewhere(than token: ApplicationToken) -> Set<String> {
+        Set(catalogue.entries().filter { $0.token != token }.map(\.bundleId))
+    }
+
+    /// `AppSyncItemDto.name` is 1…255 characters, and one over-long row 400s the whole app-list
+    /// publish. Well under it, and long enough for any real app name.
+    static let maximumCustomNameLength = 60
+
+    /// "This icon is an app you do not list" — the parent names it, the device mints the id.
+    /// A typed name that IS a catalogue app (a parent who typed "YouTube" instead of finding it)
+    /// becomes that catalogue label, so the server sees the real bundle id.
+    func labelCustom(_ token: ApplicationToken, name: String) {
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maximumCustomNameLength))
+        guard !trimmed.isEmpty else { return }
+        if let entry = AppCatalogue.all.first(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            label(token, as: entry)
+            return
+        }
+        // Keep an existing custom id for this token, so renaming does not create a second package
+        // on the server.
+        let bundleId: String
+        if let existing = catalogue.entry(for: token), existing.bundleId.hasPrefix(Self.customBundleIdPrefix) {
+            bundleId = existing.bundleId
+        } else {
+            bundleId = Self.customBundleIdPrefix + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8)).lowercased()
+        }
+        label(token, bundleId: bundleId, name: trimmed)
+    }
+
+    func removeLabel(for token: ApplicationToken) {
+        guard let entry = catalogue.entry(for: token) else { return }
+        catalogue.remove(bundleId: entry.bundleId)
+        rebuildRows()
+        onChange()
+    }
+
+    func reset() {
+        for entry in labelledEntries {
+            catalogue.remove(bundleId: entry.bundleId)
+        }
+        selection = FamilyActivitySelection(includeEntireCategory: true)
+        defaults?.removeObject(forKey: Self.selectionKey)
+        rebuildRows()
+        onChange()
+    }
+
+    // MARK: - Internals
+
+    static let customBundleIdPrefix = "ios.app."
+    static let selectionKey = "SCREEN_TIME_RESTRICTED_SELECTION_V1"
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
+
+    /// A stable string for a token — its encoded bytes — used only as a list identity.
+    nonisolated static func tokenKey(_ token: ApplicationToken) -> String {
+        guard let data = try? JSONEncoder().encode(token) else { return UUID().uuidString }
+        return data.base64EncodedString()
+    }
+
+    private func label(_ token: ApplicationToken, bundleId: String, name: String) {
+        let normalized = AppCatalogue.normalizedBundleId(bundleId)
+        // The previous label on THIS token, and the previous token under THIS id, both go: a
+        // bundle id stands for exactly one token and a token for exactly one bundle id. Time
+        // already counted under the old label is the same app's time — it moves with the label,
+        // or the day would be reported twice under two package names.
+        if let previous = catalogue.entry(for: token), previous.bundleId != normalized {
+            catalogue.remove(bundleId: previous.bundleId)
+            ledger.rename(from: previous.bundleId, to: normalized)
+        }
+        catalogue.merge([
+            ApplicationTokenCatalogue.Entry(bundleId: normalized, displayName: name, token: token, lastSeenAt: Date())
+        ])
+        rebuildRows()
+        Self.log.notice("restricted_apps labelled app=\(normalized, privacy: .public)")
+        onChange()
+    }
+
+    private func load() {
+        guard let defaults, let data = defaults.data(forKey: Self.selectionKey),
+              let decoded = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else {
+            rebuildRows()
+            return
+        }
+        selection = decoded
+        rebuildRows()
+    }
+
+    private func persistSelection() {
+        guard let defaults else { return }
+        if let data = try? JSONEncoder().encode(selection) {
+            defaults.set(data, forKey: Self.selectionKey)
+        }
+    }
+
+    private func rebuildRows() {
+        let labels = catalogue.entries()
+        // Picked tokens plus every labelled token, so a label the phone enforces is always visible
+        // here even when the picker selection no longer carries it.
+        let tokens = selection.applicationTokens.union(labels.map(\.token))
+        rows = tokens
+            .map { token in
+                let entry = labels.first { $0.token == token }
+                return Row(token: token, bundleId: entry?.bundleId, name: entry?.displayName)
+            }
+            .sorted { lhs, rhs in
+                // Labelled first, then stable by token key, so the list does not reshuffle as
+                // labels land and the parent's remaining work is at the bottom.
+                if lhs.isLabelled != rhs.isLabelled { return lhs.isLabelled }
+                return lhs.id < rhs.id
+            }
+    }
+
+    private let defaults: UserDefaults?
+    private let catalogue: ApplicationTokenCatalogue
+    private let ledger: ScreenTimeUsageLedger
+    private let onChange: () -> Void
+}

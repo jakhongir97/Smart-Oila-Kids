@@ -57,7 +57,22 @@ struct ScreenTimeAppPickerView: View {
                     }
                 }
         }
-        .onAppear { draft = selection }
+        .onAppear { draft = Self.draft(from: selection, purpose: purpose) }
+    }
+
+    /// The picker draft. For the restricted set `includeEntireCategory` is ON: a parent who flips
+    /// the big "All Apps & Categories" switch, or ticks a whole category, then gets every app in it
+    /// as an APPLICATION token — which is the only kind that can be labelled, blocked one by one
+    /// and measured. Without it the same taps yield category tokens only, and the label list is
+    /// empty (measured 2026-09-16: `selection apps=0 categories=13`). The flag is `let` on
+    /// `FamilyActivitySelection`, so a stored selection is re-created around its tokens.
+    static func draft(from selection: FamilyActivitySelection, purpose: Purpose) -> FamilyActivitySelection {
+        guard purpose == .restricted, !selection.includeEntireCategory else { return selection }
+        var expanded = FamilyActivitySelection(includeEntireCategory: true)
+        expanded.applicationTokens = selection.applicationTokens
+        expanded.categoryTokens = selection.categoryTokens
+        expanded.webDomainTokens = selection.webDomainTokens
+        return expanded
     }
 
     private var title: String {

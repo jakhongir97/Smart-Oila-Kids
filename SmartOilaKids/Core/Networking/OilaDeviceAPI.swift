@@ -584,6 +584,9 @@ protocol OilaDeviceServicing {
     /// Report app-usage deltas (`POST /device/apps/usage`); the response is the enforcement
     /// state (locked packages + per-app limit/remaining) that drives on-device app-limit locking.
     func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse
+    /// Send whole local days of per-app usage (`PUT /device/apps/usage/daily`); each named day
+    /// REPLACES the server's copy. Answers with the same enforcement state as `reportAppUsage`.
+    func reportDailyUsage(days: [ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse
     /// Publish the installed-app catalogue this device can see (`PUT /device/apps/sync`), so the
     /// parent's app list is populated for an iPhone child the same way it is for an Android one.
     func syncInstalledApps(items: [DeviceAppLockSyncEntry]) async throws
@@ -1025,6 +1028,21 @@ final class OilaDeviceClient: OilaDeviceServicing {
     func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse {
         let payload: [[String: Any]] = items.map { ["packageName": $0.packageName, "usedSeconds": $0.usedSeconds] }
         let data = try await requestJSON(path: "device/apps/usage", method: .post, body: ["items": payload], authorized: true)
+        let object = (data as? [String: Any]) ?? [:]
+        let jsonData = try JSONSerialization.data(withJSONObject: object)
+        return try JSONDecoder().decode(DeviceApplicationUsageReportResponse.self, from: jsonData)
+    }
+
+    /// `PUT /device/apps/usage/daily` — `PutUsageReportDto { days: [{ date, items: [{ packageName,
+    /// usedSeconds }] }] }` (backend 2026-09-14). Idempotent on the server: resending a report
+    /// changes nothing, so a retry after a dropped response is safe.
+    func reportDailyUsage(days: [ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse {
+        let data = try await requestJSON(
+            path: "device/apps/usage/daily",
+            method: .put,
+            body: ScreenTimeUsageReport.body(days: days),
+            authorized: true
+        )
         let object = (data as? [String: Any]) ?? [:]
         let jsonData = try JSONSerialization.data(withJSONObject: object)
         return try JSONDecoder().decode(DeviceApplicationUsageReportResponse.self, from: jsonData)

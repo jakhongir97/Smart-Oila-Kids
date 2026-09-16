@@ -7,6 +7,20 @@ Place backend specs here:
 
 Current workspace already contains both files and they can be used directly.
 
+## ➕ ADDED 2026-09-16 — the daily usage report (ingestion surface refreshed)
+
+The device-telemetry half of the backend is published separately, behind the docs basic-auth, at
+`https://api.oila360.uz/docs/ingestion.json` (8 operations on 2026-09-16). It was merged into
+`oila360_live_openapi.json` verbatim — one new path, six refreshed (richer descriptions, same
+shapes), 11 new and 8 refreshed schemas:
+
+| Added | Provenance |
+|---|---|
+| `PUT /api/v1/device/apps/usage/daily` — `PutUsageReportDto { days: [{ date, items: [{ packageName, usedSeconds }] }] }` → `DailyUsageReportResponseDto { lockedPackages, stats }` | Copied from the live ingestion spec. Announced by the backend on 2026-09-14: each named day REPLACES the server's copy; a figure is the day's total so far, not a delta; window `[today − 7, today + 1]`; `[]` means "no screen time", so a day that was never measured must not be sent; `POST /device/apps/usage` is deprecated and the two must not be mixed. |
+
+The child app calls it from `OilaDeviceClient.reportDailyUsage(days:)` and, from the schedule-monitor
+extension, `ScreenTimeUsageExtensionUploader`. The client-count floor stays 27 (`check_child_live_endpoints.py`).
+
 ## ⚠️ Legacy vs. live contract (read before trusting the coverage gate)
 
 `rest_openapi.json` / `ws_openapi.json` describe the **legacy** `backend.smart-oila.uz`

@@ -27,6 +27,7 @@ struct BolajonSettingsView: View {
 #if DEBUG
         switch ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SETTINGS_ROUTE"] {
         case "permissions": return [.settingsPermissions]
+        case "restricted_apps": return [.settingsRestrictedApps]
         case "disconnect": return [.settingsDisconnect]
         default: return []
         }
@@ -64,6 +65,7 @@ struct SettingsRootView: View {
     /// True while the language sheet is up.
     @State private var isLanguagePickerPresented = false
     @ObservedObject private var alwaysAllowed = ScreenTimeAlwaysAllowedStore.shared
+    @ObservedObject private var restrictedApps = ScreenTimeRestrictedAppsStore.shared
     @ObservedObject private var screenTimeAuthorization = ScreenTimeAuthorizationManager.shared
     @State private var isAlwaysAllowedPickerPresented = false
     /// The picker edits a copy; `onDone` is what commits it, so a swipe-to-dismiss discards.
@@ -142,6 +144,16 @@ struct SettingsRootView: View {
                     // offers a control that cannot do anything.
                     if AppRuntime.screenTimeFeaturesEnabled,
                        screenTimeAuthorization.status == .granted {
+                        // The per-app setup: pick + label. The subtitle carries the live count so a
+                        // parent can see from here whether the step is done.
+                        row(glyph: .symbol("square.grid.2x2.fill"), tint: AppColors.glyphPurple,
+                            title: "settings2.restricted_apps",
+                            subtitle: restrictedApps.rows.isEmpty ? "settings2.restricted_apps_sub" : nil,
+                            subtitleLiteral: restrictedApps.rows.isEmpty
+                                ? nil
+                                : L10n.tr("settings2.restricted_apps_count", restrictedApps.labelledCount, restrictedApps.unlabelledCount),
+                            offCount: restrictedApps.unlabelledCount,
+                            action: { path.append(.settingsRestrictedApps) })
                         row(glyph: .symbol("checkmark.shield.fill"), tint: AppColors.glyphPurple,
                             title: "settings2.always_allowed",
                             subtitle: "settings2.always_allowed_sub",

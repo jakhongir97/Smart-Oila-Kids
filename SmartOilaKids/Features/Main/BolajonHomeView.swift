@@ -10,6 +10,7 @@ enum HomeRoute: Hashable {
     case chat
     case settings
     case settingsPermissions
+    case settingsRestrictedApps
     case settingsDisconnect
 }
 
@@ -22,6 +23,7 @@ func homeRouteDestination(_ route: HomeRoute, path: Binding<[HomeRoute]>) -> som
     case .chat: BolajonChatView()
     case .settings: SettingsRootView(path: path)
     case .settingsPermissions: SettingsPermissionsScreen()
+    case .settingsRestrictedApps: ScreenTimeRestrictedAppsView()
     case .settingsDisconnect: SettingsDisconnectScreen()
     }
 }

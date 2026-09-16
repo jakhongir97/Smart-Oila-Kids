@@ -2,10 +2,34 @@ import DeviceActivity
 import Foundation
 import ManagedSettings
 import UserNotifications
+import os
 
 final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
+    /// The one line that says this process ran at all. Everything this extension does is invisible
+    /// from the app (it may be the ONLY process awake when a schedule starts at night), so each
+    /// callback is logged with what it wrote and whether the App Group write reported success —
+    /// readable off the phone with `idevicesyslog -m schedule_monitor`.
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "schedule-monitor")
+
     override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
+        Self.log.notice("schedule_monitor interval_start activity=\(activity.rawValue, privacy: .public)")
+
+        // A new local day for the usage staircase: every threshold must start again from one
+        // step, or the first callback today would fire at yesterday's height.
+        if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
+            let today = ScreenTimeUsageDayFormatter.dayKey(for: Date())
+            // Already armed for today — this is the callback our own (re)start provoked, not a
+            // new day. Re-arming here would start again, and start again.
+            guard usageLedger.armedDay() != today else {
+                Self.log.notice("schedule_monitor usage_interval_start already_armed day=\(today, privacy: .public)")
+                return
+            }
+            if let dsn = ScreenTimeUsageActivity.dsn(from: activity.rawValue) {
+                rearmUsage(dsn: dsn, reason: "interval_start")
+            }
+            return
+        }
 
         if DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: activity.rawValue) {
             scheduleStore.shield.applications = nil
@@ -27,6 +51,14 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
 
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
+        Self.log.notice("schedule_monitor interval_end activity=\(activity.rawValue, privacy: .public)")
+
+        if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
+            // The day is over; what the ledger holds for it is final. Send it while a process is
+            // awake to do so — the app may not be for hours.
+            uploadUsage(reason: "interval_end", force: true)
+            return
+        }
 
         if DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: activity.rawValue) {
             DeviceLockManagedSettingsStoreFactory.clearAllSettings(scheduleStore)
@@ -45,6 +77,12 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
 
     override func eventDidReachThreshold(_ event: DeviceActivityEvent.Name, activity: DeviceActivityName) {
         super.eventDidReachThreshold(event, activity: activity)
+        Self.log.notice("schedule_monitor threshold activity=\(activity.rawValue, privacy: .public) event=\(event.rawValue, privacy: .public)")
+
+        if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
+            handleUsageThreshold(event: event, activity: activity)
+            return
+        }
 
         guard let dsn = DeviceAppLimitActivityIdentifier.dsn(from: activity.rawValue),
               let packageName = DeviceAppLimitEventIdentifier.packageName(from: event.rawValue),
@@ -81,6 +119,76 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
     )
     private let sharedStore = DeviceAppLimitSharedStore()
     private let eventStore = DeviceControlEventSharedStore()
+    private let usageLedger = ScreenTimeUsageLedger()
+}
+
+// MARK: - Per-app usage (the staircase)
+
+private extension SmartOilaKidsDeviceActivityMonitorExtension {
+    /// "This app has been used for N seconds today." Record N, arm N + step, tell the server.
+    ///
+    /// Three writes, and the order matters: the ledger first (so a crash after it still leaves
+    /// the figure), the re-arm second (so the next rung exists before anything slow happens), the
+    /// upload last (network, bounded by a timeout, and the app will retry it anyway).
+    func handleUsageThreshold(event: DeviceActivityEvent.Name, activity: DeviceActivityName) {
+        guard let dsn = ScreenTimeUsageActivity.dsn(from: activity.rawValue),
+              let parsed = ScreenTimeUsageActivity.parse(eventName: event.rawValue) else {
+            Self.log.error("schedule_monitor usage_event_unparsed event=\(event.rawValue, privacy: .public)")
+            return
+        }
+        // The DAY comes from the event, never from the clock: a rung crossed at 23:58 may be
+        // delivered at 00:01, and it belongs to the day it was armed for.
+        let changed = usageLedger.record(bundleId: parsed.bundleId, secondsReached: parsed.thresholdSeconds, dayKey: parsed.dayKey)
+        Self.log.notice(
+            "schedule_monitor usage_step app=\(parsed.bundleId, privacy: .public) seconds=\(parsed.thresholdSeconds, privacy: .public) day=\(parsed.dayKey, privacy: .public) changed=\(changed ? 1 : 0, privacy: .public)"
+        )
+        rearmUsage(dsn: dsn, reason: "threshold")
+        uploadUsage(reason: "threshold", force: false)
+    }
+
+    func rearmUsage(dsn: String, reason: String) {
+        do {
+            let count = try ScreenTimeUsageMonitoring.arm(dsn: dsn, ledger: usageLedger)
+            Self.log.notice("schedule_monitor usage_rearm reason=\(reason, privacy: .public) events=\(count, privacy: .public)")
+        } catch {
+            Self.log.error("schedule_monitor usage_rearm_failed reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Best effort, from the process that is awake. The app uploads the same ledger when it next
+    /// comes forward, so a failure here costs latency, never data.
+    ///
+    /// Two guards, both from the review of 2026-09-16:
+    ///  * ONE request on the wire across processes — `ScreenTimeUsageUploadLock`. The app uploads on
+    ///    the Darwin notification `record` just posted, so without the lock the two bodies race and
+    ///    the older one can land last (each day REPLACES the server's copy).
+    ///  * At most one extension upload per `minimumInterval` unless `force`: a freshly labelled app
+    ///    with hours of usage today climbs the whole staircase in back-to-back callbacks
+    ///    (`includesPastActivity`), and that climb only ever happens while the parent is holding the
+    ///    app — which uploads on every Darwin notification anyway.
+    func uploadUsage(reason: String, force: Bool) {
+        let now = Date()
+        if !force, let last = usageLedger.lastExtensionUploadAt(), now.timeIntervalSince(last) < Self.minimumUploadInterval {
+            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(rate_limited)")
+            return
+        }
+        guard let lock = ScreenTimeUsageUploadLock.acquire(timeout: 6) else {
+            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_busy)")
+            return
+        }
+        defer { lock.release() }
+        let days = ScreenTimeUsageReport.days(ledger: usageLedger)
+        let credential = LocationPushSharedCredential.read()
+        let outcome = ScreenTimeUsageExtensionUploader.upload(days: days, credential: credential.payload)
+        if case .sent = outcome {
+            usageLedger.setLastExtensionUploadAt(now)
+        }
+        Self.log.notice(
+            "schedule_monitor usage_upload reason=\(reason, privacy: .public) keychain=\(credential.status, privacy: .public) outcome=\(String(describing: outcome), privacy: .public)"
+        )
+    }
+
+    static let minimumUploadInterval: TimeInterval = 60
 }
 
 private extension SmartOilaKidsDeviceActivityMonitorExtension {
@@ -117,14 +225,19 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         packageName: String? = nil,
         appName: String? = nil
     ) {
-        guard let event = try? eventStore.append(
-            kind: kind,
-            dsn: dsn,
-            packageName: packageName,
-            appName: appName
-        ) else {
+        let appended: DeviceControlEvent?
+        do {
+            appended = try eventStore.append(kind: kind, dsn: dsn, packageName: packageName, appName: appName)
+        } catch {
+            Self.log.error("schedule_monitor event_write_failed kind=\(kind.rawValue, privacy: .public) error=\(String(describing: error), privacy: .public)")
             return
         }
+        // Read back in THIS process, the same way the report extension's sandbox was measured: if
+        // the row is here and the app never sees it, the container is per-process and no App Group
+        // entitlement will bridge it.
+        let pending = eventStore.loadPendingEvents().count
+        Self.log.notice("schedule_monitor event_written kind=\(kind.rawValue, privacy: .public) id=\(appended?.id ?? "dedup", privacy: .public) pending_read_back=\(pending, privacy: .public)")
+        guard let event = appended else { return }
 
         scheduleLocalNotification(for: event)
     }

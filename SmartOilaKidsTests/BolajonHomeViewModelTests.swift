@@ -154,6 +154,9 @@ private final class SOSServiceSpy: OilaDeviceServicing {
     func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse {
         DeviceApplicationUsageReportResponse(lockedPackages: [], stats: [])
     }
+    func reportDailyUsage(days: [ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse {
+        DeviceApplicationUsageReportResponse(lockedPackages: [], stats: [])
+    }
     private(set) var syncedApps: [DeviceAppLockSyncEntry] = []
     func syncInstalledApps(items: [DeviceAppLockSyncEntry]) async throws { syncedApps = items }
     func fetchLockState() async throws -> OilaLockState { throw Unimplemented() }

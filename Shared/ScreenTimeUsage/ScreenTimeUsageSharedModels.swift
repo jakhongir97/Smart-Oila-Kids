@@ -30,13 +30,24 @@ struct ScreenTimeUsageBridgeConfiguration: Codable, Equatable {
 }
 
 enum ScreenTimeUsageDayFormatter {
-    static func dayInterval(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+    /// The calendar every day key is cut on: Gregorian, in the device's current time zone. The
+    /// server's `date` is `YYYY-MM-DD` Gregorian; `Calendar.current` follows Settings › Calendar,
+    /// and a Buddhist/Japanese/Hebrew setting would yield `2569-09-16` — pattern-valid, so not a
+    /// 400, just silently outside the server's window (review finding, 2026-09-16).
+    static var gregorian: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        return calendar
+    }
+
+    static func dayInterval(containing date: Date, calendar: Calendar = ScreenTimeUsageDayFormatter.gregorian) -> DateInterval {
         let start = calendar.startOfDay(for: date)
         let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(24 * 60 * 60)
         return DateInterval(start: start, end: end)
     }
 
-    static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
+    static func dayKey(for date: Date, calendar: Calendar = ScreenTimeUsageDayFormatter.gregorian) -> String {
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         let year = components.year ?? 0
         let month = components.month ?? 0

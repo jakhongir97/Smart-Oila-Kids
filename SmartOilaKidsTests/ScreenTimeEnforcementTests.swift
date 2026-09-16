@@ -251,6 +251,45 @@ final class BlockedApplicationsControllerTests: XCTestCase {
 
     /// A child who revokes Screen Time access in Settings must not be left with a phone full of
     /// hidden icons we can no longer restore.
+    /// A launch-time `.notDetermined` is FamilyControls still loading. It must not lift a lock the
+    /// parent set; a `.denied` still must.
+    func testAPendingAuthorizationKeepsAnAppliedLockButADenialClearsIt() {
+        var status: ScreenTimePermissionStatus = .granted
+        var applied: [Applied] = []
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        let suiteName = "BlockedApplicationsControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        suiteNames.append(suiteName)
+        let controller = BlockedApplicationsController(
+            authorizationStatus: { status },
+            apply: { locked, tokens, ids in applied.append(Applied(wholeDeviceLocked: locked, bundleIds: ids, tokenCount: tokens.count)) },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults,
+            now: { now }
+        )
+        controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        XCTAssertEqual(applied.count, 1)
+
+        status = .notDetermined
+        now = now.addingTimeInterval(1)
+        controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        XCTAssertTrue(controller.appliedWholeDeviceLock, "still locked while the answer is pending")
+
+        // Long after launch a notDetermined is no longer "loading" — it is treated like any other
+        // non-granted answer, so a revocation that reads this way still clears.
+        now = now.addingTimeInterval(BlockedApplicationsController.authorizationGracePeriod + 1)
+        controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        XCTAssertFalse(controller.appliedWholeDeviceLock, "past the grace period it clears")
+
+        status = .granted
+        controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        XCTAssertTrue(controller.appliedWholeDeviceLock, "and re-applies on a real grant")
+
+        status = .denied
+        controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        XCTAssertFalse(controller.appliedWholeDeviceLock, "a real denial clears")
+    }
+
     func testLosingAuthorizationClearsWhatWasApplied() {
         var applied: [Applied] = []
         var status = ScreenTimePermissionStatus.granted
@@ -412,6 +451,64 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         XCTAssertEqual(synced.first?.1.map(\.packageName), ["ph.telegra.telegraph"])
         XCTAssertEqual(synced.first?.1.map(\.name), ["Telegram"])
         XCTAssertEqual(defaults.object(forKey: ScreenTimeEnforcementCoordinator.lastCatalogueSyncKey) as? Date, now)
+
+        coordinator.stop()
+    }
+
+    /// The ledger goes out when the lane starts, once per distinct content, and what comes back is
+    /// enforced exactly like the lock poll's per-app half. Labelled apps join the app-list publish.
+    func testTheUsageLedgerIsUploadedOnceAndItsAnswerIsEnforced() async throws {
+        let defaults = makeDefaults()
+        let ledgerDefaults = makeDefaults()
+        let ledger = ScreenTimeUsageLedger(userDefaults: ledgerDefaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = ScreenTimeUsageDayFormatter.dayKey(for: now)
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 600, dayKey: today, now: now)
+
+        var uploads: [[ScreenTimeUsageReportDay]] = []
+        var applied: [(Bool, [String])] = []
+        var synced: [[DeviceAppLockSyncEntry]] = []
+        var armed: [String] = []
+        let token = try JSONDecoder().decode(ApplicationToken.self, from: Data(#"{"data":"AQ=="}"#.utf8))
+        let labelled = [ApplicationTokenCatalogue.Entry(bundleId: "ios.app.deadbeef", displayName: "Hay Day", token: token, lastSeenAt: now)]
+
+        let coordinator = ScreenTimeEnforcementCoordinator(
+            lockState: { .released },
+            blockedApplications: BlockedApplicationsController(
+                authorizationStatus: { .granted },
+                apply: { locked, _, ids in applied.append((locked, ids)) },
+                tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+                userDefaults: defaults
+            ),
+            authorizationStatus: { .granted },
+            canOpenScheme: { $0 == "tg" },
+            syncUpdate: { _, entries in synced.append(entries) },
+            labelledEntries: { labelled },
+            armUsage: { dsn in armed.append(dsn); return 1 },
+            uploadUsage: { days in
+                uploads.append(days)
+                return DeviceApplicationUsageReportResponse(lockedPackages: ["com.google.ios.youtube"], stats: [])
+            },
+            usageLedger: ledger,
+            userDefaults: defaults,
+            now: { now }
+        )
+
+        coordinator.start(dsn: "child-1")
+        await coordinator.refreshNow()
+        await coordinator.refreshNow()
+
+        XCTAssertEqual(uploads.count, 1, "same ledger content is not re-sent")
+        XCTAssertEqual(uploads.first?.map(\.date), [today])
+        XCTAssertEqual(uploads.first?.first?.items, [.init(packageName: "com.google.ios.youtube", usedSeconds: 600)])
+        XCTAssertEqual(armed.first, "child-1")
+        XCTAssertEqual(applied.last?.1, ["com.google.ios.youtube"], "the response's lockedPackages are enforced")
+        XCTAssertEqual(synced.first?.map(\.packageName), ["ph.telegra.telegraph", "ios.app.deadbeef"])
+        XCTAssertEqual(synced.first?.map(\.name), ["Telegram", "Hay Day"])
+
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 900, dayKey: today, now: now)
+        await coordinator.uploadUsageNow(reason: "test")
+        XCTAssertEqual(uploads.count, 2, "a new figure is sent")
 
         coordinator.stop()
     }

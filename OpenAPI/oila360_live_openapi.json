@@ -2109,7 +2109,23 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "Alert queued. Envelope `message`: \"Qabul qilindi\".",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemovalAttemptAckDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — empty packageName/applicationName"
+          },
+          "401": {
+            "description": "UNAUTHORIZED — missing, invalid, or unpaired device token"
+          },
+          "429": {
+            "description": "RATE_LIMITED — device tier, 600 req/min per IP per route"
           }
         },
         "security": [
@@ -2129,14 +2145,20 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Today's total. Always 200 — a device with no usage yet reads 0, not 404.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScreenTimeResponseDto"
                 }
               }
             }
+          },
+          "401": {
+            "description": "UNAUTHORIZED — missing, invalid, or unpaired device token"
+          },
+          "429": {
+            "description": "RATE_LIMITED — device tier, 600 req/min per IP per route"
           }
         },
         "security": [
@@ -2166,7 +2188,23 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "Catalogue reconciled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncCatalogResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — empty payload, or more than 1000 items"
+          },
+          "401": {
+            "description": "UNAUTHORIZED — missing, invalid, or unpaired device token"
+          },
+          "429": {
+            "description": "RATE_LIMITED — device tier, 600 req/min per IP per route"
           }
         },
         "security": [
@@ -2182,6 +2220,8 @@
     },
     "/api/v1/device/apps/usage": {
       "post": {
+        "deprecated": true,
+        "description": "Deprecated: send a usage report to `PUT /device/apps/usage/daily` instead. Kept only for handsets that have not updated yet.",
         "operationId": "DeviceAppsController_reportUsage",
         "parameters": [],
         "requestBody": {
@@ -2196,14 +2236,23 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Deltas accumulated; enforcement state for right now",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/UsageReportResponseDto"
                 }
               }
             }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — empty payload, more than 1000 items, or a negative delta"
+          },
+          "401": {
+            "description": "UNAUTHORIZED — missing, invalid, or unpaired device token"
+          },
+          "429": {
+            "description": "RATE_LIMITED — device tier, 600 req/min per IP per route"
           }
         },
         "security": [
@@ -2594,7 +2643,23 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "Fixes stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationBatchResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — empty/oversized batch, out-of-range coordinates, or a `ts` that is not a UTC ISO-8601 instant ending in Z. The whole batch is rejected, not the bad fix."
+          },
+          "401": {
+            "description": "UNAUTHORIZED — missing, invalid, or unpaired device token"
+          },
+          "429": {
+            "description": "RATE_LIMITED — device tier, 600 req/min per IP per route"
           }
         },
         "security": [
@@ -2771,7 +2836,23 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "Snapshot persisted. Envelope `message`: \"Holat yangilandi\".",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceStatusAckDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — battery outside 0–100, or an unknown networkType/soundMode"
+          },
+          "401": {
+            "description": "UNAUTHORIZED — missing, invalid, or unpaired device token"
+          },
+          "429": {
+            "description": "RATE_LIMITED — device tier, 600 req/min per IP per route"
           }
         },
         "security": [
@@ -5563,6 +5644,53 @@
           "health"
         ]
       }
+    },
+    "/api/v1/device/apps/usage/daily": {
+      "put": {
+        "description": "Idempotent: resending a report changes nothing. A day outside [today − 7, today + 1] is skipped, and a day that sums past its length is scaled down, never rejected.",
+        "operationId": "DeviceAppsController_replaceUsageDays",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutUsageReportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Days replaced; enforcement state for right now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyUsageReportResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED — no days or more than 9, a repeated date, a malformed date, more than 1000 items in a day, a package repeated within a day, or a negative figure"
+          },
+          "401": {
+            "description": "UNAUTHORIZED — missing, invalid, or unpaired device token"
+          },
+          "429": {
+            "description": "RATE_LIMITED — device tier, 600 req/min per IP per route"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send a usage report — each named day replaces what the server holds",
+        "tags": [
+          "device-apps"
+        ]
+      }
     }
   },
   "info": {
@@ -6546,18 +6674,24 @@
         "type": "object",
         "properties": {
           "lat": {
-            "type": "number"
+            "type": "number",
+            "example": 41.311081
           },
           "lng": {
-            "type": "number"
+            "type": "number",
+            "example": 69.240562
           },
           "accuracy": {
             "type": "number",
-            "minimum": 0
+            "minimum": 0,
+            "example": 12.5,
+            "description": "Horizontal accuracy radius in metres."
           },
           "ts": {
             "type": "string",
-            "pattern": "Z$"
+            "pattern": "Z$",
+            "example": "2026-08-15T09:41:03.000Z",
+            "description": "Device-side capture time. MUST be a UTC ISO-8601 instant ending in `Z` — a zoneless string is rejected. Past timestamps are kept as-is (an offline backlog is normal); a timestamp more than 60s in the future is clamped to server time and excluded from geofencing, which means a wrong handset clock silently loses crossings."
           }
         },
         "required": [
@@ -6572,6 +6706,19 @@
           "items": {
             "minItems": 1,
             "maxItems": 500,
+            "example": [
+              {
+                "lat": 41.311081,
+                "lng": 69.240562,
+                "accuracy": 12.5,
+                "ts": "2026-08-15T09:41:03.000Z"
+              },
+              {
+                "lat": 41.31209,
+                "lng": 69.24188,
+                "ts": "2026-08-15T09:43:11.000Z"
+              }
+            ],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LocationPointDto"
@@ -6588,22 +6735,44 @@
           "battery": {
             "type": "number",
             "minimum": 0,
-            "maximum": 100
+            "maximum": 100,
+            "example": 37,
+            "description": "Charge percentage, 0–100. Crossing the low threshold alerts the parent once."
           },
           "networkType": {
-            "type": "string",
             "enum": [
               "Wifi",
               "Mobile"
-            ]
+            ],
+            "type": "string",
+            "example": "Wifi"
           },
           "soundMode": {
-            "type": "string",
             "enum": [
               "Normal",
               "Silent",
               "Vibrate"
-            ]
+            ],
+            "type": "string",
+            "example": "Silent"
+          },
+          "diagnostics": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "granted",
+                "denied",
+                "not_determined",
+                "unavailable"
+              ]
+            },
+            "example": {
+              "location": "granted",
+              "locationBackground": "denied",
+              "locationServices": "granted"
+            },
+            "description": "Why this handset can or cannot do what the parent expects (D-102): granted permissions, special access, and device-wide settings that are not permissions at all (the GPS master switch, iOS Background App Refresh). Known keys: location, locationBackground, locationServices, batteryOptimization, backgroundRefresh, usageAccess, accessibility, overlay, notifications, microphone, camera, autoStart, lowPowerMode. Send only the keys this platform and build actually measure — an omitted key means \"never reported\" and is merged over the stored value, never treated as denied. An unknown key rejects the whole request, so the server always ships before a build that adds one."
           }
         }
       },
@@ -6613,17 +6782,21 @@
           "packageName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255
+            "maxLength": 255,
+            "example": "com.instagram.android"
           },
           "name": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255
+            "maxLength": 255,
+            "example": "Instagram",
+            "description": "User-visible label, for the parent’s list."
           },
           "iconUrl": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 2048
+            "maxLength": 2048,
+            "example": "https://cdn.oila360.uz/icons/com.instagram.android.png"
           }
         },
         "required": [
@@ -6637,6 +6810,18 @@
           "items": {
             "minItems": 1,
             "maxItems": 1000,
+            "description": "The FULL current installed set. Anything previously installed and missing here is flagged uninstalled, so a partial payload silently removes the rest.",
+            "example": [
+              {
+                "packageName": "com.instagram.android",
+                "name": "Instagram",
+                "iconUrl": "https://cdn.oila360.uz/icons/com.instagram.android.png"
+              },
+              {
+                "packageName": "com.google.android.youtube",
+                "name": "YouTube"
+              }
+            ],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AppSyncItemDto"
@@ -6653,11 +6838,14 @@
           "packageName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255
+            "maxLength": 255,
+            "example": "com.instagram.android"
           },
           "usedSeconds": {
             "type": "number",
-            "minimum": 0
+            "minimum": 0,
+            "example": 900,
+            "description": "Seconds used SINCE THE LAST REPORT, not the running total — the server adds this to the device-local day. Sending a total re-adds it every cycle."
           }
         },
         "required": [
@@ -6671,6 +6859,16 @@
           "items": {
             "minItems": 1,
             "maxItems": 1000,
+            "example": [
+              {
+                "packageName": "com.instagram.android",
+                "usedSeconds": 900
+              },
+              {
+                "packageName": "com.google.android.youtube",
+                "usedSeconds": 240
+              }
+            ],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/UsageItemDto"
@@ -6687,12 +6885,16 @@
           "packageName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255
+            "maxLength": 255,
+            "example": "uz.oila360.kids",
+            "description": "The app the removal was attempted on — usually this app itself."
           },
           "applicationName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255
+            "maxLength": 255,
+            "example": "Oila 360",
+            "description": "User-visible label; goes straight into the parent’s notification copy."
           }
         },
         "required": [
@@ -6943,6 +7145,292 @@
           "pin"
         ],
         "description": "Field list derived from the published route documentation itself, not from the component schema (the document was received truncated before `components`). The route exists to set a PIN, so `pin` is required. String constraints (length, pattern) were NOT captured and are deliberately omitted rather than guessed."
+      },
+      "LocationBatchResponseDto": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "number",
+            "example": 42,
+            "description": "Rows written. Always equals `items.length` on success — a future-dated fix is NOT rejected, it is clamped to server time and still counted here (it is only excluded from geofencing). So this is a write receipt, not a validation result: do not diff it against what you sent to decide whether to resend."
+          }
+        },
+        "required": [
+          "accepted"
+        ]
+      },
+      "DeviceStatusAckDto": {
+        "type": "object",
+        "properties": {
+          "updated": {
+            "type": "boolean",
+            "example": true,
+            "description": "Always `true` — the snapshot is persisted. Carries no state back: the battery-low alert and the parent-facing `device:status` frame are server-side side-effects the child never sees."
+          }
+        },
+        "required": [
+          "updated"
+        ]
+      },
+      "SyncCatalogResponseDto": {
+        "type": "object",
+        "properties": {
+          "synced": {
+            "type": "number",
+            "example": 87,
+            "description": "Packages upserted. Counts DISTINCT package names, so a payload that repeats one reports it once — this can be lower than `items.length` without anything failing."
+          },
+          "removed": {
+            "type": "number",
+            "example": 3,
+            "description": "Packages that were installed and are absent from this payload; flagged uninstalled, NOT deleted, so the parent’s lock/limit survives a reinstall (D-037). Send the FULL installed set every time — a partial sync marks everything you omitted as removed."
+          }
+        },
+        "required": [
+          "synced",
+          "removed"
+        ]
+      },
+      "AppUsageStatDto": {
+        "type": "object",
+        "properties": {
+          "packageName": {
+            "type": "string",
+            "example": "com.instagram.android"
+          },
+          "usageDate": {
+            "type": "string",
+            "example": "2026-08-15",
+            "description": "Today by the DEVICE-LOCAL calendar (`Device.timezone`, captured at pairing) — not the server day. Limits reset at the child’s midnight."
+          },
+          "usedSeconds": {
+            "type": "number",
+            "example": 5400,
+            "description": "What the server holds for this package on `usageDate`, after this report."
+          },
+          "dailyLimitSeconds": {
+            "type": "number",
+            "nullable": true,
+            "example": 7200,
+            "description": "Parent-set daily limit. `null` = no limit configured for this app."
+          },
+          "remainingSeconds": {
+            "type": "number",
+            "nullable": true,
+            "example": 1800,
+            "description": "Floored at 0. `null` when `dailyLimitSeconds` is null, never a misleading 0."
+          },
+          "isLimitReached": {
+            "type": "boolean",
+            "example": false,
+            "description": "True once `usedSeconds >= dailyLimitSeconds`. Always false when there is no limit."
+          }
+        },
+        "required": [
+          "packageName",
+          "usageDate",
+          "usedSeconds",
+          "dailyLimitSeconds",
+          "remainingSeconds",
+          "isLimitReached"
+        ]
+      },
+      "UsageReportResponseDto": {
+        "type": "object",
+        "properties": {
+          "lockedPackages": {
+            "example": [
+              "com.instagram.android",
+              "com.zhiliaoapp.musically"
+            ],
+            "description": "The FULL effectively-blocked set for this device right now — parent-locked apps plus apps over today’s limit. Enforce exactly this list and drop whatever you were enforcing before; it is not a delta, and it covers apps absent from your payload.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stats": {
+            "description": "One line per DISTINCT package in your payload — nothing else. It is the reply to what you just reported, not the device’s whole day; use `GET /device/apps/screen-time` for the device-wide total.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppUsageStatDto"
+            }
+          }
+        },
+        "required": [
+          "lockedPackages",
+          "stats"
+        ]
+      },
+      "UsageReportItemDto": {
+        "type": "object",
+        "properties": {
+          "packageName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "example": "com.instagram.android"
+          },
+          "usedSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "example": 5400,
+            "description": "Seconds this app was on screen on `date`, counted from that day’s local midnight — the day’s figure so far, NOT the seconds since your last report. It replaces what the server holds for this app on that day."
+          }
+        },
+        "required": [
+          "packageName",
+          "usedSeconds"
+        ]
+      },
+      "UsageReportDayDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "example": "2026-09-13",
+            "description": "The handset’s local calendar day, YYYY-MM-DD. A day outside [today − 7, today + 1] (today by the child profile’s timezone) is skipped, not rejected."
+          },
+          "items": {
+            "uniqueItems": true,
+            "maxItems": 1000,
+            "example": [
+              {
+                "packageName": "com.instagram.android",
+                "usedSeconds": 5400
+              },
+              {
+                "packageName": "com.google.android.youtube",
+                "usedSeconds": 1260
+              }
+            ],
+            "description": "Every app with screen time on `date`; a package appears at most once. An app left out reads 0 for that day, and `[]` says the day had no screen time at all.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageReportItemDto"
+            }
+          }
+        },
+        "required": [
+          "date",
+          "items"
+        ]
+      },
+      "PutUsageReportDto": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "uniqueItems": true,
+            "minItems": 1,
+            "maxItems": 9,
+            "example": [
+              {
+                "date": "2026-09-12",
+                "items": [
+                  {
+                    "packageName": "com.instagram.android",
+                    "usedSeconds": 7320
+                  },
+                  {
+                    "packageName": "com.google.android.youtube",
+                    "usedSeconds": 2880
+                  }
+                ]
+              },
+              {
+                "date": "2026-09-13",
+                "items": [
+                  {
+                    "packageName": "com.instagram.android",
+                    "usedSeconds": 5400
+                  }
+                ]
+              }
+            ],
+            "description": "One entry per local day, each date at most once. Today plus up to 7 days back.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageReportDayDto"
+            }
+          }
+        },
+        "required": [
+          "days"
+        ]
+      },
+      "DailyUsageReportResponseDto": {
+        "type": "object",
+        "properties": {
+          "lockedPackages": {
+            "example": [
+              "com.instagram.android",
+              "com.zhiliaoapp.musically"
+            ],
+            "description": "The FULL effectively-blocked set for this device right now — parent-locked apps plus apps over today’s limit, judged on today’s figures after this report was written. Enforce exactly this list and drop whatever you were enforcing before.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stats": {
+            "description": "One line per package in TODAY’s entry of your report, and nothing else. Empty when the report has no entry for today (by `Device.timezone`) — earlier days get no lines.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppUsageStatDto"
+            }
+          }
+        },
+        "required": [
+          "lockedPackages",
+          "stats"
+        ]
+      },
+      "ScreenTimeResponseDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-08-15",
+            "description": "Device-local calendar day (`Device.timezone`), YYYY-MM-DD."
+          },
+          "usedSeconds": {
+            "type": "number",
+            "example": 12600,
+            "description": "Device-wide total across every app for `date`. Server-summed from the same rows the parent’s summary reads, so the two surfaces cannot disagree — do not recompute it from `UsageStatsManager` locally."
+          },
+          "dailyScreenLimitSeconds": {
+            "type": "number",
+            "nullable": true,
+            "example": 14400,
+            "description": "The parent’s daily budget, DISPLAY-ONLY — nothing enforces it. `null` = no budget set."
+          },
+          "remainingSeconds": {
+            "type": "number",
+            "nullable": true,
+            "example": 1800,
+            "description": "Floored at 0. `null` when no budget is set — render “no limit”, not “0 left”."
+          }
+        },
+        "required": [
+          "date",
+          "usedSeconds",
+          "dailyScreenLimitSeconds",
+          "remainingSeconds"
+        ]
+      },
+      "RemovalAttemptAckDto": {
+        "type": "object",
+        "properties": {
+          "reported": {
+            "type": "boolean",
+            "example": true,
+            "description": "Always `true` — the report was accepted. It does NOT mean the parent has been notified: the alert rides a durable queue and the feed row + push are written by the other service moments later."
+          }
+        },
+        "required": [
+          "reported"
+        ]
       }
     }
   }

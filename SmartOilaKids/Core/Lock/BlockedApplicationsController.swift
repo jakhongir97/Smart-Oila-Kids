@@ -56,14 +56,21 @@ final class BlockedApplicationsController {
 
     static let shared = BlockedApplicationsController()
 
+    /// How long after launch a `.notDetermined` answer is read as "FamilyControls has not loaded
+    /// yet" rather than "not authorized". Measured at ~1 s on an iPhone 12 mini.
+    nonisolated static let authorizationGracePeriod: TimeInterval = 15
+
     init(
         authorizationStatus: AuthorizationStatusAction? = nil,
         apply: ApplyAction? = nil,
         tokenCatalogue: ApplicationTokenCatalogue = ApplicationTokenCatalogue(),
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init
     ) {
         self.tokenCatalogue = tokenCatalogue
         self.userDefaults = userDefaults
+        self.now = now
+        self.launchedAt = now()
         let store = ManagedSettingsStore()
 
         self.authorizationStatusAction = authorizationStatus ?? {
@@ -172,6 +179,21 @@ final class BlockedApplicationsController {
         )
 
         guard status == .granted else {
+            // `.notDetermined` right after launch is FamilyControls not having answered yet, not a
+            // parent revoking Screen Time — measured 2026-09-16: `auth=notDetermined` at start,
+            // `auth=granted` one second later, same process. A revocation reads `.denied`. So a
+            // lock that survived the relaunch is kept through that first second rather than
+            // lifted by it; the next apply (with a real answer) settles it either way.
+            // Bounded to the first seconds of the process: `ScreenTimeAuthorizationManager` treats a
+            // later granted → notDetermined as a revocation, and if a revocation ever reads that way
+            // on a device, an unbounded deferral would keep the stale "applied" picture and refuse to
+            // re-apply after re-authorization.
+            if status == .notDetermined,
+               appliedWholeDeviceLock || !appliedBundleIds.isEmpty,
+               now().timeIntervalSince(launchedAt) < Self.authorizationGracePeriod {
+                Self.log.notice("screentime_apply deferred reason=authorization_pending")
+                return
+            }
             // Without authorization every ManagedSettings write is a no-op, and pretending
             // otherwise would let the diagnostics screen claim apps are blocked when nothing is.
             if lastAppliedStatus != status || appliedWholeDeviceLock || !appliedBundleIds.isEmpty {
@@ -244,6 +266,8 @@ final class BlockedApplicationsController {
 
     private let tokenCatalogue: ApplicationTokenCatalogue
     private let userDefaults: UserDefaults
+    private let now: () -> Date
+    private let launchedAt: Date
     private let authorizationStatusAction: AuthorizationStatusAction
     private let applyAction: ApplyAction
     private let clearAction: () -> Void

@@ -29,8 +29,13 @@ import os
 /// configuration extensions ("prevents your extension from … moving sensitive content outside the
 /// extension's address space"); the same applies here.
 ///
-/// So this type works, and is kept, but NOTHING FILLS IT on iOS 26 by this route. The consequences
-/// are the product's, not the code's:
+/// So this type works, and is kept, but NOTHING FILLS IT on iOS 26 by this route. What fills it
+/// instead (2026-09-16) is the PARENT: `ScreenTimeRestrictedAppsStore` runs `FamilyActivityPicker`
+/// on the child's phone and asks the parent to say which catalogue app each picked icon is —
+/// `Label(token)` shows them the real name and icon, the app just cannot read it. Every label is
+/// one `Entry` here, written by the app process into the real App Group, which the app and the
+/// schedule-monitor extension both see (measured 2026-09-16). The consequences of the sandbox are
+/// still the product's, not the code's:
 /// * per-app usage cannot be exported from iOS at all — it exists only inside an extension that
 ///   may render it on the child's screen and may not hand it to anyone;
 /// * per-app blocking cannot be driven by a bundle id from the server, because no token for that
@@ -104,6 +109,33 @@ struct ApplicationTokenCatalogue {
 
     func clear() {
         userDefaults?.removeObject(forKey: Self.storageKey)
+    }
+
+    /// The entry a given token stands for, if a label exists for it. Linear, because the map is
+    /// keyed by bundle id (the server's key) and is capped at `maximumEntries`.
+    func entry(for token: ApplicationToken) -> Entry? {
+        entries().first { $0.token == token }
+    }
+
+    /// Drop the label for one bundle id — a parent un-labelling an app, or re-labelling a token
+    /// that used to stand for another. Posts the same notification as `merge`, because a block the
+    /// app was enforcing for that id must be lifted with it.
+    func remove(bundleId: String) {
+        guard let userDefaults else { return }
+        let key = bundleId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let remaining = entries().filter { $0.bundleId != key }
+        guard remaining.count != entries().count else { return }
+        if let data = try? JSONEncoder().encode(remaining) {
+            userDefaults.set(data, forKey: Self.storageKey)
+        }
+        Self.log.notice("token_catalogue removed=\(key, privacy: .public) total=\(remaining.count, privacy: .public)")
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(Self.didChangeDarwinNotification as CFString),
+            nil,
+            nil,
+            true
+        )
     }
 
     /// Tokens for the bundle ids we know, and the ids we could not resolve — the caller needs both,

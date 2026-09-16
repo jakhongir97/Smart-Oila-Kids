@@ -17,7 +17,14 @@ import os
 /// shows up in the parent's app list the same way an Android one does. iOS has no API that
 /// enumerates installed apps outside the EU, so a shipped catalogue plus `canOpenURL` is the only
 /// honest answer — and it under-reports by design: an app with no URL scheme can still be blocked,
-/// it just cannot be listed.
+/// it just cannot be listed. Apps the parent LABELLED on the phone (`ScreenTimeRestrictedAppsStore`)
+/// ride the same publish, so a custom-named app the probe cannot see still reaches the list.
+///
+/// The fifth job (2026-09-16) is per-app screen time: arm `ScreenTimeUsageMonitoring` for the
+/// labelled apps whenever the lane starts or the labels change, and send the ledger the monitor
+/// extension fills to `PUT /device/apps/usage/daily` whenever it changes and whenever the app comes
+/// forward. The response is the same enforcement state the old usage route returned, and it is
+/// applied the same way.
 /// The three server facts, read together so enforcement always applies a consistent picture
 /// rather than three separately-observed properties that can be half-updated.
 struct ScreenTimeEnforcementLockState: Equatable {
@@ -34,6 +41,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     typealias CanOpenSchemeAction = (String) -> Bool
     typealias SyncUpdateAction = (String?, [DeviceAppLockSyncEntry]) async -> Void
     typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
+    typealias LabelledEntriesAction = () -> [ApplicationTokenCatalogue.Entry]
+    typealias ArmUsageAction = (String) throws -> Int
+    typealias UploadUsageAction = ([ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse
 
     static let shared = ScreenTimeEnforcementCoordinator()
 
@@ -57,6 +67,11 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         authorizationStatus: AuthorizationStatusAction? = nil,
         canOpenScheme: CanOpenSchemeAction? = nil,
         syncUpdate: SyncUpdateAction? = nil,
+        labelledEntries: LabelledEntriesAction? = nil,
+        reloadLabels: (() -> Void)? = nil,
+        armUsage: ArmUsageAction? = nil,
+        uploadUsage: UploadUsageAction? = nil,
+        usageLedger: ScreenTimeUsageLedger = ScreenTimeUsageLedger(),
         userDefaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
     ) {
@@ -70,7 +85,15 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
         self.blockedApplications = blockedApplications ?? BlockedApplicationsController.shared
         self.authorizationStatusAction = authorizationStatus ?? {
-            ScreenTimeAuthorizationManager.shared.status
+            // `status` is `.notDetermined` until someone calls `refreshStatus()`, and on a cold
+            // launch this coordinator can be the first to ask. Reading the system's answer here
+            // costs one property read and means a launch never skips arming for a phone that
+            // is, in fact, authorized. (Measured: the 15:15 launch armed nothing for that reason.)
+            let manager = ScreenTimeAuthorizationManager.shared
+            if manager.status == .notDetermined {
+                manager.refreshStatus()
+            }
+            return manager.status
         }
         self.canOpenScheme = canOpenScheme ?? { scheme in
             // A scheme that cannot form a URL is "not installed", never a crash: the catalogue is
@@ -81,6 +104,19 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         self.syncUpdate = syncUpdate ?? { dsn, entries in
             await DeviceAppLockSyncCoordinator.shared.update(dsn: dsn, entries: entries)
         }
+        self.labelledEntries = labelledEntries ?? {
+            ScreenTimeRestrictedAppsStore.shared.labelledEntries
+        }
+        self.reloadLabels = reloadLabels ?? {
+            ScreenTimeRestrictedAppsStore.shared.reloadFromDisk()
+        }
+        self.armUsage = armUsage ?? { dsn in
+            try ScreenTimeUsageMonitoring.arm(dsn: dsn)
+        }
+        self.uploadUsage = uploadUsage ?? { days in
+            try await OilaDeviceClient.shared.reportDailyUsage(days: days)
+        }
+        self.usageLedger = usageLedger
         self.userDefaults = userDefaults
         self.now = now
     }
@@ -105,10 +141,15 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         if lockStateObserver == nil {
             observeLockState()
             observeTokenCatalogue()
+            observeUsageLedger()
         }
 
         applyNow()
-        Task { await syncCatalogueIfNeeded(force: dsnChanged) }
+        armUsageMonitoring(reason: dsnChanged ? "start_new_dsn" : "start")
+        Task {
+            await syncCatalogueIfNeeded(force: dsnChanged)
+            await uploadUsageNow(reason: "start")
+        }
     }
 
     func stop() {
@@ -116,7 +157,19 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             NotificationCenter.default.removeObserver(lockStateObserver)
         }
         lockStateObserver = nil
+        if let dsn = currentDSN {
+            ScreenTimeUsageMonitoring.stop(dsn: dsn)
+        }
         currentDSN = nil
+        // A request in flight belongs to the pairing that just ended; its answer must not be
+        // enforced on the next one, and the flags must not wedge the next one's first upload.
+        isUploadingUsage = false
+        uploadRequestedWhileBusy = false
+        lastUploadedUsageSignature = nil
+        // The unpair wipe (`SessionStore.purgeChildScopedData`) removes the App Group domain under
+        // the label store's feet; its in-memory rows would otherwise outlive the family they
+        // belonged to until the next launch.
+        reloadLabels()
         // Everything below belongs to the child we are leaving. Carrying any of it into the next
         // pairing would apply one family's blocks to another's phone.
         latestUsageLockedPackages = []
@@ -131,7 +184,113 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     func refreshNow() async {
         guard currentDSN != nil else { return }
         applyNow()
+        // Re-armed on every foreground, not only on a label change: the day may have rolled over
+        // while the app slept, and a re-arm is idempotent when nothing changed.
+        armUsageMonitoring(reason: "refresh")
         await syncCatalogueIfNeeded(force: false)
+        await uploadUsageNow(reason: "refresh")
+    }
+
+    /// The parent picked or labelled apps on this phone. Everything downstream depends on the
+    /// label set: what is enforceable, what the server lists, what usage is measured for.
+    func restrictedAppsDidChange() {
+        guard currentDSN != nil else { return }
+        applyNow()
+        armUsageMonitoring(reason: "labels_changed")
+        Task {
+            await syncCatalogueIfNeeded(force: true)
+            await uploadUsageNow(reason: "labels_changed")
+        }
+    }
+
+    // MARK: - Usage
+
+    private func armUsageMonitoring(reason: String) {
+        guard AppRuntime.screenTimeFeaturesEnabled, let dsn = currentDSN else { return }
+        let status = authorizationStatusAction()
+        Self.log.notice("usage_monitor arming reason=\(reason, privacy: .public) auth=\(status.rawValue, privacy: .public)")
+        guard status == .granted else {
+            RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(status: "not_authorized", dsn: dsn, lastError: "-")
+            return
+        }
+        do {
+            let armed = try armUsage(dsn)
+            RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(
+                status: armed > 0 ? "monitoring" : "no_labelled_apps",
+                dsn: dsn,
+                selectedApps: armed,
+                lastError: "-"
+            )
+        } catch {
+            Self.log.error("usage_monitor arm_failed reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(status: "arm_failed", dsn: dsn, lastError: String(describing: error))
+        }
+    }
+
+    /// Send what the ledger holds. One request in flight at a time (the backend asked for it —
+    /// an older report landing after a newer one lowers today's figure and lifts a limit).
+    func uploadUsageNow(reason: String) async {
+        guard AppRuntime.screenTimeFeaturesEnabled, let dsn = currentDSN else { return }
+        guard !isUploadingUsage else {
+            uploadRequestedWhileBusy = true
+            return
+        }
+        let days = ScreenTimeUsageReport.days(ledger: usageLedger, now: now())
+        guard !days.isEmpty else { return }
+        // Nothing changed since the last accepted report: the server already holds this.
+        let signature = Self.usageSignature(days)
+        guard signature != lastUploadedUsageSignature else { return }
+
+        isUploadingUsage = true
+        // The monitor extension sends the same route from its own process; one body on the wire
+        // at a time is the backend's rule (see `ScreenTimeUsageUploadLock`).
+        guard let lock = await ScreenTimeUsageUploadLock.acquire(timeout: 15) else {
+            isUploadingUsage = false
+            uploadRequestedWhileBusy = true
+            Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=lock_busy")
+            return
+        }
+        defer { lock.release() }
+        let requestDSN = dsn
+        do {
+            let response = try await uploadUsage(days)
+            // The pairing may have ended while the request was out; its answer is not ours to apply
+            // (`stop()` already reset the flags this function would otherwise clear below).
+            guard currentDSN == requestDSN else {
+                lock.release()
+                return
+            }
+            lastUploadedUsageSignature = signature
+            let apps = days.first?.items.count ?? 0
+            Self.log.notice("usage_upload reason=\(reason, privacy: .public) days=\(days.count, privacy: .public) today_apps=\(apps, privacy: .public) locked=\(response.lockedPackages.count, privacy: .public)")
+            RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(
+                status: "uploaded",
+                dsn: dsn,
+                lastSnapshot: "\(days.count) days, today \(apps) apps",
+                lastError: "-",
+                lastCollectedAt: now()
+            )
+            applyUsageReportResponse(response)
+        } catch {
+            Self.log.error("usage_upload_failed reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(status: "upload_failed", dsn: dsn, lastError: String(describing: error))
+        }
+        // Both released BEFORE the coalesced retry, not by the `defer` alone: a defer runs after
+        // the recursive call returns, so the retry would find the flag up and the lock held, and
+        // give up. (`release()` is idempotent; the defer is the safety net for throws.)
+        lock.release()
+        isUploadingUsage = false
+        guard currentDSN == requestDSN else { return }
+        if uploadRequestedWhileBusy {
+            uploadRequestedWhileBusy = false
+            await uploadUsageNow(reason: "coalesced")
+        }
+    }
+
+    nonisolated static func usageSignature(_ days: [ScreenTimeUsageReportDay]) -> String {
+        days.map { day in
+            day.date + ":" + day.items.map { "\($0.packageName)=\($0.usedSeconds)" }.joined(separator: ",")
+        }.joined(separator: ";")
     }
 
     /// The freshest enforcement signal on the device: `POST /device/apps/usage` answers with the
@@ -217,7 +376,10 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         guard force || Self.shouldProbeCatalogue(lastSyncedAt: lastSyncedAt, now: now()) else { return }
 
         let installed = InstalledAppProbe.installedEntries(canOpen: canOpenScheme)
-        let entries = InstalledAppProbe.syncEntries(for: installed)
+        let entries = Self.mergedSyncEntries(
+            probed: InstalledAppProbe.syncEntries(for: installed),
+            labelled: labelledEntries()
+        )
 
         // `SyncAppsDto` declares `minItems: 1`. An empty probe is a real answer ("none of the apps
         // we can detect are here"), but it is not a request this endpoint accepts, so it is left
@@ -238,7 +400,44 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         userDefaults.set(now(), forKey: Self.lastCatalogueSyncKey)
     }
 
+    /// The probe result plus every labelled app, one row per package. A labelled catalogue app the
+    /// probe also found is listed once (the probe's row); a labelled app the probe cannot see — no
+    /// scheme, or a custom-named one — is added under its label. Pure, pinned by a test.
+    nonisolated static func mergedSyncEntries(
+        probed: [DeviceAppLockSyncEntry],
+        labelled: [ApplicationTokenCatalogue.Entry]
+    ) -> [DeviceAppLockSyncEntry] {
+        var seen = Set(probed.map(\.packageName))
+        var result = probed
+        for entry in labelled {
+            let packageName = AppCatalogue.normalizedBundleId(entry.bundleId)
+            guard !packageName.isEmpty, seen.insert(packageName).inserted else { continue }
+            let name = entry.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            result.append(DeviceAppLockSyncEntry(
+                packageName: packageName,
+                name: (name?.isEmpty == false ? name : nil) ?? AppCatalogue.displayName(forBundleId: packageName) ?? packageName
+            ))
+        }
+        return result
+    }
+
     // MARK: - Private
+
+    /// The monitor extension recorded a step. Upload it while this process is awake; the
+    /// extension already tried, and a second attempt is cheap.
+    private func observeUsageLedger() {
+        let name = ScreenTimeUsageLedger.didChangeDarwinNotification as CFString
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, _, _, _, _ in
+                Task { @MainActor in await ScreenTimeEnforcementCoordinator.shared.uploadUsageNow(reason: "ledger_changed") }
+            },
+            name,
+            nil,
+            .deliverImmediately
+        )
+    }
 
     /// One observer for all three server facts: `OilaTelemetryService` posts
     /// `.oilaLockStateDidChange` after it has applied a recognized lock-state response, which is
@@ -290,8 +489,16 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private let authorizationStatusAction: AuthorizationStatusAction
     let canOpenScheme: CanOpenSchemeAction
     private let syncUpdate: SyncUpdateAction
+    private let labelledEntries: LabelledEntriesAction
+    private let reloadLabels: () -> Void
+    private let armUsage: ArmUsageAction
+    private let uploadUsage: UploadUsageAction
+    private let usageLedger: ScreenTimeUsageLedger
     private let userDefaults: UserDefaults
     private let now: () -> Date
+    private var isUploadingUsage = false
+    private var uploadRequestedWhileBusy = false
+    private var lastUploadedUsageSignature: String?
     private var lockStateObserver: NSObjectProtocol?
     private var currentDSN: String?
     /// Set the first time the server tells this launch anything about the lock state; see
@@ -372,6 +579,11 @@ extension ScreenTimeEnforcementCoordinator {
         if ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] == "6" {
             hasRunProof = true
             runMonitorWriteProof()
+            return
+        }
+        if ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] == "7" {
+            hasRunProof = true
+            runMonitorScheduleWriteProof()
             return
         }
         if ["4", "5"].contains(ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] ?? "") {
@@ -566,6 +778,70 @@ extension ScreenTimeEnforcementCoordinator {
 
             center.stopMonitoring([activity])
             Self.proofLog.notice("monitor_proof stopped")
+        }
+    }
+
+    /// Mode 7: the same question as mode 6, asked in a way iOS reliably answers.
+    ///
+    /// Mode 6 waited for `intervalDidStart` on a schedule that was ALREADY running, and iOS fires
+    /// that lazily (it did not, in 60 s). A one-off schedule whose start is two minutes in the
+    /// FUTURE fires at that minute. The activity name uses the real schedule-identifier shape for
+    /// the paired DSN, so the extension's shipping `intervalDidStart` path runs: it writes a
+    /// `scheduleStarted` row into `DeviceControlEventSharedStore` (App Group) and logs
+    /// `schedule_monitor event_written … pending_read_back=N`. This side then reports what the APP
+    /// can read from the same store — on the Darwin notification and on every later poll.
+    ///
+    /// Run it twice if the phone locks and suspends the poll: the second launch reads the store
+    /// first and reports what the first launch's schedule left behind.
+    func runMonitorScheduleWriteProof() {
+        Task { @MainActor in
+            let store = DeviceControlEventSharedStore()
+            let existing = store.loadPendingEvents()
+            Self.proofLog.notice("monitor_proof7 app_reads pending=\(existing.count, privacy: .public) kinds=\(existing.map { "\($0.kind.rawValue)@\(Int($0.createdAt.timeIntervalSince1970))" }.joined(separator: ","), privacy: .public)")
+
+            guard let dsn = self.currentDSN ?? OilaDeviceIdentity.persistedDSN() else {
+                Self.proofLog.error("monitor_proof7 abort reason=no_dsn")
+                return
+            }
+
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                nil,
+                { _, _, _, _, _ in
+                    let now = DeviceControlEventSharedStore().loadPendingEvents()
+                    ScreenTimeEnforcementCoordinator.proofLog.notice("monitor_proof7 darwin_notification app_reads pending=\(now.count, privacy: .public) kinds=\(now.map(\.kind.rawValue).joined(separator: ","), privacy: .public)")
+                },
+                DeviceControlEventSharedStore.darwinNotificationName as CFString,
+                nil,
+                .deliverImmediately
+            )
+
+            let center = DeviceActivityCenter()
+            let activity = DeviceActivityName(DeviceLockScheduleActivityIdentifier.rawValue(dsn: dsn, suffix: "proof7"))
+            let calendar = Calendar.current
+            let start = Date().addingTimeInterval(120)
+            let end = start.addingTimeInterval(16 * 60)
+            let units: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute]
+            let schedule = DeviceActivitySchedule(
+                intervalStart: calendar.dateComponents(units, from: start),
+                intervalEnd: calendar.dateComponents(units, from: end),
+                repeats: false
+            )
+            do {
+                center.stopMonitoring([activity])
+                try center.startMonitoring(activity, during: schedule)
+                Self.proofLog.notice("monitor_proof7 started activity=\(activity.rawValue, privacy: .public) start=\(Int(start.timeIntervalSince1970), privacy: .public) activities=\(center.activities.count, privacy: .public)")
+            } catch {
+                Self.proofLog.error("monitor_proof7 start_failed error=\(String(describing: error), privacy: .public)")
+                return
+            }
+
+            for attempt in 1...40 {
+                try? await Task.sleep(nanoseconds: 10 * 1_000_000_000)
+                let events = store.loadPendingEvents()
+                Self.proofLog.notice("monitor_proof7 poll=\(attempt, privacy: .public) pending=\(events.count, privacy: .public) kinds=\(events.map(\.kind.rawValue).joined(separator: ","), privacy: .public)")
+                if events.count > existing.count { break }
+            }
         }
     }
 

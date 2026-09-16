@@ -8,5 +8,9 @@
 	<array>
 		<string>group.3twn5nw4bl.uz.smartoila.kids</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)uz.smartoila.kids.shared</string>
+	</array>
 </dict>
 </plist>
