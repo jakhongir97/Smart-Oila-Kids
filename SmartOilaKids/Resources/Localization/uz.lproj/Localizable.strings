@@ -32,9 +32,11 @@
 "main.parent_tracking_action_check_now" = "Hozir tekshirish";
 "main.parent_tracking_action_checking" = "Tekshirilmoqda…";
 
-"lock.title" = "Ilova to'xtatildi";
-"lock.subtitle" = "Ota-onangiz Bolajon360 ilovasini hozircha to'xtatib qo'ydi.";
+"lock.title" = "Telefon bloklandi";
+"lock.subtitle" = "Ota-onangiz telefonni vaqtincha blokladi.";
 "lock.schedule" = "Jadval: %@";
+"lock.until" = "%@ gacha";
+"lock.offline_note" = "Internet bo'lmasa ham %@ da o'zi ochiladi.";
 "lock.local_time" = "Qurilma vaqti: %@";
 
 

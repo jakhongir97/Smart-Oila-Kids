@@ -3,8 +3,25 @@ import SwiftUI
 struct DeviceLockOverlay: View {
     let localTime: String?
     let scheduleRange: String?
+    /// When the lock ends, if known — `OilaTelemetryService.lockDeadline`. Rendered as the one line
+    /// the PO asked the child to see (2026-09-16): the phone opens by itself at this time, internet
+    /// or not.
+    var endsAt: Date? = nil
 
     @StateObject private var sos = LockOverlaySOSModel()
+
+    /// The deadline in the child's own locale and clock format, with the date only when it is not
+    /// today (an 8 h lock started in the evening ends tomorrow). `DateFormatter` rather than a
+    /// hard-coded "HH:mm", for the reason `BolajonChatView` records: a 12-hour-clock child should
+    /// read "7:00 AM", not "07:00".
+    static func endsAtText(_ date: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = L10n.currentLocale) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.calendar = calendar
+        formatter.timeStyle = .short
+        formatter.dateStyle = calendar.isDate(date, inSameDayAs: now) ? .none : .short
+        return formatter.string(from: date)
+    }
 
     var body: some View {
         ZStack {
@@ -28,7 +45,13 @@ struct DeviceLockOverlay: View {
                             .multilineTextAlignment(.center)
                             .lineSpacing(3)
 
-                        if let scheduleRange, !scheduleRange.isEmpty {
+                        if let endsAt {
+                            StatusPill(text: L10n.tr("lock.until", Self.endsAtText(endsAt)), state: .neutral)
+                            Text(L10n.tr("lock.offline_note", Self.endsAtText(endsAt)))
+                                .font(AppTypography.caption(11))
+                                .foregroundStyle(AppColors.inkTertiary)
+                                .multilineTextAlignment(.center)
+                        } else if let scheduleRange, !scheduleRange.isEmpty {
                             StatusPill(text: L10n.tr("lock.schedule", scheduleRange), state: .neutral)
                         }
 
@@ -42,7 +65,10 @@ struct DeviceLockOverlay: View {
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(L10n.tr("lock.title"))
-                    .accessibilityHint(L10n.tr("lock.subtitle"))
+                    .accessibilityHint(
+                        endsAt.map { L10n.tr("lock.subtitle") + " " + L10n.tr("lock.offline_note", Self.endsAtText($0)) }
+                            ?? L10n.tr("lock.subtitle")
+                    )
                 }
 
                 // A panic button must never be gated by the parental lock. The lock cover otherwise

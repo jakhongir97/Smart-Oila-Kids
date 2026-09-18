@@ -63,6 +63,7 @@ final class BlockedApplicationsController {
     init(
         authorizationStatus: AuthorizationStatusAction? = nil,
         apply: ApplyAction? = nil,
+        releaseGlobal: (() -> Void)? = nil,
         tokenCatalogue: ApplicationTokenCatalogue = ApplicationTokenCatalogue(),
         userDefaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
@@ -103,6 +104,9 @@ final class BlockedApplicationsController {
         self.clearAction = { DeviceLockManagedSettingsStoreFactory.clearAllSettings(store) }
         // `clearAllSettings()` on the DEFAULT store wipes every setting this app has written
         // there, which is exactly the intent: this controller is the only writer of that store.
+        // (The one other writer, since 2026-09-18, is the monitor extension's deadline release —
+        // which writes the same two keys `releaseGlobal` does, and nothing else.)
+        self.releaseGlobalAction = releaseGlobal ?? { DeviceLockDeadlineMonitoring.releaseGlobalShield(store: store) }
     }
 
     /// The shield policy for a whole-device lock, as a pure function of the exception set.
@@ -230,6 +234,35 @@ final class BlockedApplicationsController {
         persistAppliedState()
     }
 
+    /// Open a whole-device lock whose DEADLINE passed, and nothing else.
+    ///
+    /// The lock's own two keys go back to nil (`shield.applicationCategories`,
+    /// `shield.webDomainCategories`); `shield.applications` — the per-app blocks — is not touched,
+    /// because those outlive a whole-device lock and, after a relaunch, this object does not even
+    /// know which tokens it holds (`appliedTokens` is not persisted). This is the ONE write allowed
+    /// before the server has confirmed a state this launch: it is driven by a deadline the server
+    /// itself issued (`OilaTelemetryService.lockReleasedByDeadline`), and a phone that stays
+    /// shielded after its end is the failure the product rule of 2026-09-16 exists to prevent.
+    /// The schedule-monitor extension makes the identical write when the app is not running.
+    func releaseWholeDeviceLock() {
+        guard appliedWholeDeviceLock else { return }
+        appliedWholeDeviceLock = false
+        // Forget what was applied, so the NEXT server-confirmed `apply()` re-writes rather than
+        // being blocked by the change guard. This matters because a whole-device lock nils
+        // `shield.applications`: the per-app blocks the parent set are gone from the OS while the
+        // categories shield stood in for them, and clearing only the categories here would leave
+        // them unenforced with the guard seeing "nothing changed". Emptying the cache forces the
+        // per-app shield to be rewritten the moment the server confirms the unlocked state (the
+        // usual online case) — and the launch gate's caller has already opened the categories.
+        appliedBundleIds = []
+        appliedTokens = []
+        unresolvedBundleIds = []
+        lastAppliedStatus = nil
+        releaseGlobalAction()
+        persistAppliedState()
+        Self.log.notice("screentime_release_global reason=deadline")
+    }
+
     /// Seed the change-detection cache from what a previous launch applied, WITHOUT writing
     /// anything.
     ///
@@ -271,6 +304,7 @@ final class BlockedApplicationsController {
     private let authorizationStatusAction: AuthorizationStatusAction
     private let applyAction: ApplyAction
     private let clearAction: () -> Void
+    private let releaseGlobalAction: () -> Void
     private var appliedTokens: Set<ApplicationToken> = []
     private var lastAppliedStatus: ScreenTimePermissionStatus?
 }

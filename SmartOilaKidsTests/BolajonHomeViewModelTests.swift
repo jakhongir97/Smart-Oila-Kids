@@ -714,7 +714,7 @@ final class ChatBannerSchedulingPredicateTests: XCTestCase {
         for event in ["lock.refresh", "status.report", "stream.start", "stream.stop"] {
             XCTAssertFalse(
                 PushCommandRouter.schedulesChatBanner(userInfo: ["type": event], deliveryContext: .backgroundFetch),
-                "\(event) must not hold the completion handler"
+                "\(event) is not a chat push, so it schedules no banner (the lock/status HOLD is a separate mechanism)"
             )
         }
     }

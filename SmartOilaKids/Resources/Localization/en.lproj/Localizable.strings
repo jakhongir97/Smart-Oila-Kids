@@ -32,9 +32,11 @@
 "main.parent_tracking_action_check_now" = "Check now";
 "main.parent_tracking_action_checking" = "Checking…";
 
-"lock.title" = "App is paused";
-"lock.subtitle" = "Your parent has paused Bolajon360 for now.";
+"lock.title" = "Phone is locked";
+"lock.subtitle" = "Your parent has locked the phone for a while.";
 "lock.schedule" = "Schedule: %@";
+"lock.until" = "Until %@";
+"lock.offline_note" = "Unlocks by itself at %@, even without internet.";
 "lock.local_time" = "Device time: %@";
 
 

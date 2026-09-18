@@ -691,3 +691,207 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         coordinator.stop()
     }
 }
+
+// MARK: - The lock deadline on the enforcement side (2026-09-18)
+
+/// When the lock's deadline passes, the OS shield must open — through the key-scoped release, never
+/// through the server-state path, and on launch only when the previous process left it up.
+@MainActor
+final class ScreenTimeLockDeadlineEnforcementTests: XCTestCase {
+    private var suiteNames: [String] = []
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func makeDefaults() -> UserDefaults {
+        let name = "ScreenTimeLockDeadlineEnforcementTests.\(UUID().uuidString)"
+        suiteNames.append(name)
+        return UserDefaults(suiteName: name)!
+    }
+
+    override func tearDown() {
+        for name in suiteNames { UserDefaults.standard.removePersistentDomain(forName: name) }
+        suiteNames.removeAll()
+        super.tearDown()
+    }
+
+    private struct Harness {
+        let coordinator: ScreenTimeEnforcementCoordinator
+        let blocked: BlockedApplicationsController
+        let applied: () -> [(Bool, [String])]
+        let released: () -> Int
+        let armed: () -> [(String, Date)]
+        let stopped: () -> [(String, Bool)]
+    }
+
+    private func makeHarness(
+        defaults: UserDefaults,
+        state: @escaping () -> ScreenTimeEnforcementLockState
+    ) -> Harness {
+        var applied: [(Bool, [String])] = []
+        var released = 0
+        var armed: [(String, Date)] = []
+        var stopped: [(String, Bool)] = []
+        let blocked = BlockedApplicationsController(
+            authorizationStatus: { .granted },
+            apply: { locked, _, ids in applied.append((locked, ids)) },
+            releaseGlobal: { released += 1 },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
+        )
+        let coordinator = ScreenTimeEnforcementCoordinator(
+            lockState: state,
+            blockedApplications: blocked,
+            authorizationStatus: { .granted },
+            canOpenScheme: { _ in false },
+            syncUpdate: { _, _ in },
+            armDeadline: { dsn, end in armed.append((dsn, end)); return true },
+            stopDeadline: { dsn, force in stopped.append((dsn, force)) },
+            userDefaults: defaults,
+            now: { self.now }
+        )
+        return Harness(
+            coordinator: coordinator, blocked: blocked,
+            applied: { applied }, released: { released }, armed: { armed }, stopped: { stopped }
+        )
+    }
+
+    func testALockWithAnEndArmsTheExtensionActivityAndAnUnlockStopsIt() {
+        let defaults = makeDefaults()
+        var state = ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: [], limitReached: [],
+                                                   lockEndsAt: now.addingTimeInterval(3_600))
+        let h = makeHarness(defaults: defaults) { state }
+        h.coordinator.start(dsn: "child-1")
+        XCTAssertTrue(h.armed().isEmpty, "nothing before the server has answered this launch")
+
+        h.coordinator.handleLockStateDidChange()
+        XCTAssertEqual(h.applied().last?.0, true)
+        XCTAssertEqual(h.armed().map(\.0), ["child-1"])
+        XCTAssertEqual(h.armed().first?.1, now.addingTimeInterval(3_600))
+
+        state = .released
+        h.coordinator.handleLockStateDidChange()
+        XCTAssertEqual(h.applied().last?.0, false)
+        XCTAssertEqual(h.stopped().last?.0, "child-1")
+        XCTAssertEqual(h.stopped().last?.1, false, "an unlocked poll stops without forcing an XPC call")
+
+        h.coordinator.stop()
+        XCTAssertEqual(h.stopped().last?.1, true, "unpair always stops: the activity must not outlive the family")
+    }
+
+    func testALockWithoutAnEndArmsNothing() {
+        let defaults = makeDefaults()
+        let h = makeHarness(defaults: defaults) {
+            ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: [], limitReached: [])
+        }
+        h.coordinator.start(dsn: "child-1")
+        h.coordinator.handleLockStateDidChange()
+        XCTAssertEqual(h.applied().last?.0, true)
+        XCTAssertTrue(h.armed().isEmpty, "the rolling 8 h ceiling is the app's to enforce, not an activity to re-arm every poll")
+        h.coordinator.stop()
+    }
+
+    func testADeadlineReleaseRestoresThePerAppShieldNotJustTheWholeDeviceKeys() {
+        // A whole-device lock nils `shield.applications`, so when the deadline release runs the
+        // per-app blocks that coexisted with it must be RE-WRITTEN, not silently dropped. With the
+        // app alive and the state confirmed, `handleLockDeadlineReleased` runs the full `applyNow`,
+        // which writes the selective shield (per-app tokens, categories nil).
+        let defaults = makeDefaults()
+        var state = ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: ["com.burbn.instagram"], limitReached: [],
+                                                   lockEndsAt: now.addingTimeInterval(3_600))
+        let h = makeHarness(defaults: defaults) { state }
+        h.coordinator.start(dsn: "child-1")
+        h.coordinator.handleLockStateDidChange()
+        XCTAssertEqual(h.applied().last?.0, true, "locked: whole device")
+        XCTAssertTrue(h.blocked.appliedWholeDeviceLock)
+
+        // Deadline passes: the service set isLocked=false; the server still lists the per-app block.
+        state = ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: ["com.burbn.instagram"], limitReached: [],
+                                               releasedByDeadline: true)
+        h.coordinator.handleLockDeadlineReleased()
+
+        XCTAssertFalse(h.blocked.appliedWholeDeviceLock)
+        // The last write is the SELECTIVE shield: not a whole-device lock, and the per-app block kept.
+        XCTAssertEqual(h.applied().last?.0, false)
+        XCTAssertEqual(h.applied().last?.1, ["com.burbn.instagram"], "the parent's per-app block is re-enforced, not dropped")
+        XCTAssertEqual(h.blocked.appliedBundleIds, ["com.burbn.instagram"])
+        XCTAssertEqual(h.stopped().last?.0, "child-1", "the deadline activity is retired")
+        XCTAssertFalse(defaults.bool(forKey: BlockedApplicationsController.persistedGlobalLockKey))
+        h.coordinator.stop()
+    }
+
+    func testAnExpiredLockLeftUpByThePreviousProcessIsOpenedOnLaunch() {
+        let defaults = makeDefaults()
+        // What the previous process persisted: a whole-device lock, applied.
+        defaults.set(true, forKey: BlockedApplicationsController.persistedGlobalLockKey)
+        defaults.set(["com.burbn.instagram"], forKey: BlockedApplicationsController.persistedBundleIdsKey)
+        let h = makeHarness(defaults: defaults) {
+            ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: [], limitReached: [], releasedByDeadline: true)
+        }
+
+        h.coordinator.start(dsn: "child-1")
+
+        XCTAssertEqual(h.released(), 1, "the OS shield the last process left up must open at launch, offline")
+        XCTAssertTrue(h.applied().isEmpty, "…and nothing else may be written before a server answer")
+        XCTAssertFalse(h.blocked.appliedWholeDeviceLock)
+        // The cache is emptied so the first server-confirmed apply re-writes the per-app shield
+        // rather than being blocked by the change guard (the whole-device lock had nil'ed it).
+        XCTAssertTrue(h.blocked.appliedBundleIds.isEmpty)
+        // Idempotent: released() does not climb on a second pre-server applyNow (nothing left to open).
+        h.coordinator.restrictedAppsDidChange()
+        XCTAssertEqual(h.released(), 1)
+        h.coordinator.stop()
+    }
+
+    func testLaunchWithoutAnExpiredLockTouchesNothing() {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: BlockedApplicationsController.persistedGlobalLockKey)
+        let h = makeHarness(defaults: defaults) {
+            // Restored as still locked (deadline not passed): nothing may change before the server.
+            ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: [], limitReached: [])
+        }
+        h.coordinator.start(dsn: "child-1")
+        XCTAssertEqual(h.released(), 0)
+        XCTAssertTrue(h.applied().isEmpty)
+        XCTAssertTrue(h.blocked.appliedWholeDeviceLock)
+        h.coordinator.stop()
+
+        // And a launch that was never locked at all: same.
+        let fresh = makeDefaults()
+        let h2 = makeHarness(defaults: fresh) {
+            ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: [], limitReached: [], releasedByDeadline: true)
+        }
+        h2.coordinator.start(dsn: "child-1")
+        XCTAssertEqual(h2.released(), 0, "no persisted lock, nothing to open")
+        h2.coordinator.stop()
+    }
+
+    func testReleaseWholeDeviceLockIsANoOpWhenNoLockIsApplied() {
+        let defaults = makeDefaults()
+        var released = 0
+        let blocked = BlockedApplicationsController(
+            authorizationStatus: { .granted },
+            apply: { _, _, _ in },
+            releaseGlobal: { released += 1 },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
+        )
+        blocked.releaseWholeDeviceLock()
+        XCTAssertEqual(released, 0)
+        blocked.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        blocked.releaseWholeDeviceLock()
+        XCTAssertEqual(released, 1)
+        XCTAssertFalse(blocked.appliedWholeDeviceLock)
+        // The next server-confirmed apply re-writes: the cache no longer claims anything is applied.
+        var applies = 0
+        let blocked2 = BlockedApplicationsController(
+            authorizationStatus: { .granted },
+            apply: { _, _, _ in applies += 1 },
+            releaseGlobal: {},
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
+        )
+        blocked2.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        blocked2.releaseWholeDeviceLock()
+        blocked2.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
+        XCTAssertEqual(applies, 2, "after a local release the server's next verdict is always written")
+    }
+}

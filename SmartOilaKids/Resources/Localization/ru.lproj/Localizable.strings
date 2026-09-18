@@ -32,9 +32,11 @@
 "main.parent_tracking_action_check_now" = "Проверить";
 "main.parent_tracking_action_checking" = "Проверяем…";
 
-"lock.title" = "Приложение приостановлено";
-"lock.subtitle" = "Родитель временно приостановил приложение Bolajon360.";
+"lock.title" = "Телефон заблокирован";
+"lock.subtitle" = "Родитель временно заблокировал телефон.";
 "lock.schedule" = "Расписание: %@";
+"lock.until" = "До %@";
+"lock.offline_note" = "Даже без интернета разблокируется в %@.";
 "lock.local_time" = "Время устройства: %@";
 
 

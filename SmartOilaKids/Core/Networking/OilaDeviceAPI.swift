@@ -370,6 +370,11 @@ struct OilaLockState {
     let activeScheduleRaw: [String: Any]?
     /// PROVISIONAL, UNTYPED — see `activeScheduleRaw`.
     let schedulesRaw: [[String: Any]]
+    /// The instant the current lock ENDS, when the backend sends one (`lockedUntil`; ISO-8601 or
+    /// an epoch). nil = not sent. This is the field the 2026-09-16 product rule needs ("the child
+    /// app must always receive the start and end time") and the backend does not yet send —
+    /// see `lockEndsAt(now:)` for what stands in for it until it does.
+    let lockedUntil: Date?
     /// The full tolerant `data` object, for callers needing keys not surfaced above.
     let raw: [String: Any]
 
@@ -384,7 +389,8 @@ struct OilaLockState {
         lockedPackages: [String] = [],
         appLimits: [OilaAppLimit] = [],
         activeScheduleRaw: [String: Any]? = nil,
-        schedulesRaw: [[String: Any]] = []
+        schedulesRaw: [[String: Any]] = [],
+        lockedUntil: Date? = nil
     ) {
         self.isLocked = isLocked
         self.raw = raw
@@ -395,6 +401,7 @@ struct OilaLockState {
         self.appLimits = appLimits
         self.activeScheduleRaw = activeScheduleRaw
         self.schedulesRaw = schedulesRaw
+        self.lockedUntil = lockedUntil
     }
 
     /// The whole-device lock, resolved.
@@ -418,6 +425,22 @@ struct OilaLockState {
             return (scheduleLocked ?? false) || (manualLockEnabled ?? false)
         }
         return nil
+    }
+
+    /// When the lock the payload reports will END, as an absolute instant — or nil when the backend
+    /// gives none.
+    ///
+    /// Deliberately ONLY `lockedUntil`, the explicit end the backend sends. An earlier revision also
+    /// tried to translate the active schedule's `endMinute` through `deviceLocalTime`, but that is
+    /// minute-of-day wall-clock arithmetic with no date and no zone: near a window edge it turned a
+    /// just-passed end into a ~24 h lock, and it broke across a DST change — for a schedule shape no
+    /// live payload has ever shown (`activeSchedule` was null in both captured samples). The 8 h
+    /// ceiling (`OilaTelemetryService.lockRestoreMaxAge`) already bounds a lock with no explicit end;
+    /// an exact end needs `lockedUntil`, which the backend is being asked to add. `now` is kept in
+    /// the signature so the call sites and their tests are stable if a second source ever returns.
+    func lockEndsAt(now: Date = Date()) -> Date? {
+        _ = now
+        return lockedUntil
     }
 
     /// PROVISIONAL best-effort read of the active lock window's start/end times.
@@ -486,6 +509,12 @@ struct OilaLockState {
     /// that says 25:00 is a payload we do not understand, and showing a wrong window on a lock
     /// screen is worse than showing none.
     static func timeFromMinuteOfDay(_ dict: [String: Any], _ keys: [String]) -> String? {
+        guard let minute = minuteOfDay(dict, keys) else { return nil }
+        return String(format: "%02d:%02d", minute / 60, minute % 60)
+    }
+
+    /// The first in-range minute-of-day under `keys`, whatever JSON type it arrived as.
+    static func minuteOfDay(_ dict: [String: Any], _ keys: [String]) -> Int? {
         for key in keys {
             let raw: Int?
             switch dict[key] {
@@ -497,7 +526,7 @@ struct OilaLockState {
             default: raw = nil
             }
             guard let minute = raw, (0 ... 1439).contains(minute) else { continue }
-            return String(format: "%02d:%02d", minute / 60, minute % 60)
+            return minute
         }
         return nil
     }
@@ -1173,8 +1202,33 @@ final class OilaDeviceClient: OilaDeviceServicing {
             lockedPackages: parseLockedPackages(from: object),
             appLimits: parseAppLimits(from: object),
             activeScheduleRaw: firstDictionary(object, ["activeSchedule", "active_schedule", "currentSchedule"]),
-            schedulesRaw: firstArray(object, ["schedules", "lockSchedules", "schedule"]) ?? []
+            schedulesRaw: firstArray(object, ["schedules", "lockSchedules", "schedule"]) ?? [],
+            lockedUntil: parseLockedUntil(from: object)
         )
+    }
+
+    /// The lock's end instant, under the spellings a backend is likely to pick, flat or inside the
+    /// same nested `global` / `manualLock` objects `parseGlobalLock` accepts. ISO-8601 (with or
+    /// without fractional seconds) or an epoch number — seconds or milliseconds, told apart by
+    /// magnitude, because the backend's own `stream.start` push already sends `expiresAt` in
+    /// milliseconds while `createdAt` fields are ISO strings.
+    static func parseLockedUntil(from object: [String: Any]) -> Date? {
+        let keys = [
+            "lockedUntil", "locked_until", "lockUntil", "lock_until", "lockedUntilAt", "unlockAt", "unlock_at",
+            "lockEndsAt", "lock_ends_at", "endsAt", "manualLockUntil", "manual_lock_until", "until"
+        ]
+        var scopes: [[String: Any]] = [object]
+        for nested in ["global", "manualLock", "manual_lock", "lock"] {
+            if let dict = object[nested] as? [String: Any] { scopes.append(dict) }
+        }
+        for scope in scopes {
+            if let parsed = date(scope, keys) { return parsed }
+            if let epoch = numberValue(scope, keys), epoch > 0 {
+                // 1e11 seconds is the year 5138; anything larger is milliseconds.
+                return Date(timeIntervalSince1970: epoch > 100_000_000_000 ? epoch / 1000 : epoch)
+            }
+        }
+        return nil
     }
 
     /// `lockedPackages` may arrive as bare identifier strings (what the live sample sends) or as

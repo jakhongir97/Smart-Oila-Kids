@@ -222,17 +222,30 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         PushCommandRouter.handle(userInfo: userInfo, deliveryContext: .backgroundFetch)
 
         guard isLiveMediaWake else {
-            // Two silent commands finish their work AFTER `handle` returns, each one main-actor hop
-            // away: the chat banner is scheduled there, and `status.report` posts `/device/status`
-            // from an observer. Calling the completion handler first tells iOS the push is done and
-            // invites suspension before either runs — so the child gets no banner, and the parent's
-            // explicit "check in now" produces no check-in. A short bounded hold, not the media one.
-            let needsShortHold = PushCommandRouter.schedulesChatBanner(
-                userInfo: userInfo, deliveryContext: .backgroundFetch
-            ) || PushCommandRouter.isStatusReportCommand(
+            // Three silent commands finish their work AFTER `handle` returns, each one main-actor hop
+            // away: the chat banner is scheduled there, `status.report` posts `/device/status` from
+            // an observer, and `lock.refresh` starts a GET from another. Calling the completion
+            // handler first tells iOS the push is done and invites suspension before any of them
+            // runs — so the child gets no banner, the parent's explicit "check in now" produces no
+            // check-in, and a lock never lands. The chat banner needs one hop and a short fixed
+            // hold; the two network commands are held until their requests have actually finished
+            // (bounded), polling the service the way the `stream.start` branch polls the manager.
+            let isStatusReport = PushCommandRouter.isStatusReportCommand(
                 PushCommandRouter.parsePayload(from: userInfo).commandHaystack
             )
-            if needsShortHold {
+            let isLockRefresh = PushCommandRouter.isLockRefreshCommand(userInfo: userInfo)
+            if isStatusReport || isLockRefresh {
+                Task { @MainActor in
+                    await Self.holdWhileBusy {
+                        let service = OilaTelemetryService.shared
+                        return (isStatusReport && service.probeRequestsInFlight > 0)
+                            || (isLockRefresh && service.isRefreshingLock)
+                    }
+                    completionHandler(.newData)
+                }
+                return
+            }
+            if PushCommandRouter.schedulesChatBanner(userInfo: userInfo, deliveryContext: .backgroundFetch) {
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Self.chatBannerHoldSeconds * 1_000_000_000))
                     completionHandler(.newData)
@@ -275,11 +288,35 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
     /// How long to wait before concluding that a non-`.connecting` manager is never going to start.
     /// The router posts its notification through an unstructured main-actor hop, so the manager can
     /// legitimately still be `.idle` for a moment after this method returns.
-    private static let liveMediaWakeGraceSeconds: TimeInterval = 2
-    /// Enough for the router's main-actor hop and one `UNUserNotificationCenter.add` (or the status
-    /// observer's hop into `reportStatusForProbe`), and short
+    nonisolated private static let liveMediaWakeGraceSeconds: TimeInterval = 2
+    /// Enough for the router's main-actor hop and one `UNUserNotificationCenter.add`, and short
     /// enough that a chat push never eats a meaningful share of the background budget.
     private static let chatBannerHoldSeconds: TimeInterval = 1.5
+    /// Longest a `status.report` / `lock.refresh` push keeps the process awake through the fetch
+    /// handler. The requests themselves are also covered by a background-task assertion in the
+    /// service, so a slow server past this point loses the handler, not the request.
+    nonisolated private static let networkCommandHoldSeconds: TimeInterval = 20
+
+    /// Wait until `isBusy()` reads false — but not before `liveMediaWakeGraceSeconds` (the command
+    /// reaches the service through two unstructured main-actor hops, so the very first reads see
+    /// nothing in flight yet) and not past `networkCommandHoldSeconds`. Same loop shape as the
+    /// `stream.start` hold above; the old fixed 1.5 s was measured too short for the two POSTs a
+    /// probe issues on a cold cellular radio. Both commands ALSO carry a `beginBackgroundTask`
+    /// assertion in the service (`reportStatusForProbe`, `refreshLockNow`), so a request that
+    /// outlives this hold is finished under the assertion rather than cut off.
+    @MainActor
+    static func holdWhileBusy(
+        grace: TimeInterval = liveMediaWakeGraceSeconds,
+        limit: TimeInterval = networkCommandHoldSeconds,
+        isBusy: @MainActor () -> Bool
+    ) async {
+        let startedAt = Date()
+        while Date().timeIntervalSince(startedAt) < limit {
+            let elapsed = Date().timeIntervalSince(startedAt)
+            if elapsed >= grace, !isBusy() { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,

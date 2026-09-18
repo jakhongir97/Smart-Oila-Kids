@@ -15,6 +15,13 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         super.intervalDidStart(for: activity)
         Self.log.notice("schedule_monitor interval_start activity=\(activity.rawValue, privacy: .public)")
 
+        // The lock-deadline activity exists for its END only; the lock itself was applied by the
+        // app when the server said so. Nothing to do here but say it started.
+        if DeviceLockDeadlineActivityIdentifier.isDeadlineActivity(rawValue: activity.rawValue) {
+            Self.log.notice("schedule_monitor lock_deadline interval_start")
+            return
+        }
+
         // A new local day for the usage staircase: every threshold must start again from one
         // step, or the first callback today would fire at yesterday's height.
         if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
@@ -52,6 +59,11 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
         Self.log.notice("schedule_monitor interval_end activity=\(activity.rawValue, privacy: .public)")
+
+        if DeviceLockDeadlineActivityIdentifier.isDeadlineActivity(rawValue: activity.rawValue) {
+            releaseLockAtDeadline(activity: activity)
+            return
+        }
 
         if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
             // The day is over; what the ledger holds for it is final. Send it while a process is
@@ -131,6 +143,39 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
     private let sharedStore = DeviceAppLimitSharedStore()
     private let eventStore = DeviceControlEventSharedStore()
     private let usageLedger = ScreenTimeUsageLedger()
+    private let deadlineStore = DeviceLockDeadlineSharedStore()
+}
+
+// MARK: - The lock deadline
+
+private extension SmartOilaKidsDeviceActivityMonitorExtension {
+    /// The whole-device lock's end arrived and the app may not be running: open the phone.
+    ///
+    /// This is the product rule of 2026-09-16 in the one process iOS promises to wake for it —
+    /// "if the internet is off, the phone unlocks by itself after that time". It writes the two
+    /// keys the whole-device lock owns on the DEFAULT store and nothing else: `shield.applications`
+    /// holds the per-app blocks, which outlive the lock and which the app's change guard would not
+    /// put back. Then it marks the App Group so a relaunched app knows the OS is already open, and
+    /// tells an app that happens to be alive to drop its cover.
+    ///
+    /// Guarded by the recorded end: iOS delivers `intervalDidEnd` for a RESTART of a running
+    /// activity too (measured 2026-09-16), and a parent extending the lock must not open it.
+    func releaseLockAtDeadline(activity: DeviceActivityName) {
+        let now = Date()
+        let record = deadlineStore.load()
+        guard let dsn = DeviceLockDeadlineActivityIdentifier.dsn(from: activity.rawValue),
+              DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: dsn, now: now) else {
+            let remaining = record.map { Int($0.endsAt.timeIntervalSince(now)) } ?? -1
+            Self.log.notice("schedule_monitor lock_deadline ignored reason=not_due record=\(record == nil ? 0 : 1, privacy: .public) remaining_s=\(remaining, privacy: .public)")
+            return
+        }
+        DeviceLockDeadlineMonitoring.releaseGlobalShield()
+        deadlineStore.markReleased(at: now)
+        DeviceLockDeadlineSharedStore.postReleased()
+        // Read back in this process, the way every App Group write here is verified.
+        let readBack = deadlineStore.releasedAt() != nil
+        Self.log.notice("schedule_monitor lock_deadline released overdue_s=\(Int(now.timeIntervalSince(record?.endsAt ?? now)), privacy: .public) mark_read_back=\(readBack ? 1 : 0, privacy: .public)")
+    }
 }
 
 // MARK: - Per-app usage (the staircase)

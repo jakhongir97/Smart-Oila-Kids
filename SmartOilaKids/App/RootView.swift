@@ -123,7 +123,13 @@ struct RootView: View {
             disclosing {
                 DeviceLockOverlay(
                     localTime: oilaTelemetry.deviceLocalTime,
-                    scheduleRange: oilaTelemetry.scheduleRangeText
+                    scheduleRange: oilaTelemetry.scheduleRangeText,
+                    // The SERVER end the parent set, never the rolling `lockDeadline` (= min(end,
+                    // confirmedAt + 8 h)): the 8 h ceiling moves forward every 30 s poll, so showing
+                    // it would promise the child an unlock time that keeps sliding. When the backend
+                    // sends no end (today), this is nil and the cover shows no "until" line — the 8 h
+                    // ceiling is a silent safety backstop, not a promise to display.
+                    endsAt: oilaTelemetry.lockEndsAt
                 )
             }
         }

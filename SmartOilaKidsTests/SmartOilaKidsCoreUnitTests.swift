@@ -4858,7 +4858,9 @@ final class LockRestoreCeilingTests: XCTestCase {
             now: now))
     }
 
-    func testALockTheServerHasNotConfirmedInHalfADayIsReleased() {
+    func testALockTheServerHasNotConfirmedPastTheCeilingIsReleased() {
+        // The ceiling is 8 h since 2026-09-16 (was 12 h); a permanently bricked phone is a worse
+        // failure than an unlock, and the product rule caps a no-server lock at eight hours.
         XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
             wasLocked: true,
             confirmedAt: now.addingTimeInterval(-(OilaTelemetryService.lockRestoreMaxAge + 1)),
@@ -5108,5 +5110,450 @@ final class SafeIntConversionTests: XCTestCase {
         XCTAssertTrue(parsed.isFinite)
         XCTAssertNil(OilaDeviceClient.safeInt(parsed),
                      "this is the value that used to kill the process")
+    }
+}
+
+// MARK: - The lock deadline (2026-09-18)
+
+/// The product rule of 2026-09-16: a phone lock never lasts more than 8 hours without the server,
+/// and a lock whose end the server sent opens at that end — while the app runs, on relaunch, and
+/// (through the monitor extension) when the app is dead and the phone offline.
+final class LockDeadlineTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testTheNoServerCeilingIsEightHours() {
+        XCTAssertEqual(OilaTelemetryService.lockRestoreMaxAge, 8 * 3_600,
+                       "Ibrohim, 2026-09-16: 'Telefon bloklashni 8 soatdan oshmaydigan qilib qo'yish kerak doim'")
+    }
+
+    func testARestoredLockPastItsOwnEndIsReleasedHoweverFreshTheConfirmation() {
+        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true, confirmedAt: now, lockedUntil: now, now: now))
+        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true, confirmedAt: now, lockedUntil: now.addingTimeInterval(-1), now: now))
+    }
+
+    func testARestoredLockBeforeItsEndIsKept() {
+        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true, confirmedAt: now, lockedUntil: now.addingTimeInterval(60), now: now))
+    }
+
+    func testAnEndDoesNotExtendTheCeiling() {
+        // Confirmed 9 h ago with an end still an hour away: the ceiling wins, the phone opens.
+        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
+            wasLocked: true,
+            confirmedAt: now.addingTimeInterval(-9 * 3_600),
+            lockedUntil: now.addingTimeInterval(3_600),
+            now: now))
+    }
+
+    func testTheEffectiveDeadlineIsTheEarlierOfTheTwoBounds() {
+        let confirmed = now
+        let until = now.addingTimeInterval(2 * 3_600)
+        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: confirmed, lockedUntil: until), until)
+        let farUntil = now.addingTimeInterval(20 * 3_600)
+        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: confirmed, lockedUntil: farUntil),
+                       now.addingTimeInterval(8 * 3_600))
+        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: confirmed, lockedUntil: nil),
+                       now.addingTimeInterval(8 * 3_600))
+        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: nil, lockedUntil: until), until)
+        XCTAssertNil(OilaTelemetryService.effectiveLockDeadline(confirmedAt: nil, lockedUntil: nil))
+    }
+
+    // MARK: OilaLockState.lockEndsAt (explicit end only)
+
+    func testTheEndIsTheServerLockedUntil() {
+        let until = now.addingTimeInterval(3_600)
+        let state = OilaLockState(isLocked: true, raw: [:], deviceLocalTime: "10:00", lockedUntil: until)
+        XCTAssertEqual(state.lockEndsAt(now: now), until)
+    }
+
+    func testNoLockedUntilMeansNoEndEvenWithAnActiveSchedule() {
+        // The schedule-derived end was removed: it was minute-of-day wall-clock arithmetic with no
+        // date or zone (a just-passed end became a ~24 h lock; a DST change shifted it an hour), for
+        // a schedule shape no live payload has ever shown. The 8 h ceiling bounds a lock with no end;
+        // an exact end needs the backend's `lockedUntil`.
+        let state = OilaLockState(
+            isLocked: true, raw: [:], deviceLocalTime: "10:00",
+            activeScheduleRaw: ["label": "uxlash", "startMinute": 9 * 60, "endMinute": 11 * 60]
+        )
+        XCTAssertNil(state.lockEndsAt(now: now))
+        XCTAssertEqual(state.scheduleRangeText, "09:00 – 11:00", "the schedule is still shown as a display range")
+    }
+
+    func testAnUnlockedPayloadHasNoEnd() {
+        let unlocked = OilaLockState(isLocked: false, raw: [:], lockedUntil: nil)
+        XCTAssertNil(unlocked.lockEndsAt(now: now))
+    }
+
+    // MARK: parseLockedUntil
+
+    func testLockedUntilIsReadAsISOOrEpochUnderTheLikelySpellings() {
+        let iso = "2026-09-18T20:00:00Z"
+        let expected = Date(timeIntervalSince1970: 1_789_761_600)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": iso]), expected)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["locked_until": "2026-09-18T20:00:00.000Z"]), expected)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["unlockAt": 1_789_761_600]), expected)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": 1_789_761_600_000]), expected, "epoch milliseconds")
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["global": ["until": iso]]), expected)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["manualLock": ["until": iso]]), expected)
+    }
+
+    func testAnAbsentOrNullEndIsNil() {
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: [:]))
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": NSNull()]))
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": ""]))
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": false]))
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": 0]))
+    }
+
+    func testParseLockStateCarriesTheEnd() {
+        let state = OilaDeviceClient.parseLockState(from: [
+            "isLocked": true, "manualLockEnabled": true, "scheduleLocked": false,
+            "deviceLocalTime": "15:45", "activeSchedule": NSNull(), "lockedPackages": [], "appLimits": [],
+            "schedules": [], "lockedUntil": "2026-09-18T20:00:00Z"
+        ])
+        XCTAssertEqual(state.lockedUntil, Date(timeIntervalSince1970: 1_789_761_600))
+        XCTAssertEqual(state.isDeviceLocked, true)
+        // The live sample of 2026-07-22, untouched: no end, nothing else changes.
+        let live = OilaDeviceClient.parseLockState(from: [
+            "isLocked": false, "manualLockEnabled": false, "scheduleLocked": false,
+            "deviceLocalTime": "15:45", "activeSchedule": NSNull(),
+            "lockedPackages": ["com.instagram.android"], "appLimits": [], "schedules": []
+        ])
+        XCTAssertNil(live.lockedUntil)
+        XCTAssertNil(live.lockEndsAt(now: now))
+        XCTAssertEqual(live.lockedPackages, ["com.instagram.android"])
+    }
+}
+
+/// The one-off `DeviceActivity` whose END opens the phone when the app is not running.
+final class DeviceLockDeadlineMonitoringTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private var suiteNames: [String] = []
+
+    override func tearDown() {
+        for name in suiteNames { UserDefaults.standard.removePersistentDomain(forName: name) }
+        suiteNames.removeAll()
+        super.tearDown()
+    }
+
+    private func makeStore() -> DeviceLockDeadlineSharedStore {
+        let name = "DeviceLockDeadlineMonitoringTests.\(UUID().uuidString)"
+        suiteNames.append(name)
+        return DeviceLockDeadlineSharedStore(userDefaults: UserDefaults(suiteName: name)!)
+    }
+
+    func testTheActivityNameIsUnderAPrefixOfItsOwn() {
+        let raw = DeviceLockDeadlineActivityIdentifier.rawValue(dsn: " Child DSN./42 ")
+        XCTAssertEqual(raw, "smartoila.lock-until|_child_dsn__42_")
+        XCTAssertTrue(DeviceLockDeadlineActivityIdentifier.isDeadlineActivity(rawValue: raw))
+        XCTAssertEqual(DeviceLockDeadlineActivityIdentifier.dsn(from: raw), "_child_dsn__42_")
+        XCTAssertNil(DeviceLockDeadlineActivityIdentifier.dsn(from: "smartoila.lock-until|"))
+        // The legacy schedule controller sweeps every `smartoila.global-lock.schedule*` activity at
+        // launch, and a stop on a running activity delivers `intervalDidEnd`. This one must not be
+        // swept, nor mistaken for the app-limit or usage activities the extension also handles.
+        XCTAssertFalse(DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: raw))
+        XCTAssertFalse(DeviceAppLimitActivityIdentifier.isAppLimitActivity(rawValue: raw))
+        XCTAssertFalse(ScreenTimeUsageActivity.isUsageActivity(rawValue: raw))
+    }
+
+    func testTheIntervalEndsAtTheLockEndAndNeverBefore() {
+        let end = now.addingTimeInterval(2 * 3_600)
+        let planned = DeviceLockDeadlineMonitoring.plannedInterval(endsAt: end, now: now)
+        XCTAssertEqual(planned.start, now.addingTimeInterval(DeviceLockDeadlineMonitoring.startLead))
+        XCTAssertEqual(planned.end, end)
+    }
+
+    func testAnEndSoonerThanAppleAllowsIsPushedOutToTheMinimum() {
+        let end = now.addingTimeInterval(5 * 60)
+        let planned = DeviceLockDeadlineMonitoring.plannedInterval(endsAt: end, now: now)
+        XCTAssertGreaterThanOrEqual(planned.end.timeIntervalSince(planned.start), DeviceLockDeadlineMonitoring.minimumIntervalLength)
+        XCTAssertGreaterThanOrEqual(planned.end, end, "the extension may open late, never early")
+    }
+
+    func testReArmOnlyWhenTheDeadlineMoved() {
+        let end = now.addingTimeInterval(3_600)
+        let armed = DeviceLockDeadlineRecord(dsn: "d1", endsAt: end, armedAt: now)
+        XCTAssertTrue(DeviceLockDeadlineMonitoring.shouldArm(existing: nil, dsn: "d1", endsAt: end))
+        XCTAssertFalse(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "d1", endsAt: end))
+        XCTAssertFalse(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "d1", endsAt: end.addingTimeInterval(59)),
+                       "minute jitter from the server's HH:mm must not re-arm (each re-arm is a spurious intervalDidEnd)")
+        XCTAssertTrue(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "d1", endsAt: end.addingTimeInterval(3_600)))
+        XCTAssertTrue(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "other", endsAt: end))
+    }
+
+    func testAnUppercaseUUIDDSNStillMatchesAtReleaseTime() throws {
+        // The regression that the on-device proof caught: a real DSN is `UUID().uuidString`
+        // (UPPERCASE), the activity name lowercases it, and an earlier revision stored the RAW dsn
+        // in the record while the extension read the LOWERCASED dsn back out of the activity name —
+        // so `isReleaseDue`'s `record.dsn == dsn` never held and the phone never unlocked.
+        let store = makeStore()
+        let raw = "8D905F9F-770B-4D36-B41E-E34FD6D46B17"
+        let end = now.addingTimeInterval(3_600)
+        var startedName = ""
+        _ = try DeviceLockDeadlineMonitoring.arm(dsn: raw, endsAt: end, now: now, store: store) { name, _ in
+            startedName = name.rawValue
+        }
+        let record = try XCTUnwrap(store.load())
+        // The record is keyed on the SAME normalized form the activity name carries.
+        let parsed = try XCTUnwrap(DeviceLockDeadlineActivityIdentifier.dsn(from: startedName))
+        XCTAssertEqual(record.dsn, parsed)
+        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: parsed, now: end),
+                      "the extension parses `parsed` out of the activity name — it must match the record")
+        // A re-arm with the same DSN in a different case must still be a no-op (not a second arm).
+        let again = try DeviceLockDeadlineMonitoring.arm(dsn: raw.lowercased(), endsAt: end, now: now, store: store) { _, _ in
+            XCTFail("same DSN, same end — must not re-arm")
+        }
+        XCTAssertFalse(again)
+    }
+
+    func testAnIntervalEndIsTrustedOnlyAtTheRecordedEnd() {
+        let end = now.addingTimeInterval(3_600)
+        let record = DeviceLockDeadlineRecord(dsn: "d1", endsAt: end, armedAt: now)
+        XCTAssertFalse(DeviceLockDeadlineMonitoring.isReleaseDue(record: nil, dsn: "d1", now: end))
+        XCTAssertFalse(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "other", now: end))
+        XCTAssertFalse(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: now),
+                       "the end iOS delivers for a RESTART of the running activity is not the lock's end")
+        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: end.addingTimeInterval(-3)))
+        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: end))
+        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: end.addingTimeInterval(900)))
+    }
+
+    func testArmWritesTheRecordBeforeStartingAndIsIdempotent() throws {
+        let store = makeStore()
+        var starts: [String] = []
+        let end = now.addingTimeInterval(3_600)
+        let started = try DeviceLockDeadlineMonitoring.arm(dsn: "d1", endsAt: end, now: now, store: store) { name, schedule in
+            XCTAssertNotNil(store.load(), "the record must exist before the callback can possibly fire")
+            XCTAssertFalse(schedule.repeats)
+            starts.append(name.rawValue)
+        }
+        XCTAssertTrue(started)
+        XCTAssertEqual(starts, ["smartoila.lock-until|d1"])
+        XCTAssertEqual(store.load(), DeviceLockDeadlineRecord(dsn: "d1", endsAt: end, armedAt: now))
+
+        let again = try DeviceLockDeadlineMonitoring.arm(dsn: "d1", endsAt: end, now: now.addingTimeInterval(30), store: store) { _, _ in
+            XCTFail("the same deadline must not be re-armed")
+        }
+        XCTAssertFalse(again)
+    }
+
+    func testAFailedStartLeavesNoRecordBehind() {
+        struct Refused: Error {}
+        let store = makeStore()
+        XCTAssertThrowsError(try DeviceLockDeadlineMonitoring.arm(dsn: "d1", endsAt: now.addingTimeInterval(3_600), now: now, store: store) { _, _ in
+            throw Refused()
+        })
+        XCTAssertNil(store.load(), "a record with no activity behind it would make the next arm skip")
+    }
+
+    func testStopTalksToTheCenterOnlyWhenSomethingIsArmedUnlessForced() {
+        let store = makeStore()
+        var stops = 0
+        DeviceLockDeadlineMonitoring.stop(dsn: "d1", store: store) { _ in stops += 1 }
+        XCTAssertEqual(stops, 0, "called on every unlocked poll; no XPC when nothing is armed")
+        DeviceLockDeadlineMonitoring.stop(dsn: "d1", force: true, store: store) { _ in stops += 1 }
+        XCTAssertEqual(stops, 1)
+        store.save(DeviceLockDeadlineRecord(dsn: "d1", endsAt: now.addingTimeInterval(3_600), armedAt: now))
+        DeviceLockDeadlineMonitoring.stop(dsn: "d1", store: store) { names in
+            stops += 1
+            XCTAssertEqual(names.map(\.rawValue), ["smartoila.lock-until|d1"])
+        }
+        XCTAssertEqual(stops, 2)
+        XCTAssertNil(store.load())
+    }
+
+    func testTheReleaseMarkBelongsToTheDeadlineItReleased() {
+        let store = makeStore()
+        store.save(DeviceLockDeadlineRecord(dsn: "d1", endsAt: now.addingTimeInterval(3_600), armedAt: now))
+        XCTAssertNil(store.releasedAt())
+        store.markReleased(at: now.addingTimeInterval(3_600))
+        XCTAssertEqual(store.releasedAt(), now.addingTimeInterval(3_600))
+        // A new arm supersedes the mark: it must not read as "already released" for the next lock.
+        store.save(DeviceLockDeadlineRecord(dsn: "d1", endsAt: now.addingTimeInterval(7_200), armedAt: now))
+        XCTAssertNil(store.releasedAt())
+        store.clear()
+        XCTAssertNil(store.load())
+    }
+}
+
+/// The service half: what `GET /device/lock/state` does to `isLocked` now that it carries an end,
+/// and the non-network exit that opens the phone when the end (or the 8 h ceiling) passes.
+@MainActor
+final class OilaTelemetryServiceLockDeadlineTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private final class ServiceStub: OilaDeviceServicing {
+        struct Unimplemented: Error {}
+        func pair(code: String) async throws -> OilaPairResult { throw Unimplemented() }
+        func refreshSession() async throws { throw Unimplemented() }
+        func logout() async throws {}
+        func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws {}
+        func fetchActiveTasks() async throws -> [OilaDeviceTask] { [] }
+        func fetchTasks() async throws -> [OilaDeviceTask] { [] }
+        func completeTask(id: String) async throws {}
+        func fetchTaskStarTotal() async throws -> Int? { nil }
+        func updateFCMToken(_ token: String) async throws {}
+        func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {}
+        func postDeviceStatus(_ status: OilaDeviceStatus) async throws {}
+        func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse { throw Unimplemented() }
+        func reportDailyUsage(days: [ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse { throw Unimplemented() }
+        func syncInstalledApps(items: [DeviceAppLockSyncEntry]) async throws {}
+        func fetchLockState() async throws -> OilaLockState { throw Unimplemented() }
+        func fetchScreenTime() async throws -> OilaDeviceScreenTime? { nil }
+        func reportRemovalAttempt(packageName: String, applicationName: String) async throws {}
+        func fetchHome() async throws -> OilaDeviceHome? { nil }
+    }
+
+    private static let lockKeys = [
+        "OILA_LAST_LOCK_STATE", OilaTelemetryService.lockConfirmedAtKey, OilaTelemetryService.lockEndsAtKey,
+        OilaTelemetryService.lockReleasedByDeadlineKey
+    ]
+
+    override func setUp() {
+        super.setUp()
+        for key in Self.lockKeys { UserDefaults.standard.removeObject(forKey: key) }
+    }
+
+    override func tearDown() {
+        for key in Self.lockKeys { UserDefaults.standard.removeObject(forKey: key) }
+        super.tearDown()
+    }
+
+    private func makeService() -> OilaTelemetryService {
+        OilaTelemetryService(service: ServiceStub())
+    }
+
+    func testAServerEndBecomesTheDeadlineAndOpensThePhoneWhenItPasses() {
+        let service = makeService()
+        let until = now.addingTimeInterval(2 * 3_600)
+        var released = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: OilaTelemetryService.oilaLockDeadlineReleased, object: nil, queue: nil
+        ) { _ in released += 1 }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        service.applyLockState(OilaLockState(isLocked: true, raw: [:], lockedUntil: until), now: now)
+        XCTAssertTrue(service.isLocked)
+        XCTAssertEqual(service.lockEndsAt, until)
+        XCTAssertEqual(service.lockDeadline, until, "two hours is inside the ceiling, so the end is the deadline")
+        XCTAssertEqual(UserDefaults.standard.double(forKey: OilaTelemetryService.lockEndsAtKey), until.timeIntervalSince1970)
+
+        service.releaseExpiredLockIfNeeded(now: until.addingTimeInterval(-1))
+        XCTAssertTrue(service.isLocked, "one second early is early")
+        XCTAssertEqual(released, 0)
+
+        service.releaseExpiredLockIfNeeded(now: until)
+        XCTAssertFalse(service.isLocked)
+        XCTAssertNil(service.lockEndsAt)
+        XCTAssertTrue(service.lockReleasedByDeadline)
+        XCTAssertEqual(released, 1)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: "OILA_LAST_LOCK_STATE"), "the release must reach disk")
+        XCTAssertNil(UserDefaults.standard.object(forKey: OilaTelemetryService.lockEndsAtKey))
+    }
+
+    func testALockWithNoEndOpensEightHoursAfterTheLastServerAnswer() {
+        let service = makeService()
+        service.applyLockState(OilaLockState(isLocked: true, raw: [:]), now: now)
+        XCTAssertEqual(service.lockDeadline, now.addingTimeInterval(8 * 3_600))
+        // Every server answer moves the ceiling: online, a longer lock keeps being enforced.
+        service.applyLockState(OilaLockState(isLocked: true, raw: [:]), now: now.addingTimeInterval(3_600))
+        XCTAssertEqual(service.lockDeadline, now.addingTimeInterval(9 * 3_600))
+        service.releaseExpiredLockIfNeeded(now: now.addingTimeInterval(9 * 3_600 - 1))
+        XCTAssertTrue(service.isLocked)
+        service.releaseExpiredLockIfNeeded(now: now.addingTimeInterval(9 * 3_600))
+        XCTAssertFalse(service.isLocked)
+    }
+
+    func testAStaleServerFlagPastItsOwnEndReadsAsUnlocked() {
+        let service = makeService()
+        service.applyLockState(OilaLockState(isLocked: true, raw: [:], lockedUntil: now.addingTimeInterval(-60)), now: now)
+        XCTAssertFalse(service.isLocked, "the end the parent saw wins over a flag that has not caught up")
+        XCTAssertNil(service.lockEndsAt)
+    }
+
+    func testAServerAnswerClearsTheLocalReleaseMark() {
+        let service = makeService()
+        service.applyLockState(OilaLockState(isLocked: true, raw: [:], lockedUntil: now.addingTimeInterval(60)), now: now)
+        service.releaseExpiredLockIfNeeded(now: now.addingTimeInterval(60))
+        XCTAssertTrue(service.lockReleasedByDeadline)
+        service.applyLockState(OilaLockState(isLocked: false, raw: [:]), now: now.addingTimeInterval(120))
+        XCTAssertFalse(service.lockReleasedByDeadline)
+        XCTAssertNil(service.lockDeadline)
+    }
+
+    func testAnUnrecognizedAnswerNeitherStampsNorReleases() {
+        let service = makeService()
+        service.applyLockState(OilaLockState(isLocked: true, raw: [:]), now: now)
+        let deadline = service.lockDeadline
+        service.applyLockState(OilaLockState(isLocked: nil, raw: ["somethingElse": 1]), now: now.addingTimeInterval(3_600))
+        XCTAssertTrue(service.isLocked, "an unrecognized 200 keeps the last-known lock")
+        XCTAssertEqual(service.lockDeadline, deadline, "and must not refresh the ceiling of a lock it said nothing about")
+    }
+
+    func testAnExpiredPersistedLockIsReleasedOnLaunchAndSaidSoOnDisk() {
+        UserDefaults.standard.set(true, forKey: "OILA_LAST_LOCK_STATE")
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: OilaTelemetryService.lockConfirmedAtKey)
+        UserDefaults.standard.set(Date().addingTimeInterval(-1).timeIntervalSince1970, forKey: OilaTelemetryService.lockEndsAtKey)
+
+        let service = makeService()
+
+        XCTAssertFalse(service.isLocked)
+        XCTAssertTrue(service.lockReleasedByDeadline, "the enforcement side opens the OS shield from this")
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: "OILA_LAST_LOCK_STATE"),
+                       "left `true`, the next relaunch would restore a lock the deadline already ended")
+        XCTAssertNil(UserDefaults.standard.object(forKey: OilaTelemetryService.lockEndsAtKey))
+    }
+
+    func testALivePersistedLockIsRestoredWithItsEnd() {
+        let until = Date().addingTimeInterval(3_600)
+        UserDefaults.standard.set(true, forKey: "OILA_LAST_LOCK_STATE")
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: OilaTelemetryService.lockConfirmedAtKey)
+        UserDefaults.standard.set(until.timeIntervalSince1970, forKey: OilaTelemetryService.lockEndsAtKey)
+
+        let service = makeService()
+
+        XCTAssertTrue(service.isLocked)
+        XCTAssertEqual(service.lockEndsAt?.timeIntervalSince1970 ?? 0, until.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertFalse(service.lockReleasedByDeadline)
+    }
+
+    func testAnExpiredReleaseAtInitPersistsTheDurableFlag() {
+        UserDefaults.standard.set(true, forKey: "OILA_LAST_LOCK_STATE")
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: OilaTelemetryService.lockConfirmedAtKey)
+        UserDefaults.standard.set(Date().addingTimeInterval(-1).timeIntervalSince1970, forKey: OilaTelemetryService.lockEndsAtKey)
+
+        let service = makeService()
+
+        XCTAssertTrue(service.lockReleasedByDeadline)
+        // Persisted, because a scene-less launch that cannot open the shield must hand the fact on.
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: OilaTelemetryService.lockReleasedByDeadlineKey),
+                      "the durable flag must survive to the next launch (didSet does not fire in init)")
+    }
+
+    func testTheDurableFlagCarriesTheReleaseToALaterLaunchThatIsNoLongerLocked() {
+        // The scene-less-launch hole: process 1 released in memory and cleared OILA_LAST_LOCK_STATE
+        // but never opened the shield (no coordinator); process 2 must still know to open it.
+        UserDefaults.standard.set(false, forKey: "OILA_LAST_LOCK_STATE")
+        UserDefaults.standard.set(true, forKey: OilaTelemetryService.lockReleasedByDeadlineKey)
+
+        let service = makeService()
+
+        XCTAssertFalse(service.isLocked)
+        XCTAssertTrue(service.lockReleasedByDeadline, "so the enforcement coordinator's gate still fires this launch")
+    }
+
+    func testAServerVerdictClearsTheDurableFlag() {
+        UserDefaults.standard.set(false, forKey: "OILA_LAST_LOCK_STATE")
+        UserDefaults.standard.set(true, forKey: OilaTelemetryService.lockReleasedByDeadlineKey)
+        let service = makeService()
+        XCTAssertTrue(service.lockReleasedByDeadline)
+
+        service.applyLockState(OilaLockState(isLocked: false, raw: [:]), now: Date())
+
+        XCTAssertFalse(service.lockReleasedByDeadline)
+        XCTAssertNil(UserDefaults.standard.object(forKey: OilaTelemetryService.lockReleasedByDeadlineKey),
+                     "a server verdict supersedes the local release")
     }
 }

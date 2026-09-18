@@ -4,6 +4,16 @@ enum L10n {
     private static let lock = NSLock()
     private static var languageBundle: Bundle = .main
     private static var cyrillic = false
+    /// The two-letter code of the selected language (uz-Cyrl folds to "uz"). Drives `currentLocale`
+    /// so date/number formatting on our own screens follows the app language, not the device region.
+    private static var localeCode = "uz"
+
+    /// The locale matching the selected app language, for formatters on our screens (e.g. the lock
+    /// cover's unlock time). Defaults to Uzbek — the app's default — never the device region.
+    static var currentLocale: Locale {
+        lock.lock(); let code = localeCode; lock.unlock()
+        return Locale(identifier: code)
+    }
 
     static func setLanguage(_ code: String) {
         let normalized = code.lowercased()
@@ -20,6 +30,7 @@ enum L10n {
         lock.lock()
         languageBundle = bundle
         cyrillic = isCyrillic
+        localeCode = fallback
         lock.unlock()
     }
 

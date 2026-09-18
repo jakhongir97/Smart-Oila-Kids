@@ -397,6 +397,16 @@ extension PushCommandRouter {
         }
         return hasStem(String(first), in: RoutingTokens.statusSubjects)
     }
+
+    /// Whether `userInfo` is a lock-state command, for the AppDelegate's completion-handler hold.
+    ///
+    /// Matches the STRUCTURED command (`commandHaystack` = the event/type/action field), not the
+    /// full `routingHaystack` the router uses for delivery — otherwise any chat message whose body
+    /// merely contains "lock"/"unlock"/"blocked" would hold the fetch handler open for seconds. A
+    /// real `lock.refresh` carries its verb in the event field, so this still catches it.
+    static func isLockRefreshCommand(userInfo: [AnyHashable: Any]) -> Bool {
+        containsAny(in: parsePayload(from: userInfo).commandHaystack, tokens: RoutingTokens.lock)
+    }
 }
 
 private extension PushCommandRouter {
