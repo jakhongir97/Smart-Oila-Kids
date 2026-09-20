@@ -207,6 +207,8 @@ final class BlockedApplicationsControllerTests: XCTestCase {
 
     private func makeController(
         status: @escaping () -> ScreenTimePermissionStatus,
+        removalProtectionEnabled: @escaping () -> Bool = { true },
+        removalProtection: @escaping (Bool) -> Void = { _ in },
         record: @escaping (Applied) -> Void
     ) -> BlockedApplicationsController {
         // A per-test defaults suite, because the controller now persists what it applied so a cold
@@ -220,9 +222,101 @@ final class BlockedApplicationsControllerTests: XCTestCase {
             apply: { locked, tokens, ids in
                 record(Applied(wholeDeviceLocked: locked, bundleIds: ids, tokenCount: tokens.count))
             },
+            removalProtectionEnabled: removalProtectionEnabled,
+            removalProtection: removalProtection,
             tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
             userDefaults: defaults
         )
+    }
+
+    // MARK: - Deletion protection
+
+    /// The product owner deleted Bolajon360 from a child's phone in two taps (2026-09-20). An
+    /// authorized phone must refuse that, whether or not anything is blocked on it.
+    func testDeletionProtectionIsAssertedOnAnAuthorizedPhoneEvenWithNothingBlocked() {
+        var protection: [Bool] = []
+        let controller = makeController(status: { .granted }, removalProtection: { protection.append($0) }, record: { _ in })
+
+        controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
+
+        XCTAssertEqual(protection, [true])
+        XCTAssertTrue(controller.appliedAppRemovalProtection)
+    }
+
+    /// The lock state is re-read every 30 seconds; the protection is written once per process,
+    /// not twice a minute.
+    func testDeletionProtectionIsWrittenOncePerProcess() {
+        var protection: [Bool] = []
+        let controller = makeController(status: { .granted }, removalProtection: { protection.append($0) }, record: { _ in })
+
+        controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
+        controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        controller.apply(wholeDeviceLocked: false, lockedPackages: ["com.burbn.instagram"], limitReached: [])
+
+        XCTAssertEqual(protection, [true])
+    }
+
+    /// Without authorization the key is inert, and claiming it is applied would be a lie in the
+    /// diagnostics screen.
+    func testDeletionProtectionIsNotAssertedWithoutAuthorization() {
+        var protection: [Bool] = []
+        let controller = makeController(status: { .denied }, removalProtection: { protection.append($0) }, record: { _ in })
+
+        controller.apply(wholeDeviceLocked: true, lockedPackages: ["com.zhiliaoapp.musically"], limitReached: [])
+
+        XCTAssertTrue(protection.isEmpty)
+        XCTAssertFalse(controller.appliedAppRemovalProtection)
+    }
+
+    /// The kill switch must actively clear a value an earlier build wrote, not merely stop writing.
+    func testTheKillSwitchClearsDeletionProtection() {
+        var protection: [Bool] = []
+        let controller = makeController(status: { .granted }, removalProtectionEnabled: { false }, removalProtection: { protection.append($0) }, record: { _ in })
+
+        controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
+
+        XCTAssertEqual(protection, [false])
+        XCTAssertFalse(controller.appliedAppRemovalProtection)
+    }
+
+    /// `clear()` wipes the whole store (revocation, unpair). The next authorized apply must put the
+    /// protection back rather than believe it is still there.
+    func testDeletionProtectionIsReassertedAfterAClear() {
+        var protection: [Bool] = []
+        let controller = makeController(status: { .granted }, removalProtection: { protection.append($0) }, record: { _ in })
+
+        controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
+        controller.clear()
+        XCTAssertFalse(controller.appliedAppRemovalProtection)
+        controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
+
+        XCTAssertEqual(protection, [true, true])
+    }
+
+    /// A whole-device lock ending (the 8 h deadline) opens the shield keys only; the phone stays
+    /// undeletable.
+    func testDeletionProtectionOutlivesAWholeDeviceLockRelease() {
+        var protection: [Bool] = []
+        var released = 0
+        let suiteName = "BlockedApplicationsControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        suiteNames.append(suiteName)
+        let controller = BlockedApplicationsController(
+            authorizationStatus: { .granted },
+            apply: { _, _, _ in },
+            releaseGlobal: { released += 1 },
+            removalProtection: { protection.append($0) },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
+        )
+
+        controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
+        controller.releaseWholeDeviceLock()
+        controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
+
+        XCTAssertEqual(released, 1)
+        XCTAssertEqual(protection, [true])
+        XCTAssertTrue(controller.appliedAppRemovalProtection)
     }
 
     private var suiteNames: [String] = []

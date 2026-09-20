@@ -2,8 +2,8 @@ import Foundation
 import ManagedSettings
 import os
 
-/// Writes the parent's intent into iOS: which apps are hidden, and whether the whole device is
-/// shielded.
+/// Writes the parent's intent into iOS: which apps are hidden, whether the whole device is
+/// shielded, and — for as long as the phone is authorized — that no app may be deleted.
 ///
 /// This is the only place in the app that blocks an app the child did not pick, and what it does
 /// NOT use is the point. `ManagedSettings.Application(bundleIdentifier:)` is public, Apple
@@ -22,6 +22,14 @@ import os
 ///   from `ApplicationTokenCatalogue`, which the usage-report extension fills in as it sees apps.
 ///   An app the child has never opened has no token yet and cannot be blocked individually — the
 ///   honest limit of the design, surfaced as `unresolvedBundleIds` rather than hidden.
+/// * **deletion protection** → `application.denyAppRemoval = true`, asserted on every apply that
+///   finds the phone authorized, independent of the lock. Without it the child deletes Bolajon360
+///   in two taps (long-press → Remove App → Delete), which the product owner demonstrated on
+///   2026-09-20 next to a competitor whose MDM profile refuses the same taps. Apple applies the
+///   setting to every app on the phone, it is honoured under `.individual` authorization (Apple
+///   Frameworks Engineer, forums thread 729717) but "not guaranteed": the child can still revoke
+///   Screen Time access in iOS Settings, and that revocation lifts this along with every other
+///   restriction — which is why `clear()` is the right response to a lost authorization.
 ///
 /// Two rules are not negotiable and both are enforced here rather than at the call sites:
 ///
@@ -53,6 +61,9 @@ final class BlockedApplicationsController {
     /// stand for; the OS is given tokens.
     typealias ApplyAction = (Bool, Set<ApplicationToken>, [String]) -> Void
     typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
+    /// `(protect)`: write `denyAppRemoval = true` (or clear it). Injected so tests never touch
+    /// ManagedSettings.
+    typealias RemovalProtectionAction = (Bool) -> Void
 
     static let shared = BlockedApplicationsController()
 
@@ -64,6 +75,8 @@ final class BlockedApplicationsController {
         authorizationStatus: AuthorizationStatusAction? = nil,
         apply: ApplyAction? = nil,
         releaseGlobal: (() -> Void)? = nil,
+        removalProtectionEnabled: (() -> Bool)? = nil,
+        removalProtection: RemovalProtectionAction? = nil,
         tokenCatalogue: ApplicationTokenCatalogue = ApplicationTokenCatalogue(),
         userDefaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
@@ -73,6 +86,29 @@ final class BlockedApplicationsController {
         self.now = now
         self.launchedAt = now()
         let store = ManagedSettingsStore()
+
+        self.removalProtectionEnabledAction = removalProtectionEnabled ?? { AppRuntime.appRemovalProtectionEnabled }
+        self.removalProtectionAction = removalProtection ?? { protect in
+            // Read-compare-write: the OS keeps this setting across launches, so on most launches
+            // it is already what we want and the write (a cross-process call) is skipped. Logged
+            // on every call — which `assertAppRemovalProtection` limits to once per process per
+            // value — because this codebase has twice found an Apple-documented ManagedSettings
+            // key accepted and inert; a device log line with the read-back is the only proof, and
+            // a silent "already set" would be indistinguishable from "never asserted".
+            let desired: Bool? = protect ? true : nil
+            let current = store.application.denyAppRemoval
+            let written = current != desired
+            if written { store.application.denyAppRemoval = desired }
+            let readBack = store.application.denyAppRemoval
+            Self.log.notice(
+                "app_removal_protection desired=\(protect ? 1 : 0, privacy: .public) was=\(Self.describe(current), privacy: .public) written=\(written ? 1 : 0, privacy: .public) read_back=\(Self.describe(readBack), privacy: .public)"
+            )
+            #if DEBUG
+            // Mirrored to stdout so a `devicectl … --console` run shows it; os_log lines do not
+            // reach that stream, and this Mac cannot attach `idevicesyslog` over the network.
+            print("[screentime] app_removal_protection desired=\(protect ? 1 : 0) was=\(Self.describe(current)) written=\(written ? 1 : 0) read_back=\(Self.describe(readBack))")
+            #endif
+        }
 
         self.authorizationStatusAction = authorizationStatus ?? {
             ScreenTimeAuthorizationManager.shared.status
@@ -171,6 +207,10 @@ final class BlockedApplicationsController {
     /// What is currently applied — for diagnostics and tests.
     private(set) var appliedBundleIds: [String] = []
     private(set) var appliedWholeDeviceLock = false
+    /// Whether this process has asserted `denyAppRemoval` on the OS. False after `clear()` and on a
+    /// cold launch (the OS still holds the previous launch's value; the first authorized apply
+    /// re-asserts it either way).
+    var appliedAppRemovalProtection: Bool { lastAssertedRemovalProtection == true }
     /// Apps the server asked us to block that have no token yet, so iOS cannot act on them. A
     /// parent must be able to tell "blocked" from "we were told to, and could not".
     private(set) var unresolvedBundleIds: [String] = []
@@ -206,6 +246,11 @@ final class BlockedApplicationsController {
             }
             return
         }
+
+        // Deletion protection rides on authorization, not on the lock state or the block list, so
+        // it is asserted BEFORE the change guard below: an authorized phone with nothing blocked
+        // must still refuse to delete the app. Once per process per value; `clear()` forgets it.
+        assertAppRemovalProtection()
 
         // The resolution is computed BEFORE the change guard, and is part of it. What we ask iOS
         // to block can change while the server's list does not: the token catalogue learns a token
@@ -291,11 +336,31 @@ final class BlockedApplicationsController {
         appliedTokens = []
         unresolvedBundleIds = []
         lastAppliedStatus = nil
+        // `clearAllSettings()` below drops `denyAppRemoval` with everything else — correct on a
+        // lost authorization (the key is inert without it) and on an unpair (a phone that left the
+        // family must be deletable again). Forgetting the assertion makes the next authorized
+        // apply write it back.
+        lastAssertedRemovalProtection = nil
         clearAction()
         persistAppliedState()
     }
 
-    static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
+    private func assertAppRemovalProtection() {
+        let desired = removalProtectionEnabledAction()
+        guard lastAssertedRemovalProtection != desired else { return }
+        lastAssertedRemovalProtection = desired
+        removalProtectionAction(desired)
+    }
+
+    private nonisolated static func describe(_ value: Bool?) -> String {
+        switch value {
+        case .some(true): return "1"
+        case .some(false): return "0"
+        case .none: return "nil"
+        }
+    }
+
+    nonisolated static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
 
     private let tokenCatalogue: ApplicationTokenCatalogue
     private let userDefaults: UserDefaults
@@ -305,6 +370,9 @@ final class BlockedApplicationsController {
     private let applyAction: ApplyAction
     private let clearAction: () -> Void
     private let releaseGlobalAction: () -> Void
+    private let removalProtectionEnabledAction: () -> Bool
+    private let removalProtectionAction: RemovalProtectionAction
     private var appliedTokens: Set<ApplicationToken> = []
     private var lastAppliedStatus: ScreenTimePermissionStatus?
+    private var lastAssertedRemovalProtection: Bool?
 }

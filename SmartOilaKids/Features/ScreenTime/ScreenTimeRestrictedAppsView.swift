@@ -45,6 +45,16 @@ struct ScreenTimeRestrictedAppsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 2)
 
+                // Deletion protection is device-wide by Apple's design; a parent who finds that
+                // Calculator can no longer be deleted must have been told why, here, in advance.
+                if authorization.status == .granted, AppRuntime.appRemovalProtectionEnabled {
+                    Text(L10n.tr("screentime.restricted.removal_protection"))
+                        .font(AppTypography.bodyText(13))
+                        .foregroundStyle(AppColors.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 2)
+                }
+
                 if authorization.status != .granted {
                     InfoCard {
                         Text(L10n.tr("screentime.restricted.not_authorized"))

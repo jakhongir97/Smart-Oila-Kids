@@ -402,3 +402,4 @@
 "screentime.restricted.guided_cta" = "Set up";
 "screentime.restricted.guided_nothing" = "No new app was ticked for %@. Open it again and tick that app.";
 "screentime.restricted.guided_ambiguous" = "%2$d apps were ticked at once, so %1$@ could not be told apart. They are kept — tap each one below and choose its name.";
+"screentime.restricted.removal_protection" = "While Screen Time access is on, apps cannot be deleted from this phone — Bolajon360 included. That is Apple's rule: the restriction applies to every app on the phone at once.";

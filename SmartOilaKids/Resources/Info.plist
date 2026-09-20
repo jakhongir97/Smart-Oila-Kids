@@ -85,6 +85,8 @@
 	<true/>
 	<key>SMARTOILA_SCREEN_TIME_FEATURES_ENABLED</key>
 	<true/>
+	<key>SMARTOILA_APP_REMOVAL_PROTECTION_ENABLED</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

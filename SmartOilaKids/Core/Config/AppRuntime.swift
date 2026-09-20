@@ -75,6 +75,26 @@ enum AppRuntime {
         configuredBool("SMARTOILA_SHOW_GEO_DEBUG_OVERLAY") ?? false
     }
 
+    /// Whether Screen Time authorization also stops the child deleting apps from this phone
+    /// (`ManagedSettingsStore.application.denyAppRemoval`). Ships ON: a child who can delete
+    /// Bolajon360 in two taps has no parental control at all (measured by the product owner,
+    /// 2026-09-20). `SMARTOILA_APP_REMOVAL_PROTECTION_ENABLED=0` in the environment or Info.plist
+    /// turns it off. Apple applies the restriction to EVERY app on the phone, not only to ours —
+    /// the parent is told so in the Screen Time settings screen.
+    static var appRemovalProtectionEnabled: Bool {
+        if let configured = configuredBool("SMARTOILA_APP_REMOVAL_PROTECTION_ENABLED") {
+            return configured
+        }
+        if let configured = Bundle.main.object(forInfoDictionaryKey: "SMARTOILA_APP_REMOVAL_PROTECTION_ENABLED") as? NSNumber {
+            return configured.boolValue
+        }
+        if let configured = Bundle.main.object(forInfoDictionaryKey: "SMARTOILA_APP_REMOVAL_PROTECTION_ENABLED") as? String,
+           let resolved = parseBool(configured) {
+            return resolved
+        }
+        return true
+    }
+
     /// Parent↔child chat surface (REST + `/ws/chat`). Ships ON: `SMARTOILA_CHAT_FEATURES_ENABLED`
     /// is `true` in Info.plist, so DEBUG and Release now behave identically instead of chat being a
     /// debug-only surface. A `SMARTOILA_CHAT_FEATURES_ENABLED` environment variable still wins over
