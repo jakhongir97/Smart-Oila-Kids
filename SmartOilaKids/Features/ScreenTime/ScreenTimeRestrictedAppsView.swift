@@ -16,7 +16,12 @@ import SwiftUI
 ///    typing. Pending apps are queued, so at pairing the parent taps through them in one run.
 ///    Fallback when the icon is not in the list (the parent did not tick everything): the same row
 ///    opens Apple's picker already titled "Tick TikTok".
-/// 3. LINKED APPS are then controlled from the web alone; a tap offers to unlink a wrong one.
+/// 3. NAMING ANY APP, ONE TAP + A PICK. The web can only see an app the phone can NAME. So any grey
+///    row — Paynet, Click, a game — opens "Bu qaysi ilova?": the parent picks the name from the
+///    catalogue (installed apps first; the Uzbek apps are in it) or, only for an app nobody
+///    listed, types it. That is the ONLY mechanism on iOS that makes an un-detectable app visible
+///    and controllable from the web, so it stays (product rule 2026-09-21). A linked row opens the
+///    same sheet, which also offers to remove the name.
 struct ScreenTimeRestrictedAppsView: View {
     @ObservedObject private var store = ScreenTimeRestrictedAppsStore.shared
     @ObservedObject private var authorization = ScreenTimeAuthorizationManager.shared
@@ -32,8 +37,8 @@ struct ScreenTimeRestrictedAppsView: View {
     @State private var guidedSelectionBefore = FamilyActivitySelection()
     @State private var message: String?
     @State private var installed: [AppCatalogueEntry] = []
-    /// The linked row whose "unlink" confirmation is open.
-    @State private var unlinking: ScreenTimeRestrictedAppsStore.Row?
+    /// The row whose "which app is this?" sheet is open.
+    @State private var labelling: ScreenTimeRestrictedAppsStore.Row?
 
     private var pendingGroups: (web: [AppCatalogueEntry], installed: [AppCatalogueEntry]) {
         store.pendingTargetGroups(
@@ -188,18 +193,14 @@ struct ScreenTimeRestrictedAppsView: View {
                 guidedName: pickerIsGuided ? linking?.name : nil
             )
         }
-        .alert(
-            L10n.tr("screentime.restricted.unlink_title"),
-            isPresented: Binding(get: { unlinking != nil }, set: { if !$0 { unlinking = nil } }),
-            presenting: unlinking
-        ) { row in
-            Button(L10n.tr("screentime.restricted.unlink"), role: .destructive) {
-                store.removeLabel(for: row.token)
-                unlinking = nil
+        .sheet(item: $labelling) { row in
+            ScreenTimeAppLabelSheet(row: row, takenElsewhere: store.bundleIdsLabelledElsewhere(than: row.token)) { choice in
+                switch choice {
+                case .catalogue(let entry): store.label(row.token, as: entry)
+                case .custom(let name): store.labelCustom(row.token, name: name)
+                case .clear: store.removeLabel(for: row.token)
+                }
             }
-            Button(L10n.tr("common.cancel"), role: .cancel) { unlinking = nil }
-        } message: { row in
-            Text(L10n.tr("screentime.restricted.unlink_message", row.name ?? ""))
         }
         .onAppear {
             authorization.refreshStatus()
@@ -300,8 +301,8 @@ struct ScreenTimeRestrictedAppsView: View {
         .disabled(authorization.status != .granted)
     }
 
-    /// One picked app. Outside link mode a linked row can be unlinked and an unlinked row is inert.
-    /// In link mode an unlinked row IS the answer to "which one is <App>?".
+    /// One picked app. Outside link mode ANY row opens "which app is this?" (name it, rename it,
+    /// or remove the name). In link mode an unlinked row IS the answer to "which one is <App>?".
     private func appRow(_ row: ScreenTimeRestrictedAppsStore.Row) -> some View {
         let isAnswer = linking != nil && !row.isLabelled
         return Button {
@@ -310,8 +311,8 @@ struct ScreenTimeRestrictedAppsView: View {
                 store.label(row.token, as: target)
                 message = nil
                 advanceLinking(after: target)
-            } else if row.isLabelled, linking == nil {
-                unlinking = row
+            } else if linking == nil {
+                labelling = row
             }
         } label: {
             InfoCard(padding: 14) {
@@ -335,12 +336,130 @@ struct ScreenTimeRestrictedAppsView: View {
                         Image(systemName: "hand.tap.fill")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(AppColors.glyphPurple)
+                    } else {
+                        Text(L10n.tr("screentime.restricted.name_cta"))
+                            .font(AppTypography.bodyStrong(13))
+                            .foregroundStyle(AppColors.glyphPurple)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppColors.inkTertiary)
                     }
                 }
             }
             .opacity(linking != nil && row.isLabelled ? 0.45 : 1)
         }
         .buttonStyle(.plain)
-        .disabled(linking != nil ? row.isLabelled : !row.isLabelled)
+        .disabled(linking != nil && row.isLabelled)
+    }
+}
+
+/// "Which app is this?" — the catalogue, installed apps first, plus a free-text name.
+struct ScreenTimeAppLabelSheet: View {
+    enum Choice {
+        case catalogue(AppCatalogueEntry)
+        case custom(String)
+        case clear
+    }
+
+    let row: ScreenTimeRestrictedAppsStore.Row
+    /// Bundle ids already given to another icon — shown, not forbidden: choosing one moves it.
+    let takenElsewhere: Set<String>
+    let onChoose: (Choice) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var customName = ""
+    /// The `canOpenURL` probe (~50 synchronous XPC calls) runs once per sheet, never per keystroke.
+    @State private var installed: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        Label(row.token)
+                            .labelStyle(.titleAndIcon)
+                            .font(AppTypography.bodyStrong(16))
+                        Spacer()
+                    }
+                } header: {
+                    Text(L10n.tr("screentime.label.which"))
+                }
+
+                Section(L10n.tr("screentime.label.catalogue")) {
+                    ForEach(filteredEntries, id: \.bundleId) { entry in
+                        Button {
+                            onChoose(.catalogue(entry))
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(entry.name)
+                                    .foregroundStyle(AppColors.inkPrimary)
+                                Spacer()
+                                if row.bundleId == AppCatalogue.normalizedBundleId(entry.bundleId) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(AppColors.glyphPurple)
+                                } else if takenElsewhere.contains(AppCatalogue.normalizedBundleId(entry.bundleId)) {
+                                    Text(L10n.tr("screentime.label.taken"))
+                                        .font(AppTypography.caption(12))
+                                        .foregroundStyle(AppColors.inkTertiary)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section(L10n.tr("screentime.label.custom")) {
+                    TextField(L10n.tr("screentime.label.custom_placeholder"), text: $customName)
+                        .textInputAutocapitalization(.words)
+                        .onChange(of: customName) { value in
+                            if value.count > ScreenTimeRestrictedAppsStore.maximumCustomNameLength {
+                                customName = String(value.prefix(ScreenTimeRestrictedAppsStore.maximumCustomNameLength))
+                            }
+                        }
+                    Button(L10n.tr("common.save")) {
+                        onChoose(.custom(customName))
+                        dismiss()
+                    }
+                    .disabled(customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                if row.isLabelled {
+                    Section {
+                        Button(L10n.tr("screentime.label.clear"), role: .destructive) {
+                            onChoose(.clear)
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: L10n.tr("screentime.label.search"))
+            .navigationTitle(L10n.tr("screentime.label.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.tr("common.cancel")) { dismiss() }
+                }
+            }
+        }
+        .onAppear {
+            if let name = row.name, row.bundleId?.hasPrefix(ScreenTimeRestrictedAppsStore.customBundleIdPrefix) == true {
+                customName = name
+            }
+            installed = Set(InstalledAppProbe.installedEntries(canOpen: ScreenTimeEnforcementCoordinator.shared.canOpenScheme).map(\.bundleId))
+        }
+    }
+
+    /// Installed (probe-detected) apps first, then the rest of the catalogue, both alphabetical.
+    private var filteredEntries: [AppCatalogueEntry] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return AppCatalogue.all
+            .filter { trimmed.isEmpty || $0.name.localizedCaseInsensitiveContains(trimmed) }
+            .sorted { lhs, rhs in
+                let l = installed.contains(lhs.bundleId), r = installed.contains(rhs.bundleId)
+                if l != r { return l }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
     }
 }
