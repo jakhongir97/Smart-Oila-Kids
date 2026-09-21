@@ -243,9 +243,12 @@ final class BlockedApplicationsControllerTests: XCTestCase {
         XCTAssertTrue(controller.appliedAppRemovalProtection)
     }
 
-    /// The lock state is re-read every 30 seconds; the protection is written once per process,
-    /// not twice a minute.
-    func testDeletionProtectionIsWrittenOncePerProcess() {
+    /// The lock state is re-read every 30 seconds and the protection is re-verified with it: iOS
+    /// drops every ManagedSettings key when the child switches Screen Time access off in Settings,
+    /// and switching it back on tells this process nothing. A once-per-process assertion would
+    /// leave the phone deletable until the next relaunch while the app believed it was protected.
+    /// (The action itself is a read that writes only on a difference, so this is cheap.)
+    func testDeletionProtectionIsReverifiedOnEveryAuthorizedApply() {
         var protection: [Bool] = []
         let controller = makeController(status: { .granted }, removalProtection: { protection.append($0) }, record: { _ in })
 
@@ -253,7 +256,36 @@ final class BlockedApplicationsControllerTests: XCTestCase {
         controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
         controller.apply(wholeDeviceLocked: false, lockedPackages: ["com.burbn.instagram"], limitReached: [])
 
+        XCTAssertEqual(protection, [true, true, true])
+    }
+
+    /// Before the server has answered this launch the coordinator applies nothing — but the
+    /// protection does not depend on the server, only on authorization, and a phone updated
+    /// while offline must not stay deletable until its first successful poll.
+    func testDeletionProtectionCanBeAssertedWithoutAServerState() {
+        var protection: [Bool] = []
+        var applied: [Applied] = []
+        let controller = makeController(status: { .granted }, removalProtection: { protection.append($0) }, record: { applied.append($0) })
+
+        controller.assertAppRemovalProtectionIfAuthorized()
+
         XCTAssertEqual(protection, [true])
+        XCTAssertTrue(controller.appliedAppRemovalProtection)
+        XCTAssertTrue(applied.isEmpty)
+    }
+
+    /// The same call on an unauthorized (or not-yet-answered) phone writes nothing: the key would
+    /// be inert, and a `.notDetermined` right after launch is not an answer.
+    func testDeletionProtectionIsNotAssertedWithoutAServerStateUnlessAuthorized() {
+        for status in [ScreenTimePermissionStatus.denied, .notDetermined] {
+            var protection: [Bool] = []
+            let controller = makeController(status: { status }, removalProtection: { protection.append($0) }, record: { _ in })
+
+            controller.assertAppRemovalProtectionIfAuthorized()
+
+            XCTAssertTrue(protection.isEmpty, "\(status)")
+            XCTAssertFalse(controller.appliedAppRemovalProtection, "\(status)")
+        }
     }
 
     /// Without authorization the key is inert, and claiming it is applied would be a lie in the
@@ -305,6 +337,7 @@ final class BlockedApplicationsControllerTests: XCTestCase {
             authorizationStatus: { .granted },
             apply: { _, _, _ in },
             releaseGlobal: { released += 1 },
+            removalProtectionEnabled: { true },
             removalProtection: { protection.append($0) },
             tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
             userDefaults: defaults
@@ -315,7 +348,8 @@ final class BlockedApplicationsControllerTests: XCTestCase {
         controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
 
         XCTAssertEqual(released, 1)
-        XCTAssertEqual(protection, [true])
+        // Never `false`: the release opens the shield keys only, and the next apply re-verifies.
+        XCTAssertEqual(protection, [true, true])
         XCTAssertTrue(controller.appliedAppRemovalProtection)
     }
 
@@ -535,6 +569,37 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
             ScreenTimeEnforcementCoordinator.limitReachedBundleIds(from: limits),
             ["com.zhiliaoapp.musically"]
         )
+    }
+
+    /// A launch with no server answer yet (offline, backend down, first launch after an update on
+    /// a phone with no signal): nothing is applied — that gate is what keeps a parent's lock from
+    /// being lifted by an empty state — but an authorized phone still gets deletion protection.
+    func testALaunchWithoutAServerStateAssertsDeletionProtectionAndAppliesNothing() {
+        let defaults = makeDefaults()
+        var protection: [Bool] = []
+        var applied: [(Bool, [String])] = []
+
+        let coordinator = ScreenTimeEnforcementCoordinator(
+            lockState: { .released },
+            blockedApplications: BlockedApplicationsController(
+                authorizationStatus: { .granted },
+                apply: { locked, _, ids in applied.append((locked, ids)) },
+                removalProtection: { protection.append($0) },
+                tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+                userDefaults: defaults
+            ),
+            authorizationStatus: { .granted },
+            canOpenScheme: { _ in false },
+            syncUpdate: { _, _ in },
+            userDefaults: defaults
+        )
+
+        coordinator.start(dsn: "child-1")
+
+        XCTAssertEqual(protection, [true])
+        XCTAssertTrue(applied.isEmpty)
+
+        coordinator.stop()
     }
 
     func testTheProbeResultIsSyncedAndStamped() async {

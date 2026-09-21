@@ -88,18 +88,26 @@ final class BlockedApplicationsController {
         let store = ManagedSettingsStore()
 
         self.removalProtectionEnabledAction = removalProtectionEnabled ?? { AppRuntime.appRemovalProtectionEnabled }
+        var lastLoggedProtection: Bool?
         self.removalProtectionAction = removalProtection ?? { protect in
-            // Read-compare-write: the OS keeps this setting across launches, so on most launches
-            // it is already what we want and the write (a cross-process call) is skipped. Logged
-            // on every call — which `assertAppRemovalProtection` limits to once per process per
-            // value — because this codebase has twice found an Apple-documented ManagedSettings
-            // key accepted and inert; a device log line with the read-back is the only proof, and
-            // a silent "already set" would be indistinguishable from "never asserted".
+            // Read-compare-write on EVERY authorized apply (every lock poll, ~30 s): the OS keeps
+            // this setting across launches, so nearly every call is a read that matches and the
+            // write (a cross-process call) is skipped. The read is not skipped, because iOS drops
+            // every ManagedSettings key the moment the child switches Screen Time access off in
+            // iOS Settings, and switching it back on tells this process nothing — a once-per-
+            // process assertion would then leave the phone deletable until the next relaunch
+            // while the app believes it is protected. Logged once per process per value, and
+            // again whenever a write actually happens, because this codebase has twice found an
+            // Apple-documented ManagedSettings key accepted and inert; a device log line with the
+            // read-back is the only proof, and a silent "already set" would be indistinguishable
+            // from "never asserted".
             let desired: Bool? = protect ? true : nil
             let current = store.application.denyAppRemoval
             let written = current != desired
             if written { store.application.denyAppRemoval = desired }
             let readBack = store.application.denyAppRemoval
+            guard written || lastLoggedProtection != protect else { return }
+            lastLoggedProtection = protect
             Self.log.notice(
                 "app_removal_protection desired=\(protect ? 1 : 0, privacy: .public) was=\(Self.describe(current), privacy: .public) written=\(written ? 1 : 0, privacy: .public) read_back=\(Self.describe(readBack), privacy: .public)"
             )
@@ -209,7 +217,7 @@ final class BlockedApplicationsController {
     private(set) var appliedWholeDeviceLock = false
     /// Whether this process has asserted `denyAppRemoval` on the OS. False after `clear()` and on a
     /// cold launch (the OS still holds the previous launch's value; the first authorized apply
-    /// re-asserts it either way).
+    /// re-asserts it, and every later authorized apply re-verifies it).
     var appliedAppRemovalProtection: Bool { lastAssertedRemovalProtection == true }
     /// Apps the server asked us to block that have no token yet, so iOS cannot act on them. A
     /// parent must be able to tell "blocked" from "we were told to, and could not".
@@ -249,7 +257,8 @@ final class BlockedApplicationsController {
 
         // Deletion protection rides on authorization, not on the lock state or the block list, so
         // it is asserted BEFORE the change guard below: an authorized phone with nothing blocked
-        // must still refuse to delete the app. Once per process per value; `clear()` forgets it.
+        // must still refuse to delete the app. Re-verified on every authorized apply (a cheap
+        // read; see the action) so a key the OS dropped behind our back comes back within a poll.
         assertAppRemovalProtection()
 
         // The resolution is computed BEFORE the change guard, and is part of it. What we ask iOS
@@ -345,9 +354,20 @@ final class BlockedApplicationsController {
         persistAppliedState()
     }
 
+    /// Deletion protection for a launch the server has not answered yet (offline, backend down,
+    /// or the first launch after a TestFlight update on a phone with no signal). The
+    /// server-confirmation gate in `ScreenTimeEnforcementCoordinator.applyNow` rightly stops
+    /// every shield write until a real state arrives — but this key does not depend on server
+    /// state, only on authorization, and a phone that stays deletable until its first successful
+    /// poll is exactly the two-tap deletion this exists to stop. Writes nothing without
+    /// authorization (the key would be inert) and nothing to the shields.
+    func assertAppRemovalProtectionIfAuthorized() {
+        guard authorizationStatusAction() == .granted else { return }
+        assertAppRemovalProtection()
+    }
+
     private func assertAppRemovalProtection() {
         let desired = removalProtectionEnabledAction()
-        guard lastAssertedRemovalProtection != desired else { return }
         lastAssertedRemovalProtection = desired
         removalProtectionAction(desired)
     }

@@ -353,10 +353,15 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         // "no data yet" and "no restrictions" are not the same thing and must not be treated alike.
         guard hasServerConfirmedState else {
             blockedApplications.restorePersistedState()
-            // The one exception to "nothing before a server answer": the previous process left the
-            // OS shielded and the lock's deadline has since passed (the telemetry service released
-            // it on launch, or the monitor extension already opened the phone). Open only the
-            // whole-device keys; the per-app blocks are exactly what this gate protects.
+            // Two exceptions to "nothing before a server answer", neither of which touches a
+            // per-app block (the per-app blocks are exactly what this gate protects):
+            // 1. Deletion protection depends on authorization alone, so an authorized phone gets
+            //    it on this launch even if the server never answers — otherwise a child phone
+            //    updated over TestFlight while offline stays deletable until its first poll.
+            blockedApplications.assertAppRemovalProtectionIfAuthorized()
+            // 2. The previous process left the OS shielded and the lock's deadline has since
+            //    passed (the telemetry service released it on launch, or the monitor extension
+            //    already opened the phone). Open only the whole-device keys.
             let state = lockStateAction()
             if state.releasedByDeadline, !state.isLocked, blockedApplications.appliedWholeDeviceLock {
                 blockedApplications.releaseWholeDeviceLock()
