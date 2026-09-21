@@ -134,9 +134,11 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         label(token, bundleId: bundleId, name: trimmed)
     }
 
-    /// The guided step: the parent tapped "set up <entry>", the picker came back, and exactly ONE
-    /// new app is in it — that token IS the entry, no name-choosing needed. The selection is
-    /// committed either way; only the label depends on the count.
+    /// The ONLY way an app gets linked (since 2026-09-21): the parent tapped "<entry> — Belgilash",
+    /// the picker came back, and exactly ONE new app is in it — that token IS the entry. No name
+    /// is chosen or typed anywhere. With two or more new apps the tick is ambiguous and NOTHING is
+    /// committed: an unlabelled token is a rule nobody can see, and the parent simply tries again
+    /// (the picker itself refuses to save such a draft; this is the backstop).
     enum GuidedOutcome: Equatable {
         case labelled
         case nothingNew
@@ -150,11 +152,11 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         as entry: AppCatalogueEntry
     ) -> GuidedOutcome {
         let added = current.applicationTokens.subtracting(previous.applicationTokens)
-        updateSelection(current)
         switch added.count {
         case 0:
             return .nothingNew
         case 1:
+            updateSelection(current)
             label(added.first!, as: entry)
             return .labelled
         default:
@@ -162,6 +164,25 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
             return .ambiguous(added.count)
         }
     }
+
+    /// The guided list, in two groups the screen shows apart: apps the web has blocked or limited
+    /// (the parent is waiting for these), then apps the probe found installed but nobody asked
+    /// about yet (linking them now saves a trip to the child's phone later). Both unlabelled only.
+    func pendingTargetGroups(
+        lockedPackages: [String],
+        limitedPackages: [String],
+        installed: [AppCatalogueEntry]
+    ) -> (web: [AppCatalogueEntry], installed: [AppCatalogueEntry]) {
+        let web = pendingTargets(lockedPackages: lockedPackages, limitedPackages: limitedPackages, installed: [])
+        let webIds = Set(web.map { AppCatalogue.normalizedBundleId($0.bundleId) })
+        let rest = pendingTargets(lockedPackages: [], limitedPackages: [], installed: installed)
+            .filter { !webIds.contains(AppCatalogue.normalizedBundleId($0.bundleId)) }
+        return (web, rest)
+    }
+
+    /// Linked apps — the rows the phone can act on. Tokens picked by an older build and never
+    /// named are not shown: iOS cannot act on them and there is no longer a way to name them.
+    var linkedRows: [Row] { rows.filter(\.isLabelled) }
 
     /// Catalogue apps the parent has asked about — blocked or limited on the web, or found installed
     /// by the probe — that carry no label yet. This is the short list the guided step shows, in

@@ -419,7 +419,34 @@ final class ScreenTimeRestrictedAppsStoreTests: XCTestCase {
 
         let two = try makeSelection([a, b, c, try makeToken("BA==")])
         XCTAssertEqual(store.labelNewlyPicked(previous: store.selection, current: two, as: youtube), .ambiguous(2))
-        XCTAssertEqual(store.rows.count, 4, "the selection is kept even when the label cannot be implied")
+        XCTAssertEqual(store.rows.count, 2, "an ambiguous tick commits nothing: an unnamed token is a rule nobody can see")
+        XCTAssertEqual(store.linkedRows.map(\.bundleId), ["ph.telegra.telegraph"])
+    }
+
+    /// The guided list in its two groups: what the web is waiting for, then what the probe found.
+    func testPendingTargetGroupsSplitWebAsksFromInstalledFinds() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, onChange: {})
+        catalogue.merge([.init(bundleId: "ph.telegra.telegraph", displayName: "Telegram", token: try makeToken("AQ=="), lastSeenAt: Date())])
+        let groups = store.pendingTargetGroups(
+            lockedPackages: ["com.google.ios.youtube", "ph.telegra.telegraph"],
+            limitedPackages: ["net.whatsapp.WhatsApp"],
+            installed: [AppCatalogue.entry(forBundleId: "com.zhiliaoapp.musically")!, AppCatalogue.entry(forBundleId: "com.google.ios.youtube")!]
+        )
+        XCTAssertEqual(groups.web.map(\.name), ["YouTube", "WhatsApp"], "linked Telegram is out")
+        XCTAssertEqual(groups.installed.map(\.name), ["TikTok"], "YouTube is already in the web group")
+    }
+
+    /// The picker refuses to save a guided pick unless exactly one app was added.
+    func testAGuidedPickCanOnlyBeSavedWithExactlyOneNewApp() throws {
+        let a = try makeToken("AQ=="), b = try makeToken("Ag=="), c = try makeToken("Aw==")
+        let previous = try makeSelection([a])
+        XCTAssertFalse(ScreenTimeAppPickerView.saveAllowed(draft: previous, previous: previous, purpose: .restricted, guided: true))
+        XCTAssertTrue(ScreenTimeAppPickerView.saveAllowed(draft: try makeSelection([a, b]), previous: previous, purpose: .restricted, guided: true))
+        XCTAssertFalse(ScreenTimeAppPickerView.saveAllowed(draft: try makeSelection([a, b, c]), previous: previous, purpose: .restricted, guided: true))
+        XCTAssertTrue(ScreenTimeAppPickerView.saveAllowed(draft: previous, previous: previous, purpose: .restricted, guided: false))
+        XCTAssertFalse(ScreenTimeAppPickerView.saveAllowed(draft: FamilyActivitySelection(), previous: previous, purpose: .alwaysAllowed, guided: false))
     }
 
     /// The short list: what the parent asked about and has not labelled yet, in catalogue order.

@@ -29,13 +29,19 @@ struct ScreenTimeAppPickerView: View {
     let purpose: Purpose
     @Binding var selection: FamilyActivitySelection
     var onDone: (FamilyActivitySelection) -> Void
+    /// The guided step: the picker was opened to link ONE named app. The title and hint say which,
+    /// and Save stays disabled until exactly one new app is ticked — so an ambiguous tick cannot
+    /// be saved in the first place.
+    var guidedName: String? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var draft = FamilyActivitySelection()
 
     var body: some View {
         NavigationStack {
-            FamilyActivityPicker(selection: $draft)
+            // The header is the only text Apple lets us put INSIDE the picker. For the restricted
+            // set it tells the parent the one switch that yields every app's token at once.
+            FamilyActivityPicker(headerText: headerText, footerText: nil, selection: $draft)
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
                 .safeAreaInset(edge: .top) { explanation }
@@ -53,7 +59,7 @@ struct ScreenTimeAppPickerView: View {
                         // nothing, which is the state that put Phone behind the shield. Saving one
                         // is blocked rather than accepted-and-ignored, so the parent finds out here
                         // instead of when their child cannot call them.
-                        .disabled(purpose == .alwaysAllowed && draft.applicationTokens.isEmpty)
+                        .disabled(!Self.saveAllowed(draft: draft, previous: selection, purpose: purpose, guided: guidedName != nil))
                     }
                 }
         }
@@ -75,18 +81,43 @@ struct ScreenTimeAppPickerView: View {
         return expanded
     }
 
+    /// Whether the Save button is live. An EMPTY always-allowed set is refused (it excepts nothing,
+    /// which is the state that put Phone behind the shield). A guided pick is refused unless exactly
+    /// ONE app was added: zero means nothing to link, two means the app cannot tell which is which.
+    static func saveAllowed(
+        draft: FamilyActivitySelection,
+        previous: FamilyActivitySelection,
+        purpose: Purpose,
+        guided: Bool
+    ) -> Bool {
+        if purpose == .alwaysAllowed, draft.applicationTokens.isEmpty { return false }
+        if guided { return draft.applicationTokens.subtracting(previous.applicationTokens).count == 1 }
+        return true
+    }
+
     private var title: String {
+        if let guidedName { return L10n.tr("screentime.picker.guided.title", guidedName) }
         switch purpose {
         case .restricted: return L10n.tr("screentime.picker.restricted.title")
         case .alwaysAllowed: return L10n.tr("screentime.picker.allowed.title")
         }
     }
 
+    private var headerText: String? {
+        if guidedName != nil { return nil }
+        return purpose == .restricted ? L10n.tr("screentime.picker.restricted.header") : nil
+    }
+
+    private var hint: String {
+        if let guidedName { return L10n.tr("screentime.picker.guided.hint", guidedName) }
+        return purpose == .alwaysAllowed
+            ? L10n.tr("screentime.picker.allowed.hint")
+            : L10n.tr("screentime.picker.restricted.hint")
+    }
+
     @ViewBuilder
     private var explanation: some View {
-        Text(purpose == .alwaysAllowed
-             ? L10n.tr("screentime.picker.allowed.hint")
-             : L10n.tr("screentime.picker.restricted.hint"))
+        Text(hint)
             .font(.footnote)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
