@@ -27,10 +27,19 @@ final class AppCatalogueTests: XCTestCase {
         XCTAssertLessThanOrEqual(AppCatalogue.probeSchemes.count, AppCatalogue.maximumProbeSchemes)
     }
 
-    /// Blocking more than 50 apps is reported to block NOTHING rather than the first 50, so the
-    /// catalogue itself is kept inside the cap: a parent cannot request more than we can deliver.
-    func testTheCatalogueFitsTheFiftyAppBlockingCap() {
-        XCTAssertLessThanOrEqual(AppCatalogue.all.count, AppCatalogue.maximumBlockedApplications)
+    /// Blocking more than 50 apps at once is reported to block NOTHING rather than the first 50.
+    /// The catalogue is a NAME DIRECTORY, not the block list — it can list far more than 50 apps
+    /// (global plus every Uzbek app a parent might name), and the guarantee that matters is that
+    /// the RESOLVER never hands iOS more than the cap, however many the server asks for. That is
+    /// what this test pins; the directory itself only needs a sane upper bound.
+    func testTheResolverNeverExceedsTheFiftyAppBlockingCap() {
+        let everything = AppCatalogue.all.map(\.bundleId)
+        let resolved = BlockedApplicationsController.resolveBlockedBundleIds(
+            lockedPackages: everything,
+            limitReached: everything
+        )
+        XCTAssertLessThanOrEqual(resolved.count, AppCatalogue.maximumBlockedApplications)
+        XCTAssertLessThanOrEqual(AppCatalogue.all.count, ApplicationTokenCatalogue.maximumEntries, "the directory has a sane bound")
     }
 
     func testBundleIdsAndSchemesAreUnique() {
@@ -38,7 +47,7 @@ final class AppCatalogueTests: XCTestCase {
         XCTAssertEqual(Set(bundleIds).count, bundleIds.count, "a duplicate bundle id wastes a blocking slot")
 
         let schemes = AppCatalogue.probeSchemes
-        XCTAssertEqual(Set(schemes).count, schemes.count, "a duplicate scheme wastes one of the 25 probe slots")
+        XCTAssertEqual(Set(schemes).count, schemes.count, "a duplicate scheme wastes one of the probe slots")
     }
 
     /// Not every bundle id is reverse-DNS: Pinterest really ships as `pinterest` and imo as

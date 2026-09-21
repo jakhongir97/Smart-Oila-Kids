@@ -46,26 +46,36 @@
 		<string>instagram</string>
 		<string>youtube</string>
 		<string>whatsapp</string>
-		<string>roblox</string>
-		<string>fb1036341366506456</string>
-		<string>fb752573801798020</string>
-		<string>brawlstars</string>
-		<string>fb2036793259884297</string>
-		<string>minecraft</string>
 		<string>snapchat</string>
 		<string>discord</string>
 		<string>fb</string>
 		<string>fb-messenger</string>
+		<string>twitter</string>
+		<string>reddit</string>
+		<string>roblox</string>
+		<string>fb1036341366506456</string>
+		<string>fb752573801798020</string>
+		<string>fb2036793259884297</string>
+		<string>brawlstars</string>
+		<string>minecraft</string>
 		<string>clashroyale</string>
 		<string>clashofclans</string>
 		<string>mobilelegends</string>
+		<string>com.epicgames.fortnite</string>
 		<string>googlechrome</string>
 		<string>yandexbrowser-open-url</string>
 		<string>chatgpt</string>
 		<string>spotify</string>
-		<string>twitter</string>
-		<string>reddit</string>
-		<string>com.epicgames.fortnite</string>
+		<string>yandexmaps</string>
+		<string>yandextaxi</string>
+		<string>yandexnavi</string>
+		<string>aliexpress</string>
+		<string>vk</string>
+		<string>sgnl</string>
+		<string>googlegmail</string>
+		<string>twitch</string>
+		<string>nflx</string>
+		<string>yandexmusic</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>

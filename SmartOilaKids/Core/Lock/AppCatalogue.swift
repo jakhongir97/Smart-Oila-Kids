@@ -62,14 +62,22 @@ enum AppCatalogue {
         AppCatalogueEntry(name: "Yandex Browser", bundleId: "ru.yandex.mobile.search", scheme: "yandexbrowser-open-url", category: "browser"),
         AppCatalogueEntry(name: "ChatGPT", bundleId: "com.openai.chat", scheme: "chatgpt", category: "ai"),
         AppCatalogueEntry(name: "Spotify", bundleId: "com.spotify.client", scheme: "spotify", category: "music"),
+        // Popular in Uzbekistan — schemes verified 2026-09-21 (Yandex launch docs, curated scheme lists).
+        AppCatalogueEntry(name: "Yandex Maps", bundleId: "ru.yandex.traffic", scheme: "yandexmaps", category: "navigation"),
+        AppCatalogueEntry(name: "Yandex Go", bundleId: "ru.yandex.ytaxi", scheme: "yandextaxi", category: "navigation"),
+        AppCatalogueEntry(name: "Yandex Navi", bundleId: "ru.yandex.mobile.navigator", scheme: "yandexnavi", category: "navigation"),
+        AppCatalogueEntry(name: "AliExpress", bundleId: "com.alibaba.iAliexpress", scheme: "aliexpress", category: "shopping"),
+        AppCatalogueEntry(name: "VK", bundleId: "com.vk.vkclient", scheme: "vk", category: "social"),
+        AppCatalogueEntry(name: "Signal", bundleId: "org.whispersystems.signal", scheme: "sgnl", category: "messaging"),
+        AppCatalogueEntry(name: "Gmail", bundleId: "com.google.Gmail", scheme: "googlegmail", category: "messaging"),
 
         // ── Everything below can be BLOCKED but not DETECTED (no verified scheme). ──
         AppCatalogueEntry(name: "Likee", bundleId: "video.like", scheme: nil, category: "social"),
         AppCatalogueEntry(name: "CapCut", bundleId: "com.lemon.lvoverseas", scheme: nil, category: "creative"),
         AppCatalogueEntry(name: "Threads", bundleId: "com.burbn.barcelona", scheme: nil, category: "social"),
         AppCatalogueEntry(name: "Pinterest", bundleId: "pinterest", scheme: nil, category: "social"),
-        AppCatalogueEntry(name: "Twitch", bundleId: "tv.twitch", scheme: nil, category: "video"),
-        AppCatalogueEntry(name: "Netflix", bundleId: "com.netflix.Netflix", scheme: nil, category: "video"),
+        AppCatalogueEntry(name: "Twitch", bundleId: "tv.twitch", scheme: "twitch", category: "video"),
+        AppCatalogueEntry(name: "Netflix", bundleId: "com.netflix.Netflix", scheme: "nflx", category: "video"),
         AppCatalogueEntry(name: "YouTube Kids", bundleId: "com.google.ios.youtubekids", scheme: nil, category: "video"),
         AppCatalogueEntry(name: "Kinopoisk", bundleId: "ru.kinopoisk", scheme: nil, category: "video"),
         AppCatalogueEntry(name: "Genshin Impact", bundleId: "com.miHoYo.GenshinImpact", scheme: nil, category: "games"),
@@ -82,7 +90,7 @@ enum AppCatalogue {
         AppCatalogueEntry(name: "Character.AI", bundleId: "ai.character.app", scheme: nil, category: "ai"),
         AppCatalogueEntry(name: "imo", bundleId: "imoimiphone", scheme: nil, category: "messaging"),
         AppCatalogueEntry(name: "Viber", bundleId: "com.viber", scheme: nil, category: "messaging"),
-        AppCatalogueEntry(name: "Yandex Music", bundleId: "ru.yandex.mobile.music", scheme: nil, category: "music"),
+        AppCatalogueEntry(name: "Yandex Music", bundleId: "ru.yandex.mobile.music", scheme: "yandexmusic", category: "music"),
         AppCatalogueEntry(name: "Shazam", bundleId: "com.shazam.Shazam", scheme: nil, category: "music"),
         AppCatalogueEntry(name: "Opera", bundleId: "com.opera.OperaTouch", scheme: nil, category: "browser"),
         // Safari is an Apple app, so it has no App Store listing and no scheme of ours to probe —
@@ -92,6 +100,28 @@ enum AppCatalogue {
         AppCatalogueEntry(name: "Duolingo", bundleId: "com.duolingo.DuolingoMobile", scheme: nil, category: "education"),
         AppCatalogueEntry(name: "Wildberries", bundleId: "RU.WILDBERRIES.MOBILEAPP", scheme: nil, category: "shopping"),
         AppCatalogueEntry(name: "Ozon", bundleId: "ru.ozon.OzonStore", scheme: nil, category: "shopping"),
+
+        // ── Uzbek apps (App Store bundle ids verified 2026-09-21; no public URL scheme, so
+        //    blockable and linkable-by-tap, but not auto-detected). ──
+        AppCatalogueEntry(name: "Payme", bundleId: "uz.payme.Payme", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "Click", bundleId: "com.ssdsoftwaresolutions.clickuz", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "Uzum Market", bundleId: "uz.uzum.app", scheme: nil, category: "shopping"),
+        AppCatalogueEntry(name: "Uzum Bank", bundleId: "uz.kapitalbank.apelsin", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "Uzum Tezkor", bundleId: "uz.uzum.tezkor", scheme: nil, category: "shopping"),
+        AppCatalogueEntry(name: "Paynet", bundleId: "GS.Uzpaynet", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "Alif", bundleId: "tj.alif.mobi", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "Anor Bank", bundleId: "uz.anorbank.mobile", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "TBC UZ", bundleId: "ge.tbc.tbcuz", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "Humans", bundleId: "net.humans.fintech-uz", scheme: nil, category: "finance"),
+        AppCatalogueEntry(name: "My Beeline", bundleId: "uz.beeline.odp", scheme: nil, category: "utility"),
+        AppCatalogueEntry(name: "Ucell", bundleId: "uz.ucell.ucellmobile", scheme: nil, category: "utility"),
+        AppCatalogueEntry(name: "Mobiuz", bundleId: "uz.mobiuz.mobiservice", scheme: nil, category: "utility"),
+        AppCatalogueEntry(name: "Uzmobile", bundleId: "com.cr204.Uztelecom", scheme: nil, category: "utility"),
+        AppCatalogueEntry(name: "MyGov", bundleId: "uz.uzinfocom.mygov", scheme: nil, category: "utility"),
+        AppCatalogueEntry(name: "Express24", bundleId: "com.uznewmax.theflash", scheme: nil, category: "shopping"),
+        AppCatalogueEntry(name: "Wolt", bundleId: "com.woltapp.wolt", scheme: nil, category: "shopping"),
+        AppCatalogueEntry(name: "Zoodmall", bundleId: "com.orientswiss.b2c.kazakhstan", scheme: nil, category: "shopping"),
+        AppCatalogueEntry(name: "VK Video", bundleId: "com.vk.vkvideo", scheme: nil, category: "video"),
     ]
 
     /// The schemes to probe. MUST equal `LSApplicationQueriesSchemes` in Info.plist exactly —
@@ -101,7 +131,7 @@ enum AppCatalogue {
     /// Apple's documented ceiling on `LSApplicationQueriesSchemes`: 50 for a binary linked with the
     /// iOS 15+ SDK, **25 once linked with the iOS 27 SDK**. Overflow behaviour is undocumented and
     /// silent, so the catalogue is built against the lower number and never has to be cut later.
-    static let maximumProbeSchemes = 25
+    static let maximumProbeSchemes = 50
 
     /// Apple's documented ceiling on `ApplicationSettings.blockedApplications`:
     /// "Your app can shield up to 50 applications at once." Past it, developers report that
