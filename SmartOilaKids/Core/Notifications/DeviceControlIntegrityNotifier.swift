@@ -118,6 +118,34 @@ actor DeviceControlIntegrityNotifier {
             lastEvent: title,
             lastError: "-"
         )
+
+        // …and to the PARENT, which is who the alert is for. Everything above stays on this phone —
+        // the inbox row, a local notification the child can swipe away, and a NotificationCenter
+        // post nothing observes — so a child who switched Screen Time off was the only person told.
+        // `POST /device/apps/removal-attempt` is the contract's "removal/tamper attempt" route: its
+        // `packageName` is documented as "usually this app itself" and its `applicationName` "goes
+        // straight into the parent's notification copy", and the parent feed has a `Tamper` type
+        // for it. Revoking this app's Screen Time access is precisely a tamper with this app, so the
+        // report names the app itself. The coordinator persists and retries it (and is purged on
+        // unpair, so it can never reach the next family). Last, so the network cannot delay the
+        // on-phone record above.
+        let report = Self.screenTimeRevocationReport()
+        await removalAttemptCoordinator.enqueue(
+            dsn: normalizedDSN,
+            packageName: report.packageName,
+            appName: report.appName
+        )
+    }
+
+    /// What the parent's tamper alert names when Screen Time is switched off: this app, by its
+    /// bundle identifier and its home-screen name. The fallbacks only matter to a host with no
+    /// Info.plist values (never the shipped app), and keep the report from being dropped as empty.
+    static func screenTimeRevocationReport(bundle: Bundle = .main) -> (packageName: String, appName: String) {
+        let packageName = bundle.bundleIdentifier?.trimmedNonEmpty ?? "uz.smartoila.kids"
+        let appName = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)?.trimmedNonEmpty
+            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)?.trimmedNonEmpty
+            ?? "Bolajon360"
+        return (packageName, appName)
     }
 
     func recordUnenforceableRemoteLocks(

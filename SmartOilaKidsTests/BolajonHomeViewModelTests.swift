@@ -326,6 +326,43 @@ final class ChatReadReceiptPredicateTests: XCTestCase {
             "and it is deterministic — the two formatters are separate immutable instances on purpose"
         )
     }
+
+    // MARK: The 4000 cap, counted the server's way
+
+    /// `String.count` counts graphemes; the server counts UTF-16 units at most. Emoji are where the
+    /// two part company: 👍 is one character and two units.
+    func testTheCapCountsUTF16UnitsNotCharacters() throws {
+        let limit = BolajonChatViewModel.maxMessageLength
+        XCTAssertNil(BolajonChatViewModel.clampedToServerLimit(String(repeating: "a", count: limit)),
+                     "exactly at the limit is untouched")
+        XCTAssertNil(BolajonChatViewModel.clampedToServerLimit(String(repeating: "👍", count: limit / 2)))
+
+        // 3000 thumbs are 3000 characters — under the old grapheme cap — but 6000 units.
+        let thumbs = String(repeating: "👍", count: 3_000)
+        let clamped = try XCTUnwrap(BolajonChatViewModel.clampedToServerLimit(thumbs))
+        XCTAssertEqual(clamped.utf16.count, limit)
+        XCTAssertEqual(clamped.count, limit / 2)
+    }
+
+    func testTheCutNeverSplitsACharacter() throws {
+        // One unit short of room for the last emoji: it is dropped whole, never half a surrogate pair.
+        let text = String(repeating: "a", count: 3_999) + "👍"
+        let clamped = try XCTUnwrap(BolajonChatViewModel.clampedToServerLimit(text))
+        XCTAssertEqual(clamped, String(repeating: "a", count: 3_999))
+
+        // A six-unit family/flag sequence is one character and is kept or dropped as one.
+        let flag = "🏳️‍🌈"
+        XCTAssertEqual(flag.utf16.count, 6)
+        let flagged = String(repeating: "a", count: 3_996) + flag
+        XCTAssertEqual(BolajonChatViewModel.clampedToServerLimit(flagged), String(repeating: "a", count: 3_996))
+    }
+
+    func testTheDraftIsClampedAsItIsTyped() {
+        let viewModel = BolajonChatViewModel()
+        viewModel.draft = String(repeating: "👍", count: 3_000)
+        XCTAssertEqual(viewModel.draft.utf16.count, BolajonChatViewModel.maxMessageLength)
+        XCTAssertNotNil(viewModel.errorMessage, "the child is told why the text stopped")
+    }
 }
 
 /// Backend-parity behaviours added so the iPhone reports and displays what the Android child app
@@ -429,6 +466,54 @@ final class BolajonBackendParityTests: XCTestCase {
         XCTAssertEqual(viewModel.activeTasks.map(\.id), ["t1"])
         XCTAssertEqual(viewModel.localStarTotal, 4, "a cancelled chore earns nothing")
         XCTAssertFalse(viewModel.previewTasks.contains { $0.isCancelled })
+    }
+
+    // MARK: Only `Active` is the child's to complete
+
+    /// `DeviceHomeTaskDto.status`: "Only `Active` may be completed by the child. Show the 'done'
+    /// affordance on `Active` alone — an `Expired` or `Cancelled` task is not actionable." The screens
+    /// offered it on anything that was not Completed or Cancelled.
+    func testOnlyAnActiveTaskIsActionable() {
+        XCTAssertTrue(task("a", status: "Active").isActive)
+        XCTAssertTrue(task("b", status: "active").isActive)
+        for status in ["Completed", "Cancelled", "Expired", "Archived", ""] {
+            XCTAssertFalse(task("c", status: status).isActive, status)
+        }
+    }
+
+    func testAnExpiredTaskIsNotOnHomesToDoCard() async {
+        let service = SOSServiceSpy()
+        service.fetchTasksResult = [task("t1", status: "Active"), task("t2", status: "Expired")]
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+                                             screenTimeUsage: StubScreenTimeUsage(seconds: nil))
+
+        await viewModel.load()
+
+        XCTAssertEqual(viewModel.tasks.count, 2, "the Tasks screen still gets the row")
+        XCTAssertEqual(viewModel.activeTasks.map(\.id), ["t1"])
+        XCTAssertEqual(viewModel.previewTasks.map(\.id), ["t1"])
+    }
+
+    func testHomeNeverPostsACompletionForATaskThatIsNotActive() async {
+        let service = SOSServiceSpy()
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: StubSOSTelemetry(context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)),
+                                             screenTimeUsage: StubScreenTimeUsage(seconds: nil))
+
+        for status in ["Expired", "Cancelled", "Completed"] {
+            await viewModel.complete(task("x-\(status)", status: status))
+        }
+
+        XCTAssertTrue(service.completeTaskCalls.isEmpty)
+    }
+
+    func testTheTasksScreenNeverPostsACompletionForATaskThatIsNotActive() async {
+        let service = SOSServiceSpy()
+        let viewModel = BolajonTasksViewModel(service: service)
+
+        await viewModel.complete(task("expired", status: "Expired"))
+        await viewModel.complete(task("active", status: "Active"))
+
+        XCTAssertEqual(service.completeTaskCalls, ["active"])
     }
 
     func testCancelledStatusSpellingsBothParse() {

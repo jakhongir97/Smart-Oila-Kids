@@ -1000,7 +1000,17 @@ final class DeviceControlIntegrityNotifierTests: XCTestCase {
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
         await PushInboxStore.shared.clearAll()
 
-        let notifier = DeviceControlIntegrityNotifier(userDefaults: userDefaults)
+        // Injected since build 26: a revocation now also reports to the parent, and the default
+        // `.shared` coordinator would queue that report in the host app's real defaults.
+        let removalService = DeviceApplicationRemovalAttemptReportingServiceSpy()
+        let removalCoordinator = DeviceApplicationRemovalAttemptCoordinator(
+            service: removalService,
+            userDefaults: userDefaults
+        )
+        let notifier = DeviceControlIntegrityNotifier(
+            userDefaults: userDefaults,
+            removalAttemptCoordinator: removalCoordinator
+        )
         var telemetryRecords: [DeviceControlTelemetryRecord] = []
         let token = NotificationCenter.default.addObserver(
             forName: .deviceControlTelemetryRecorded,
@@ -1026,6 +1036,24 @@ final class DeviceControlIntegrityNotifierTests: XCTestCase {
         XCTAssertEqual(telemetryRecords.first?.event, DeviceControlIntegrityEvent.screenTimeRevoked.rawValue)
         XCTAssertNil(telemetryRecords.first?.packageName)
         XCTAssertNil(telemetryRecords.first?.appName)
+
+        // The parent hears about it: ONE tamper report (the cooldown dedups the repeat), naming this
+        // app. Before build 26 the revocation never left the phone.
+        let report = DeviceControlIntegrityNotifier.screenTimeRevocationReport()
+        let reportedAttempts = await removalService.recordedCalls()
+        XCTAssertEqual(
+            reportedAttempts,
+            [DeviceApplicationRemovalAttemptEntry(dsn: "child-2", packageName: report.packageName, appName: report.appName)]
+        )
+    }
+
+    func testScreenTimeRevocationReportNamesThisApp() {
+        // The report is about THIS app — its bundle id is the `packageName` the contract documents as
+        // "usually this app itself", and the name is what the parent's notification will print.
+        let report = DeviceControlIntegrityNotifier.screenTimeRevocationReport()
+        XCTAssertEqual(report.packageName, Bundle.main.bundleIdentifier)
+        XCTAssertEqual(report.packageName, "uz.smartoila.kids")
+        XCTAssertEqual(report.appName, "Bolajon360")
     }
 
     func testRecordUnenforceableRemoteLocksUsesSingleNormalizedApplication() async {
@@ -4638,9 +4666,302 @@ final class CredentialAbsenceTests: XCTestCase {
         XCTAssertFalse(error(OilaAPIError.noCredentialCode).isCredentialAbsent)
     }
 
-    func testAnOrdinaryServerRejectionIsUnaffected() {
-        XCTAssertTrue(error("UNAUTHORIZED").requiresRePair)
+    func testARefusedTokenIsNotAGonePairing() {
+        // Flipped in build 26. The live contract: UNAUTHORIZED is "a missing, malformed, expired or
+        // foreign-signed token", and "only DEVICE_UNPAIRED means the pairing is gone". Treating it
+        // as a re-pair let a backend auth blip wipe every child's pairing.
+        XCTAssertFalse(error("UNAUTHORIZED").requiresRePair)
         XCTAssertFalse(error("UNAUTHORIZED").isCredentialAbsent)
+        XCTAssertTrue(error("UNAUTHORIZED").isCredentialRejected)
+    }
+
+    func testDeviceUnpairedIsTheServersWordThatThePairingIsGone() {
+        XCTAssertEqual(OilaAPIError.deviceUnpairedCode, "DEVICE_UNPAIRED")
+        XCTAssertTrue(error(OilaAPIError.deviceUnpairedCode).requiresRePair)
+        XCTAssertFalse(error(OilaAPIError.deviceUnpairedCode).isCredentialRejected)
+    }
+
+    func testABare401WithNoErrorCodeIsNotAGonePairing() {
+        // A proxy or gateway 401 carries no errorCode at all. It used to match `statusCode == 401`.
+        let bare = OilaAPIError(statusCode: 401, message: "m", errorCode: nil, fieldErrors: [])
+        XCTAssertFalse(bare.requiresRePair)
+        XCTAssertTrue(bare.isCredentialRejected)
+    }
+
+    func testTheLegacyRefreshRefusalStillForcesRePairing() {
+        XCTAssertTrue(error("REFRESH_INVALID").requiresRePair)
+    }
+
+    func testAnUnreadableKeychainIsNeitherAGonePairingNorARefusedToken() {
+        // NO_LOCAL_CREDENTIAL never reached a server, so it is not a server's refusal either.
+        XCTAssertFalse(error(OilaAPIError.noCredentialCode).isCredentialRejected)
+        XCTAssertFalse(error(OilaAPIError.credentialAbsentCode).isCredentialRejected)
+    }
+
+    func testOnlyAConclusiveProbeAnswerEndsThePairingAfterOneProbe() {
+        // DEVICE_UNPAIRED and CREDENTIAL_ABSENT cannot change by asking again; the legacy refresh
+        // refusal still needs the second agreeing probe.
+        XCTAssertTrue(OilaTelemetryService.probeAnswerIsConclusive(error(OilaAPIError.deviceUnpairedCode)))
+        XCTAssertTrue(OilaTelemetryService.probeAnswerIsConclusive(error(OilaAPIError.credentialAbsentCode)))
+        XCTAssertFalse(OilaTelemetryService.probeAnswerIsConclusive(error("REFRESH_INVALID")))
+    }
+}
+
+// MARK: - Which answers may end a pairing, end to end
+
+/// `OilaTelemetryService` is the only code allowed to end a pairing, and until build 26 it did so for
+/// ANY 401 after two probes — a refused token (UNAUTHORIZED), a gateway 401 with no code, and the
+/// server's real DEVICE_UNPAIRED alike. These drive the real service through its `sleeper` and
+/// `sessionInvalidationSignal` seams, so no real time passes and the host app's session is never
+/// touched.
+@MainActor
+final class TelemetryPairingLossTests: XCTestCase {
+    /// Thread-safe tally: the seams and the stub are called off the main actor.
+    private final class Tally: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func bump() { lock.lock(); count += 1; lock.unlock() }
+        var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    }
+
+    /// Every call the telemetry service makes, answered from fixed scripts.
+    private final class Stub: OilaDeviceServicing, @unchecked Sendable {
+        struct Unimplemented: Error {}
+        private let lock = NSLock()
+        /// Answers to `GET /device/lock/state`, in order; the last one repeats. Always a failure — the
+        /// tests never need a lock state, only the answer that decides the pairing.
+        private var lockAnswers: [Error]
+        private let statusError: Error?
+        private let locationError: Error?
+        private var lockCalls = 0
+        private var statusCalls = 0
+        private var batches: [[OilaLocationFix]] = []
+        private var sos: [OilaSOSContext] = []
+
+        init(lockAnswers: [Error], statusError: Error? = nil, locationError: Error? = nil) {
+            self.lockAnswers = lockAnswers
+            self.statusError = statusError
+            self.locationError = locationError
+        }
+
+        private func locked<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
+        var lockStateCalls: Int { locked { lockCalls } }
+        var statusPostCalls: Int { locked { statusCalls } }
+        var uploadedBatches: [[OilaLocationFix]] { locked { batches } }
+        var sentSOS: [OilaSOSContext] { locked { sos } }
+
+        func fetchLockState() async throws -> OilaLockState {
+            let answer: Error = locked { () -> Error in
+                lockCalls += 1
+                return lockAnswers.count > 1 ? lockAnswers.removeFirst() : lockAnswers[0]
+            }
+            throw answer
+        }
+        func postDeviceStatus(_ status: OilaDeviceStatus) async throws {
+            locked { statusCalls += 1 }
+            if let statusError { throw statusError }
+        }
+        func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {
+            locked { batches.append(fixes) }
+            if let locationError { throw locationError }
+        }
+        func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws {
+            locked {
+                sos.append(OilaSOSContext(lat: lat, lng: lng, accuracy: accuracy,
+                                          batteryPercent: batteryLevel.map { Int($0) }))
+            }
+        }
+        func pair(code: String) async throws -> OilaPairResult { throw Unimplemented() }
+        func refreshSession() async throws { throw Unimplemented() }
+        func logout() async throws {}
+        func fetchActiveTasks() async throws -> [OilaDeviceTask] { [] }
+        func fetchTasks() async throws -> [OilaDeviceTask] { [] }
+        func completeTask(id: String) async throws {}
+        func fetchTaskStarTotal() async throws -> Int? { nil }
+        func updateFCMToken(_ token: String) async throws {}
+        func reportAppUsage(items: [DeviceApplicationUsageReportItemRequest]) async throws -> DeviceApplicationUsageReportResponse { throw Unimplemented() }
+        func reportDailyUsage(days: [ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse { throw Unimplemented() }
+        func syncInstalledApps(items: [DeviceAppLockSyncEntry]) async throws {}
+        func fetchScreenTime() async throws -> OilaDeviceScreenTime? { nil }
+        func reportRemovalAttempt(packageName: String, applicationName: String) async throws {}
+        func fetchHome() async throws -> OilaDeviceHome? { nil }
+    }
+
+    private static let pendingFixesKey = "OILA_PENDING_LOCATION_FIXES"
+    private static let persistedKeys = [
+        pendingFixesKey, "OILA_PENDING_SOS", "OILA_LAST_LOCK_STATE", "OILA_LAST_SUCCESSFUL_CONTACT",
+        OilaTelemetryService.lockConfirmedAtKey, OilaTelemetryService.lockEndsAtKey,
+        OilaTelemetryService.lockReleasedByDeadlineKey
+    ]
+
+    override func setUp() {
+        super.setUp()
+        for key in Self.persistedKeys { UserDefaults.standard.removeObject(forKey: key) }
+    }
+
+    override func tearDown() {
+        for key in Self.persistedKeys { UserDefaults.standard.removeObject(forKey: key) }
+        super.tearDown()
+    }
+
+    private func apiError(_ status: Int, _ code: String?) -> OilaAPIError {
+        OilaAPIError(statusCode: status, message: "m", errorCode: code, fieldErrors: [])
+    }
+
+    /// A running service whose probes cost no time and whose teardown signal is only counted.
+    private func start(_ stub: Stub) -> (service: OilaTelemetryService, probes: Tally, invalidations: Tally) {
+        let service = OilaTelemetryService(service: stub)
+        let probes = Tally()
+        let invalidations = Tally()
+        service.sleeper = { _ in probes.bump() }
+        service.sessionInvalidationSignal = { invalidations.bump() }
+        service.start()
+        return (service, probes, invalidations)
+    }
+
+    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return condition()
+    }
+
+    private func persistedFixes() -> [OilaLocationFix] {
+        guard let data = UserDefaults.standard.data(forKey: Self.pendingFixesKey) else { return [] }
+        return (try? JSONDecoder().decode([OilaLocationFix].self, from: data)) ?? []
+    }
+
+    // MARK: 401s
+
+    func testARefusedTokenNeverEndsThePairing() async {
+        for code in ["UNAUTHORIZED", nil] as [String?] {
+            let refused = apiError(401, code)
+            let stub = Stub(lockAnswers: [refused], statusError: refused, locationError: refused)
+            let (service, probes, invalidations) = start(stub)
+            defer { service.stop() }
+
+            let answered = await waitUntil { stub.lockStateCalls >= 1 && stub.statusPostCalls >= 1 }
+            XCTAssertTrue(answered, "the launch poll and status post both went out (code: \(code ?? "none"))")
+            // The sleeper returns at once, so a confirmation that had (wrongly) started would long
+            // since have finished.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+
+            XCTAssertEqual(invalidations.value, 0, "a refused token is not a gone pairing (code: \(code ?? "none"))")
+            XCTAssertEqual(probes.value, 0, "it must not even start the confirmation (code: \(code ?? "none"))")
+            XCTAssertEqual(stub.lockStateCalls, 1, "no probe was sent (code: \(code ?? "none"))")
+            XCTAssertTrue(service.isRunning)
+        }
+    }
+
+    func testDeviceUnpairedEndsThePairingAfterOneProbe() async {
+        let stub = Stub(lockAnswers: [apiError(401, OilaAPIError.deviceUnpairedCode)])
+        let (service, probes, invalidations) = start(stub)
+        defer { service.stop() }
+
+        let ended = await waitUntil { invalidations.value == 1 }
+
+        XCTAssertTrue(ended, "DEVICE_UNPAIRED, confirmed, ends the pairing")
+        XCTAssertEqual(probes.value, 1, "conclusive: ONE probe, not the two a refresh refusal needs")
+        XCTAssertEqual(stub.lockStateCalls, 2, "the poll that heard it, then the one probe")
+        XCTAssertFalse(service.isRunning, "the pairing's telemetry stops with it")
+    }
+
+    func testAProbeAnsweringWithARefusedTokenKeepsThePairing() async {
+        // The poll heard DEVICE_UNPAIRED, the probe heard UNAUTHORIZED: not a confirmation.
+        let stub = Stub(lockAnswers: [apiError(401, OilaAPIError.deviceUnpairedCode), apiError(401, "UNAUTHORIZED")])
+        let (service, probes, invalidations) = start(stub)
+        defer { service.stop() }
+
+        let probed = await waitUntil { stub.lockStateCalls >= 2 }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(probed)
+        XCTAssertEqual(probes.value, 1)
+        XCTAssertEqual(invalidations.value, 0)
+        XCTAssertTrue(service.isRunning)
+    }
+
+    // MARK: Location batches
+
+    private let seeded = [
+        OilaLocationFix(lat: 41.3111, lng: 69.2406, accuracy: 12, ts: Date(timeIntervalSince1970: 1_800_000_000)),
+        OilaLocationFix(lat: 41.3120, lng: 69.2419, accuracy: 9, ts: Date(timeIntervalSince1970: 1_800_000_060))
+    ]
+
+    private func seedPendingFixes() throws {
+        UserDefaults.standard.set(try JSONEncoder().encode(seeded), forKey: Self.pendingFixesKey)
+    }
+
+    private func batchesCarryingSeeded(_ stub: Stub) -> Int {
+        let seededTimes = Set(seeded.map(\.ts))
+        return stub.uploadedBatches.filter { batch in batch.contains { seededTimes.contains($0.ts) } }.count
+    }
+
+    func testABatchTheServerRejectsForGoodIsDroppedNotRequeued() async throws {
+        try seedPendingFixes()
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)],
+                        locationError: apiError(400, "VALIDATION_FAILED"))
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        service.flushNow()
+
+        let sent = await waitUntil { self.batchesCarryingSeeded(stub) >= 1 }
+        let dropped = await waitUntil {
+            !self.persistedFixes().contains { fix in self.seeded.contains { $0.ts == fix.ts } }
+        }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(sent)
+        XCTAssertTrue(dropped, "\"the whole batch is rejected\": resending the same body cannot succeed")
+        XCTAssertEqual(batchesCarryingSeeded(stub), 1, "and it is never sent again")
+    }
+
+    func testARefusedTokenKeepsTheQueuedRoute() async throws {
+        try seedPendingFixes()
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)],
+                        locationError: apiError(401, "UNAUTHORIZED"))
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        service.flushNow()
+
+        let sent = await waitUntil { self.batchesCarryingSeeded(stub) >= 1 }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertTrue(sent)
+        let kept = Set(persistedFixes().map(\.ts))
+        XCTAssertTrue(Set(seeded.map(\.ts)).isSubset(of: kept), "a 401 keeps the child's route queued")
+    }
+
+    func testOnlyAValidationRejectionIsPermanent() {
+        XCTAssertTrue(OilaTelemetryService.locationBatchIsPermanentlyRejected(apiError(400, "VALIDATION_FAILED")))
+        XCTAssertTrue(OilaTelemetryService.locationBatchIsPermanentlyRejected(apiError(422, nil)))
+        for status in [401, 403, 404, 408, 409, 425, 429, 500, 502, 503] {
+            XCTAssertFalse(OilaTelemetryService.locationBatchIsPermanentlyRejected(apiError(status, nil)), "\(status)")
+        }
+        XCTAssertFalse(OilaTelemetryService.locationBatchIsPermanentlyRejected(URLError(.notConnectedToInternet)))
+    }
+
+    // MARK: SOS outbox
+
+    func testAQueuedSOSWhosePositionHasGoneStaleIsSentWithoutIt() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+
+        service.enqueueUndeliveredSOS(OilaSOSContext(
+            lat: 41.31, lng: 69.24, accuracy: 8, batteryPercent: 40,
+            locationAt: Date().addingTimeInterval(-(OilaTelemetryService.sosLocationMaxAge + 30))
+        ))
+
+        let sent = await waitUntil { !stub.sentSOS.isEmpty }
+        XCTAssertTrue(sent, "the alert still goes out")
+        let delivered = stub.sentSOS.first
+        XCTAssertNil(delivered?.lat)
+        XCTAssertNil(delivered?.lng)
+        XCTAssertNil(delivered?.accuracy)
+        XCTAssertEqual(delivered?.batteryPercent, 40, "with everything that is still true")
     }
 }
 
@@ -4686,6 +5007,63 @@ final class SOSLocationFreshnessTests: XCTestCase {
 
     func testNoFixAtAllIsHandled() {
         XCTAssertNil(OilaTelemetryService.sosUsableLocation(nil, now: now))
+    }
+
+    // MARK: The same bound at replay
+
+    /// The press-time bound only held at the press. The outbox replays the context for up to six
+    /// hours, and with no timestamp on `TriggerSosDto` the parent reads the pin as "where they are now".
+    private func queued(fixAge: TimeInterval?, battery: Int? = 55) -> OilaPendingSOS {
+        OilaPendingSOS(
+            context: OilaSOSContext(lat: 41.31, lng: 69.24, accuracy: 12, batteryPercent: battery,
+                                    locationAt: fixAge.map { now.addingTimeInterval(-$0) }),
+            queuedAt: now.addingTimeInterval(-(fixAge ?? 0))
+        )
+    }
+
+    func testAReplayInsideTheBoundCarriesItsPosition() {
+        let context = OilaTelemetryService.sosReplayContext(queued(fixAge: 30), now: now)
+        XCTAssertEqual(context.lat, 41.31)
+        XCTAssertEqual(context.lng, 69.24)
+        XCTAssertEqual(context.accuracy, 12)
+    }
+
+    func testAReplayAtTheBoundStillCarriesItsPosition() {
+        let context = OilaTelemetryService.sosReplayContext(
+            queued(fixAge: OilaTelemetryService.sosLocationMaxAge), now: now)
+        XCTAssertNotNil(context.lat)
+    }
+
+    func testAReplayPastTheBoundTravelsWithoutAPositionButKeepsTheBattery() {
+        let context = OilaTelemetryService.sosReplayContext(
+            queued(fixAge: OilaTelemetryService.sosLocationMaxAge + 1), now: now)
+        XCTAssertNil(context.lat)
+        XCTAssertNil(context.lng)
+        XCTAssertNil(context.accuracy)
+        XCTAssertNil(context.locationAt)
+        XCTAssertEqual(context.batteryPercent, 55, "the alert itself, and what is still true, still go")
+    }
+
+    func testAnEntryQueuedByAnOlderBuildCannotProveItsFixIsFresh() {
+        // Persisted before `locationAt` existed: the age is unknown, so the position is not sent.
+        let legacy = OilaPendingSOS(
+            context: OilaSOSContext(lat: 41.31, lng: 69.24, accuracy: 12, batteryPercent: 80),
+            queuedAt: now
+        )
+        XCTAssertNil(OilaTelemetryService.sosReplayContext(legacy, now: now).lat)
+    }
+
+    func testAnOlderBuildsPersistedOutboxStillDecodes() throws {
+        // The outbox is JSON in UserDefaults; a new stored property must not drop what is queued.
+        let legacyJSON = #"[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","context":{"lat":1,"lng":2,"accuracy":3,"batteryPercent":4},"queuedAt":0}]"#
+        let decoded = try JSONDecoder().decode([OilaPendingSOS].self, from: Data(legacyJSON.utf8))
+        XCTAssertEqual(decoded.first?.context.lat, 1)
+        XCTAssertNil(decoded.first?.context.locationAt)
+    }
+
+    func testAReplayWithNoPositionIsLeftAlone() {
+        let none = OilaPendingSOS(context: OilaSOSContext(batteryPercent: 20), queuedAt: now)
+        XCTAssertEqual(OilaTelemetryService.sosReplayContext(none, now: now), none.context)
     }
 
     func testAFixTimestampedInTheFutureIsAlsoRefused() {

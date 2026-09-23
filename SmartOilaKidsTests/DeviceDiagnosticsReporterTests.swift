@@ -21,7 +21,8 @@ final class DeviceDiagnosticsReporterTests: XCTestCase {
         microphone: AVAudioSession.RecordPermission = .granted,
         camera: AVAuthorizationStatus = .authorized,
         backgroundRefresh: UIBackgroundRefreshStatus = .available,
-        lowPowerMode: Bool = false
+        lowPowerMode: Bool = false,
+        usageAccess: ScreenTimePermissionStatus = .granted
     ) -> [String: String] {
         DeviceDiagnosticsReporter.map(
             location: location,
@@ -30,7 +31,8 @@ final class DeviceDiagnosticsReporterTests: XCTestCase {
             microphone: microphone,
             camera: camera,
             backgroundRefresh: backgroundRefresh,
-            lowPowerMode: lowPowerMode
+            lowPowerMode: lowPowerMode,
+            usageAccess: usageAccess
         )
     }
 
@@ -51,20 +53,52 @@ final class DeviceDiagnosticsReporterTests: XCTestCase {
     func testEveryEmittedValueIsOneOfTheFourTheSchemaAccepts() {
         let allowed: Set<String> = ["granted", "denied", "not_determined", "unavailable"]
         for status in [CLAuthorizationStatus.authorizedAlways, .authorizedWhenInUse, .denied, .restricted, .notDetermined] {
-            for (key, value) in map(location: status) {
-                XCTAssertTrue(allowed.contains(value), "\(key) = \(value)")
+            for usage in [ScreenTimePermissionStatus.granted, .denied, .notDetermined, .unavailable] {
+                for (key, value) in map(location: status, usageAccess: usage) {
+                    XCTAssertTrue(allowed.contains(value), "\(key) = \(value)")
+                }
             }
         }
+    }
+
+    func testEveryEmittedKeyIsOneTheLiveSpecLists() {
+        // `PostDeviceStatusDto.diagnostics` names its known keys (ingestion.json, 2026-09-24). Pinned
+        // here as well as in `emittableKeys`, so widening the allow-list alone cannot pass.
+        let liveKeys: Set<String> = [
+            "location", "locationBackground", "locationServices", "batteryOptimization",
+            "backgroundRefresh", "usageAccess", "accessibility", "overlay", "notifications",
+            "microphone", "camera", "autoStart", "lowPowerMode"
+        ]
+        XCTAssertTrue(DeviceDiagnosticsReporter.emittableKeys.isSubset(of: liveKeys))
+        XCTAssertTrue(Set(map().keys).isSubset(of: liveKeys))
     }
 
     func testAndroidOnlyConceptsAreOmittedRatherThanReportedAsUnavailable() {
         // The contract reads a MISSING key as "never reported" and says it must not be rendered as
         // a fault. Sending `unavailable` for a concept iOS does not have would instead put a
-        // permanent dead row on the parent's screen.
+        // permanent dead row on the parent's screen. (`usageAccess` left this list in build 26: the
+        // Screen Time authorization is iOS's real equivalent.)
         let keys = Set(map().keys)
-        for android in ["batteryOptimization", "usageAccess", "accessibility", "overlay", "autoStart"] {
+        for android in ["batteryOptimization", "accessibility", "overlay", "autoStart"] {
             XCTAssertFalse(keys.contains(android), "\(android) is an Android concept and must be omitted")
         }
+    }
+
+    // MARK: - Screen Time, reported as `usageAccess`
+
+    func testScreenTimeAuthorizationIsReportedAsUsageAccess() {
+        // What the parent needs to know about app blocking and usage: can this phone do it at all.
+        XCTAssertEqual(map(usageAccess: .granted)["usageAccess"], "granted")
+        XCTAssertEqual(map(usageAccess: .denied)["usageAccess"], "denied",
+                       "a child who switched Screen Time off shows up on every status post from then on")
+        XCTAssertEqual(map(usageAccess: .notDetermined)["usageAccess"], "not_determined")
+        XCTAssertEqual(map(usageAccess: .unavailable)["usageAccess"], "unavailable",
+                       "restricted / unsupported is not something the child can change")
+    }
+
+    func testUsageAccessDoesNotDisturbTheOtherKeys() {
+        XCTAssertEqual(map(usageAccess: .denied)["lowPowerMode"], "granted")
+        XCTAssertEqual(map(usageAccess: .denied)["location"], "granted")
     }
 
     // MARK: - Location, the pair that must travel together
@@ -151,7 +185,7 @@ final class DeviceDiagnosticsReporterTests: XCTestCase {
 
     func testAHealthyHandsetReportsEveryKeyGranted() {
         let result = map()
-        XCTAssertEqual(result.count, 8)
+        XCTAssertEqual(result.count, 9)
         XCTAssertTrue(result.values.allSatisfy { $0 == "granted" }, "\(result)")
     }
 }

@@ -414,7 +414,7 @@ final class StatusDiagnosticsSafetyTests: XCTestCase {
             [
                 "location", "locationBackground", "locationServices",
                 "notifications", "microphone", "camera",
-                "backgroundRefresh", "lowPowerMode"
+                "backgroundRefresh", "lowPowerMode", "usageAccess"
             ]
         )
     }
@@ -423,7 +423,8 @@ final class StatusDiagnosticsSafetyTests: XCTestCase {
     /// as "never reported" and forbids rendering it as a fault, so claiming `unavailable` would put
     /// a permanent dead row on the parent's screen.
     func testAndroidOnlyKeysAreNeverEmitted() {
-        for key in ["batteryOptimization", "usageAccess", "accessibility", "overlay", "autoStart"] {
+        // `usageAccess` left this list in build 26: iOS reports it from the Screen Time authorization.
+        for key in ["batteryOptimization", "accessibility", "overlay", "autoStart"] {
             XCTAssertFalse(DeviceDiagnosticsReporter.emittableKeys.contains(key), key)
         }
     }
@@ -432,8 +433,9 @@ final class StatusDiagnosticsSafetyTests: XCTestCase {
     func testEveryEmittedValueIsInTheSchemaEnum() {
         let allowed: Set<String> = ["granted", "denied", "not_determined", "unavailable"]
         let statuses: [CLAuthorizationStatus] = [.authorizedAlways, .authorizedWhenInUse, .denied, .restricted, .notDetermined]
+        let screenTime: [ScreenTimePermissionStatus] = [.granted, .denied, .notDetermined, .unavailable]
         for status in statuses {
-            for servicesEnabled in [true, false] {
+            for (servicesEnabled, usage) in zip([true, false, true, false], screenTime) {
                 let map = DeviceDiagnosticsReporter.map(
                     location: status,
                     locationServicesEnabled: servicesEnabled,
@@ -441,7 +443,8 @@ final class StatusDiagnosticsSafetyTests: XCTestCase {
                     microphone: .denied,
                     camera: .denied,
                     backgroundRefresh: .denied,
-                    lowPowerMode: true
+                    lowPowerMode: true,
+                    usageAccess: usage
                 )
                 XCTAssertTrue(map.keys.allSatisfy(DeviceDiagnosticsReporter.emittableKeys.contains), "\(status)")
                 XCTAssertTrue(map.values.allSatisfy(allowed.contains), "\(status)")

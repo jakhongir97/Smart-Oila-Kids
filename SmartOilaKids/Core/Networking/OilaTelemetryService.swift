@@ -432,13 +432,20 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private let sosMaxAge: TimeInterval = 6 * 60 * 60
 
     /// How many independent authorized probes must all report `requiresRePair` before the pairing is
-    /// destroyed. See `confirmAndInvalidate`.
+    /// destroyed — unless one of them answers conclusively (DEVICE_UNPAIRED), which ends it after
+    /// that probe. See `confirmAndInvalidate`.
     static let invalidationConfirmationsRequired = 2
     /// Randomized gap between confirmation probes, in seconds. Randomized so a real mass revocation
     /// does not produce a synchronized re-pair stampede across the fleet.
     static let invalidationProbeDelayRange = 30 ... 120
     /// Injection seam so tests can drive `confirmAndInvalidate` without real time passing.
     var sleeper: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
+    /// Injection seam for the one side effect that ends a pairing. Production posts
+    /// `.oilaSessionInvalidated`, which `RootView` answers with `SessionStore.clearSession()`; a test
+    /// counts calls instead, so asserting "this 401 never unpairs" cannot wipe the test host's session.
+    var sessionInvalidationSignal: () -> Void = {
+        NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
+    }
 
     init(service: OilaDeviceServicing = OilaDeviceClient.shared) {
         self.service = service
@@ -953,12 +960,15 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 delivered.insert(entry.id) // too stale to be useful — drop it
                 continue
             }
+            // Re-judged at every attempt: a position that was fresh at the press is not fresh an hour
+            // into an outage. See `sosReplayContext`.
+            let context = Self.sosReplayContext(entry)
             do {
                 try await service.sendSOS(
-                    lat: entry.context.lat,
-                    lng: entry.context.lng,
-                    accuracy: entry.context.accuracy,
-                    batteryLevel: entry.context.batteryPercent.map(Double.init)
+                    lat: context.lat,
+                    lng: context.lng,
+                    accuracy: context.accuracy,
+                    batteryLevel: context.batteryPercent.map(Double.init)
                 )
                 delivered.insert(entry.id)
             } catch let error as OilaAPIError where error.requiresRePair {
@@ -966,7 +976,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
                 break
             } catch {
-                break // still offline — keep the whole remaining queue for the next flush
+                // Still offline — or a 401 that is not DEVICE_UNPAIRED, which is a token problem and
+                // not a reason to give up on an emergency. Keep the whole remaining queue for the
+                // next flush.
+                break
             }
         }
 
@@ -1296,11 +1309,6 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
     }
 
-    /// A telemetry call reported `requiresRePair`. Rather than tear the pairing down on the first
-    /// 401 — a transient infra/proxy 401 would falsely unpair the device, since paired devices hold
-    /// no refresh token and `send()`'s refresh path therefore always fails — confirm with one
-    /// independent authorized probe before invalidating. Real revocation makes the probe fail too;
-    /// a transient blip does not.
     /// A request reached the server and was answered. Also clears `hasCredential` doubt: a call that
     /// got an answer necessarily carried a Bearer.
     private func recordSuccessfulContact() {
@@ -1308,6 +1316,20 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         if !hasCredential { hasCredential = true }
     }
 
+    /// A telemetry call reported `requiresRePair`: the server said DEVICE_UNPAIRED, the Keychain
+    /// said there is no token (CREDENTIAL_ABSENT), or a legacy refresh was refused (REFRESH_INVALID).
+    ///
+    /// What does NOT arrive here, since 2026-09-24: a 401 UNAUTHORIZED, or a 401 with no errorCode.
+    /// The live contract defines those as a bad TOKEN, not a gone pairing ("only DEVICE_UNPAIRED
+    /// means the pairing is gone"), and they used to run the same confirmation as a real unpair — so
+    /// a signing-key rotation or a gateway answering 401 for longer than the probes' few minutes
+    /// could wipe every child's pairing at once. Each caller's generic failure branch now takes them
+    /// like any other failed request: the lock poll counts it and backs off, SOS and location keep
+    /// their queues, the status post is dropped. `OilaDeviceClient.noteCredentialRejected` records
+    /// each one.
+    ///
+    /// Even the server's DEVICE_UNPAIRED is confirmed by an independent probe after a randomized
+    /// delay — see `confirmAndInvalidate` — rather than trusted from a single response.
     private func handleAuthorizationLoss(credentialAbsent: Bool = false) {
         if credentialAbsent { hasCredential = false }
         guard !didSignalInvalidation, !isConfirmingInvalidation else { return }
@@ -1319,7 +1341,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // the child re-link.
         guard !credentialAbsent else {
             didSignalInvalidation = true
-            NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
+            sessionInvalidationSignal()
             stop()
             return
         }
@@ -1329,15 +1351,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// Confirm a reported `requiresRePair` before destroying the pairing.
     ///
-    /// The probe used to fire milliseconds after the original 401 and invalidate on a single
-    /// confirmation. That made a backend-side blip that 401s for a few seconds — a JWT signing-key
-    /// rotation, a gateway restart mid-deploy — capable of unpairing every device in the fleet at
-    /// once, and recovery requires a parent to mint a new code. So: require
-    /// `invalidationConfirmationsRequired` independent confirmations, each preceded by a randomized
-    /// delay. Any probe that succeeds, or that fails for a non-auth reason, keeps the session.
+    /// Each probe is an authorized `GET /device/lock/state` after a randomized 30–120 s delay. The
+    /// delay is what keeps a backend blip from unpairing the fleet at once, and it de-synchronizes a
+    /// real mass revocation so it does not arrive as a re-pair stampede. Any probe that succeeds, or
+    /// that fails for any other reason (offline, 5xx, and since 2026-09-24 a 401 UNAUTHORIZED),
+    /// keeps the session.
     ///
-    /// The randomized delay also de-synchronizes the fleet, so a real mass revocation does not
-    /// arrive as a synchronized re-pair stampede.
+    /// How many probes: ONE, when the probe's own answer is conclusive — DEVICE_UNPAIRED, which the
+    /// contract defines as the pairing being gone, or CREDENTIAL_ABSENT (see
+    /// `probeAnswerIsConclusive`). A second probe after that could only repeat the server's
+    /// answer, and it cost the child another one to two minutes on a phone whose parent has
+    /// already removed it. Only REFRESH_INVALID — the legacy refresh path, which says the refresh
+    /// token was refused rather than that the pairing is gone — still needs
+    /// `invalidationConfirmationsRequired` agreeing probes. That two-probe rule is the older
+    /// defence, from when any 401 got here: a JWT signing-key rotation or a gateway restart mid-deploy
+    /// answered 401 for seconds and unpaired every device, and recovery needed a parent to mint a new
+    /// code.
     private func confirmAndInvalidate() async {
         defer { isConfirmingInvalidation = false }
         guard !didSignalInvalidation, isRunning else { return }
@@ -1353,21 +1382,31 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
             do {
                 _ = try await service.fetchLockState()
-                // Probe succeeded → the earlier 401 was transient. Keep the session.
+                // Probe succeeded → the earlier answer was transient. Keep the session.
                 return
             } catch let error as OilaAPIError where error.requiresRePair {
-                // Confirmed once more. Keep going until we have enough agreement.
+                // The server said it again. A conclusive answer ends the confirmation here; the
+                // legacy refresh code keeps going until enough probes agree.
+                if Self.probeAnswerIsConclusive(error) { break }
                 _ = attempt
             } catch {
-                // Probe failed transiently (offline / 5xx) → not a confirmed revocation.
+                // Probe failed for another reason (offline / 5xx / a rejected token) → not a
+                // confirmed loss of the pairing.
                 return
             }
         }
 
-        guard !didSignalInvalidation else { return }
+        guard !didSignalInvalidation, isRunning else { return }
         didSignalInvalidation = true
-        NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
+        sessionInvalidationSignal()
         stop()
+    }
+
+    /// Whether ONE probe answering with `error` is enough to end the pairing. Pure, so the rule is
+    /// pinned by a test: DEVICE_UNPAIRED is the server stating the pairing is gone, CREDENTIAL_ABSENT
+    /// is the Keychain stating there is no token — neither changes by asking again.
+    nonisolated static func probeAnswerIsConclusive(_ error: OilaAPIError) -> Bool {
+        error.errorCode == OilaAPIError.deviceUnpairedCode || error.isCredentialAbsent
     }
 
     private func flushLocations() async {
@@ -1401,23 +1440,34 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 lastUploadAt = Date()
                 recordSuccessfulContact()
             } catch let error as OilaAPIError where error.requiresRePair {
-                // The 401 is UNCONFIRMED here. `requiresRePair` is true for any 401, and
-                // `handleAuthorizationLoss()` deliberately refuses to believe the first one — it probes
-                // independently before destroying the pairing. Dropping the batch contradicted that
-                // caution: the app was not yet willing to say the credentials were gone, but had already
-                // thrown away the child's queued location history, which on a route with no signal is
-                // the only record of where they were. Re-queued on the same bounded rule as any other
-                // failure; if the pairing really is dead, teardown clears the queue anyway.
+                // The loss is UNCONFIRMED here: `handleAuthorizationLoss()` deliberately refuses to
+                // believe the first answer — it probes independently before destroying the pairing.
+                // Dropping the batch contradicted that caution: the app was not yet willing to say
+                // the pairing was gone, but had already thrown away the child's queued location
+                // history, which on a route with no signal is the only record of where they were.
+                // Re-queued on the same bounded rule as any other failure; if the pairing really is
+                // dead, teardown clears the queue anyway.
                 if isRunning {
                     pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
                 }
                 handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
                 break
+            } catch where Self.locationBatchIsPermanentlyRejected(error) {
+                // The server refused THIS batch for its content, and says so permanently: "The whole
+                // batch is rejected, not the bad fix" (`POST /device/location/batch`, 400). The
+                // generic branch below put it back at the head of the queue, so the next trigger sent
+                // the identical body, got the identical 400, and every fix queued behind it — the
+                // whole offline route — waited forever. Dropped, logged, and the drain carries on
+                // with the next slice, which a single malformed fix does not poison.
+                Self.locationLog.error(
+                    "location_batch_rejected status=\((error as? OilaAPIError)?.statusCode ?? -1, privacy: .public) dropped=\(batch.count, privacy: .public)"
+                )
             } catch {
                 // Re-queue on failure (bounded) so fixes survive transient offline periods —
                 // but never resurrect a queue the session already tore down. Stop at the first
                 // failed slice: the rest of the queue is older than nothing and the next trigger
-                // will retry it in order.
+                // will retry it in order. A 401 that is not DEVICE_UNPAIRED lands here too, and
+                // keeps its fixes: a refused token is not a verdict on the route the child took.
                 guard isRunning else { return }
                 pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
                 break
@@ -1429,6 +1479,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // Persist the (possibly re-queued) backlog so an offline route survives a process kill.
         persistPendingFixes()
     }
+
+    /// Whether `POST /device/location/batch` refused a batch for good. Pure, so the line is pinned by
+    /// a test.
+    ///
+    /// 400 is the one rejection the route documents ("VALIDATION_FAILED — empty/oversized batch,
+    /// out-of-range coordinates, or a `ts` that is not a UTC ISO-8601 instant ending in Z. The whole
+    /// batch is rejected"), and 422 is the same verdict in another framework's spelling. Resending the
+    /// identical body cannot change either. Everything else keeps the batch: 401 is an auth question
+    /// (`requiresRePair` or a refused token), 403/404/408/409/425/429 and 5xx can all be different
+    /// next time, and a transport error means the request may never have arrived.
+    nonisolated static func locationBatchIsPermanentlyRejected(_ error: Error) -> Bool {
+        guard let api = error as? OilaAPIError else { return false }
+        return api.statusCode == 400 || api.statusCode == 422
+    }
+
+    nonisolated static let locationLog = Logger(subsystem: "uz.smartoila.kids", category: "location")
 
     /// Maps an `NWPath` onto the `networkType` values `POST /device/status` accepts.
     ///
@@ -1555,6 +1621,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private func currentDiagnostics() async -> [String: String] {
         let notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         let locationServices = await DeviceDiagnosticsReporter.readLocationServicesEnabled()
+        // Re-read, not the cached value: this post is the one thing that runs every few minutes with
+        // no UI at all, so it is also what notices a Screen Time switch-off on a phone nobody is
+        // looking at — and the transition it detects is what files the parent's tamper alert.
+        let screenTime = ScreenTimeAuthorizationManager.shared
+        screenTime.refreshStatus()
         return DeviceDiagnosticsReporter.map(
             location: locationManager.authorizationStatus,
             locationServicesEnabled: locationServices,
@@ -1562,7 +1633,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             microphone: AVAudioSession.sharedInstance().recordPermission,
             camera: AVCaptureDevice.authorizationStatus(for: .video),
             backgroundRefresh: UIApplication.shared.backgroundRefreshStatus,
-            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            usageAccess: screenTime.status
         )
     }
 
@@ -2166,6 +2238,11 @@ struct OilaSOSContext: Codable, Equatable {
     var lng: Double?
     var accuracy: Double?
     var batteryPercent: Int?
+    /// When the fix in `lat`/`lng` was taken (`CLLocation.timestamp`). Never sent — `TriggerSosDto`
+    /// has no timestamp — it is what lets a REPLAYED alert know how old its position has become (see
+    /// `OilaTelemetryService.sosReplayContext`). Optional and defaulted, so an outbox persisted by an
+    /// older build still decodes, and reads as "age unknown".
+    var locationAt: Date? = nil
 }
 
 /// One undelivered panic alert, persisted so it survives a process kill. `queuedAt` is the moment
@@ -2226,8 +2303,33 @@ extension OilaTelemetryService: SOSTelemetryProviding {
             lat: location?.coordinate.latitude,
             lng: location?.coordinate.longitude,
             accuracy: location?.horizontalAccuracy,
-            batteryPercent: batteryPercent
+            batteryPercent: batteryPercent,
+            locationAt: location?.timestamp
         )
+    }
+
+    /// The context a QUEUED SOS is sent with: the one captured at the press, minus its position once
+    /// that position is older than `sosLocationMaxAge`.
+    ///
+    /// The press-time rule above only bounds the fix at the moment of the press. The outbox then
+    /// replays that same context for up to `sosMaxAge` (six hours), and `TriggerSosDto` has no
+    /// timestamp, so the parent was shown the pin as where their child is NOW — possibly hours after
+    /// the child left it. The same freshness bound now holds at every send: past it, lat/lng/accuracy
+    /// travel as absent and the alert still goes out with its battery reading. An entry with no
+    /// `locationAt` (queued by an older build) cannot show its fix is fresh, so it is treated as
+    /// stale. Pure, so the rule is testable without an outbox or a clock.
+    nonisolated static func sosReplayContext(_ entry: OilaPendingSOS, now: Date = Date()) -> OilaSOSContext {
+        var context = entry.context
+        guard context.lat != nil || context.lng != nil || context.accuracy != nil else { return context }
+        if let locationAt = context.locationAt,
+           abs(now.timeIntervalSince(locationAt)) <= sosLocationMaxAge {
+            return context
+        }
+        context.lat = nil
+        context.lng = nil
+        context.accuracy = nil
+        context.locationAt = nil
+        return context
     }
 
     /// The fix an SOS may carry, or nil. Pure, so the age and validity rules are testable.

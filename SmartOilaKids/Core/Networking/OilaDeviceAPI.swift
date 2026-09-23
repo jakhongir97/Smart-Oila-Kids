@@ -1,4 +1,5 @@
 import Foundation
+import os
 import UIKit
 
 // oila360 device API client (Bolajon360 redesign).
@@ -39,20 +40,38 @@ struct OilaAPIError: LocalizedError {
     /// deleted, handset swapped). Distinct from `UNAUTHORIZED`, which is a bad token.
     static let deviceUnpairedCode = "DEVICE_UNPAIRED"
 
-    /// The device credential is no longer valid server-side — the caller should force re-pairing.
+    /// The pairing is gone — the caller should force re-pairing.
     ///
-    /// `NO_LOCAL_CREDENTIAL` is excluded on purpose. Requests used to be sent WITHOUT an
-    /// Authorization header whenever the Keychain read returned nil, so the server answered 401 and
-    /// "we cannot read our own token" became indistinguishable from "the parent unpaired this
-    /// device". The confirmation probe then re-read the same unreadable Keychain, got the same 401,
-    /// and self-confirmed the revocation -- destroying a perfectly valid pairing.
+    /// Decided by `errorCode` ALONE, because that is what the live contract says to switch on (every
+    /// device 401 in api.json / ingestion.json, 2026-09-24): `DEVICE_UNPAIRED` is "a valid device
+    /// token whose pairing is gone", `UNAUTHORIZED` is "a missing, malformed, expired or
+    /// foreign-signed token", and "only DEVICE_UNPAIRED means the pairing is gone". This used to be
+    /// true for UNAUTHORIZED and for any bare 401 as well, so a gateway or signing-key hiccup that
+    /// outlasted the few minutes of confirmation probes could wipe the child's pairing (Keychain
+    /// token, DSN, per-child data) — and only a parent minting a new code could undo it.
     ///
-    /// `CREDENTIAL_ABSENT` is the half of that nil the exclusion was never meant to cover: the
-    /// Keychain did answer, and it said the item is not here.
+    /// The three codes that do mean it:
+    /// - `DEVICE_UNPAIRED` — the server says so.
+    /// - `CREDENTIAL_ABSENT` — the app's own: the Keychain answered definitively that there is no
+    ///   token, so waiting cannot produce one.
+    /// - `REFRESH_INVALID` — legacy installs that still hold a refresh token, whose refresh was
+    ///   refused.
+    ///
+    /// `NO_LOCAL_CREDENTIAL` stays out, as it always has: it is "the Keychain cannot be read right
+    /// now" (locked before first unlock). It once sent requests with no Authorization header, the
+    /// 401 that came back looked like a revocation, and the probe self-confirmed it.
     var requiresRePair: Bool {
-        if errorCode == Self.credentialAbsentCode { return true }
-        guard errorCode != Self.noCredentialCode else { return false }
-        return errorCode == "REFRESH_INVALID" || errorCode == "UNAUTHORIZED" || statusCode == 401
+        switch errorCode {
+        case Self.deviceUnpairedCode, Self.credentialAbsentCode, "REFRESH_INVALID": return true
+        default: return false
+        }
+    }
+
+    /// A server 401 that does NOT say the pairing is gone — UNAUTHORIZED, or no errorCode at all.
+    /// Never tears anything down: it is recorded (see `OilaDeviceClient.noteCredentialRejected`),
+    /// and the telemetry polls treat it like any other failed request and back off.
+    var isCredentialRejected: Bool {
+        statusCode == 401 && !requiresRePair && !holdsNoCredential
     }
 
     /// A conclusive "there is no credential on this device". Probing cannot change the answer, so the
@@ -181,6 +200,14 @@ struct OilaDeviceTask: Identifiable {
     let completedAt: Date?
 
     var isCompleted: Bool { status.lowercased() == "completed" }
+    /// The only status the child may complete, so the only one that gets a "done" button.
+    ///
+    /// The live `DeviceHomeTaskDto.status` says so in as many words: "Only `Active` may be completed
+    /// by the child. Show the 'done' affordance on `Active` alone — an `Expired` or `Cancelled` task
+    /// is not actionable." The screens used to offer it on anything that was not Completed or
+    /// Cancelled, which put a live button on an `Expired` task (a status the enum does not even
+    /// list yet, but the prose does) and on any status a newer backend adds.
+    var isActive: Bool { status.lowercased() == "active" }
     /// The parent called this chore off. It is shown, struck through, rather than hidden: a task
     /// that silently disappears reads to a child as one they failed to do.
     var isCancelled: Bool {
@@ -898,9 +925,15 @@ final class OilaDeviceClient: OilaDeviceServicing {
         return (try await fetchStatus(nil)).filter { seen.insert($0.id).inserted }
     }
 
-    /// `GET /device/tasks` pagination: the spec marks `page`/`limit`/`sortOrder` as REQUIRED
-    /// (limit max 100), so every request sends them. Pages are walked until a short page
-    /// signals the end, hard-capped so a misbehaving backend can't loop us forever.
+    /// `GET /device/tasks` pagination. The live spec (captured 2026-08-13 and again 2026-09-24)
+    /// declares only the optional `status` filter on this route; `page`/`limit`/`sortOrder` appear
+    /// nowhere in it, even though its summary says "paginated". An older comment here claimed the spec
+    /// marked them REQUIRED — it does not. They are still sent, because they are the query this
+    /// client has always sent and the route has been answering; dropping them would hand page size
+    /// and order to server defaults nobody has written down. The spec under-documents the route, so
+    /// confirm with the backend before relying on either reading. Pages are walked until a short
+    /// page (or the server's own `totalPages`) signals the end, hard-capped so a misbehaving backend
+    /// can't loop us forever.
     static let tasksPageLimit = 100
     static let tasksMaxPages = 10
 
@@ -1558,6 +1591,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
         if http.statusCode == 401, authorized {
             let serverError = Self.error(from: json, statusCode: http.statusCode)
             guard allowRefresh, secureTokens.refreshToken()?.trimmedNonEmpty != nil else {
+                Self.noteCredentialRejected(serverError, path: path)
                 throw serverError
             }
             do {
@@ -1568,6 +1602,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
             } catch {
                 // The refresh failed on its own terms; the caller still needs to know why the
                 // ORIGINAL request was rejected, so the server's 401 wins.
+                Self.noteCredentialRejected(serverError, path: path)
                 throw serverError
             }
             return try await send(
@@ -1580,6 +1615,37 @@ final class OilaDeviceClient: OilaDeviceServicing {
 
         throw Self.error(from: json, statusCode: http.statusCode)
     }
+
+    /// The one place a refused-but-not-unpaired 401 (UNAUTHORIZED, or no errorCode) leaves a trace.
+    ///
+    /// Since 2026-09-24 such a 401 no longer tears the pairing down (see `requiresRePair`), which
+    /// makes it the kind of failure that could otherwise be invisible: the lock poll backs off, the
+    /// status post is dropped, location re-queues, and nothing says why the phone went quiet. So it
+    /// is written to the unified log on every occurrence and to the lifecycle timeline the
+    /// diagnostics screen renders — there only when the code or route changes, or ten minutes after
+    /// the last entry, because a backed-off poll would otherwise bury the timeline in one line.
+    /// Recorded HERE rather than at each caller so the lock poll, the screens and the telemetry
+    /// flushes are all covered by one rule.
+    static func noteCredentialRejected(_ error: OilaAPIError, path: String) {
+        guard error.isCredentialRejected else { return }
+        let code = error.errorCode ?? "none"
+        authLog.error("device_credential_rejected code=\(code, privacy: .public) path=\(path, privacy: .public)")
+        Task { @MainActor in
+            let signature = "\(code) \(path)"
+            let now = Date()
+            if let last = lastCredentialRejectionNote,
+               last.signature == signature,
+               now.timeIntervalSince(last.at) < credentialRejectionNoteGap {
+                return
+            }
+            lastCredentialRejectionNote = (signature, now)
+            RuntimeDiagnosticsCenter.shared.updateLifecycle(lastEvent: "device_credential_rejected \(signature)")
+        }
+    }
+
+    private static let authLog = Logger(subsystem: "uz.smartoila.kids", category: "auth")
+    private static let credentialRejectionNoteGap: TimeInterval = 600
+    @MainActor private static var lastCredentialRejectionNote: (signature: String, at: Date)?
 
     /// At most three attempts per idempotent request, backing off 0.4 s then 0.8 s.
     private static let idempotentRetryAttempts = 3
