@@ -625,6 +625,73 @@ final class ScreenTimeRestrictedAppsStoreTests: XCTestCase {
         XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 300])
     }
 
+    /// The same move in two steps: the old icon loses the name FIRST, then another icon is given
+    /// it. The old icon's tombstone still points at the name and its minutes are still under it —
+    /// they must go, or the new icon reports them as its own (and its staircase starts above them),
+    /// and the old icon, named later, climbs the same minutes again: Σ labelled above the real day.
+    func testANameMovedInTwoStepsDoesNotCarryTheOldTokensFigures() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let ledger = ScreenTimeUsageLedger(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, ledger: ledger, onChange: {})
+        let first = try makeToken("AQ=="), second = try makeToken("Ag==")
+        store.updateSelection(try makeSelection([first, second]))
+        let youtube = AppCatalogue.entry(forBundleId: "com.google.ios.youtube")!
+
+        // first is really Telegram, named YouTube by mistake: its 20 minutes land under youtube.
+        store.label(first, as: youtube)
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 1200, dayKey: today())
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 600, dayKey: "2026-01-01")
+        store.removeLabel(for: first)
+        store.label(second, as: youtube)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), [:], "first's minutes are not second's")
+        XCTAssertEqual(ledger.secondsReached(dayKey: "2026-01-01"), ["com.google.ios.youtube": 600], "history stays")
+
+        // Each icon climbs its own day, once.
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 300, dayKey: today())
+        store.label(first, as: AppCatalogue.entry(forBundleId: "ph.telegra.Telegraph")!)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 300], "no youtube 1200 dragged along")
+        ledger.record(bundleId: "ph.telegra.telegraph", secondsReached: 1200, dayKey: today())
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()).values.reduce(0, +), 1500, "Σ labelled is the real day")
+    }
+
+    /// The other two ways an icon loses its name — un-picked (here through the guided step) and
+    /// reset — leave the same tombstone, so the same rule holds; the SAME icon named again keeps
+    /// its own minutes.
+    func testANameGivenToAnotherIconAfterAnUnpickOrResetStartsFromZero() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let ledger = ScreenTimeUsageLedger(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, ledger: ledger, onChange: {})
+        let first = try makeToken("AQ=="), second = try makeToken("Ag==")
+        let youtube = AppCatalogue.entry(forBundleId: "com.google.ios.youtube")!
+
+        store.updateSelection(try makeSelection([first]))
+        store.label(first, as: youtube)
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 900, dayKey: today())
+        store.updateSelection(try makeSelection([]))
+        XCTAssertEqual(
+            store.labelNewlyPicked(previous: store.selection, current: try makeSelection([second]), as: youtube),
+            .labelled
+        )
+        XCTAssertEqual(catalogue.entry(for: second)?.bundleId, "com.google.ios.youtube")
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), [:], "un-picked: first's minutes went with it")
+
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 400, dayKey: today())
+        store.reset()
+        store.updateSelection(try makeSelection([first]))
+        store.label(first, as: youtube)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), [:], "reset: second's minutes are not first's")
+
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 700, dayKey: today())
+        store.label(first, as: youtube)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 700], "naming an icon what it already is changes nothing")
+        store.reset()
+        store.updateSelection(try makeSelection([first]))
+        store.label(first, as: youtube)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 700], "the same icon named again keeps its own")
+    }
+
     /// Home's card asks for the one-tap pick exactly while nothing can count the whole phone.
     func testTheHomeSetupCardShowsOnlyWhileThePickIsMissing() {
         XCTAssertTrue(ScreenTimeSetupCard.isNeeded(featuresEnabled: true, supported: true, authorization: .granted, hasCategoryTokens: false))
