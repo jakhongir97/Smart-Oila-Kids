@@ -463,3 +463,96 @@ struct ScreenTimeAppLabelSheet: View {
             }
     }
 }
+
+// MARK: - Home: the one-time pick that lets screen time count at all
+
+/// The Home card that asks for the one-tap "All Apps & Categories" pick, shown only while the phone
+/// has none.
+///
+/// WHY IT EXISTS. iOS measures nothing without a `FamilyActivityPicker` selection — no token, no
+/// threshold, no minute (Apple's wall). Until build 26 the pick lived only behind Settings ›
+/// restricted apps, so a phone paired without opening it measured nothing, uploaded nothing, and
+/// the parent's web read "Bugungi ekran 0 daqiqa" (Ibrohim, 2026-09-23). The pick's category tokens
+/// are what the device-total rung measures (`ScreenTimeUsageTotalCategoryStore`), so this card stays
+/// until the stored selection HAS categories — which is exactly when the whole phone is counted.
+///
+/// WHY HOME, not a permissions-flow step: a phone that is already paired never sees onboarding
+/// again, and Ibrohim's phone is one of those. Home reaches both — a fresh pairing lands here right
+/// after onboarding, with the parent still holding the phone. And not a checklist row: the
+/// checklist drives the header chip's "permissions off" count, and a missing pick is not a missing
+/// permission.
+///
+/// WHAT IT ASKS: one tap, Apple's own picker, one switch, Save. No naming, no typing, no switch of
+/// ours (product rule 2026-09-21). The picker's header already says which switch.
+struct ScreenTimeSetupCard: View {
+    @ObservedObject private var store = ScreenTimeRestrictedAppsStore.shared
+    @ObservedObject private var authorization = ScreenTimeAuthorizationManager.shared
+
+    @State private var isPickerPresented = false
+    @State private var draft = FamilyActivitySelection()
+    /// The picker's answer, applied once the sheet has gone: applying it inside the sheet would
+    /// remove this card — and the `.sheet` it hosts — while the sheet is still on screen.
+    @State private var pendingSelection: FamilyActivitySelection?
+
+    /// Pure, so the rule is pinned by a test. Authorization first: without it the picker has
+    /// nothing to hand out, and the header chip already tells the child that permission is off.
+    /// Below iOS 17.4 nothing is measured whatever is picked (`ScreenTimeUsageMonitoring`).
+    static func isNeeded(
+        featuresEnabled: Bool,
+        supported: Bool,
+        authorization: ScreenTimePermissionStatus,
+        hasCategoryTokens: Bool
+    ) -> Bool {
+        featuresEnabled && supported && authorization == .granted && !hasCategoryTokens
+    }
+
+    var body: some View {
+        if Self.isNeeded(
+            featuresEnabled: AppRuntime.screenTimeFeaturesEnabled,
+            supported: ScreenTimeUsageMonitoring.isSupported,
+            authorization: authorization.status,
+            hasCategoryTokens: !store.selection.categoryTokens.isEmpty
+        ) {
+            InfoCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ZStack {
+                            Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 46, height: 46)
+                            Image(systemName: "hourglass")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(AppColors.ctaPurple)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.tr("home2.screentime_setup.title"))
+                                .font(AppTypography.bodyStrong(14))
+                                .foregroundStyle(AppColors.inkPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(L10n.tr("home2.screentime_setup.body"))
+                                .font(AppTypography.bodyText(13))
+                                .foregroundStyle(AppColors.inkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    BolajonPrimaryButton(title: L10n.tr("screentime.restricted.pick")) {
+                        draft = store.selection
+                        isPickerPresented = true
+                    }
+                }
+            }
+            .sheet(isPresented: $isPickerPresented, onDismiss: applyPendingSelection) {
+                ScreenTimeAppPickerView(
+                    purpose: .restricted,
+                    selection: $draft,
+                    onDone: { pendingSelection = $0 }
+                )
+            }
+        }
+    }
+
+    private func applyPendingSelection() {
+        guard let selection = pendingSelection else { return }
+        pendingSelection = nil
+        store.updateSelection(selection)
+    }
+}

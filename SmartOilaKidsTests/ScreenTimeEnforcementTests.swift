@@ -646,7 +646,8 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
     }
 
     /// The ledger goes out when the lane starts, once per distinct content, and what comes back is
-    /// enforced exactly like the lock poll's per-app half. Labelled apps join the app-list publish.
+    /// enforced exactly like the lock poll's per-app half. Labelled apps join the app-list publish,
+    /// and so does "other apps" — the row the device total beyond them is reported under.
     func testTheUsageLedgerIsUploadedOnceAndItsAnswerIsEnforced() async throws {
         let defaults = makeDefaults()
         let ledgerDefaults = makeDefaults()
@@ -654,6 +655,7 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let today = ScreenTimeUsageDayFormatter.dayKey(for: now)
         ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 600, dayKey: today, now: now)
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 900, dayKey: today, now: now)
 
         var uploads: [[ScreenTimeUsageReportDay]] = []
         var applied: [(Bool, [String])] = []
@@ -679,6 +681,8 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
                 uploads.append(days)
                 return DeviceApplicationUsageReportResponse(lockedPackages: ["com.google.ios.youtube"], stats: [])
             },
+            stopUsage: { _ in },
+            totalMonitoringPossible: { true },
             usageLedger: ledger,
             userDefaults: defaults,
             now: { now }
@@ -690,11 +694,14 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(uploads.count, 1, "same ledger content is not re-sent")
         XCTAssertEqual(uploads.first?.map(\.date), [today])
-        XCTAssertEqual(uploads.first?.first?.items, [.init(packageName: "com.google.ios.youtube", usedSeconds: 600)])
+        XCTAssertEqual(uploads.first?.first?.items, [
+            .init(packageName: "com.google.ios.youtube", usedSeconds: 600),
+            .init(packageName: "ios.other", usedSeconds: 300)
+        ], "the total goes out as other = 900 − 600; its own key never does")
         XCTAssertEqual(armed.first, "child-1")
         XCTAssertEqual(applied.last?.1, ["com.google.ios.youtube"], "the response's lockedPackages are enforced")
-        XCTAssertEqual(synced.first?.map(\.packageName), ["ph.telegra.telegraph", "ios.app.deadbeef"])
-        XCTAssertEqual(synced.first?.map(\.name), ["Telegram", "Hay Day"])
+        XCTAssertEqual(synced.first?.map(\.packageName), ["ph.telegra.telegraph", "ios.app.deadbeef", "ios.other"])
+        XCTAssertEqual(synced.first?.map(\.name), ["Telegram", "Hay Day", L10n.tr("screentime.other_apps.name")])
 
         ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 900, dayKey: today, now: now)
         await coordinator.uploadUsageNow(reason: "test")
@@ -705,7 +712,9 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
 
     /// `SyncAppsDto` declares `minItems: 1`, and this route shares a device with the status
     /// heartbeat — a 400 here is not a missing app list, it is a child that reads offline. So an
-    /// empty probe is not sent, and not stamped either, so the next foreground tries again.
+    /// empty probe is not sent, and not stamped either, so the next foreground tries again. Since
+    /// build 26 the list can only be empty on a phone that ALSO lacks the one-tap pick: with it,
+    /// "other apps" is always listed (`testSyncAlwaysListsOtherApps`).
     func testAnEmptyProbeIsNeitherSentNorStamped() async {
         let defaults = makeDefaults()
         var synced: [(String?, [DeviceAppLockSyncEntry])] = []
@@ -721,6 +730,8 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
             authorizationStatus: { .granted },
             canOpenScheme: { _ in false },
             syncUpdate: { dsn, entries in synced.append((dsn, entries)) },
+            labelledEntries: { [] },
+            totalMonitoringPossible: { false },
             userDefaults: defaults,
             now: { Date(timeIntervalSince1970: 1_800_000_000) }
         )
@@ -732,6 +743,157 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: ScreenTimeEnforcementCoordinator.lastCatalogueSyncKey))
 
         coordinator.stop()
+    }
+
+    // MARK: - Build 26: the device total
+
+    private func makeUsageCoordinator(
+        defaults: UserDefaults,
+        ledger: ScreenTimeUsageLedger? = nil,
+        lockState: @escaping ScreenTimeEnforcementCoordinator.LockStateAction = { .released },
+        blocked: BlockedApplicationsController? = nil,
+        synced: @escaping ([DeviceAppLockSyncEntry]) -> Void = { _ in },
+        uploaded: @escaping ([ScreenTimeUsageReportDay]) -> Void = { _ in },
+        stoppedUsage: @escaping (String) -> Void = { _ in },
+        totalMonitoringPossible: @escaping () -> Bool = { true },
+        now: Date = Date(timeIntervalSince1970: 1_800_000_000)
+    ) -> ScreenTimeEnforcementCoordinator {
+        ScreenTimeEnforcementCoordinator(
+            lockState: lockState,
+            blockedApplications: blocked ?? BlockedApplicationsController(
+                authorizationStatus: { .denied },
+                apply: { _, _, _ in },
+                tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+                userDefaults: defaults
+            ),
+            authorizationStatus: { .granted },
+            canOpenScheme: { _ in false },
+            syncUpdate: { dsn, entries in if dsn != nil { synced(entries) } },
+            labelledEntries: { [] },
+            reloadLabels: {},
+            armUsage: { _ in 1 },
+            uploadUsage: { days in
+                uploaded(days)
+                return DeviceApplicationUsageReportResponse(lockedPackages: [], stats: [])
+            },
+            stopUsage: stoppedUsage,
+            totalMonitoringPossible: totalMonitoringPossible,
+            usageLedger: ledger ?? ScreenTimeUsageLedger(userDefaults: makeDefaults()),
+            userDefaults: defaults,
+            now: { now }
+        )
+    }
+
+    /// `PUT /device/apps/sync` is a FULL replace. A phone that measures its total reports an
+    /// `ios.other` row every time, so the list must carry it every time — even when the probe finds
+    /// nothing and nothing is labelled (Ibrohim's phone), which is also what keeps the list from
+    /// ever being empty there.
+    func testSyncAlwaysListsOtherApps() async {
+        let defaults = makeDefaults()
+        var synced: [[DeviceAppLockSyncEntry]] = []
+        let coordinator = makeUsageCoordinator(defaults: defaults, synced: { synced.append($0) })
+
+        coordinator.start(dsn: "child-1")
+        await coordinator.refreshNow()
+
+        XCTAssertEqual(synced.first, [
+            DeviceAppLockSyncEntry(packageName: "ios.other", name: L10n.tr("screentime.other_apps.name"))
+        ])
+        XCTAssertNotNil(defaults.object(forKey: ScreenTimeEnforcementCoordinator.lastCatalogueSyncKey))
+        coordinator.stop()
+    }
+
+    /// The first launch of build 26 publishes the list once even though build 25 stamped it an
+    /// hour ago — otherwise the parent's list would lack "other apps" for up to a day while the
+    /// usage report already sums into it.
+    func testAnUpgradePublishesTheAppListOnceDespiteAFreshStamp() async {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertTrue(ScreenTimeEnforcementCoordinator.isCatalogueSyncDue(force: false, lastSyncedAt: now.addingTimeInterval(-3600), syncedVersion: 0, now: now))
+        XCTAssertFalse(ScreenTimeEnforcementCoordinator.isCatalogueSyncDue(force: false, lastSyncedAt: now.addingTimeInterval(-3600),
+                                                                            syncedVersion: ScreenTimeEnforcementCoordinator.catalogueSyncVersion, now: now))
+        XCTAssertTrue(ScreenTimeEnforcementCoordinator.isCatalogueSyncDue(force: true, lastSyncedAt: now, syncedVersion: ScreenTimeEnforcementCoordinator.catalogueSyncVersion, now: now))
+
+        let defaults = makeDefaults()
+        defaults.set(now.addingTimeInterval(-3600), forKey: ScreenTimeEnforcementCoordinator.lastCatalogueSyncKey)
+        var synced: [[DeviceAppLockSyncEntry]] = []
+        let coordinator = makeUsageCoordinator(defaults: defaults, synced: { synced.append($0) }, now: now)
+
+        coordinator.start(dsn: "child-1")
+        await coordinator.refreshNow()
+
+        XCTAssertEqual(synced.first?.map(\.packageName), ["ios.other"])
+        XCTAssertEqual(defaults.integer(forKey: ScreenTimeEnforcementCoordinator.catalogueSyncVersionKey), ScreenTimeEnforcementCoordinator.catalogueSyncVersion)
+        coordinator.stop()
+    }
+
+    /// Ibrohim's phone: nothing labelled, the one-tap pick made. The whole day goes out as
+    /// `ios.other`, which is what turns "Bugungi ekran 0 daqiqa" into a real number.
+    func testAUsageUploadWithOnlyATotalSendsOtherApps() async {
+        let defaults = makeDefaults()
+        let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let today = ScreenTimeUsageDayFormatter.dayKey(for: now)
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 900, dayKey: today, now: now)
+        var uploads: [[ScreenTimeUsageReportDay]] = []
+        let coordinator = makeUsageCoordinator(defaults: defaults, ledger: ledger, uploaded: { uploads.append($0) }, now: now)
+
+        coordinator.start(dsn: "child-1")
+        await coordinator.uploadUsageNow(reason: "test")
+
+        XCTAssertEqual(uploads.first, [ScreenTimeUsageReportDay(date: today, items: [.init(packageName: "ios.other", usedSeconds: 900)])])
+        coordinator.stop()
+    }
+
+    /// `ios.other` is not an app: no token stands for it. A parent who blocks or limits "other apps"
+    /// on the web must not produce a phantom "unenforceable" block on the phone.
+    func testOtherAppsIsNeverCountedUnenforceable() {
+        let defaults = makeDefaults()
+        var applied: [(Bool, [String])] = []
+        let blocked = BlockedApplicationsController(
+            authorizationStatus: { .granted },
+            apply: { locked, _, ids in applied.append((locked, ids)) },
+            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+            userDefaults: defaults
+        )
+        let coordinator = makeUsageCoordinator(
+            defaults: defaults,
+            lockState: {
+                ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: ["ios.other", "com.burbn.instagram"], limitReached: ["IOS.OTHER"])
+            },
+            blocked: blocked
+        )
+        coordinator.start(dsn: "child-1")
+        coordinator.handleLockStateDidChange()
+
+        XCTAssertEqual(applied.last?.1, ["com.burbn.instagram"])
+        XCTAssertEqual(blocked.unresolvedBundleIds, ["com.burbn.instagram"], "instagram has no token here; ios.other is never asked for")
+
+        coordinator.applyUsageReportResponse(DeviceApplicationUsageReportResponse(
+            lockedPackages: ["ios.other"],
+            stats: [DeviceApplicationUsageReportStat(packageName: "ios.other", usageDate: "2026-09-24", usedSeconds: 7200,
+                                                     dailyLimitSeconds: 3600, remainingSeconds: 0, isLimitReached: true)]
+        ))
+        XCTAssertFalse(blocked.appliedBundleIds.contains { $0.lowercased() == "ios.other" })
+        XCTAssertFalse(blocked.unresolvedBundleIds.contains { $0.lowercased() == "ios.other" })
+        XCTAssertEqual(ScreenTimeEnforcementCoordinator.enforceablePackages(["ios.other", " Ios.Other ", "video.like"]), ["video.like"])
+        coordinator.stop()
+    }
+
+    /// A pairing change retires the old family's usage activity; left running it keeps firing and
+    /// re-arming itself from the extension for a DSN this phone no longer has.
+    func testANewDSNStopsThePreviousUsageActivity() {
+        let defaults = makeDefaults()
+        var stopped: [String] = []
+        let coordinator = makeUsageCoordinator(defaults: defaults, stoppedUsage: { stopped.append($0) })
+
+        coordinator.start(dsn: "child-1")
+        XCTAssertTrue(stopped.isEmpty)
+        coordinator.start(dsn: "child-1")
+        XCTAssertTrue(stopped.isEmpty, "the same pairing re-started stops nothing")
+        coordinator.start(dsn: "child-2")
+        XCTAssertEqual(stopped, ["child-1"])
+        coordinator.stop()
+        XCTAssertEqual(stopped, ["child-1", "child-2"])
     }
 
     /// The whole point of the lane: what the parent set on the server reaches ManagedSettings,

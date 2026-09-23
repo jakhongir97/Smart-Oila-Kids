@@ -24,6 +24,13 @@ import os
 /// An app the parent cannot find in the catalogue gets a device-minted id (`ios.app.<8 hex>`) and
 /// the name the parent typed; the server treats it like any other package, so it can be blocked
 /// and measured too — it simply cannot be probed by `canOpenURL`.
+///
+/// Build 26 adds two App Group records this store keeps in step with the selection:
+///  * the selection's CATEGORY tokens (`ScreenTimeUsageTotalCategoryStore`) — what the device-total
+///    rung measures, so a phone that made the one-tap pick is counted whole without any label;
+///  * a per-token TOMBSTONE — the label a token last carried before it lost it. Naming the same
+///    icon again renames that ledger entry instead of starting a second package that climbs
+///    today's minutes a second time (audit gap 5).
 @MainActor
 final class ScreenTimeRestrictedAppsStore: ObservableObject {
     static let shared = ScreenTimeRestrictedAppsStore()
@@ -52,6 +59,7 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         self.defaults = defaults
         self.catalogue = catalogue
         self.ledger = ledger
+        self.totalCategories = ScreenTimeUsageTotalCategoryStore(userDefaults: defaults)
         self.onChange = onChange ?? {
             ScreenTimeEnforcementCoordinator.shared.restrictedAppsDidChange()
         }
@@ -89,6 +97,7 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         let removedTokens = selection.applicationTokens.subtracting(newSelection.applicationTokens)
         for entry in catalogue.entries() where removedTokens.contains(entry.token) {
             catalogue.remove(bundleId: entry.bundleId)
+            setTombstone(entry.bundleId, for: entry.token)
         }
         selection = newSelection
         persistSelection()
@@ -124,10 +133,15 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
             return
         }
         // Keep an existing custom id for this token, so renaming does not create a second package
-        // on the server.
+        // on the server — and the one it carried before its label was cleared, for the same reason
+        // (unless another icon has been given that id since).
         let bundleId: String
         if let existing = catalogue.entry(for: token), existing.bundleId.hasPrefix(Self.customBundleIdPrefix) {
             bundleId = existing.bundleId
+        } else if catalogue.entry(for: token) == nil,
+                  let buried = tombstone(for: token), buried.hasPrefix(Self.customBundleIdPrefix),
+                  !catalogue.entries().contains(where: { $0.bundleId == buried }) {
+            bundleId = buried
         } else {
             bundleId = Self.customBundleIdPrefix + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8)).lowercased()
         }
@@ -204,6 +218,7 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
     func removeLabel(for token: ApplicationToken) {
         guard let entry = catalogue.entry(for: token) else { return }
         catalogue.remove(bundleId: entry.bundleId)
+        setTombstone(entry.bundleId, for: token)
         rebuildRows()
         onChange()
     }
@@ -211,17 +226,39 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
     func reset() {
         for entry in labelledEntries {
             catalogue.remove(bundleId: entry.bundleId)
+            setTombstone(entry.bundleId, for: entry.token)
         }
         selection = FamilyActivitySelection(includeEntireCategory: true)
         defaults?.removeObject(forKey: Self.selectionKey)
+        totalCategories.clear()
         rebuildRows()
         onChange()
+    }
+
+    /// The migration `load()` performs, for a caller that must not wait for this store to exist.
+    ///
+    /// On a cold launch the enforcement coordinator arms usage monitoring BEFORE anything has
+    /// touched `shared` (the label store is first read by the catalogue sync, which runs after the
+    /// arm). A phone that made the one-tap pick before build 26 would then arm without its device
+    /// total until the next foreground — and a phone with no labels would stop monitoring outright.
+    /// So the arm mirrors the stored selection's categories first. Idempotent and cheap: one small
+    /// decode, no change when the key already matches.
+    nonisolated static func mirrorStoredCategories(
+        defaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()
+    ) {
+        guard let defaults, let data = defaults.data(forKey: selectionKey),
+              let decoded = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else { return }
+        ScreenTimeUsageTotalCategoryStore(userDefaults: defaults).save(decoded.categoryTokens)
     }
 
     // MARK: - Internals
 
     static let customBundleIdPrefix = "ios.app."
-    static let selectionKey = "SCREEN_TIME_RESTRICTED_SELECTION_V1"
+    nonisolated static let selectionKey = "SCREEN_TIME_RESTRICTED_SELECTION_V1"
+    /// Token key → the label that token last carried. Ordered oldest first and bounded, like the
+    /// catalogue it shadows.
+    static let labelTombstonesKey = "SCREEN_TIME_LABEL_TOMBSTONES_V1"
+    static let maximumTombstones = ApplicationTokenCatalogue.maximumEntries
     static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
 
     /// A stable string for a token — its encoded bytes — used only as a list identity.
@@ -233,13 +270,33 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
     private func label(_ token: ApplicationToken, bundleId: String, name: String) {
         let normalized = AppCatalogue.normalizedBundleId(bundleId)
         // The previous label on THIS token, and the previous token under THIS id, both go: a
-        // bundle id stands for exactly one token and a token for exactly one bundle id. Time
-        // already counted under the old label is the same app's time — it moves with the label,
-        // or the day would be reported twice under two package names.
-        if let previous = catalogue.entry(for: token), previous.bundleId != normalized {
-            catalogue.remove(bundleId: previous.bundleId)
-            ledger.rename(from: previous.bundleId, to: normalized)
+        // bundle id stands for exactly one token and a token for exactly one bundle id.
+        //
+        // The name MOVES here from another icon: what that icon climbed today is its time, not
+        // this one's. Left in the ledger it would be reported under this label and this token's
+        // staircase would start at its height (the next rung is armed above the ledger), so today's
+        // figure goes (audit gap 6). Earlier days stay as they were reported.
+        if catalogue.entries().contains(where: { $0.bundleId == normalized && $0.token != token }) {
+            ledger.remove(bundleId: normalized, dayKey: ScreenTimeUsageDayFormatter.dayKey(for: Date()))
         }
+        // Time already counted for THIS token is the same app's time — it moves with the label, or
+        // the day would be reported twice under two package names: from its current label (a
+        // rename), or, when that label was cleared first, from the one it last carried (a clear
+        // and a re-name used to mint a second package that climbed today again via
+        // `includesPastActivity`). Never from a name another icon holds now.
+        if let previous = catalogue.entry(for: token) {
+            if previous.bundleId != normalized {
+                catalogue.remove(bundleId: previous.bundleId)
+                ledger.rename(from: previous.bundleId, to: normalized)
+            }
+        } else if let buried = tombstone(for: token), buried != normalized,
+                  !catalogue.entries().contains(where: { $0.bundleId == buried }) {
+            ledger.rename(from: buried, to: normalized)
+        }
+        // This token carries a label again, and the name's figures are its own from now on: no
+        // other icon's tombstone may point at this name any more, or naming that icon later would
+        // drag this one's minutes away with it.
+        forgetTombstones(of: token, pointingAt: normalized)
         catalogue.merge([
             ApplicationTokenCatalogue.Entry(bundleId: normalized, displayName: name, token: token, lastSeenAt: Date())
         ])
@@ -251,10 +308,15 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
     private func load() {
         guard let defaults, let data = defaults.data(forKey: Self.selectionKey),
               let decoded = try? JSONDecoder().decode(FamilyActivitySelection.self, from: data) else {
+            // No selection, no categories: the device-total key only ever mirrors a stored pick.
+            totalCategories.clear()
             rebuildRows()
             return
         }
         selection = decoded
+        // Also the build-26 migration: a phone that picked before the device total existed holds
+        // its categories here already, and from this moment the next arm measures the whole phone.
+        totalCategories.save(decoded.categoryTokens)
         rebuildRows()
     }
 
@@ -263,6 +325,52 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         if let data = try? JSONEncoder().encode(selection) {
             defaults.set(data, forKey: Self.selectionKey)
         }
+        totalCategories.save(selection.categoryTokens)
+    }
+
+    // MARK: - Tombstones
+
+    private struct LabelTombstone: Codable {
+        let token: String
+        let bundleId: String
+    }
+
+    private func tombstone(for token: ApplicationToken) -> String? {
+        let key = Self.tokenKey(token)
+        return loadTombstones().last { $0.token == key }?.bundleId
+    }
+
+    /// The token lost its label: remember which, replacing anything older for the same token.
+    private func setTombstone(_ bundleId: String, for token: ApplicationToken) {
+        let key = Self.tokenKey(token)
+        var all = loadTombstones().filter { $0.token != key }
+        all.append(LabelTombstone(token: key, bundleId: AppCatalogue.normalizedBundleId(bundleId)))
+        if all.count > Self.maximumTombstones {
+            all.removeFirst(all.count - Self.maximumTombstones)
+        }
+        storeTombstones(all)
+    }
+
+    private func forgetTombstones(of token: ApplicationToken, pointingAt bundleId: String) {
+        let key = Self.tokenKey(token)
+        let all = loadTombstones()
+        let kept = all.filter { $0.token != key && $0.bundleId != bundleId }
+        guard kept.count != all.count else { return }
+        storeTombstones(kept)
+    }
+
+    private func storeTombstones(_ tombstones: [LabelTombstone]) {
+        guard let defaults else { return }
+        if tombstones.isEmpty {
+            defaults.removeObject(forKey: Self.labelTombstonesKey)
+        } else if let data = try? JSONEncoder().encode(tombstones) {
+            defaults.set(data, forKey: Self.labelTombstonesKey)
+        }
+    }
+
+    private func loadTombstones() -> [LabelTombstone] {
+        guard let data = defaults?.data(forKey: Self.labelTombstonesKey) else { return [] }
+        return (try? JSONDecoder().decode([LabelTombstone].self, from: data)) ?? []
     }
 
     private func rebuildRows() {
@@ -286,5 +394,6 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
     private let defaults: UserDefaults?
     private let catalogue: ApplicationTokenCatalogue
     private let ledger: ScreenTimeUsageLedger
+    private let totalCategories: ScreenTimeUsageTotalCategoryStore
     private let onChange: () -> Void
 }

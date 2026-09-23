@@ -158,15 +158,228 @@ final class ScreenTimeUsageLedgerTests: XCTestCase {
         XCTAssertLessThan(ScreenTimeUsageLedger.firstStepSeconds, ScreenTimeUsageLedger.stepSeconds)
     }
 
+    /// App rungs stop one short of the event budget: the last slot is the device total's, even on a
+    /// phone that has no categories yet.
     func testThePlanDeduplicatesAndCaps() throws {
         let token = try makeToken("AQ==")
         let entries = (0..<60).map { index in
             ApplicationTokenCatalogue.Entry(bundleId: "app\(index % 55)", displayName: nil, token: token, lastSeenAt: Date())
         }
         let events = ScreenTimeUsageMonitoring.plan(entries: entries, secondsReached: [:], dayKey: "2026-09-16")
-        XCTAssertEqual(events.count, ScreenTimeUsageMonitoring.maximumEvents)
+        XCTAssertEqual(events.count, ScreenTimeUsageMonitoring.maximumApplicationEvents)
         XCTAssertEqual(Set(events.map(\.bundleId)).count, events.count)
         XCTAssertEqual(ScreenTimeUsageMonitoring.maximumEvents, AppCatalogue.maximumBlockedApplications)
+    }
+
+    // MARK: - The device total (build 26)
+
+    private func makeCategory(_ base64Data: String) throws -> ActivityCategoryToken {
+        try JSONDecoder().decode(ActivityCategoryToken.self, from: Data(#"{"data":"\#(base64Data)"}"#.utf8))
+    }
+
+    /// One extra rung, over the categories alone, climbing the same staircase as an app.
+    func testThePlanAddsOneDeviceTotalRungOverCategories() throws {
+        let entries = [
+            ApplicationTokenCatalogue.Entry(bundleId: "a", displayName: nil, token: try makeToken("AQ=="), lastSeenAt: Date()),
+            ApplicationTokenCatalogue.Entry(bundleId: "b", displayName: nil, token: try makeToken("Ag=="), lastSeenAt: Date())
+        ]
+        let categories: Set<ActivityCategoryToken> = [try makeCategory("AQ=="), try makeCategory("Ag==")]
+        let totalKey = ScreenTimeUsageLedger.deviceTotalKey
+
+        let fresh = ScreenTimeUsageMonitoring.plan(entries: entries, totalCategories: categories, secondsReached: [:], dayKey: "2026-09-16")
+        XCTAssertEqual(fresh.map(\.bundleId), ["a", "b", totalKey])
+        XCTAssertEqual(fresh.last?.thresholdSeconds, ScreenTimeUsageLedger.firstStepSeconds, "the total starts at the low first rung too")
+        XCTAssertEqual(fresh.last?.target, .categories(categories), "categories only — never mixed with app tokens")
+        XCTAssertEqual(fresh.filter { $0.bundleId == totalKey }.count, 1)
+
+        let climbing = ScreenTimeUsageMonitoring.plan(entries: entries, totalCategories: categories, secondsReached: [totalKey: 600], dayKey: "2026-09-16")
+        XCTAssertEqual(climbing.last?.name, "usage|__device_total__|900|2026-09-16")
+
+        let noPick = ScreenTimeUsageMonitoring.plan(entries: entries, secondsReached: [:], dayKey: "2026-09-16")
+        XCTAssertFalse(noPick.contains { $0.bundleId == totalKey }, "no categories, no total rung")
+
+        let onlyTotal = ScreenTimeUsageMonitoring.plan(entries: [], totalCategories: categories, secondsReached: [:], dayKey: "2026-09-16")
+        XCTAssertEqual(onlyTotal.map(\.bundleId), [totalKey], "a phone with no labels is still measured whole")
+    }
+
+    /// Total + app rungs never exceed the budget the code assumes, however many apps are labelled.
+    func testThePlanReservesASlotForTheTotal() throws {
+        let entries = try (0..<60).map { index in
+            ApplicationTokenCatalogue.Entry(bundleId: "app\(index)", displayName: nil, token: try makeToken("AQ=="), lastSeenAt: Date())
+        }
+        let categories: Set<ActivityCategoryToken> = [try makeCategory("AQ==")]
+        let events = ScreenTimeUsageMonitoring.plan(entries: entries, totalCategories: categories, secondsReached: [:], dayKey: "2026-09-16")
+        XCTAssertEqual(events.count, ScreenTimeUsageMonitoring.maximumEvents)
+        XCTAssertEqual(events.filter { $0.bundleId != ScreenTimeUsageLedger.deviceTotalKey }.count, ScreenTimeUsageMonitoring.maximumApplicationEvents)
+        XCTAssertEqual(events.last?.bundleId, ScreenTimeUsageLedger.deviceTotalKey)
+
+        let small = ScreenTimeUsageMonitoring.plan(entries: entries, totalCategories: categories, secondsReached: [:], dayKey: "2026-09-16", cap: 3)
+        XCTAssertEqual(small.map(\.bundleId), ["app0", "app1", ScreenTimeUsageLedger.deviceTotalKey])
+    }
+
+    /// A threshold past 23:59 can never fire, and `hour: 24` could make the whole start throw.
+    func testNoRungIsArmedPastTheEndOfTheDay() throws {
+        let entries = [
+            ApplicationTokenCatalogue.Entry(bundleId: "a", displayName: nil, token: try makeToken("AQ=="), lastSeenAt: Date()),
+            ApplicationTokenCatalogue.Entry(bundleId: "b", displayName: nil, token: try makeToken("Ag=="), lastSeenAt: Date())
+        ]
+        let events = ScreenTimeUsageMonitoring.plan(
+            entries: entries,
+            totalCategories: [try makeCategory("AQ==")],
+            secondsReached: ["a": 86_100, "b": 86_000, ScreenTimeUsageLedger.deviceTotalKey: 86_339],
+            dayKey: "2026-09-16"
+        )
+        XCTAssertEqual(events.map(\.bundleId), ["b"])
+        XCTAssertEqual(events.map(\.thresholdSeconds), [86_100])
+        XCTAssertTrue(events.allSatisfy { $0.thresholdSeconds < ScreenTimeUsageMonitoring.maximumThresholdSeconds })
+        XCTAssertNil(ScreenTimeUsageMonitoring.nextRung(reached: 86_100, step: 300, firstStep: 60))
+        XCTAssertEqual(ScreenTimeUsageMonitoring.nextRung(reached: 0, step: 300, firstStep: 60), 60)
+    }
+
+    func testEventNameRoundTripsTheTotalKey() {
+        let name = ScreenTimeUsageActivity.eventName(bundleId: ScreenTimeUsageLedger.deviceTotalKey, thresholdSeconds: 1500, dayKey: "2026-09-16")
+        XCTAssertEqual(name, "usage|__device_total__|1500|2026-09-16")
+        let parsed = ScreenTimeUsageActivity.parse(eventName: name)
+        XCTAssertEqual(parsed?.bundleId, ScreenTimeUsageLedger.deviceTotalKey)
+        XCTAssertEqual(parsed?.thresholdSeconds, 1500)
+        XCTAssertEqual(parsed?.dayKey, "2026-09-16")
+    }
+
+    /// The server sums per-app rows: the total goes out as `ios.other` = T − Σ labelled, and its
+    /// own key never reaches the wire (the server would list it as an app).
+    func testTheReportDerivesOtherAppsAndNeverSendsTheTotalKey() {
+        let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 600, dayKey: "2026-09-16")
+        ledger.record(bundleId: "ph.telegra.telegraph", secondsReached: 300, dayKey: "2026-09-16")
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 1500, dayKey: "2026-09-16")
+        let day = ledger.day("2026-09-16")!
+        XCTAssertEqual(ScreenTimeUsageReport.items(for: day), [
+            .init(packageName: "com.google.ios.youtube", usedSeconds: 600),
+            .init(packageName: ScreenTimeUsageReport.otherPackageName, usedSeconds: 600),
+            .init(packageName: "ph.telegra.telegraph", usedSeconds: 300)
+        ])
+        XCTAssertFalse(ScreenTimeUsageReport.items(for: day).contains { $0.packageName == ScreenTimeUsageLedger.deviceTotalKey })
+        XCTAssertEqual(ScreenTimeUsageReport.otherPackageName, "ios.other")
+    }
+
+    /// Staircases are floors of different sets and can cross: the labelled sum may pass the total's
+    /// last rung. Then there is nothing "other" to report — never a negative row.
+    func testOtherAppsIsClampedAtZero() {
+        let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 900, dayKey: "2026-09-16")
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 600, dayKey: "2026-09-16")
+        XCTAssertEqual(ScreenTimeUsageReport.items(for: ledger.day("2026-09-16")!), [.init(packageName: "com.google.ios.youtube", usedSeconds: 900)])
+    }
+
+    /// What the parent reads is the server's SUM of the rows: `max(T, Σ labelled)` — every term a
+    /// floor, so the total is a floor too and can never exceed what the child really used.
+    func testServerSumIsMaxOfTotalAndLabelledSum() {
+        let cases: [(labelled: [Int], total: Int?)] = [
+            ([], 1200), ([300, 600], 1500), ([300, 600], 600), ([900], nil), ([], nil), ([60], 60)
+        ]
+        for (index, testCase) in cases.enumerated() {
+            let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
+            ledger.touch(dayKey: "2026-09-16")
+            for (appIndex, seconds) in testCase.labelled.enumerated() {
+                ledger.record(bundleId: "app\(appIndex)", secondsReached: seconds, dayKey: "2026-09-16")
+            }
+            if let total = testCase.total {
+                ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: total, dayKey: "2026-09-16")
+            }
+            let serverSum = ScreenTimeUsageReport.items(for: ledger.day("2026-09-16")!).reduce(0) { $0 + $1.usedSeconds }
+            XCTAssertEqual(serverSum, max(testCase.total ?? 0, testCase.labelled.reduce(0, +)), "case \(index)")
+        }
+    }
+
+    /// The Home card's fallback is the same number the server will sum, and nothing when today was
+    /// never armed (a measured-looking zero would be a claim).
+    func testTodaysLocalFigureIsWhatTheServerWillSum() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tashkent")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 15))!
+        let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
+        XCTAssertNil(ScreenTimeUsageReport.todaySeconds(ledger: ledger, now: now, calendar: calendar))
+        ledger.record(bundleId: "a", secondsReached: 300, dayKey: "2026-09-16", now: now)
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 1200, dayKey: "2026-09-16", now: now)
+        ledger.record(bundleId: "a", secondsReached: 9000, dayKey: "2026-09-15", now: now)
+        XCTAssertEqual(ScreenTimeUsageReport.todaySeconds(ledger: ledger, now: now, calendar: calendar), 1200)
+    }
+
+    /// No app can have been used longer than its day has lasted: such a rung is a spurious
+    /// callback, and the extension neither records it nor re-arms above it.
+    func testARungBeyondTheElapsedDayIsRejected() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tashkent")!
+        let oneAM = calendar.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 1))!
+        let bound = ScreenTimeUsageMonitoring.plausibleSecondsBound(dayKey: "2026-09-16", now: oneAM, calendar: calendar)
+        XCTAssertEqual(bound, 3600 + ScreenTimeUsageMonitoring.plausibilitySlackSeconds)
+        XCTAssertLessThanOrEqual(3600, bound, "an hour of use by 01:00 is possible")
+        XCTAssertGreaterThan(3900, bound, "65 minutes by 01:00 is not")
+        XCTAssertEqual(ScreenTimeUsageMonitoring.plausibleSecondsBound(dayKey: "2026-09-15", now: oneAM, calendar: calendar), 86_400,
+                       "a rung for yesterday delivered after midnight is judged against a whole day")
+        XCTAssertEqual(ScreenTimeUsageMonitoring.plausibleSecondsBound(dayKey: "2026-09-17", now: oneAM, calendar: calendar), 0,
+                       "a day that has not begun (clock moved back) can hold nothing")
+    }
+
+    func testRenameNeverTouchesTheTotal() {
+        let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 900, dayKey: "2026-09-16")
+        ledger.record(bundleId: "a", secondsReached: 300, dayKey: "2026-09-16")
+        ledger.rename(from: ScreenTimeUsageLedger.deviceTotalKey, to: "b")
+        ledger.rename(from: "a", to: ScreenTimeUsageLedger.deviceTotalKey)
+        ledger.remove(bundleId: ScreenTimeUsageLedger.deviceTotalKey, dayKey: "2026-09-16")
+        XCTAssertEqual(ledger.secondsReached(dayKey: "2026-09-16"), [ScreenTimeUsageLedger.deviceTotalKey: 900, "a": 300])
+    }
+
+    /// Ibrohim's phone after the one-tap pick: no label anywhere, and the activity still arms — one
+    /// rung over the categories. Only "nothing picked at all" stops it, and a day whose rungs have
+    /// all run out keeps the activity alive (stopped, it would get no `intervalDidStart` at midnight).
+    func testArmingMeasuresAPhoneWithOnlyTheOneTapPickAndStopsOnlyWhenNothingIsPicked() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let ledger = ScreenTimeUsageLedger(userDefaults: defaults)
+        let categories = ScreenTimeUsageTotalCategoryStore(userDefaults: defaults)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tashkent")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 15))!
+        var started: [[String]] = []
+        var stopped = 0
+        func arm() throws -> Int {
+            try ScreenTimeUsageMonitoring.arm(
+                dsn: "child-1", catalogue: catalogue, ledger: ledger, totalCategories: categories,
+                now: now, calendar: calendar,
+                start: { _, _, events in started.append(events.keys.map(\.rawValue).sorted()) },
+                stop: { _ in stopped += 1 }
+            )
+        }
+        guard ScreenTimeUsageMonitoring.isSupported else { throw XCTSkip("usage is measured on iOS 17.4+ only") }
+
+        XCTAssertEqual(try arm(), 0)
+        XCTAssertEqual(stopped, 1, "nothing picked: the only state that stops")
+        XCTAssertTrue(started.isEmpty)
+
+        categories.save([try makeCategory("AQ==")])
+        XCTAssertEqual(try arm(), 1)
+        XCTAssertEqual(started.last, ["usage|__device_total__|60|2026-09-16"])
+        XCTAssertEqual(ledger.day("2026-09-16")?.seconds, [:], "today exists, so a measured zero can be sent")
+
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 86_100, dayKey: "2026-09-16", now: now)
+        XCTAssertEqual(try arm(), 0)
+        XCTAssertEqual(started.last, [], "no rung left today, but the activity keeps running for tomorrow")
+        XCTAssertEqual(stopped, 1)
+    }
+
+    /// The extension re-arms with the categories it reads from the App Group; the store round-trips
+    /// them and "none" is the absence of the key.
+    func testTheCategoryStoreRoundTripsAndEmptyClears() throws {
+        let defaults = makeDefaults()
+        let store = ScreenTimeUsageTotalCategoryStore(userDefaults: defaults)
+        XCTAssertFalse(store.hasTokens)
+        let categories: Set<ActivityCategoryToken> = [try makeCategory("AQ=="), try makeCategory("Ag==")]
+        store.save(categories)
+        XCTAssertEqual(ScreenTimeUsageTotalCategoryStore(userDefaults: defaults).tokens(), categories)
+        store.save([])
+        XCTAssertNil(defaults.object(forKey: ScreenTimeUsageTotalCategoryStore.storageKey))
     }
 
     func testThresholdComponentsAreNormalized() {
@@ -234,6 +447,15 @@ final class ScreenTimeUsageLedgerTests: XCTestCase {
             DeviceAppLockSyncEntry(packageName: "ios.app.1a2b3c4d", name: "Hay Day"),
             DeviceAppLockSyncEntry(packageName: "video.like", name: "Likee")
         ])
+
+        // A phone that measures its total also lists the row the report sums it into — last, once.
+        let other = DeviceAppLockSyncEntry(packageName: "ios.other", name: "Boshqa ilovalar")
+        let withOther = ScreenTimeEnforcementCoordinator.mergedSyncEntries(probed: probed, labelled: labelled, otherApps: other)
+        XCTAssertEqual(withOther, merged + [other])
+        XCTAssertEqual(
+            ScreenTimeEnforcementCoordinator.mergedSyncEntries(probed: probed + [other], labelled: labelled, otherApps: other).filter { $0 == other }.count,
+            1
+        )
     }
 
     // MARK: - Catalogue
@@ -272,15 +494,145 @@ final class ScreenTimeRestrictedAppsStoreTests: XCTestCase {
         try JSONDecoder().decode(ApplicationToken.self, from: Data(#"{"data":"\#(base64Data)"}"#.utf8))
     }
 
-    private func makeSelection(_ tokens: [ApplicationToken]) throws -> FamilyActivitySelection {
+    private func makeSelection(_ tokens: [ApplicationToken], categories: [ActivityCategoryToken] = []) throws -> FamilyActivitySelection {
         // `FamilyActivitySelection` has no public setter for its tokens; it round-trips through
         // Codable, which is also how the store persists it. Encode an empty one to learn the
         // container shape, then splice the tokens in.
         var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(FamilyActivitySelection())) as! [String: Any]
         let encoded = try tokens.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
         object["applicationTokens"] = encoded
+        if !categories.isEmpty {
+            object["categoryTokens"] = try categories.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) }
+        }
         let data = try JSONSerialization.data(withJSONObject: object)
         return try JSONDecoder().decode(FamilyActivitySelection.self, from: data)
+    }
+
+    private func makeCategory(_ base64Data: String) throws -> ActivityCategoryToken {
+        try JSONDecoder().decode(ActivityCategoryToken.self, from: Data(#"{"data":"\#(base64Data)"}"#.utf8))
+    }
+
+    private func today() -> String { ScreenTimeUsageDayFormatter.dayKey(for: Date()) }
+
+    // MARK: - Build 26: the device total and the double counts
+
+    /// The monitor extension measures the whole phone from the categories the one-tap pick left —
+    /// written on every save, migrated on load for a phone that picked before build 26, and gone
+    /// with a reset.
+    func testCategoryTokensArePersistedForTheExtension() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let categories = [try makeCategory("AQ=="), try makeCategory("Ag==")]
+        let picked = try makeSelection([try makeToken("AQ==")], categories: categories)
+        XCTAssertEqual(picked.categoryTokens.count, 2, "the helper really carries categories")
+        let extensionView = ScreenTimeUsageTotalCategoryStore(userDefaults: defaults)
+
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, onChange: {})
+        XCTAssertFalse(extensionView.hasTokens)
+        store.updateSelection(picked)
+        XCTAssertEqual(extensionView.tokens(), Set(categories))
+
+        // A phone that picked on build 25: the selection is stored, the new key is not.
+        defaults.removeObject(forKey: ScreenTimeUsageTotalCategoryStore.storageKey)
+        _ = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, onChange: {})
+        XCTAssertEqual(extensionView.tokens(), Set(categories), "load migrates")
+
+        // …and the cold-launch arm, which runs before anything has created the store.
+        defaults.removeObject(forKey: ScreenTimeUsageTotalCategoryStore.storageKey)
+        ScreenTimeRestrictedAppsStore.mirrorStoredCategories(defaults: defaults)
+        XCTAssertEqual(extensionView.tokens(), Set(categories), "the static mirror migrates too")
+
+        store.reset()
+        XCTAssertFalse(extensionView.hasTokens)
+    }
+
+    /// Clearing a label and naming the same icon again used to mint a second package: the same
+    /// token then climbed today's minutes a second time under the new key (`includesPastActivity`)
+    /// while the old key kept them too — the day counted twice.
+    func testClearThenRenameDoesNotCountTheSameTokenTwice() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let ledger = ScreenTimeUsageLedger(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, ledger: ledger, onChange: {})
+        let token = try makeToken("AQ==")
+        store.updateSelection(try makeSelection([token]))
+
+        store.labelCustom(token, name: "Hay Day")
+        let minted = try XCTUnwrap(catalogue.entry(for: token)?.bundleId)
+        ledger.record(bundleId: minted, secondsReached: 900, dayKey: today())
+
+        store.removeLabel(for: token)
+        store.labelCustom(token, name: "Hay Day")
+        XCTAssertEqual(catalogue.entry(for: token)?.bundleId, minted, "named again: the same server package")
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), [minted: 900])
+
+        store.removeLabel(for: token)
+        store.label(token, as: AppCatalogue.entry(forBundleId: "com.google.ios.youtube")!)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 900], "one key, never two")
+
+        // Un-picked and picked again (the other way a label is lost) — same rule.
+        store.updateSelection(try makeSelection([]))
+        store.updateSelection(try makeSelection([token]))
+        store.label(token, as: AppCatalogue.entry(forBundleId: "ph.telegra.Telegraph")!)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["ph.telegra.telegraph": 900])
+    }
+
+    /// A tombstone never steals figures from a name another icon holds now.
+    func testATombstoneNeverRenamesANameAnotherIconHolds() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let ledger = ScreenTimeUsageLedger(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, ledger: ledger, onChange: {})
+        let first = try makeToken("AQ=="), second = try makeToken("Ag==")
+        store.updateSelection(try makeSelection([first, second]))
+        let youtube = AppCatalogue.entry(forBundleId: "com.google.ios.youtube")!
+
+        store.label(first, as: youtube)
+        store.removeLabel(for: first)           // first's tombstone: youtube
+        store.label(second, as: youtube)        // youtube's figures now belong to second
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 600, dayKey: today())
+        store.removeLabel(for: second)          // nobody holds youtube now — still second's minutes
+        store.label(first, as: AppCatalogue.entry(forBundleId: "ph.telegra.Telegraph")!)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 600], "second's minutes stay second's")
+
+        store.label(second, as: youtube)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 600], "and second picks them up again")
+    }
+
+    /// Moving a name to another icon must not hand the new icon the old one's minutes: today's
+    /// figure under that name goes (the new icon's staircase starts from zero), history stays.
+    func testAMovedLabelDoesNotCarryTheOldTokensFigures() throws {
+        let defaults = makeDefaults()
+        let catalogue = ApplicationTokenCatalogue(userDefaults: defaults)
+        let ledger = ScreenTimeUsageLedger(userDefaults: defaults)
+        let store = ScreenTimeRestrictedAppsStore(defaults: defaults, catalogue: catalogue, ledger: ledger, onChange: {})
+        let first = try makeToken("AQ=="), second = try makeToken("Ag==")
+        store.updateSelection(try makeSelection([first, second]))
+        let youtube = AppCatalogue.entry(forBundleId: "com.google.ios.youtube")!
+
+        store.label(first, as: youtube)
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 1200, dayKey: today())
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 600, dayKey: "2026-01-01")
+        store.label(second, as: youtube)
+
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), [:])
+        XCTAssertEqual(ledger.secondsReached(dayKey: "2026-01-01"), ["com.google.ios.youtube": 600])
+        XCTAssertNil(catalogue.entry(for: first))
+
+        // And the old icon, named later, does not drag the moved name's figures along.
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 300, dayKey: today())
+        store.label(first, as: AppCatalogue.entry(forBundleId: "ph.telegra.Telegraph")!)
+        XCTAssertEqual(ledger.secondsReached(dayKey: today()), ["com.google.ios.youtube": 300])
+    }
+
+    /// Home's card asks for the one-tap pick exactly while nothing can count the whole phone.
+    func testTheHomeSetupCardShowsOnlyWhileThePickIsMissing() {
+        XCTAssertTrue(ScreenTimeSetupCard.isNeeded(featuresEnabled: true, supported: true, authorization: .granted, hasCategoryTokens: false))
+        XCTAssertFalse(ScreenTimeSetupCard.isNeeded(featuresEnabled: true, supported: true, authorization: .granted, hasCategoryTokens: true), "picked: done")
+        XCTAssertFalse(ScreenTimeSetupCard.isNeeded(featuresEnabled: true, supported: true, authorization: .denied, hasCategoryTokens: false), "no grant: the picker has nothing to give")
+        XCTAssertFalse(ScreenTimeSetupCard.isNeeded(featuresEnabled: true, supported: true, authorization: .notDetermined, hasCategoryTokens: false))
+        XCTAssertFalse(ScreenTimeSetupCard.isNeeded(featuresEnabled: true, supported: false, authorization: .granted, hasCategoryTokens: false), "below iOS 17.4 nothing is measured")
+        XCTAssertFalse(ScreenTimeSetupCard.isNeeded(featuresEnabled: false, supported: true, authorization: .granted, hasCategoryTokens: false))
     }
 
     func testLabellingWritesTheCatalogueAndUnpickingRemovesIt() throws {

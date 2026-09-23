@@ -117,6 +117,10 @@ actor DeviceApplicationUsageReportCoordinator {
 
     static let shared = DeviceApplicationUsageReportCoordinator()
 
+    /// False since build 26 — see `updateSnapshot`. A constant, not a flag anyone flips: turning it
+    /// back on double-counts every minute the daily report already carries.
+    static let postsAdditiveUsage = false
+
     init(
         service: DeviceApplicationUsageReportServicing = DeviceApplicationUsageReportService(),
         userDefaults: UserDefaults = .standard,
@@ -149,7 +153,16 @@ actor DeviceApplicationUsageReportCoordinator {
         self.retryScheduler = retryScheduler ?? { delay, operation in
             Self.defaultRetryScheduler(delay: delay, operation: operation)
         }
-        let loadedState = Self.loadState(userDefaults: userDefaults, storageKey: Self.storageKey)
+        // Build 26: this route is retired (see `updateSnapshot`). A queue an older build persisted
+        // holds deltas the server would ADD on top of what `PUT /device/apps/usage/daily` already
+        // set, so it is purged unsent — once, because nothing can refill it now.
+        var loadedState = Self.loadState(userDefaults: userDefaults, storageKey: Self.storageKey)
+        if !loadedState.pendingBatches.isEmpty || !loadedState.accountedUsageByKey.isEmpty {
+            Self.log.notice("screentime_usage_post purged batches=\(loadedState.pendingBatches.count, privacy: .public) reason=deprecated_additive")
+            loadedState.pendingBatches = []
+            loadedState.accountedUsageByKey = [:]
+            Self.storeState(loadedState, userDefaults: userDefaults, storageKey: Self.storageKey)
+        }
         persistedState = loadedState
 
         let initialDSN = loadedState.pendingBatches.first?.dsn ?? "-"
@@ -188,7 +201,17 @@ actor DeviceApplicationUsageReportCoordinator {
         await processQueueIfPossible(force: true)
     }
 
+    /// No longer queues anything (build 26). `POST /device/apps/usage` is deprecated and ADDITIVE —
+    /// the server adds each item to the day — while the live pipeline (`ScreenTimeUsageReport` →
+    /// `PUT /device/apps/usage/daily`) REPLACES whole days from the monitor extension's ledger.
+    /// Both running would count the same minutes twice. This path was only inert because the
+    /// report extension's snapshot never reaches the app (sandboxed); it must not depend on that.
+    /// The queueing code below stays compiled, unreachable, until the route is removed server-side.
     func updateSnapshot(_ snapshot: ScreenTimeUsageSnapshot) async {
+        guard Self.postsAdditiveUsage else {
+            Self.log.notice("screentime_usage_post dropped reason=deprecated_additive apps=\(snapshot.entries.count, privacy: .public)")
+            return
+        }
         guard let batch = makePendingBatch(from: snapshot) else {
             persistState()
             updateDiagnostics(

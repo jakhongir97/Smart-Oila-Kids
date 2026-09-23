@@ -384,3 +384,8 @@
 "screentime.restricted.pending_installed_title" = "Telefonda topilgan ilovalar";
 "screentime.restricted.pending_web" = "Web'da bloklangan — telefonda hali belgilanmagan";
 "screentime.restricted.pending_web_title" = "Belgilash kerak";
+
+/* build 26 — USAGE */
+"home2.screentime_setup.title" = "Ekran vaqti hisoblanmayapti";
+"home2.screentime_setup.body" = "Ota-ona ekran vaqtini ko'rishi uchun ilovalarni bir marta tanlang: “All Apps & Categories” tugmasini yoqing va Saqlash bosing.";
+"screentime.other_apps.name" = "Boshqa ilovalar";

@@ -23,6 +23,17 @@ enum ScreenTimeUsageReport {
     static let maximumDays = 9
     static let lookbackDays = 7
 
+    /// The row that carries everything the labelled apps do not: the device total minus their sum.
+    ///
+    /// Why a row and not a field: the server's total (`GET /device/apps/screen-time`, the parent's
+    /// "Bugungi ekran") is the SUM of the per-app rows of this report, and the contract has no
+    /// device-total field. With labelled apps a₁…aₙ (each a staircase floor of that app) and the
+    /// device total T (a floor of the whole phone), sending `max(0, T − Σaᵢ)` here makes the server
+    /// sum `max(T, Σaᵢ)` — still a floor, never above what the child really used. Listed in every
+    /// `PUT /device/apps/sync` as "Boshqa ilovalar" so the parent sees the row it sums, and never
+    /// resolved to a token or enforced: it is not an app.
+    static let otherPackageName = "ios.other"
+
     /// Days the ledger has measured, newest first, inside the server's window. Today is included
     /// whenever the ledger knows it, even with no apps yet — monitoring is armed, so zero is a
     /// measurement. A day with no ledger entry at all is left out: nothing was watching, and `[]`
@@ -38,16 +49,41 @@ enum ScreenTimeUsageReport {
         let todayKey = ScreenTimeUsageDayFormatter.dayKey(for: today, calendar: calendar)
 
         let inWindow = ledger.days().filter { $0.dayKey >= oldestKey && $0.dayKey <= todayKey }
-        var result: [ScreenTimeUsageReportDay] = []
-        for day in inWindow.prefix(maximumDays) {
-            var items: [ScreenTimeUsageReportDay.Item] = []
-            for (packageName, seconds) in day.seconds where seconds > 0 {
-                items.append(ScreenTimeUsageReportDay.Item(packageName: packageName, usedSeconds: seconds))
-            }
-            items.sort { $0.packageName < $1.packageName }
-            result.append(ScreenTimeUsageReportDay(date: day.dayKey, items: items))
+        return inWindow.prefix(maximumDays).map { day in
+            ScreenTimeUsageReportDay(date: day.dayKey, items: items(for: day))
         }
-        return result
+    }
+
+    /// One day's rows: every labelled app with time on it, then `ios.other` when the device total
+    /// is above their sum. The total's own key never goes on the wire.
+    static func items(for day: ScreenTimeUsageLedger.Day) -> [ScreenTimeUsageReportDay.Item] {
+        var items: [ScreenTimeUsageReportDay.Item] = []
+        var labelledSum = 0
+        for (packageName, seconds) in day.seconds where seconds > 0 {
+            // `ios.other` is derived, never recorded — skipped defensively all the same, because a
+            // package twice in one day is a 400 for the whole report (`uniqueItems`).
+            guard packageName != ScreenTimeUsageLedger.deviceTotalKey, packageName != otherPackageName else { continue }
+            items.append(ScreenTimeUsageReportDay.Item(packageName: packageName, usedSeconds: seconds))
+            labelledSum += seconds
+        }
+        let other = max(0, (day.seconds[ScreenTimeUsageLedger.deviceTotalKey] ?? 0) - labelledSum)
+        if other > 0 {
+            items.append(ScreenTimeUsageReportDay.Item(packageName: otherPackageName, usedSeconds: other))
+        }
+        items.sort { $0.packageName < $1.packageName }
+        return items
+    }
+
+    /// Today's figure exactly as the server will sum it (labelled apps + `ios.other` =
+    /// `max(T, Σaᵢ)`), or nil when the ledger has never been armed today. What the child's Home card
+    /// shows while the server's own total is unreachable.
+    static func todaySeconds(
+        ledger: ScreenTimeUsageLedger,
+        now: Date = Date(),
+        calendar: Calendar = ScreenTimeUsageDayFormatter.gregorian
+    ) -> Int? {
+        guard let day = ledger.day(ScreenTimeUsageDayFormatter.dayKey(for: now, calendar: calendar)) else { return nil }
+        return items(for: day).reduce(0) { $0 + $1.usedSeconds }
     }
 
     /// The wire body, as plain JSON objects so the request shape is visible at the call site — the

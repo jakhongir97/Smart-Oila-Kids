@@ -91,6 +91,8 @@ struct BolajonHomeView: View {
                     if viewModel.showsScreenTimeCard {
                         screenTimeCard
                     }
+                    // Draws nothing unless the phone still lacks the one-tap app pick (build 26).
+                    ScreenTimeSetupCard()
                     sosCard
                     if AppRuntime.chatFeaturesEnabled {
                         ChatHomeCard(refreshToken: chatUnreadRefreshToken, onOpen: { path.append(.chat) })
@@ -1047,15 +1049,17 @@ protocol ScreenTimeUsageProviding {
     func todayTrackedUsageSeconds() -> Int?
 }
 
-/// Reads the DeviceActivity report snapshot the app already collects (see
-/// `ScreenTimeUsageCoordinator`), gated on Screen Time authorization + a current-day snapshot.
+/// Today's figure from the monitor extension's ledger — labelled apps plus "other apps", exactly
+/// what the next `PUT /device/apps/usage/daily` makes the server sum — gated on Screen Time
+/// authorization and on the ledger having been armed today.
+///
+/// It used to read the DeviceActivity REPORT snapshot, which never reaches the app (the report
+/// extension is sandboxed, measured 2026-09-16), so this fallback was always nil. The ledger is
+/// the one local number that exists, and it matches the server's by construction.
 struct LocalScreenTimeUsageProvider: ScreenTimeUsageProviding {
     func todayTrackedUsageSeconds() -> Int? {
         guard ScreenTimeAuthorizationManager.shared.status == .granted else { return nil }
-        let coordinator = ScreenTimeUsageCoordinator.shared
-        guard let snapshot = coordinator.latestSnapshot,
-              snapshot.dayKey == coordinator.currentDayKey else { return nil }
-        return snapshot.totalUsedTime
+        return ScreenTimeUsageReport.todaySeconds(ledger: ScreenTimeUsageLedger())
     }
 }
 
