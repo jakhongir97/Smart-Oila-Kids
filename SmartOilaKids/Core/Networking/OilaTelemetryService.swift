@@ -107,15 +107,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// whenever a call comes back conclusively credential-less, so the UI can say "ask a parent to
     /// re-link this device" instead of a green chip that will never be true again.
     @Published private(set) var hasCredential = true
-    /// Global device lock resolved from GET /device/lock/state (drives the lock overlay).
-    /// Persisted on every change so the lock is FAIL-CLOSED: a force-quit + offline relaunch
-    /// restores the last-known lock (see init) instead of silently defaulting to unlocked.
-    @Published private(set) var isLocked = false {
-        didSet {
-            guard oldValue != isLocked else { return }
-            UserDefaults.standard.set(isLocked, forKey: Self.lockStateKey)
-        }
-    }
+    /// The whole-device lock, DECIDED ON THE PHONE (`reevaluateLock`): the saved policy snapshot
+    /// (`DeviceLockPolicySnapshot` — manual window + schedules from the last `GET /device/lock/state`)
+    /// evaluated by the clock. Drives the lock overlay. Never persisted and never taken from the
+    /// server's `isLocked`: a saved verdict is what kept an offline phone locked forever
+    /// (Akramjon, 2026-09-23); the saved DATA opens it on time by itself.
+    @Published private(set) var isLocked = false
 
     // The per-app half of GET /device/lock/state. iOS cannot ENFORCE any of it — per-app blocking
     // needs the FamilyControls entitlement Apple has not granted this app. Unlike `isLocked` they
@@ -140,38 +137,20 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     @Published private(set) var lockedPackages: [String] = []
     /// Per-app daily budgets + today's spend (`appLimits`).
     @Published private(set) var appLimits: [OilaAppLimit] = []
-    /// Device-local wall clock the backend evaluated the schedules against, e.g. "15:45".
-    @Published private(set) var deviceLocalTime: String?
     /// The active lock window as "21:00 – 07:00". PROVISIONAL: the schedule schema is unknown, so
     /// this stays nil whenever `OilaLockState.resolvedScheduleRange()` can't recognize the shape.
     @Published private(set) var scheduleRangeText: String?
-    /// When the current lock ENDS, as the server last told us (`OilaLockState.lockEndsAt`); nil while
-    /// unlocked or when the payload carries no end. Persisted beside `isLocked`, because the
-    /// deadline is what a relaunched, offline phone unlocks by. Shown on the lock cover.
-    @Published private(set) var lockEndsAt: Date? {
-        didSet {
-            guard oldValue != lockEndsAt else { return }
-            if let lockEndsAt {
-                UserDefaults.standard.set(lockEndsAt.timeIntervalSince1970, forKey: Self.lockEndsAtKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: Self.lockEndsAtKey)
-            }
-        }
-    }
-    /// True after THIS process released a lock because its deadline passed (on launch or from the
-    /// timer) and no server answer has arrived since. `ScreenTimeEnforcementCoordinator` reads it
-    /// on start to open the OS shield the previous process left up — the one write it is allowed
-    /// to make before the server has confirmed anything this launch. Persisted (see the key) so a
-    /// scene-less launch that cannot open the shield still hands the fact to the next launch.
-    private(set) var lockReleasedByDeadline = false {
-        didSet {
-            guard oldValue != lockReleasedByDeadline else { return }
-            UserDefaults.standard.set(lockReleasedByDeadline, forKey: Self.lockReleasedByDeadlineKey)
-        }
-    }
-
-    /// UserDefaults key for the persisted fail-closed lock state.
-    private static let lockStateKey = "OILA_LAST_LOCK_STATE"
+    /// When the current locked EPISODE ends (`DeviceLockPolicy.episodeEnd`: the manual window and
+    /// the schedules that overlap or abut it, merged — the phone does not open between them); nil
+    /// while unlocked or when no end exists within a week. Shown on the lock cover as the time the
+    /// phone opens by itself, internet or not.
+    @Published private(set) var lockEndsAt: Date?
+    /// Whether a policy snapshot exists at all. False before the first successful poll of a pairing
+    /// (and after unpair): "unknown", which is not "unlocked" — nothing may be written to the OS
+    /// from it. `ScreenTimeEnforcementCoordinator` reads it before a server answer this launch.
+    private(set) var lockDecisionKnown = false
+    /// When the in-app one-shot timer re-checks next (the next edge); nil when none is ahead.
+    private(set) var nextLockCheckAt: Date?
     /// UserDefaults key for the persisted pending location backlog (survives process death so an
     /// offline route isn't lost if iOS kills the app; cleared on unpair via stop()).
     private static let pendingFixesKey = "OILA_PENDING_LOCATION_FIXES"
@@ -179,24 +158,24 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// Persisted `lastSuccessfulContactAt`, so "when did this phone last reach the server" survives a
     /// relaunch. Cleared in `stop()` with the rest of the child-scoped state.
     private static let lastContactKey = "OILA_LAST_SUCCESSFUL_CONTACT"
-    /// When the server last CONFIRMED a lock state (either value). Bounds the fail-closed restore.
-    nonisolated static let lockConfirmedAtKey = "OILA_LAST_LOCK_CONFIRMED_AT"
-    /// The persisted `lockEndsAt` (epoch seconds), so a relaunch knows the deadline without a server.
-    nonisolated static let lockEndsAtKey = "OILA_LOCK_ENDS_AT"
-    /// Durable mirror of `lockReleasedByDeadline`. Without it a background launch with NO scene
-    /// releases the lock in memory (its trigger, `OILA_LAST_LOCK_STATE`, is consumed and cleared),
-    /// the enforcement coordinator never starts to open the OS shield (its only start is scene-
-    /// driven), the process dies, and the flag is gone — so the next launch, now `wasLocked=false`,
-    /// never opens the shield. Persisted, it survives to the first launch that starts the
-    /// coordinator (the child opening Bolajon360, which is exempt from the shield), which then opens
-    /// the phone. Cleared under a server verdict and on unpair.
-    nonisolated static let lockReleasedByDeadlineKey = "OILA_LOCK_RELEASED_BY_DEADLINE"
-    /// Posted on the main actor when this service released the whole-device lock because its
-    /// deadline passed — NOT a server answer, so it is deliberately a different name from
-    /// `.oilaLockStateDidChange`: the enforcement side must open the phone without treating the
-    /// event as a server-confirmed state (which would let an offline launch re-derive the per-app
-    /// blocks from nothing and drop them).
-    static let oilaLockDeadlineReleased = Notification.Name("smartoila.oila.lockDeadlineReleased")
+    /// Build 24's lock keys, read once by the upgrade migration (`migrateLegacyLockState`) and then
+    /// deleted: the saved verdict, when the server last confirmed it, and its end.
+    nonisolated static let legacyLockStateKey = "OILA_LAST_LOCK_STATE"
+    nonisolated static let legacyLockConfirmedAtKey = "OILA_LAST_LOCK_CONFIRMED_AT"
+    nonisolated static let legacyLockEndsAtKey = "OILA_LOCK_ENDS_AT"
+    nonisolated static let legacyLockReleasedByDeadlineKey = "OILA_LOCK_RELEASED_BY_DEADLINE"
+    /// Set once the one-time upgrade cleanup has run (build 24's activity stopped, the always-allowed
+    /// selection cleared).
+    nonisolated static let lockPolicyMigratedKey = "OILA_LOCK_POLICY_MIGRATED_V1"
+    /// Posted on the main actor when the LOCAL rule flipped `isLocked` — an edge passed, the clock
+    /// or zone changed, a relaunch, the extension's word — NOT a server answer, so it is a different
+    /// name from `.oilaLockStateDidChange`: the enforcement side applies the whole-device half from
+    /// it without treating it as a server-confirmed state (which would re-derive the per-app blocks
+    /// from nothing on an offline launch).
+    static let oilaLockEvaluationDidChange = Notification.Name("smartoila.oila.lockEvaluationDidChange")
+    /// Relays the monitor extension's Darwin notification AFTER this service has re-decided, so the
+    /// enforcement side resets its cache against the new answer, never the old one.
+    static let oilaLockExtensionDidEvaluate = Notification.Name("smartoila.oila.lockExtensionDidEvaluate")
 
     private let service: OilaDeviceServicing
     private let locationManager = CLLocationManager()
@@ -206,15 +185,21 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var flushTimer: Timer?
     private var statusTimer: Timer?
     private var lockTimer: Timer?
-    /// One-shot, fires at the lock's effective deadline while the process is alive. Main-run-loop
-    /// timers do not fire while the app is suspended, which is why the deadline is ALSO checked on
-    /// every poll tick, every refresh trigger and every foreground (`releaseExpiredLockIfNeeded`).
-    private var lockDeadlineTimer: Timer?
-    /// In-memory mirror of `lockConfirmedAtKey`: when the server last confirmed a lock verdict.
-    private var lockConfirmedAt: Date?
+    /// One-shot, fires just after the next edge while the process is alive. Main-run-loop timers do
+    /// not fire while the app is suspended, which is why the rule is ALSO re-evaluated on every poll
+    /// tick, refresh, foreground and clock change, and why the extension holds an activity per edge.
+    private var lockEdgeTimer: Timer?
     /// Registered once per process (Darwin observers are not removable per-instance the way
-    /// `NotificationCenter` ones are); `isRunning` gates what the callback does.
-    private var isObservingDeadlineRelease = false
+    /// `NotificationCenter` ones are).
+    private var isObservingExtensionLockEdge = false
+    /// Clock / time-zone change observers, registered in `start()`.
+    private var lockClockObservers: [NSObjectProtocol] = []
+    /// The edge activities last handed to `lockRuntime.armEdges`, so a re-evaluation every 30 s
+    /// talks to `DeviceActivityCenter` only when the plan changed.
+    private var lastArmedEdgeSignature: [String]?
+    /// Whether the last `lock_clock` line said the clock was moved; logged on change only.
+    private var lastLoggedClockTamper: Bool?
+    private let lockRuntime: OilaLockRuntime
     private var networkType: String?
     /// When the last `postStatus()` was issued, for `eventStatusMinimumGap`.
     private var lastStatusPostAt: Date?
@@ -447,8 +432,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
     }
 
-    init(service: OilaDeviceServicing = OilaDeviceClient.shared) {
+    init(service: OilaDeviceServicing = OilaDeviceClient.shared, lockRuntime: OilaLockRuntime? = nil) {
         self.service = service
+        self.lockRuntime = lockRuntime ?? .live
         super.init()
         locationManager.delegate = self
         // `NearestTenMeters` engages GPS while still letting CoreLocation duty-cycle the receiver.
@@ -476,48 +462,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // Safe default until the authorization is known; `applyAuthorization` turns it off for
         // `.authorizedAlways` only (see there for why).
         locationManager.pausesLocationUpdatesAutomatically = true
-        // Fail-closed: restore the last-known lock so a force-quit + offline relaunch cannot
-        // silently unlock a locked child. refreshLock() corrects it once the server is reachable;
-        // stop() clears it on unpair. (Property observers don't fire during init, so this doesn't
-        // re-persist.)
-        let confirmedRaw = UserDefaults.standard.double(forKey: Self.lockConfirmedAtKey)
-        let endsAtRaw = UserDefaults.standard.double(forKey: Self.lockEndsAtKey)
-        let wasLocked = UserDefaults.standard.bool(forKey: Self.lockStateKey)
-        lockConfirmedAt = confirmedRaw > 0 ? Date(timeIntervalSince1970: confirmedRaw) : nil
-        let persistedEndsAt = endsAtRaw > 0 ? Date(timeIntervalSince1970: endsAtRaw) : nil
-        isLocked = Self.restoredLockIsTrustworthy(
-            wasLocked: wasLocked,
-            confirmedAt: lockConfirmedAt,
-            lockedUntil: persistedEndsAt
-        )
-        if isLocked {
-            lockEndsAt = persistedEndsAt
-        } else if wasLocked {
-            // The restore RELEASED a persisted lock (deadline passed, or the server had not
-            // confirmed it within the ceiling). Say so on disk explicitly: the didSet above does not
-            // run in init, and a `true` left behind here would come back as a lock on the next
-            // relaunch the moment a server answer re-stamped `lockConfirmedAtKey` without changing
-            // `isLocked` (false → false is not a change, so nothing would ever persist the false).
-            UserDefaults.standard.set(false, forKey: Self.lockStateKey)
-            UserDefaults.standard.removeObject(forKey: Self.lockEndsAtKey)
-            lockReleasedByDeadline = true
-            // Property observers do NOT fire for assignments inside init, so persist the durable
-            // flag explicitly — a scene-less launch depends on the next launch reading it back.
-            UserDefaults.standard.set(true, forKey: Self.lockReleasedByDeadlineKey)
-            // Open the OS shield right here, in whatever process this is: a scene-less background
-            // launch never starts the enforcement coordinator, so relying on it would strand the
-            // shield. This writes only the two keys the whole-device lock owns (categories +
-            // web categories), exactly what the coordinator and the extension write.
-            DeviceLockDeadlineMonitoring.releaseGlobalShield()
-            let confirmedAge = Int(-(lockConfirmedAt?.timeIntervalSinceNow ?? 0))
-            Self.lockLog.notice("lock_deadline released_on_launch confirmed_age_s=\(confirmedAge, privacy: .public) had_end=\(persistedEndsAt == nil ? 0 : 1, privacy: .public)")
-        } else if !wasLocked, UserDefaults.standard.bool(forKey: Self.lockReleasedByDeadlineKey) {
-            // A previous process released the lock but may not have opened the OS shield (scene-less,
-            // no coordinator). Carry the fact forward so this launch's coordinator gate still fires,
-            // and open the shield again in case it is still up (idempotent).
-            lockReleasedByDeadline = true
-            DeviceLockDeadlineMonitoring.releaseGlobalShield()
-        }
+        // The lock at launch comes from the saved policy snapshot and the clock, in whatever process
+        // this is (a scene-less background launch included) — never from a saved verdict. Build 24's
+        // saved verdict is converted once, so an upgrade while offline neither unlocks early nor
+        // locks forever.
+        migrateLegacyLockState()
+        reevaluateLock(reason: "launch")
         // Restore the last contact stamp the same way, and for the same reason: a relaunched app that
         // has not reached the server yet must not render as freshly connected. 0 means "never".
         let storedContact = UserDefaults.standard.double(forKey: Self.lastContactKey)
@@ -574,9 +524,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                // The one foreground hook that exists without a scene: a lock whose deadline passed
-                // while the process was suspended (its timer could not fire) is released here.
-                self?.releaseExpiredLockIfNeeded(reason: "foreground")
+                // The one foreground hook that exists without a scene: an edge that passed while the
+                // process was suspended (its timer could not fire) takes effect here.
+                self?.reevaluateLock(reason: "foreground")
                 await self?.postStatusForEvent()
             }
         }
@@ -614,20 +564,34 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             Task { @MainActor [weak self] in self?.refreshLockNow() }
         }
 
-        // The schedule-monitor extension opened the phone at the deadline while this process was
-        // suspended or dead. Drop the cover now rather than on the next tick.
-        if !isObservingDeadlineRelease {
-            isObservingDeadlineRelease = true
+        // The schedule-monitor extension evaluated an edge while this process was suspended or
+        // dead, and wrote the OS shield. Follow it now rather than on the next tick.
+        if !isObservingExtensionLockEdge {
+            isObservingExtensionLockEdge = true
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(),
                 nil,
                 { _, _, _, _, _ in
-                    Task { @MainActor in OilaTelemetryService.shared.releaseExpiredLockIfNeeded(reason: "extension_release") }
+                    Task { @MainActor in OilaTelemetryService.shared.handleExtensionLockEdge() }
                 },
-                DeviceLockDeadlineSharedStore.releasedDarwinNotification as CFString,
+                DeviceLockEdgeMonitoring.darwinNotification as CFString,
                 nil,
                 .deliverImmediately
             )
+        }
+
+        // A clock or time-zone change moves every edge: a schedule's minutes are local, and the
+        // in-app timer was armed against the old clock. Re-evaluate at once (a child moving the
+        // clock is also exactly what the trusted clock exists to see through).
+        let clockNotifications: [Notification.Name] = [
+            UIApplication.significantTimeChangeNotification, .NSSystemClockDidChange, .NSSystemTimeZoneDidChange
+        ]
+        lockClockObservers = clockNotifications.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                if note.name == .NSSystemTimeZoneDidChange { NSTimeZone.resetSystemTimeZone() }
+                let reason = note.name == .NSSystemTimeZoneDidChange ? "time_zone_changed" : "clock_changed"
+                Task { @MainActor [weak self] in self?.reevaluateLock(reason: reason) }
+            }
         }
 
         applyAuthorization(locationManager.authorizationStatus)
@@ -669,9 +633,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// parent who locks and unlocks in quick succession still gets the final state applied.
     func refreshLockNow() {
         guard isRunning else { return }
-        // Before the network: a push or a foreground on a phone whose lock has already expired must
-        // open it even if the GET below never lands.
-        releaseExpiredLockIfNeeded(reason: "refresh")
+        // Before the network: a push or a foreground on a phone whose lock has already ended (or
+        // begun) must follow the rule even if the GET below never lands.
+        reevaluateLock(reason: "refresh")
         guard !isRefreshingLock else {
             lockRefreshRequestedWhileBusy = true
             return
@@ -822,7 +786,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         flushTimer?.invalidate(); flushTimer = nil
         statusTimer?.invalidate(); statusTimer = nil
         lockTimer?.invalidate(); lockTimer = nil
-        lockDeadlineTimer?.invalidate(); lockDeadlineTimer = nil
+        lockEdgeTimer?.invalidate(); lockEdgeTimer = nil
         pathMonitor?.cancel()
         pathMonitor = nil
         if let foregroundObserver {
@@ -841,6 +805,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             NotificationCenter.default.removeObserver(lockCommandObserver)
             self.lockCommandObserver = nil
         }
+        lockClockObservers.forEach(NotificationCenter.default.removeObserver)
+        lockClockObservers = []
         isRefreshingLock = false
         lockRefreshRequestedWhileBusy = false
         locationManager.stopMonitoringVisits()
@@ -855,11 +821,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         networkType = nil
         lastStatusPostAt = nil
         lastPostedBattery = nil
-        isLocked = false
-        lockEndsAt = nil
-        lockConfirmedAt = nil
-        lockReleasedByDeadline = false
-        UserDefaults.standard.removeObject(forKey: Self.lockReleasedByDeadlineKey)
+        clearLockPolicy()
         probeRequestsInFlight = 0
         // stop() runs on unpair / confirmed session invalidation, so drop the per-app state too:
         // re-pairing to a DIFFERENT child must not inherit the previous child's blocked apps or
@@ -867,7 +829,6 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lockState = nil
         lockedPackages = []
         appLimits = []
-        deviceLocalTime = nil
         scheduleRangeText = nil
         pendingFixes.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.pendingFixesKey)
@@ -879,7 +840,6 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // reached the server.
         lastSuccessfulContactAt = nil
         UserDefaults.standard.removeObject(forKey: Self.lastContactKey)
-        UserDefaults.standard.removeObject(forKey: Self.lockConfirmedAtKey)
         hasCredential = true
         // Same reasoning as the SOS outbox and the contact stamp above: the location-push address
         // and the extension's credential copy belong to the pairing that made them. Left behind,
@@ -1666,19 +1626,26 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             }
         }
         do {
+            // Both clocks on both sides of the request: the anchor sits at its midpoint.
+            let sentWall = lockRuntime.clock.wallNow()
+            let sentMonotonic = lockRuntime.clock.monotonicNanos()
             let state = try await service.fetchLockState()
+            let timing = LockPollTiming(
+                sentWall: sentWall,
+                sentMonotonicNanos: sentMonotonic,
+                receivedMonotonicNanos: lockRuntime.clock.monotonicNanos()
+            )
             recordSuccessfulContact()
             consecutiveLockFailures = 0
             guard isRunning, sequence == lockRefreshSequence else { return }
-            applyLockState(state)
+            applyLockState(state, timing: timing)
         } catch let error as OilaAPIError where error.requiresRePair {
             handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
         } catch {
-            // Keep the last known lock state on a transient failure — but stop asking at full rate.
+            // Keep the saved policy on a transient failure — but stop asking at full rate. The rule
+            // itself runs on: this is the offline branch, and offline is exactly where it must act.
             consecutiveLockFailures += 1
-            // A failed poll is itself the moment to ask whether the lock we are keeping has run out:
-            // this is the offline branch, and offline is exactly where the deadline must act.
-            releaseExpiredLockIfNeeded(reason: "poll_failed")
+            reevaluateLock(reason: "poll_failed")
         }
     }
 
@@ -1690,9 +1657,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// backs off. A lock push and a foreground both still refresh immediately, so the moment
     /// connectivity or the parent's intent changes, the device is current again.
     private func refreshLockOnTimer() async {
-        // BEFORE the backoff early-return, so an unreachable device still checks the deadline every
-        // 30 s tick rather than inheriting the poll's 10-minute backoff.
-        releaseExpiredLockIfNeeded(reason: "tick")
+        // BEFORE the backoff early-return, so an unreachable device still re-evaluates every 30 s
+        // tick rather than inheriting the poll's 10-minute backoff.
+        reevaluateLock(reason: "tick")
         let backoff = Self.lockPollBackoff(consecutiveFailures: consecutiveLockFailures,
                                            baseInterval: lockInterval)
         if let last = lastLockPollAt, Date().timeIntervalSince(last) < backoff { return }
@@ -1709,139 +1676,272 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         return min(baseInterval * pow(2, Double(capped)), 600)
     }
 
-    /// Publishes one lock-state response. Callers must already have passed the sequence guard in
-    /// `refreshLock()` — this method assumes `state` is the newest response we've seen.
-    /// How long a restored lock may go without a server confirmation before it is released on
-    /// launch.
-    ///
-    /// The fail-closed restore is right — a force-quit must not unlock a locked child — but it had no
-    /// ceiling and no non-network exit, so it could brick the phone: the child loses connectivity (a
-    /// prepaid balance running out is the ordinary case here), every `refreshLock()` lands in the
-    /// swallow-everything catch, `isLocked` stays true, and a relaunch restores it before the first
-    /// request is even issued. The parent unlocking from their app changes nothing, because nothing
-    /// can fetch that. The child is behind an undismissable cover, permanently.
-    ///
-    /// 8 hours — the product rule since 2026-09-16 ("Telefon bloklashni 8 soatdan oshmaydigan
-    /// qilib qo'yish kerak doim"): no lock outlives eight hours WITHOUT THE SERVER. Online, every
-    /// 30 s poll re-stamps the confirmation and a longer parent-configured window keeps being
-    /// enforced; offline, the phone opens by itself at the latest eight hours after the last
-    /// answer it heard. It was 12 h before the rule existed. It is deliberately not shorter: a
-    /// short ceiling would turn a subway ride into an unlock.
-    ///
-    /// This bounds only a lock with no known end. A lock whose end the server sent (or that the
-    /// active schedule implies) ends at that instant — see `effectiveLockDeadline`.
-    nonisolated static let lockRestoreMaxAge: TimeInterval = 8 * 3_600
-
-    /// Whether a persisted lock may still be trusted at launch. Pure, so the ceiling is testable.
-    nonisolated static func restoredLockIsTrustworthy(
-        wasLocked: Bool,
-        confirmedAt: Date?,
-        lockedUntil: Date? = nil,
-        now: Date = Date()
-    ) -> Bool {
-        guard wasLocked else { return false }
-        // The lock's own end has passed: released, whatever the confirmation age says. (A clock
-        // moved FORWARD buys an early unlock here; that harm is bounded by one lock and is the
-        // trade the product rule makes — the alternative is the permanent lock it exists to end.)
-        if let lockedUntil, now >= lockedUntil { return false }
-        // No stamp at all means the lock predates this field (an app updated mid-lock). Honour it
-        // once — the next poll either confirms it or clears it — rather than unlocking on upgrade.
-        guard let confirmedAt else { return true }
-        let age = now.timeIntervalSince(confirmedAt)
-        // A negative age means the clock moved backwards; treat it as fresh (fail closed) rather than
-        // handing the child an unlock for changing the date.
-        return age <= lockRestoreMaxAge
-    }
-
-    /// When a lock confirmed at `confirmedAt` with a server end of `lockedUntil` must be released
-    /// without further word from the server: the earlier of the two bounds. nil only when neither
-    /// is known (a lock from before the confirmation stamp existed), which the next poll settles.
-    nonisolated static func effectiveLockDeadline(
-        confirmedAt: Date?,
-        lockedUntil: Date?,
-        maxAge: TimeInterval = lockRestoreMaxAge
-    ) -> Date? {
-        let ceiling = confirmedAt?.addingTimeInterval(maxAge)
-        switch (ceiling, lockedUntil) {
-        case let (ceiling?, until?): return min(ceiling, until)
-        case let (ceiling?, nil): return ceiling
-        case let (nil, until?): return until
-        case (nil, nil): return nil
-        }
-    }
-
-    /// The deadline in force for the current lock, or nil while unlocked / unknown.
-    var lockDeadline: Date? {
-        guard isLocked else { return nil }
-        return Self.effectiveLockDeadline(confirmedAt: lockConfirmedAt, lockedUntil: lockEndsAt)
-    }
-
-    /// Open the phone if the lock's deadline has passed. Safe to call from anywhere on the main
-    /// actor, as often as convenient: it does nothing while unlocked or before the deadline.
-    ///
-    /// This is the non-network exit the fail-closed lock never had. It releases `isLocked` (which
-    /// persists), remembers that the release was LOCAL (`lockReleasedByDeadline`), and posts
-    /// `.oilaLockDeadlineReleased` so `ScreenTimeEnforcementCoordinator` opens the OS shield —
-    /// through the key-scoped release, never through the server-state path.
-    func releaseExpiredLockIfNeeded(now: Date = Date(), reason: String = "deadline") {
-        guard isLocked, let deadline = lockDeadline, now >= deadline else { return }
-        let overdue = Int(now.timeIntervalSince(deadline))
-        Self.lockLog.notice(
-            "lock_deadline released reason=\(reason, privacy: .public) overdue_s=\(overdue, privacy: .public) had_end=\(self.lockEndsAt == nil ? 0 : 1, privacy: .public)"
-        )
-        lockDeadlineTimer?.invalidate(); lockDeadlineTimer = nil
-        isLocked = false
-        lockEndsAt = nil
-        lockReleasedByDeadline = true
-        // The coordinator opens the shield when it is alive and started (via the notification
-        // below); this direct write is the backstop for a scene-less process where it is not.
-        DeviceLockDeadlineMonitoring.releaseGlobalShield()
-        NotificationCenter.default.post(name: Self.oilaLockDeadlineReleased, object: nil)
-    }
-
-    /// (Re)arm the one-shot timer for the current deadline. Idle while unlocked.
-    private func armLockDeadlineTimer() {
-        lockDeadlineTimer?.invalidate(); lockDeadlineTimer = nil
-        guard let deadline = lockDeadline else { return }
-        let delay = max(1, deadline.timeIntervalSinceNow)
-        lockDeadlineTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.releaseExpiredLockIfNeeded(reason: "timer") }
-        }
-    }
+    // MARK: - The whole-device lock (build 26)
+    //
+    // The phone decides the lock by itself (Akramjon, 2026-09-23): from the manual window and the
+    // schedules the server last sent, by a clock the child cannot move, re-checked at every edge.
+    // Nothing here trusts a saved verdict, and nothing here needs the network to end a lock.
 
     nonisolated static let lockLog = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
 
-    /// Internal (not private) so a test can drive the exact transition the poll drives.
-    func applyLockState(_ state: OilaLockState, now: Date = Date()) {
-        // Whole device: only apply a recognized shape. A nil (unrecognized 200) keeps the
-        // last-known lock — never releases an active parental lock on an unexpected payload
-        // (fail closed). `isDeviceLocked` preserves that: nil still means "unrecognized, keep the
-        // last-known lock"; it only resolves a value when the payload actually reports one.
-        if var locked = state.isDeviceLocked {
-            let endsAt = state.lockEndsAt(now: now)
-            // The server's own end has passed but its flag has not caught up (a lazily evaluated
-            // window, a clock a little behind ours): the end it gave us is the promise the parent
-            // saw, so it wins over the stale flag. Without this the poll would re-lock the phone
-            // the deadline just opened, every 30 s, for as long as the two disagree.
-            if locked, let endsAt, now >= endsAt {
-                let overdue = Int(now.timeIntervalSince(endsAt))
-                Self.lockLog.notice("lock_deadline server_flag_stale overdue_s=\(overdue, privacy: .public)")
-                locked = false
+    /// How long an OLD backend's bare `isLocked: true` (or build 24's saved lock on upgrade) is held
+    /// with no word from the server: the 8 h product rule (PO, 2026-09-16), as a window with an end.
+    nonisolated static let legacyLockCeiling: TimeInterval = 8 * 3_600
+
+    /// Both clocks around one `GET /device/lock/state`, for the clock anchor.
+    struct LockPollTiming {
+        let sentWall: Date
+        let sentMonotonicNanos: UInt64
+        let receivedMonotonicNanos: UInt64
+    }
+
+    /// Re-decide the lock from the saved snapshot and the trusted clock, and make everything follow:
+    /// `isLocked` / `lockEndsAt`, the OS shield — written HERE, in any process, scene or not, because
+    /// a background launch has no enforcement coordinator — the in-app timer at the next edge, and
+    /// the extension's edge activities. Idempotent and cheap: called from init, every poll, every
+    /// 30 s tick, refresh, foreground, the extension's notification and every clock or zone change.
+    /// Returns the decision. `announce: false` is for the poll, which posts its own notification.
+    @discardableResult
+    func reevaluateLock(reason: String, announce: Bool = true) -> Bool {
+        guard let snapshot = lockRuntime.store.load() else {
+            // Unknown, which is not "unlocked": nothing is written to the OS from it.
+            lockEdgeTimer?.invalidate(); lockEdgeTimer = nil
+            nextLockCheckAt = nil
+            lockDecisionKnown = false
+            if lockEndsAt != nil { lockEndsAt = nil }
+            if isLocked {
+                isLocked = false
+                if announce { NotificationCenter.default.post(name: Self.oilaLockEvaluationDidChange, object: nil) }
             }
-            // Stamp every SERVER-CONFIRMED verdict, whatever it says. This is what bounds the
-            // fail-closed restore above: without it a lock had no age and could outlive the
-            // pairing. Under the verdict, not above it: an unrecognized 200 must not refresh the
-            // ceiling of a lock it said nothing about.
-            lockConfirmedAt = now
-            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.lockConfirmedAtKey)
-            // A server verdict supersedes any local deadline release; clear the durable flag too so
-            // a later launch does not re-open a lock the server has since re-confirmed.
-            lockReleasedByDeadline = false
-            UserDefaults.standard.removeObject(forKey: Self.lockReleasedByDeadlineKey)
-            if locked != isLocked { isLocked = locked }
-            let newEndsAt = locked ? endsAt : nil
-            if lockEndsAt != newEndsAt { lockEndsAt = newEndsAt }
-            armLockDeadlineTimer()
+            return false
+        }
+        let wallNow = lockRuntime.clock.wallNow()
+        let trustedNow = lockRuntime.clock.trustedNow(anchor: snapshot.clock)
+        // The extension may have evaluated an edge a few seconds AHEAD of the clock (a callback that
+        // fired early is evaluated at its own edge); this process must not undo that in the gap.
+        var evaluationTime = trustedNow
+        if let evaluated = lockRuntime.store.lastEdgeEvaluatedAt(), evaluated > trustedNow,
+           evaluated.timeIntervalSince(trustedNow) <= DeviceLockEdgeMonitoring.earlyCallbackTolerance {
+            evaluationTime = evaluated
+        }
+        let calendar = lockRuntime.calendar()
+        let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
+        // Edges are the instants the answer FLIPS, so while locked the first one is where the episode
+        // ends: `DeviceLockPolicy.episodeEnd`, computed once for both uses.
+        let edges = DeviceLockPolicy.edges(
+            after: evaluationTime, horizon: DeviceLockPolicy.episodeSearchHorizon, snapshot: snapshot, calendar: calendar
+        )
+        let endsAt = locked ? edges.first : nil
+
+        lockDecisionKnown = true
+        let changed = locked != isLocked
+        if changed { isLocked = locked }
+        if lockEndsAt != endsAt { lockEndsAt = endsAt }
+        lockRuntime.applyWholeDevice(locked)
+        armLockEdgeTimer(next: edges.first, trustedNow: trustedNow)
+
+        let skew = trustedNow.timeIntervalSince(wallNow)
+        let armable = edges.filter { $0.timeIntervalSince(evaluationTime) <= DeviceLockEdgeMonitoring.horizon }
+        let entries = DeviceLockEdgeMonitoring.plan(dsn: snapshot.dsn, edges: armable, now: trustedNow, skew: skew)
+        let signature = entries.map { "\($0.name)@\(Int($0.wallStart.timeIntervalSince1970 / 60))" }
+        if signature != lastArmedEdgeSignature, lockRuntime.armEdges(entries) {
+            lastArmedEdgeSignature = signature
+        }
+        logLockClock(snapshot: snapshot, skew: skew)
+
+        if changed {
+            let endsIn = endsAt.map { Int($0.timeIntervalSince(trustedNow)) } ?? -1
+            let nextIn = edges.first.map { Int($0.timeIntervalSince(trustedNow)) } ?? -1
+            Self.lockLog.notice(
+                "lock_eval reason=\(reason, privacy: .public) locked=\(locked ? 1 : 0, privacy: .public) ends_in_s=\(endsIn, privacy: .public) next_edge_in_s=\(nextIn, privacy: .public) legacy=\(snapshot.isLegacy ? 1 : 0, privacy: .public)"
+            )
+            if announce { NotificationCenter.default.post(name: Self.oilaLockEvaluationDidChange, object: nil) }
+        }
+        return locked
+    }
+
+    /// The monitor extension evaluated an edge and wrote the OS (its Darwin notification). Follow it,
+    /// then tell the enforcement side — in that order, so it never re-applies the old answer.
+    func handleExtensionLockEdge() {
+        reevaluateLock(reason: "extension")
+        NotificationCenter.default.post(name: Self.oilaLockExtensionDidEvaluate, object: nil)
+    }
+
+    /// One one-shot timer, half a second past the next edge (so the re-check lands on its far side).
+    private func armLockEdgeTimer(next edge: Date?, trustedNow: Date) {
+        lockEdgeTimer?.invalidate(); lockEdgeTimer = nil
+        nextLockCheckAt = edge
+        guard let edge else { return }
+        let delay = max(1, edge.timeIntervalSince(trustedNow) + 0.5)
+        lockEdgeTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.reevaluateLock(reason: "edge_timer") }
+        }
+    }
+
+    /// `lock_clock` — the server offset and whether the phone's clock was moved (Akramjon's point 4).
+    /// Logged when the verdict changes, not every tick. There is no backend field to report it to
+    /// yet (`PostDeviceStatusDto.diagnostics` takes fixed values and rejects unknown keys).
+    private func logLockClock(snapshot: DeviceLockPolicySnapshot, skew: TimeInterval) {
+        let tamper = abs(skew) > DeviceLockClock.tamperThreshold
+        guard tamper != lastLoggedClockTamper else { return }
+        lastLoggedClockTamper = tamper
+        Self.lockLog.notice(
+            "lock_clock clock_offset_s=\(Int(snapshot.clock?.offset ?? 0), privacy: .public) skew_s=\(Int(skew), privacy: .public) tamper=\(tamper ? 1 : 0, privacy: .public)"
+        )
+    }
+
+    /// Unpair (`stop()`): the policy, the timer, the edge activities and the OS shield all belong to
+    /// the family that just left. A phone that left the family must not stay (or become) locked.
+    /// Internal so a test can check it without starting the whole service.
+    func clearLockPolicy() {
+        lockEdgeTimer?.invalidate(); lockEdgeTimer = nil
+        nextLockCheckAt = nil
+        lockRuntime.store.clear()
+        lockRuntime.stopAllEdges()
+        lastArmedEdgeSignature = nil
+        lastLoggedClockTamper = nil
+        lockDecisionKnown = false
+        if isLocked { isLocked = false }
+        if lockEndsAt != nil { lockEndsAt = nil }
+        lockRuntime.applyWholeDevice(false)
+    }
+
+    /// The snapshot one lock-state payload yields, or nil for a shape with no lock information at
+    /// all (the saved snapshot is then KEPT: an unexpected shape must neither lock nor unlock).
+    ///
+    /// A current backend's payload is taken as data (`carriesLockPolicy`). An OLD backend's bare
+    /// `isLocked` becomes a window from now to its `lockedUntil`, never more than 8 h — refreshed by
+    /// every poll while online, so a longer lock keeps being enforced, and ending by itself offline
+    /// (the 2026-09-16 rule) instead of the permanent lock this build exists to end. A `manualLock`
+    /// that is present but unreadable counts as running only when `manualLockEnabled` says so.
+    nonisolated static func lockPolicySnapshot(
+        from state: OilaLockState,
+        dsn: String,
+        anchor: DeviceLockClockAnchor
+    ) -> DeviceLockPolicySnapshot? {
+        // "Now" in the trusted domain: the server's clock at the anchor (the phone's, with no serverTime).
+        let now = anchor.wall.addingTimeInterval(anchor.offset)
+        let heldWindow = DeviceLockManualWindow(startsAt: now, endsAt: now.addingTimeInterval(legacyLockCeiling))
+        if state.carriesLockPolicy {
+            let manual: DeviceLockManualWindow?
+            switch state.manualLock {
+            case let .window(window): manual = window
+            case .unreadable: manual = state.manualLockEnabled == true ? heldWindow : nil
+            case .null, .absent: manual = nil
+            }
+            return DeviceLockPolicySnapshot(
+                dsn: dsn, manualLock: manual, schedules: state.schedules ?? [], serverTime: state.serverTime,
+                receivedAt: anchor.wall, clock: anchor, isLegacy: false
+            )
+        }
+        guard let legacyLocked = state.isDeviceLocked else { return nil }
+        // A `lockedUntil` already past makes the window empty: the end the parent saw wins over a
+        // flag that has not caught up.
+        let manual = legacyLocked
+            ? DeviceLockManualWindow(startsAt: now, endsAt: min(state.lockedUntil ?? heldWindow.endsAt, heldWindow.endsAt))
+            : nil
+        return DeviceLockPolicySnapshot(
+            dsn: dsn, manualLock: manual, schedules: [], serverTime: nil,
+            receivedAt: anchor.wall, clock: anchor, isLegacy: true
+        )
+    }
+
+    /// Build 24's saved lock as a window, so an upgrade while offline neither opens a locked phone
+    /// early nor keeps it locked forever: from now to build 24's own promise — its end, and never
+    /// later than 8 h after the server last confirmed it (8 h from now when neither is known). nil
+    /// when it was not locked or that promise has already run out.
+    nonisolated static func migratedLegacyWindow(
+        wasLocked: Bool,
+        endsAt: Date?,
+        confirmedAt: Date?,
+        now: Date
+    ) -> DeviceLockManualWindow? {
+        guard wasLocked else { return nil }
+        let ceiling = now.addingTimeInterval(legacyLockCeiling)
+        let bounds = [endsAt, confirmedAt.map { $0.addingTimeInterval(legacyLockCeiling) }].compactMap { $0 }
+        let end = min(bounds.min() ?? ceiling, ceiling)
+        guard end > now else { return nil }
+        return DeviceLockManualWindow(startsAt: now, endsAt: end)
+    }
+
+    /// The one-time upgrade from build 24's saved verdict to a snapshot, then the old keys go. Runs
+    /// on every launch but acts only while an old key exists and no snapshot does. Also retires, on
+    /// the first launch of this build, build 24's lock-until activity, and clears the always-allowed
+    /// selection whose Settings row is gone (so nothing can ever read a stale one).
+    private func migrateLegacyLockState() {
+        let defaults = lockRuntime.legacyDefaults
+        lockRuntime.clearAlwaysAllowed()
+        let keys = [
+            Self.legacyLockStateKey, Self.legacyLockConfirmedAtKey,
+            Self.legacyLockEndsAtKey, Self.legacyLockReleasedByDeadlineKey
+        ]
+        if keys.contains(where: { defaults.object(forKey: $0) != nil }) {
+            if lockRuntime.store.load() == nil {
+                func date(_ key: String) -> Date? {
+                    let raw = defaults.double(forKey: key)
+                    return raw > 0 ? Date(timeIntervalSince1970: raw) : nil
+                }
+                let clock = lockRuntime.clock
+                let now = clock.wallNow()
+                let monotonic = clock.monotonicNanos()
+                let window = Self.migratedLegacyWindow(
+                    wasLocked: defaults.bool(forKey: Self.legacyLockStateKey),
+                    endsAt: date(Self.legacyLockEndsAtKey),
+                    confirmedAt: date(Self.legacyLockConfirmedAtKey),
+                    now: now
+                )
+                lockRuntime.store.save(DeviceLockPolicySnapshot(
+                    dsn: DeviceLockEdgeActivityIdentifier.normalize(lockRuntime.pairedDSN() ?? "unpaired"),
+                    manualLock: window,
+                    schedules: [],
+                    serverTime: nil,
+                    receivedAt: now,
+                    clock: DeviceLockClock.anchor(
+                        serverTime: nil, sentWall: now, sentMonotonicNanos: monotonic,
+                        receivedMonotonicNanos: monotonic, bootSessionID: clock.bootSessionID()
+                    ),
+                    isLegacy: true
+                ))
+                let heldFor = window.map { Int($0.endsAt.timeIntervalSince(now)) } ?? 0
+                Self.lockLog.notice("lock_migration from=build24 locked=\(window == nil ? 0 : 1, privacy: .public) held_s=\(heldFor, privacy: .public)")
+            }
+            keys.forEach(defaults.removeObject(forKey:))
+        }
+        // After the snapshot exists: stopping a RUNNING build-24 activity delivers one last
+        // `intervalDidEnd`, which this build's extension evaluates against the snapshot.
+        if !defaults.bool(forKey: Self.lockPolicyMigratedKey) {
+            lockRuntime.retireLegacyDeadline()
+            defaults.set(true, forKey: Self.lockPolicyMigratedKey)
+        }
+    }
+
+    /// Publishes one lock-state response. Callers must already have passed the sequence guard in
+    /// `refreshLock()` — this method assumes `state` is the newest response we've seen. Internal
+    /// (not private) so a test can drive the exact transition the poll drives.
+    func applyLockState(_ state: OilaLockState, timing: LockPollTiming? = nil) {
+        let clock = lockRuntime.clock
+        let timing = timing ?? {
+            let monotonic = clock.monotonicNanos()
+            return LockPollTiming(sentWall: clock.wallNow(), sentMonotonicNanos: monotonic, receivedMonotonicNanos: monotonic)
+        }()
+        let anchor = DeviceLockClock.anchor(
+            serverTime: state.serverTime,
+            sentWall: timing.sentWall,
+            sentMonotonicNanos: timing.sentMonotonicNanos,
+            receivedMonotonicNanos: timing.receivedMonotonicNanos,
+            bootSessionID: clock.bootSessionID()
+        )
+        let dsn = DeviceLockEdgeActivityIdentifier.normalize(lockRuntime.pairedDSN() ?? "unpaired")
+        if let snapshot = Self.lockPolicySnapshot(from: state, dsn: dsn, anchor: anchor) {
+            lockRuntime.store.save(snapshot)
+            let locked = reevaluateLock(reason: "poll", announce: false)
+            // The server's own verdict is no longer obeyed, but a disagreement is worth a line: at an
+            // edge it is timing; anywhere else it is a zone or clock the two sides disagree on.
+            if let serverSays = state.isLocked, serverSays != locked {
+                Self.lockLog.notice("lock_eval disagrees server=\(serverSays ? 1 : 0, privacy: .public) phone=\(locked ? 1 : 0, privacy: .public)")
+            }
+        } else {
+            Self.lockLog.notice("lock_poll unrecognized_shape kept_snapshot=\(self.lockDecisionKnown ? 1 : 0, privacy: .public)")
         }
         // Per-app half: informational only (see the property docs), so it mirrors the server 1:1.
         //
@@ -1852,13 +1952,72 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lockState = state
         if lockedPackages != state.lockedPackages { lockedPackages = state.lockedPackages }
         if appLimits != state.appLimits { appLimits = state.appLimits }
-        if deviceLocalTime != state.deviceLocalTime { deviceLocalTime = state.deviceLocalTime }
         if scheduleRangeText != state.scheduleRangeText { scheduleRangeText = state.scheduleRangeText }
         // Announce the applied state rather than exposing the publishers: the per-app half is no
         // longer informational — `ScreenTimeEnforcementCoordinator` turns it into real
         // ManagedSettings blocks — and a notification keeps that consumer out of this service's
         // dependency graph, which its own tests rely on staying small.
         NotificationCenter.default.post(name: .oilaLockStateDidChange, object: nil)
+    }
+}
+
+/// Everything the lock half of `OilaTelemetryService` needs from outside itself. Injected so a test
+/// drives the rule with a fake clock and touches no App Group, ManagedSettings or DeviceActivity.
+struct OilaLockRuntime {
+    var store: DeviceLockPolicySharedStore
+    var clock: DeviceLockClock
+    var calendar: () -> Calendar
+    /// The session DSN (`SessionStore`'s "DSN"), which names the edge activities.
+    var pairedDSN: () -> String?
+    /// Writes the two whole-device keys on the default store (only when Screen Time is authorized).
+    var applyWholeDevice: (Bool) -> Void
+    /// Arms the edge activities. False when it could not (not authorized), so the plan is retried.
+    var armEdges: ([DeviceLockEdgeMonitoring.Entry]) -> Bool
+    var stopAllEdges: () -> Void
+    /// Where build 24 kept its lock keys.
+    var legacyDefaults: UserDefaults
+    /// Stops build 24's lock-until activity and forgets its App Group record.
+    var retireLegacyDeadline: () -> Void
+    var clearAlwaysAllowed: () -> Void
+
+    @MainActor static var live: OilaLockRuntime {
+        OilaLockRuntime(
+            store: DeviceLockPolicySharedStore(),
+            clock: .live,
+            calendar: { DeviceLockPolicy.phoneCalendar() },
+            pairedDSN: { UserDefaults.standard.string(forKey: "DSN")?.trimmedNonEmpty },
+            applyWholeDevice: { locked in
+                guard OilaLockRuntime.screenTimeAuthorized() else { return }
+                if DeviceLockPolicy.applyWholeDevice(locked: locked) {
+                    OilaTelemetryService.lockLog.notice("lock_shield written locked=\(locked ? 1 : 0, privacy: .public)")
+                }
+            },
+            armEdges: { entries in
+                guard OilaLockRuntime.screenTimeAuthorized() else { return false }
+                let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: Date())
+                OilaTelemetryService.lockLog.notice(
+                    "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public)"
+                )
+                return true
+            },
+            stopAllEdges: { DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter()) },
+            legacyDefaults: .standard,
+            retireLegacyDeadline: {
+                let center = LiveDeviceLockEdgeCenter()
+                center.stop(names: center.lockActivities().map(\.name).filter { DeviceLockLegacyDeadline.isLegacyActivity(rawValue: $0) })
+                DeviceLockLegacyDeadline.clear()
+            },
+            clearAlwaysAllowed: { ScreenTimeAlwaysAllowedSharedStore.clear() }
+        )
+    }
+
+    /// The same answer the enforcement coordinator asks for: `.notDetermined` right after launch is
+    /// FamilyControls not having answered yet, so the manager is asked to read the system's answer.
+    @MainActor static func screenTimeAuthorized() -> Bool {
+        guard AppRuntime.screenTimeFeaturesEnabled else { return false }
+        let manager = ScreenTimeAuthorizationManager.shared
+        if manager.status == .notDetermined { manager.refreshStatus() }
+        return manager.status == .granted
     }
 }
 

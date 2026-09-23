@@ -59,12 +59,8 @@ struct SettingsRootView: View {
 
     /// True while the language sheet is up.
     @State private var isLanguagePickerPresented = false
-    @ObservedObject private var alwaysAllowed = ScreenTimeAlwaysAllowedStore.shared
     @ObservedObject private var restrictedApps = ScreenTimeRestrictedAppsStore.shared
     @ObservedObject private var screenTimeAuthorization = ScreenTimeAuthorizationManager.shared
-    @State private var isAlwaysAllowedPickerPresented = false
-    /// The picker edits a copy; `onDone` is what commits it, so a swipe-to-dismiss discards.
-    @State private var alwaysAllowedSelection = FamilyActivitySelection()
 
     /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). Every row
     /// in the checklist now reports a real OS status, so every row can count toward this.
@@ -133,10 +129,11 @@ struct SettingsRootView: View {
                     // parent" answered its own question wrongly on every degraded device. It now
                     // reports the real state, and becomes tappable when there is something to fix.
                     // Only when Screen Time is actually usable: the picker is the ONLY way to
-                    // obtain an ApplicationToken on iOS, and the set it collects is what keeps
-                    // Phone and Messages reachable while a parent's whole-device lock is up.
-                    // Hidden rather than disabled when the feature is off, so the screen never
-                    // offers a control that cannot do anything.
+                    // obtain an ApplicationToken on iOS. Hidden rather than disabled when the
+                    // feature is off, so the screen never offers a control that cannot do anything.
+                    // (No "always allowed" row any more: it let whoever held the phone exempt any
+                    // app from the parent's whole-device lock, and the parent controls blocking
+                    // from the web — PO, 2026-09-21.)
                     if AppRuntime.screenTimeFeaturesEnabled,
                        screenTimeAuthorization.status == .granted {
                         // The per-app setup: pick + label. The subtitle carries the live count so a
@@ -149,10 +146,6 @@ struct SettingsRootView: View {
                                 : L10n.tr("settings2.restricted_apps_count", restrictedApps.labelledCount, restrictedApps.unlabelledCount),
                             offCount: restrictedApps.unlabelledCount,
                             action: { path.append(.settingsRestrictedApps) })
-                        row(glyph: .symbol("checkmark.shield.fill"), tint: AppColors.glyphPurple,
-                            title: "settings2.always_allowed",
-                            subtitle: "settings2.always_allowed_sub",
-                            action: { isAlwaysAllowedPickerPresented = true })
                     }
                     row(glyph: .connection, tint: AppColors.glyphPurple,
                         title: "settings2.connection",
@@ -192,14 +185,6 @@ struct SettingsRootView: View {
             LanguagePickerSheet()
                 .environmentObject(sessionStore)
         }
-        .sheet(isPresented: $isAlwaysAllowedPickerPresented) {
-            ScreenTimeAppPickerView(
-                purpose: .alwaysAllowed,
-                selection: $alwaysAllowedSelection,
-                onDone: { selection in alwaysAllowed.update(selection) }
-            )
-        }
-        .onAppear { alwaysAllowedSelection = alwaysAllowed.selection }
     }
 
     private enum RowGlyph {

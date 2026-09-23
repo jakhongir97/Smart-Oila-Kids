@@ -158,11 +158,6 @@ extension RootView {
             eventDate: now
         )
 
-        if shouldRunLocalChildServices,
-           AppRuntime.screenTimeFeaturesEnabled,
-           shouldArmRecoveryCheck(referenceDate: Date()) {
-            lockCoordinator.armForegroundRecoveryCheck()
-        }
         lastBackgroundedAt = nil
         if didHandleInitialAppear {
             clearPersistedBackgroundTimestamp()
@@ -171,7 +166,6 @@ extension RootView {
         if shouldRunLocalChildServices,
            AppRuntime.screenTimeFeaturesEnabled {
             Task {
-                await lockCoordinator.refreshNow()
                 // Foreground is where a newly installed app is discovered: re-probe before the
                 // sync coordinator is asked to retry, so a retry has the fresh catalogue.
                 await ScreenTimeEnforcementCoordinator.shared.refreshNow()
@@ -196,11 +190,8 @@ extension RootView {
             // refreshLockNow() no-ops unless the telemetry service is running (i.e. paired).
             oilaTelemetry.refreshLockNow()
         }
-        if actions.refreshLegacyLockCoordinator {
-            Task {
-                await lockCoordinator.refreshNow()
-            }
-        }
+        // `actions.refreshLegacyLockCoordinator` has no receiver any more: the old
+        // `DeviceLockCoordinator` is no longer started (see `syncLockService`).
     }
 }
 
@@ -216,13 +207,17 @@ private extension RootView {
         }
     }
 
+    /// The old `DeviceLockCoordinator` lane is NOT started any more (build 26). It polled a
+    /// `DeviceLockService` whose every call throws (the legacy backend is gone) every 15 s, wrote
+    /// only named ManagedSettings stores (measured inert on this hardware), fed nothing the lock
+    /// overlay reads (that is `OilaTelemetryService.isLocked`), and fought the enforcement
+    /// coordinator over the same diagnostics rows. Its files stay compiled for their tests.
     func syncLockService(with dsn: String?, armRecoveryCheck: Bool = false) {
+        _ = armRecoveryCheck
         guard AppRuntime.screenTimeFeaturesEnabled else {
-            lockCoordinator.stop()
             ScreenTimeEnforcementCoordinator.shared.stop()
             return
         }
-        lockCoordinator.start(dsn: dsn, armRecoveryCheck: armRecoveryCheck)
         // Server-driven per-app blocking rides the lock state `OilaTelemetryService` already
         // polls, so it starts and stops with the same DSN the rest of the lock lane uses.
         ScreenTimeEnforcementCoordinator.shared.start(dsn: dsn)

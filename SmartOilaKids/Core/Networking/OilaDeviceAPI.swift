@@ -373,18 +373,29 @@ struct OilaAppLimit: Identifiable, Equatable {
     var id: String { packageName }
 }
 
-/// Resolved lock state from `GET /device/lock/state` (schema untyped in the spec — parsed tolerantly).
+/// What `manualLock` in `GET /device/lock/state` said. Three different answers that must not be
+/// confused: the key missing (an old backend), `null` (no manual lock, running or future), and a
+/// window. A present-but-unreadable value is kept apart too, so it is never read as "no lock".
+enum OilaManualLockField: Equatable {
+    case absent
+    case null
+    case window(DeviceLockManualWindow)
+    case unreadable
+}
+
+/// Resolved lock state from `GET /device/lock/state` (`LockStateResponseDto`, parsed tolerantly).
 ///
 /// The live payload carries two independent halves and both are preserved here: the WHOLE-DEVICE
-/// lock (`isLocked`, plus the `manualLockEnabled` / `scheduleLocked` reasons behind it) and the
-/// PER-APP half (`lockedPackages`, `appLimits`). Only the whole-device half is safety-critical —
-/// the per-app half is informational on iOS, which cannot enforce it without FamilyControls.
+/// lock and the PER-APP half (`lockedPackages`, `appLimits`). Since the backend contract of
+/// 2026-09-23 the whole-device half is DATA, not a verdict: `manualLock` (a window with a start and
+/// an end, a future one included), `schedules` (every schedule) and `serverTime`. The phone decides
+/// from those by its own clock (`DeviceLockPolicy`), so it locks and opens on time with no internet;
+/// `isLocked` is "kept for old child builds" and read only when none of the three keys is present.
 struct OilaLockState {
-    /// nil = the 200 response shape was not recognized (no known lock key, no nested `global`
-    /// object). Callers MUST treat nil as "unknown" and keep the last-known lock — never as
-    /// "unlocked" — so an unexpected shape can never silently release an active parental lock.
+    /// The server's own verdict. Only the fallback for an old backend (see `carriesLockPolicy`) and
+    /// a diagnostics cross-check; nil = the 200 response shape was not recognized at all.
     let isLocked: Bool?
-    /// The parent's manual (always-on) lock switch, when the payload reports it; nil when absent.
+    /// True only while the manual lock is RUNNING (a future window reads false); nil when absent.
     let manualLockEnabled: Bool?
     /// True while a lock SCHEDULE window is currently in force, when the payload reports it.
     let scheduleLocked: Bool?
@@ -395,17 +406,20 @@ struct OilaLockState {
     let lockedPackages: [String]
     /// Per-app daily budgets + today's spend (`appLimits`). Display-only on iOS.
     let appLimits: [OilaAppLimit]
-    /// PROVISIONAL, UNTYPED: the only live sample had `activeSchedule: null` and `schedules: []`,
-    /// so the schedule object's real field names are unknown. Rather than invent a schema we keep
-    /// the raw JSON and read it best-effort through `resolvedScheduleRange()`.
+    /// The schedule the SERVER found active when it answered, raw. Display only, through
+    /// `resolvedScheduleRange()`: it goes stale offline, and the lock itself comes from `schedules`.
     let activeScheduleRaw: [String: Any]?
-    /// PROVISIONAL, UNTYPED — see `activeScheduleRaw`.
+    /// `schedules[]` raw, for the same display fallback. The lock reads the typed `schedules`.
     let schedulesRaw: [[String: Any]]
-    /// The instant the current lock ENDS, when the backend sends one (`lockedUntil`; ISO-8601 or
-    /// an epoch). nil = not sent. This is the field the 2026-09-16 product rule needs ("the child
-    /// app must always receive the start and end time") and the backend does not yet send —
-    /// see `lockEndsAt(now:)` for what stands in for it until it does.
+    /// An explicit end under an old-backend spelling (`lockedUntil`; ISO-8601 or an epoch). Only the
+    /// old-backend fallback reads it; the live payload's end is `manualLock.endsAt`.
     let lockedUntil: Date?
+    /// `manualLock` — see `OilaManualLockField`.
+    let manualLock: OilaManualLockField
+    /// `schedules[]`, typed. nil = the key is absent; an unreadable row is dropped, never guessed.
+    let schedules: [DeviceLockSchedule]?
+    /// `serverTime`: the server's clock when it answered, for the clock anchor.
+    let serverTime: Date?
     /// The full tolerant `data` object, for callers needing keys not surfaced above.
     let raw: [String: Any]
 
@@ -421,7 +435,10 @@ struct OilaLockState {
         appLimits: [OilaAppLimit] = [],
         activeScheduleRaw: [String: Any]? = nil,
         schedulesRaw: [[String: Any]] = [],
-        lockedUntil: Date? = nil
+        lockedUntil: Date? = nil,
+        manualLock: OilaManualLockField = .absent,
+        schedules: [DeviceLockSchedule]? = nil,
+        serverTime: Date? = nil
     ) {
         self.isLocked = isLocked
         self.raw = raw
@@ -433,13 +450,24 @@ struct OilaLockState {
         self.activeScheduleRaw = activeScheduleRaw
         self.schedulesRaw = schedulesRaw
         self.lockedUntil = lockedUntil
+        self.manualLock = manualLock
+        self.schedules = schedules
+        self.serverTime = serverTime
     }
 
-    /// The whole-device lock, resolved.
+    /// Whether the payload carries the lock POLICY (the 2026-09-23 contract). When it carries none
+    /// of `serverTime`, `schedules` and `manualLock`, it is an old backend and only `isLocked` can
+    /// be read (`isDeviceLocked`).
+    var carriesLockPolicy: Bool {
+        manualLock != .absent || schedules != nil || serverTime != nil
+    }
+
+    /// The OLD backend's whole-device verdict, resolved. Read only when the payload carries no lock
+    /// policy (`carriesLockPolicy`); a current backend's payload is decided by `DeviceLockPolicy`.
     ///
-    /// `isLocked` stays AUTHORITATIVE — the backend owner confirmed it already means "the whole
-    /// phone", i.e. the server has folded the manual switch and the schedule window into it — so
-    /// whenever it is present it is returned untouched. The OR with `scheduleLocked` /
+    /// `isLocked` is authoritative here — on the old backend it already meant "the whole phone",
+    /// the manual switch and the schedule window folded in — so whenever it is present it is
+    /// returned untouched. The OR with `scheduleLocked` /
     /// `manualLockEnabled` therefore only fires when the primary flag is MISSING entirely, and it
     /// can only ever turn "unknown" into LOCKED, never into unlocked. That keeps the fail-closed
     /// contract of `isLocked` intact: nil still means "unrecognized shape, keep the last-known
@@ -456,22 +484,6 @@ struct OilaLockState {
             return (scheduleLocked ?? false) || (manualLockEnabled ?? false)
         }
         return nil
-    }
-
-    /// When the lock the payload reports will END, as an absolute instant — or nil when the backend
-    /// gives none.
-    ///
-    /// Deliberately ONLY `lockedUntil`, the explicit end the backend sends. An earlier revision also
-    /// tried to translate the active schedule's `endMinute` through `deviceLocalTime`, but that is
-    /// minute-of-day wall-clock arithmetic with no date and no zone: near a window edge it turned a
-    /// just-passed end into a ~24 h lock, and it broke across a DST change — for a schedule shape no
-    /// live payload has ever shown (`activeSchedule` was null in both captured samples). The 8 h
-    /// ceiling (`OilaTelemetryService.lockRestoreMaxAge`) already bounds a lock with no explicit end;
-    /// an exact end needs `lockedUntil`, which the backend is being asked to add. `now` is kept in
-    /// the signature so the call sites and their tests are stable if a second source ever returns.
-    func lockEndsAt(now: Date = Date()) -> Date? {
-        _ = now
-        return lockedUntil
     }
 
     /// PROVISIONAL best-effort read of the active lock window's start/end times.
@@ -1236,39 +1248,83 @@ final class OilaDeviceClient: OilaDeviceServicing {
         "usedSeconds", "used_seconds", "usageSeconds", "used", "totalSeconds", "total_seconds"
     ]
 
-    /// Tolerant whole-payload read for `GET /device/lock/state`. The live response carries
-    /// `isLocked` / `manualLockEnabled` / `scheduleLocked` / `deviceLocalTime` / `lockedPackages` /
-    /// `appLimits` / `activeSchedule` / `schedules`, but the spec types the 2xx body as `{}` — so
-    /// each field is looked up under several plausible spellings and a key we don't recognize
-    /// degrades to nil/empty instead of failing the whole parse. One surprising key must never
-    /// cost us the rest of the state.
+    /// Tolerant whole-payload read for `GET /device/lock/state` (`LockStateResponseDto`). The live
+    /// response carries `isLocked` / `manualLockEnabled` / `manualLock` / `serverTime` /
+    /// `scheduleLocked` / `deviceLocalTime` / `activeSchedule` / `lockedPackages` / `appLimits` /
+    /// `schedules`. A key we don't recognize degrades to nil/empty instead of failing the whole
+    /// parse: one surprising key must never cost us the rest of the state.
     static func parseLockState(from object: [String: Any]) -> OilaLockState {
         OilaLockState(
             isLocked: parseGlobalLock(from: object),
             raw: object,
-            manualLockEnabled: boolValue(object, ["manualLockEnabled", "manualLock", "manual_lock_enabled"]),
+            // NOT "manualLock": that key is the window object now, and reading it as a flag was
+            // how a future window used to look like a running lock.
+            manualLockEnabled: boolValue(object, ["manualLockEnabled", "manual_lock_enabled"]),
             scheduleLocked: boolValue(object, ["scheduleLocked", "isScheduleLocked", "schedule_locked"]),
             deviceLocalTime: firstString(object, ["deviceLocalTime", "device_local_time", "localTime", "deviceTime"]),
             lockedPackages: parseLockedPackages(from: object),
             appLimits: parseAppLimits(from: object),
             activeScheduleRaw: firstDictionary(object, ["activeSchedule", "active_schedule", "currentSchedule"]),
             schedulesRaw: firstArray(object, ["schedules", "lockSchedules", "schedule"]) ?? [],
-            lockedUntil: parseLockedUntil(from: object)
+            lockedUntil: parseLockedUntil(from: object),
+            manualLock: parseManualLock(from: object),
+            schedules: parseLockSchedules(from: object),
+            serverTime: date(object, ["serverTime"])
         )
     }
 
-    /// The lock's end instant, under the spellings a backend is likely to pick, flat or inside the
-    /// same nested `global` / `manualLock` objects `parseGlobalLock` accepts. ISO-8601 (with or
-    /// without fractional seconds) or an epoch number — seconds or milliseconds, told apart by
-    /// magnitude, because the backend's own `stream.start` push already sends `expiresAt` in
-    /// milliseconds while `createdAt` fields are ISO strings.
+    /// `manualLock`: absent, `null`, a `{startsAt, endsAt}` window (UTC ISO-8601), or unreadable.
+    static func parseManualLock(from object: [String: Any]) -> OilaManualLockField {
+        guard let value = object["manualLock"] else { return .absent }
+        if value is NSNull { return .null }
+        guard let window = value as? [String: Any],
+              let startsAt = date(window, ["startsAt"]),
+              let endsAt = date(window, ["endsAt"]) else {
+            return .unreadable
+        }
+        return .window(DeviceLockManualWindow(startsAt: startsAt, endsAt: endsAt))
+    }
+
+    /// `schedules[]` as `LockScheduleDto` rows. The minutes and the bitmask are `number` in the spec
+    /// and are read as Int or Double (or a numeric string, the tolerance every other number here
+    /// gets). A row without a readable window or bitmask is DROPPED rather than guessed at — a
+    /// guessed schedule locks a child at a time no parent chose. `enabled` defaults to true only
+    /// when missing (the DTO requires it); any `deletedAt` other than null means deleted. nil when
+    /// the key is absent; a `null` reads as no schedules.
+    static func parseLockSchedules(from object: [String: Any]) -> [DeviceLockSchedule]? {
+        guard let value = object["schedules"] else { return nil }
+        guard let rows = value as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            guard let start = OilaLockState.minuteOfDay(row, ["startMinute"]),
+                  let end = OilaLockState.minuteOfDay(row, ["endMinute"]),
+                  let days = intValue(row, ["daysBitmask"]), days >= 0 else { return nil }
+            var deletedAt: String?
+            if let raw = row["deletedAt"], !(raw is NSNull) {
+                deletedAt = (raw as? String) ?? String(describing: raw)
+            }
+            return DeviceLockSchedule(
+                id: firstString(row, ["id"]),
+                startMinute: start,
+                endMinute: end,
+                daysBitmask: days & 0x7F,
+                enabled: boolValue(row, ["enabled"]) ?? true,
+                deletedAt: deletedAt
+            )
+        }
+    }
+
+    /// An explicit end under an old-backend spelling, flat or inside a nested `global` / `lock`
+    /// object. ISO-8601 (with or without fractional seconds) or an epoch number — seconds or
+    /// milliseconds, told apart by magnitude. Deliberately NOT inside `manualLock`: that window's
+    /// `endsAt` is the manual lock's end only, and reading it as "the lock's end" opened a phone
+    /// whose SCHEDULE was still running and dropped a future window altogether.
     static func parseLockedUntil(from object: [String: Any]) -> Date? {
         let keys = [
             "lockedUntil", "locked_until", "lockUntil", "lock_until", "lockedUntilAt", "unlockAt", "unlock_at",
-            "lockEndsAt", "lock_ends_at", "endsAt", "manualLockUntil", "manual_lock_until", "until"
+            "lockEndsAt", "lock_ends_at", "manualLockUntil", "manual_lock_until", "until"
         ]
         var scopes: [[String: Any]] = [object]
-        for nested in ["global", "manualLock", "manual_lock", "lock"] {
+        for nested in ["global", "lock"] {
             if let dict = object[nested] as? [String: Any] { scopes.append(dict) }
         }
         for scope in scopes {

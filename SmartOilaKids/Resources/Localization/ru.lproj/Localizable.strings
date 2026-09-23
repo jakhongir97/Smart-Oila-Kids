@@ -37,7 +37,6 @@
 "lock.schedule" = "Расписание: %@";
 "lock.until" = "До %@";
 "lock.offline_note" = "Даже без интернета разблокируется в %@.";
-"lock.local_time" = "Время устройства: %@";
 
 
 
@@ -339,11 +338,7 @@
 /* Screen Time — app picker and the always-allowed set */
 "common.save" = "Сохранить";
 "screentime.picker.restricted.title" = "Выберите приложения";
-"screentime.picker.allowed.title" = "Всегда разрешены";
 "screentime.picker.restricted.hint" = "Выберите приложения, к которым применяются правила. Apple разрешает сделать этот выбор только здесь, на этом телефоне — из веба выбрать нельзя.";
-"screentime.picker.allowed.hint" = "Эти приложения работают, даже когда телефон заблокирован. Добавьте Телефон и Сообщения, чтобы ребёнок всегда мог вам позвонить.";
-"settings2.always_allowed" = "Всегда разрешённые приложения";
-"settings2.always_allowed_sub" = "Приложения, которые работают при блокировке";
 "settings2.restricted_apps" = "Приложения для блокировки и учёта";
 "settings2.restricted_apps_sub" = "Разовая настройка: выберите приложения, которые родитель сможет блокировать и видеть их время";
 "settings2.restricted_apps_count" = "%d готово, %d без названия";

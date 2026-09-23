@@ -798,7 +798,6 @@ final class ScreenTimeRestrictedAppsStoreTests: XCTestCase {
         XCTAssertTrue(ScreenTimeAppPickerView.saveAllowed(draft: try makeSelection([a, b]), previous: previous, purpose: .restricted, guided: true))
         XCTAssertFalse(ScreenTimeAppPickerView.saveAllowed(draft: try makeSelection([a, b, c]), previous: previous, purpose: .restricted, guided: true))
         XCTAssertTrue(ScreenTimeAppPickerView.saveAllowed(draft: previous, previous: previous, purpose: .restricted, guided: false))
-        XCTAssertFalse(ScreenTimeAppPickerView.saveAllowed(draft: FamilyActivitySelection(), previous: previous, purpose: .alwaysAllowed, guided: false))
     }
 
     /// The short list: what the parent asked about and has not labelled yet, in catalogue order.

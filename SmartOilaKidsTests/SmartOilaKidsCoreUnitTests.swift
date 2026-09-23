@@ -1,6 +1,7 @@
 import AVFAudio
 import AVFoundation
 import CoreLocation
+import DeviceActivity
 import os
 import UIKit
 import UserNotifications
@@ -5156,56 +5157,7 @@ final class PINLockoutClockTests: XCTestCase {
     }
 }
 
-// MARK: - A lock that cannot outlive the network, and a poll that stops shouting into it
-
-/// The fail-closed lock restore is right — a force-quit must not unlock a locked child — but it had
-/// no age ceiling and the cover has no non-network exit. A child who loses connectivity (a prepaid
-/// balance running out is the ordinary case in this market) was therefore locked out permanently:
-/// every refresh landed in the swallow-everything catch, and each relaunch restored the lock before
-/// a request was even issued. The parent unlocking from their own app changed nothing.
-final class LockRestoreCeilingTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
-
-    func testAnUnlockedDeviceStaysUnlocked() {
-        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: false, confirmedAt: now, now: now))
-    }
-
-    func testARecentlyConfirmedLockIsRestored() {
-        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true, confirmedAt: now.addingTimeInterval(-3_600), now: now),
-            "an overnight lock must survive a force-quit")
-    }
-
-    func testALockAtTheCeilingIsStillRestored() {
-        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true,
-            confirmedAt: now.addingTimeInterval(-OilaTelemetryService.lockRestoreMaxAge),
-            now: now))
-    }
-
-    func testALockTheServerHasNotConfirmedPastTheCeilingIsReleased() {
-        // The ceiling is 8 h since 2026-09-16 (was 12 h); a permanently bricked phone is a worse
-        // failure than an unlock, and the product rule caps a no-server lock at eight hours.
-        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true,
-            confirmedAt: now.addingTimeInterval(-(OilaTelemetryService.lockRestoreMaxAge + 1)),
-            now: now),
-            "a permanently bricked phone is a worse failure than an unlock")
-    }
-
-    func testALockFromBeforeThisFieldExistedIsHonouredOnce() {
-        // An app updated while the device was locked has no stamp. Trust it; the next poll settles it.
-        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true, confirmedAt: nil, now: now))
-    }
-
-    func testAClockMovedBackwardsDoesNotBuyAnUnlock() {
-        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true, confirmedAt: now.addingTimeInterval(86_400), now: now),
-            "a future stamp means the child moved the clock; fail closed")
-    }
-}
+// MARK: - A lock poll that stops shouting into the network
 
 /// The 30 s lock poll never slowed down, so an unreachable device woke its radio twice a minute
 /// forever — real battery and real prepaid data, spent on a request that cannot succeed.
@@ -5227,12 +5179,13 @@ final class LockPollBackoffTests: XCTestCase {
     }
 }
 
-// MARK: - The fail-closed lock resolver
+// MARK: - The old-backend lock resolver
 
-/// `OilaLockState.isDeviceLocked` decides whether a parent's lock cover comes up, and its contract is
-/// three-valued on purpose: nil means "unrecognized payload, KEEP the last-known lock", never
-/// "unlocked". It had no tests at all, which matters because it has already regressed once — deriving
-/// only true-or-nil from the reason flags made it a one-way latch that could never release a lock.
+/// `OilaLockState.isDeviceLocked` is only the fallback for an OLD backend's payload now (one with no
+/// `manualLock`, `schedules` or `serverTime`; see `OilaTelemetryService.lockPolicySnapshot`), and its
+/// contract is three-valued on purpose: nil means "unrecognized payload, KEEP the saved policy",
+/// never "unlocked". It has already regressed once — deriving only true-or-nil from the reason flags
+/// made it a one-way latch that could never release a lock.
 final class DeviceLockResolutionTests: XCTestCase {
     private func state(isLocked: Bool? = nil,
                        manual: Bool? = nil,
@@ -5447,276 +5400,641 @@ final class SafeIntConversionTests: XCTestCase {
     }
 }
 
-// MARK: - The lock deadline (2026-09-18)
+// MARK: - The whole-device lock, decided on the phone (build 26)
 
-/// The product rule of 2026-09-16: a phone lock never lasts more than 8 hours without the server,
-/// and a lock whose end the server sent opens at that end — while the app runs, on relaunch, and
-/// (through the monitor extension) when the app is dead and the phone offline.
-final class LockDeadlineTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
-
-    func testTheNoServerCeilingIsEightHours() {
-        XCTAssertEqual(OilaTelemetryService.lockRestoreMaxAge, 8 * 3_600,
-                       "Ibrohim, 2026-09-16: 'Telefon bloklashni 8 soatdan oshmaydigan qilib qo'yish kerak doim'")
+/// Shared fixtures for the lock tests: fixed zones, local-time dates, schedules and snapshots.
+/// 2026-09-21 is a Monday; Europe/Berlin springs forward on 2026-03-29 and falls back on 2026-10-25.
+private enum LockFixture {
+    static func calendar(_ identifier: String) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: identifier)!
+        return calendar
     }
 
-    func testARestoredLockPastItsOwnEndIsReleasedHoweverFreshTheConfirmation() {
-        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true, confirmedAt: now, lockedUntil: now, now: now))
-        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true, confirmedAt: now, lockedUntil: now.addingTimeInterval(-1), now: now))
+    static let tashkent = calendar("Asia/Tashkent")
+    static let berlin = calendar("Europe/Berlin")
+
+    static func local(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int,
+                      second: Int = 0, in calendar: Calendar = tashkent) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute, second: second))!
     }
 
-    func testARestoredLockBeforeItsEndIsKept() {
-        XCTAssertTrue(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true, confirmedAt: now, lockedUntil: now.addingTimeInterval(60), now: now))
+    static func utc(_ iso: String) -> Date {
+        ISO8601DateFormatter().date(from: iso)!
     }
 
-    func testAnEndDoesNotExtendTheCeiling() {
-        // Confirmed 9 h ago with an end still an hour away: the ceiling wins, the phone opens.
-        XCTAssertFalse(OilaTelemetryService.restoredLockIsTrustworthy(
-            wasLocked: true,
-            confirmedAt: now.addingTimeInterval(-9 * 3_600),
-            lockedUntil: now.addingTimeInterval(3_600),
-            now: now))
+    static func schedule(_ start: Int, _ end: Int, days: Int = 0x7F, enabled: Bool = true,
+                         deletedAt: String? = nil) -> DeviceLockSchedule {
+        DeviceLockSchedule(id: nil, startMinute: start, endMinute: end, daysBitmask: days, enabled: enabled, deletedAt: deletedAt)
     }
 
-    func testTheEffectiveDeadlineIsTheEarlierOfTheTwoBounds() {
-        let confirmed = now
-        let until = now.addingTimeInterval(2 * 3_600)
-        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: confirmed, lockedUntil: until), until)
-        let farUntil = now.addingTimeInterval(20 * 3_600)
-        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: confirmed, lockedUntil: farUntil),
-                       now.addingTimeInterval(8 * 3_600))
-        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: confirmed, lockedUntil: nil),
-                       now.addingTimeInterval(8 * 3_600))
-        XCTAssertEqual(OilaTelemetryService.effectiveLockDeadline(confirmedAt: nil, lockedUntil: until), until)
-        XCTAssertNil(OilaTelemetryService.effectiveLockDeadline(confirmedAt: nil, lockedUntil: nil))
+    static func snapshot(manual: DeviceLockManualWindow? = nil, schedules: [DeviceLockSchedule] = [],
+                         clock: DeviceLockClockAnchor? = nil) -> DeviceLockPolicySnapshot {
+        DeviceLockPolicySnapshot(dsn: "child", manualLock: manual, schedules: schedules, serverTime: nil,
+                                 receivedAt: Date(timeIntervalSince1970: 0), clock: clock, isLegacy: false)
     }
 
-    // MARK: OilaLockState.lockEndsAt (explicit end only)
+    /// Day bits, Monday = bit 0.
+    static let monday = 1, tuesday = 2, wednesday = 4, thursday = 8, friday = 16, saturday = 32, sunday = 64
+}
 
-    func testTheEndIsTheServerLockedUntil() {
-        let until = now.addingTimeInterval(3_600)
-        let state = OilaLockState(isLocked: true, raw: [:], deviceLocalTime: "10:00", lockedUntil: until)
-        XCTAssertEqual(state.lockEndsAt(now: now), until)
+/// The rule itself (Akramjon, 2026-09-23): locked iff a manual window is running
+/// (`startsAt <= now < endsAt`) or a schedule is active, by the phone's clock and zone.
+final class DeviceLockPolicyTests: XCTestCase {
+    private typealias F = LockFixture
+    private let cal = LockFixture.tashkent
+
+    private func locked(_ date: Date, _ snapshot: DeviceLockPolicySnapshot?, _ calendar: Calendar = LockFixture.tashkent) -> Bool {
+        DeviceLockPolicy.isLocked(at: date, snapshot: snapshot, calendar: calendar)
     }
 
-    func testNoLockedUntilMeansNoEndEvenWithAnActiveSchedule() {
-        // The schedule-derived end was removed: it was minute-of-day wall-clock arithmetic with no
-        // date or zone (a just-passed end became a ~24 h lock; a DST change shifted it an hour), for
-        // a schedule shape no live payload has ever shown. The 8 h ceiling bounds a lock with no end;
-        // an exact end needs the backend's `lockedUntil`.
-        let state = OilaLockState(
-            isLocked: true, raw: [:], deviceLocalTime: "10:00",
-            activeScheduleRaw: ["label": "uxlash", "startMinute": 9 * 60, "endMinute": 11 * 60]
-        )
-        XCTAssertNil(state.lockEndsAt(now: now))
-        XCTAssertEqual(state.scheduleRangeText, "09:00 – 11:00", "the schedule is still shown as a display range")
+    // MARK: Manual window
+
+    func testAManualWindowLocksFromItsStartUpToButNotIncludingItsEnd() {
+        let start = F.local(2026, 9, 21, 14, 0)
+        let snapshot = F.snapshot(manual: DeviceLockManualWindow(startsAt: start, endsAt: start.addingTimeInterval(7_200)))
+        XCTAssertFalse(locked(start.addingTimeInterval(-1), snapshot))
+        XCTAssertTrue(locked(start, snapshot), "startsAt <= now")
+        XCTAssertTrue(locked(start.addingTimeInterval(7_199), snapshot))
+        XCTAssertFalse(locked(start.addingTimeInterval(7_200), snapshot), "now < endsAt: the end itself is open")
     }
 
-    func testAnUnlockedPayloadHasNoEnd() {
-        let unlocked = OilaLockState(isLocked: false, raw: [:], lockedUntil: nil)
-        XCTAssertNil(unlocked.lockEndsAt(now: now))
+    func testAFutureWindowLocksNothingUntilItStarts() {
+        let now = F.local(2026, 9, 21, 13, 0)
+        let snapshot = F.snapshot(manual: DeviceLockManualWindow(startsAt: now.addingTimeInterval(3_600), endsAt: now.addingTimeInterval(7_200)))
+        XCTAssertFalse(locked(now, snapshot))
+        XCTAssertTrue(locked(now.addingTimeInterval(3_600), snapshot))
     }
 
-    // MARK: parseLockedUntil
-
-    func testLockedUntilIsReadAsISOOrEpochUnderTheLikelySpellings() {
-        let iso = "2026-09-18T20:00:00Z"
-        let expected = Date(timeIntervalSince1970: 1_789_761_600)
-        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": iso]), expected)
-        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["locked_until": "2026-09-18T20:00:00.000Z"]), expected)
-        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["unlockAt": 1_789_761_600]), expected)
-        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": 1_789_761_600_000]), expected, "epoch milliseconds")
-        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["global": ["until": iso]]), expected)
-        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["manualLock": ["until": iso]]), expected)
+    func testNoWindowNoScheduleAndNoSnapshotAreAllUnlocked() {
+        XCTAssertFalse(locked(F.local(2026, 9, 21, 13, 0), F.snapshot()))
+        XCTAssertFalse(locked(F.local(2026, 9, 21, 13, 0), nil), "no snapshot is unknown, never a lock")
     }
 
-    func testAnAbsentOrNullEndIsNil() {
-        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: [:]))
-        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": NSNull()]))
-        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": ""]))
-        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": false]))
-        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": 0]))
+    /// The backend refuses more than 8 h; the phone refuses to be locked longer by any payload.
+    func testAManualWindowIsClampedToEightHoursAndAMinute() {
+        let start = F.local(2026, 9, 21, 8, 0)
+        let snapshot = F.snapshot(manual: DeviceLockManualWindow(startsAt: start, endsAt: start.addingTimeInterval(12 * 3_600)))
+        XCTAssertTrue(locked(start.addingTimeInterval(8 * 3_600 + 59), snapshot))
+        XCTAssertFalse(locked(start.addingTimeInterval(8 * 3_600 + 60), snapshot))
+        XCTAssertEqual(DeviceLockPolicy.episodeEnd(at: start, snapshot: snapshot, calendar: cal),
+                       start.addingTimeInterval(8 * 3_600 + 60))
     }
 
-    func testParseLockStateCarriesTheEnd() {
-        let state = OilaDeviceClient.parseLockState(from: [
-            "isLocked": true, "manualLockEnabled": true, "scheduleLocked": false,
-            "deviceLocalTime": "15:45", "activeSchedule": NSNull(), "lockedPackages": [], "appLimits": [],
-            "schedules": [], "lockedUntil": "2026-09-18T20:00:00Z"
+    func testAnInvertedOrEmptyWindowLocksNothing() {
+        let start = F.local(2026, 9, 21, 14, 0)
+        for end in [start, start.addingTimeInterval(-60)] {
+            let snapshot = F.snapshot(manual: DeviceLockManualWindow(startsAt: start, endsAt: end))
+            XCTAssertFalse(locked(start, snapshot))
+            XCTAssertFalse(locked(end, snapshot))
+            XCTAssertTrue(DeviceLockPolicy.edges(after: start.addingTimeInterval(-3_600), horizon: 86_400, snapshot: snapshot, calendar: cal).isEmpty)
+        }
+    }
+
+    // MARK: Schedules
+
+    func testASimpleScheduleIsActiveOnItsDayWithAnExclusiveEnd() {
+        let snapshot = F.snapshot(schedules: [F.schedule(9 * 60, 11 * 60, days: F.monday)])
+        XCTAssertFalse(locked(F.local(2026, 9, 21, 8, 59), snapshot))
+        XCTAssertTrue(locked(F.local(2026, 9, 21, 9, 0), snapshot))
+        XCTAssertTrue(locked(F.local(2026, 9, 21, 10, 59), snapshot))
+        XCTAssertFalse(locked(F.local(2026, 9, 21, 11, 0), snapshot), "endMinute is exclusive")
+        XCTAssertFalse(locked(F.local(2026, 9, 22, 10, 0), snapshot), "Tuesday's bit is off")
+    }
+
+    /// The day bit names the day the window STARTS: a Friday night locks into Saturday morning even
+    /// with Saturday's bit off, and a Thursday-bit-less window does not lock Friday's early hours.
+    func testAWindowCrossingMidnightBelongsToTheDayItStarts() {
+        let snapshot = F.snapshot(schedules: [F.schedule(22 * 60, 7 * 60, days: F.friday)])
+        XCTAssertFalse(locked(F.local(2026, 9, 25, 21, 59), snapshot), "Friday before the start")
+        XCTAssertTrue(locked(F.local(2026, 9, 25, 22, 0), snapshot), "Friday, today's half")
+        XCTAssertTrue(locked(F.local(2026, 9, 26, 0, 0), snapshot), "Saturday midnight, yesterday's half")
+        XCTAssertTrue(locked(F.local(2026, 9, 26, 6, 59), snapshot))
+        XCTAssertFalse(locked(F.local(2026, 9, 26, 7, 0), snapshot), "exclusive end")
+        XCTAssertFalse(locked(F.local(2026, 9, 26, 23, 0), snapshot), "Saturday's own bit is off")
+        XCTAssertFalse(locked(F.local(2026, 9, 25, 1, 0), snapshot), "Friday 01:00 is Thursday's window, and Thursday is off")
+    }
+
+    func testTheSundayToMondayWrapUsesSundaysBit() {
+        let snapshot = F.snapshot(schedules: [F.schedule(21 * 60, 6 * 60, days: F.sunday)])
+        XCTAssertTrue(locked(F.local(2026, 9, 27, 21, 30), snapshot), "Sunday evening")
+        XCTAssertTrue(locked(F.local(2026, 9, 28, 5, 59), snapshot), "Monday morning, Sunday's window")
+        XCTAssertFalse(locked(F.local(2026, 9, 28, 21, 30), snapshot), "Monday evening, Monday is off")
+    }
+
+    func testStartEqualToEndAndAnEmptyBitmaskNeverLock() {
+        let now = F.local(2026, 9, 21, 12, 0)
+        XCTAssertFalse(locked(now, F.snapshot(schedules: [F.schedule(12 * 60, 12 * 60)])), "start == end is inactive")
+        XCTAssertFalse(locked(now, F.snapshot(schedules: [F.schedule(11 * 60, 13 * 60, days: 0)])))
+    }
+
+    func testEveryDayBitMapsToItsOwnWeekday() {
+        for bit in 0 ..< 7 {
+            let snapshot = F.snapshot(schedules: [F.schedule(10 * 60, 11 * 60, days: 1 << bit)])
+            for offset in 0 ..< 7 {
+                // 2026-09-21 is Monday (bit 0); +offset days is bit `offset`.
+                let at = F.local(2026, 9, 21 + offset, 10, 30)
+                XCTAssertEqual(locked(at, snapshot), offset == bit, "bit \(bit), day +\(offset)")
+            }
+        }
+        XCTAssertEqual(DeviceLockPolicy.weekdayIndex(calendarWeekday: 2), 0, "Calendar's Monday is bit 0")
+        XCTAssertEqual(DeviceLockPolicy.weekdayIndex(calendarWeekday: 1), 6, "Calendar's Sunday is bit 6")
+    }
+
+    func testDisabledAndDeletedSchedulesAreIgnored() {
+        let now = F.local(2026, 9, 21, 10, 0)
+        XCTAssertFalse(locked(now, F.snapshot(schedules: [F.schedule(9 * 60, 11 * 60, enabled: false)])))
+        XCTAssertFalse(locked(now, F.snapshot(schedules: [F.schedule(9 * 60, 11 * 60, deletedAt: "2026-09-20T10:00:00.000Z")])))
+        XCTAssertTrue(locked(now, F.snapshot(schedules: [F.schedule(9 * 60, 11 * 60)])))
+    }
+
+    // MARK: Episodes and edges
+
+    func testAManualWindowAndAnAbuttingOrOverlappingScheduleAreOneEpisode() {
+        let evening = F.local(2026, 9, 21, 21, 0)
+        let night = F.schedule(22 * 60, 7 * 60)
+        let abutting = F.snapshot(manual: DeviceLockManualWindow(startsAt: F.local(2026, 9, 21, 20, 0), endsAt: F.local(2026, 9, 21, 22, 0)),
+                                  schedules: [night])
+        XCTAssertEqual(DeviceLockPolicy.episodeEnd(at: evening, snapshot: abutting, calendar: cal), F.local(2026, 9, 22, 7, 0),
+                       "the phone does not open for an instant at 22:00, so the cover must not promise it")
+        let overlapping = F.snapshot(manual: DeviceLockManualWindow(startsAt: F.local(2026, 9, 21, 20, 0), endsAt: F.local(2026, 9, 21, 23, 0)),
+                                     schedules: [night])
+        XCTAssertEqual(DeviceLockPolicy.episodeEnd(at: evening, snapshot: overlapping, calendar: cal), F.local(2026, 9, 22, 7, 0))
+        // A schedule that ends INSIDE the manual window: the window's end is the episode's.
+        let inside = F.snapshot(manual: DeviceLockManualWindow(startsAt: F.local(2026, 9, 21, 20, 0), endsAt: F.local(2026, 9, 21, 23, 0)),
+                                schedules: [F.schedule(20 * 60 + 30, 21 * 60 + 30)])
+        XCTAssertEqual(DeviceLockPolicy.episodeEnd(at: evening, snapshot: inside, calendar: cal), F.local(2026, 9, 21, 23, 0))
+    }
+
+    func testThereIsNoEpisodeEndWhileUnlocked() {
+        let snapshot = F.snapshot(schedules: [F.schedule(22 * 60, 7 * 60)])
+        XCTAssertNil(DeviceLockPolicy.episodeEnd(at: F.local(2026, 9, 21, 12, 0), snapshot: snapshot, calendar: cal))
+    }
+
+    func testEdgesAreTheFlipsInOrderInsideTheHorizon() {
+        let snapshot = F.snapshot(schedules: [F.schedule(22 * 60, 7 * 60)])
+        let edges = DeviceLockPolicy.edges(after: F.local(2026, 9, 21, 12, 0), horizon: 48 * 3_600, snapshot: snapshot, calendar: cal)
+        XCTAssertEqual(edges, [
+            F.local(2026, 9, 21, 22, 0), F.local(2026, 9, 22, 7, 0),
+            F.local(2026, 9, 22, 22, 0), F.local(2026, 9, 23, 7, 0)
         ])
-        XCTAssertEqual(state.lockedUntil, Date(timeIntervalSince1970: 1_789_761_600))
-        XCTAssertEqual(state.isDeviceLocked, true)
-        // The live sample of 2026-07-22, untouched: no end, nothing else changes.
-        let live = OilaDeviceClient.parseLockState(from: [
-            "isLocked": false, "manualLockEnabled": false, "scheduleLocked": false,
-            "deviceLocalTime": "15:45", "activeSchedule": NSNull(),
-            "lockedPackages": ["com.instagram.android"], "appLimits": [], "schedules": []
+        // (now, now + horizon]: an edge exactly at now is not ahead; one exactly at the horizon is.
+        let fromTheEdge = DeviceLockPolicy.edges(after: F.local(2026, 9, 21, 22, 0), horizon: 9 * 3_600, snapshot: snapshot, calendar: cal)
+        XCTAssertEqual(fromTheEdge, [F.local(2026, 9, 22, 7, 0)])
+    }
+
+    func testAScheduleStartingInsideARunningWindowIsNotAnEdge() {
+        let snapshot = F.snapshot(manual: DeviceLockManualWindow(startsAt: F.local(2026, 9, 21, 21, 0), endsAt: F.local(2026, 9, 21, 23, 0)),
+                                  schedules: [F.schedule(22 * 60, 23 * 60 + 30, days: F.monday)])
+        let edges = DeviceLockPolicy.edges(after: F.local(2026, 9, 21, 20, 0), horizon: 6 * 3_600, snapshot: snapshot, calendar: cal)
+        XCTAssertEqual(edges, [F.local(2026, 9, 21, 21, 0), F.local(2026, 9, 21, 23, 30)])
+    }
+
+    /// Spring forward (Berlin, 2026-03-29, 02:00 CET → 03:00 CEST): a 02:30–04:00 schedule's start
+    /// minute does not exist that night. The rule reads the local minute, so the lock takes effect
+    /// at 03:00 CEST — the transition itself — and the edge is there, not an hour late.
+    func testASkippedStartMinuteLocksAtTheSpringForwardTransition() {
+        let snapshot = F.snapshot(schedules: [F.schedule(2 * 60 + 30, 4 * 60)])
+        XCTAssertFalse(locked(F.utc("2026-03-29T00:59:59Z"), snapshot, F.berlin), "01:59:59 CET")
+        XCTAssertTrue(locked(F.utc("2026-03-29T01:00:00Z"), snapshot, F.berlin), "03:00 CEST")
+        let edges = DeviceLockPolicy.edges(after: F.utc("2026-03-28T12:00:00Z"), horizon: 24 * 3_600, snapshot: snapshot, calendar: F.berlin)
+        XCTAssertEqual(edges, [F.utc("2026-03-29T01:00:00Z"), F.utc("2026-03-29T02:00:00Z")],
+                       "lock at the transition, open at 04:00 CEST")
+    }
+
+    /// Fall back (Berlin, 2026-10-25, 03:00 CEST → 02:00 CET): 02:00–02:59 happens twice. A
+    /// 01:00–02:30 schedule opens at the first 02:30, locks again when the clock goes back to 02:00,
+    /// and opens at the second 02:30 — what the minute-of-day rule says, with every flip an edge.
+    func testARepeatedHourYieldsBothOccurrencesAsEdges() {
+        let snapshot = F.snapshot(schedules: [F.schedule(60, 2 * 60 + 30)])
+        let edges = DeviceLockPolicy.edges(after: F.utc("2026-10-24T22:00:00Z"), horizon: 4 * 3_600, snapshot: snapshot, calendar: F.berlin)
+        XCTAssertEqual(edges, [
+            F.utc("2026-10-24T23:00:00Z"), // 01:00 CEST
+            F.utc("2026-10-25T00:30:00Z"), // 02:30 CEST
+            F.utc("2026-10-25T01:00:00Z"), // 02:00 CET, the clock went back
+            F.utc("2026-10-25T01:30:00Z")  // 02:30 CET
         ])
-        XCTAssertNil(live.lockedUntil)
-        XCTAssertNil(live.lockEndsAt(now: now))
-        XCTAssertEqual(live.lockedPackages, ["com.instagram.android"])
+        // Every edge really is a flip.
+        var state = locked(F.utc("2026-10-24T22:00:00Z"), snapshot, F.berlin)
+        for edge in edges {
+            let next = locked(edge, snapshot, F.berlin)
+            XCTAssertNotEqual(next, state, "\(edge)")
+            state = next
+        }
+    }
+
+    func testTheSameLocalRuleHoldsInTashkentWhichHasNoDST() {
+        let snapshot = F.snapshot(schedules: [F.schedule(22 * 60, 7 * 60, days: F.friday | F.saturday)])
+        let edges = DeviceLockPolicy.edges(after: F.local(2026, 9, 25, 12, 0), horizon: 72 * 3_600, snapshot: snapshot, calendar: cal)
+        XCTAssertEqual(edges, [
+            F.local(2026, 9, 25, 22, 0), F.local(2026, 9, 26, 7, 0),
+            F.local(2026, 9, 26, 22, 0), F.local(2026, 9, 27, 7, 0)
+        ])
     }
 }
 
-/// The one-off `DeviceActivity` whose END opens the phone when the app is not running.
-final class DeviceLockDeadlineMonitoringTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
-    private var suiteNames: [String] = []
+/// The clock the lock runs on (Akramjon's point 4): the server's time carried forward on a
+/// monotonic clock the child cannot set, so moving the date changes nothing within a boot.
+final class DeviceLockClockTests: XCTestCase {
+    private let wall = Date(timeIntervalSince1970: 1_800_000_000)
+    private let second: UInt64 = 1_000_000_000
 
-    override func tearDown() {
-        for name in suiteNames { UserDefaults.standard.removePersistentDomain(forName: name) }
-        suiteNames.removeAll()
-        super.tearDown()
+    private func anchor(offset: TimeInterval = 30, boot: String? = "boot-A") -> DeviceLockClockAnchor {
+        DeviceLockClockAnchor(wall: wall, monotonicNanos: 1_000 * second, offset: offset, bootSessionID: boot)
     }
 
-    private func makeStore() -> DeviceLockDeadlineSharedStore {
-        let name = "DeviceLockDeadlineMonitoringTests.\(UUID().uuidString)"
-        suiteNames.append(name)
-        return DeviceLockDeadlineSharedStore(userDefaults: UserDefaults(suiteName: name)!)
+    func testTheServerOffsetIsCarriedForwardOnTheMonotonicClock() {
+        let trusted = DeviceLockClock.trustedNow(anchor: anchor(), wall: wall.addingTimeInterval(600),
+                                                 monotonicNanos: 1_600 * second, bootSessionID: "boot-A")
+        XCTAssertEqual(trusted, wall.addingTimeInterval(600 + 30))
     }
 
-    func testTheActivityNameIsUnderAPrefixOfItsOwn() {
-        let raw = DeviceLockDeadlineActivityIdentifier.rawValue(dsn: " Child DSN./42 ")
-        XCTAssertEqual(raw, "smartoila.lock-until|_child_dsn__42_")
-        XCTAssertTrue(DeviceLockDeadlineActivityIdentifier.isDeadlineActivity(rawValue: raw))
-        XCTAssertEqual(DeviceLockDeadlineActivityIdentifier.dsn(from: raw), "_child_dsn__42_")
-        XCTAssertNil(DeviceLockDeadlineActivityIdentifier.dsn(from: "smartoila.lock-until|"))
-        // The legacy schedule controller sweeps every `smartoila.global-lock.schedule*` activity at
-        // launch, and a stop on a running activity delivers `intervalDidEnd`. This one must not be
-        // swept, nor mistaken for the app-limit or usage activities the extension also handles.
+    func testMovingTheWallClockEitherWayWithinABootChangesNothing() {
+        let moves: [TimeInterval] = [3 * 3_600, -3 * 3_600, 86_400 * 30]
+        for moved in moves {
+            let trusted = DeviceLockClock.trustedNow(anchor: anchor(), wall: wall.addingTimeInterval(60 + moved),
+                                                     monotonicNanos: 1_060 * second, bootSessionID: "boot-A")
+            XCTAssertEqual(trusted, wall.addingTimeInterval(60 + 30), "wall moved \(moved) s")
+        }
+    }
+
+    func testAfterARebootTheWallClockCarriesTheOffset() {
+        let rebooted = DeviceLockClock.trustedNow(anchor: anchor(), wall: wall.addingTimeInterval(7_200),
+                                                  monotonicNanos: 50 * second, bootSessionID: nil)
+        XCTAssertEqual(rebooted, wall.addingTimeInterval(7_200 + 30), "a monotonic value below the anchor's is a reboot")
+    }
+
+    /// A later boot that has simply been up longer than the anchor's would pass the monotonic test
+    /// and put the clock back by however long the phone was off. The boot id decides first.
+    func testADifferentBootSessionIsARebootEvenWithALargerMonotonicValue() {
+        let trusted = DeviceLockClock.trustedNow(anchor: anchor(), wall: wall.addingTimeInterval(86_400),
+                                                 monotonicNanos: 5_000 * second, bootSessionID: "boot-B")
+        XCTAssertEqual(trusted, wall.addingTimeInterval(86_400 + 30))
+    }
+
+    func testNoAnchorIsThePlainWallClockAndNoServerTimeIsOffsetZero() {
+        XCTAssertEqual(DeviceLockClock.trustedNow(anchor: nil, wall: wall, monotonicNanos: 1, bootSessionID: nil), wall)
+        let noServer = DeviceLockClock.anchor(serverTime: nil, sentWall: wall, sentMonotonicNanos: 10 * second,
+                                              receivedMonotonicNanos: 10 * second, bootSessionID: nil)
+        XCTAssertEqual(noServer.offset, 0)
+    }
+
+    func testTheAnchorSitsAtTheMidpointOfTheRequest() {
+        let anchor = DeviceLockClock.anchor(serverTime: wall.addingTimeInterval(1 + 5), sentWall: wall,
+                                            sentMonotonicNanos: 10 * second, receivedMonotonicNanos: 12 * second,
+                                            bootSessionID: "boot-A")
+        XCTAssertEqual(anchor.wall, wall.addingTimeInterval(1))
+        XCTAssertEqual(anchor.monotonicNanos, 11 * second)
+        XCTAssertEqual(anchor.offset, 5, accuracy: 0.000_1)
+        XCTAssertEqual(anchor.bootSessionID, "boot-A")
+    }
+
+    func testTheLiveClocksAreReadable() {
+        let clock = DeviceLockClock.live
+        let first = clock.monotonicNanos()
+        XCTAssertGreaterThan(first, 0)
+        XCTAssertGreaterThanOrEqual(clock.monotonicNanos(), first, "monotonic")
+        XCTAssertEqual(DeviceLockClock.tamperThreshold, 120)
+    }
+}
+
+/// One one-off `DeviceActivity` per edge, so the lock follows the rule with the app dead.
+final class DeviceLockEdgeMonitoringTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000) // a whole minute
+    private let dsn = "8D905F9F-770B-4D36-B41E-E34FD6D46B17"
+
+    private final class FakeCenter: DeviceLockEdgeCenter {
+        var armed: [(name: String, start: Date?)] = []
+        var started: [(String, DeviceActivitySchedule)] = []
+        var stopped: [String] = []
+        var failNames: Set<String> = []
+        struct Refused: Error {}
+
+        func lockActivities() -> [(name: String, start: Date?)] { armed }
+        func start(name: String, schedule: DeviceActivitySchedule) throws {
+            if failNames.contains(name) { throw Refused() }
+            started.append((name, schedule))
+        }
+        func stop(names: [String]) { stopped += names }
+    }
+
+    private func minute(_ date: Date) -> Int { Int(date.timeIntervalSince1970 / 60) }
+
+    private func activity(_ name: String, _ start: Date?) -> (name: String, start: Date?) { (name, start) }
+
+    func testTheNameCarriesTheNormalizedDSNAndTheEdgeMinute() {
+        let raw = DeviceLockEdgeActivityIdentifier.rawValue(dsn: dsn, edgeMinute: 30_000_000)
+        XCTAssertEqual(raw, "smartoila.lock-edge|8d905f9f-770b-4d36-b41e-e34fd6d46b17|30000000")
+        XCTAssertTrue(DeviceLockEdgeActivityIdentifier.isLockEdgeActivity(rawValue: raw))
+        XCTAssertEqual(DeviceLockEdgeActivityIdentifier.edgeMinute(from: raw), 30_000_000)
+        XCTAssertEqual(DeviceLockEdgeActivityIdentifier.rawValue(dsn: "a|b", edgeMinute: 1), "smartoila.lock-edge|a_b|1",
+                       "the separator can never appear inside the DSN")
+        // Not swept by the old schedule controller, nor mistaken for any other activity.
         XCTAssertFalse(DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: raw))
         XCTAssertFalse(DeviceAppLimitActivityIdentifier.isAppLimitActivity(rawValue: raw))
         XCTAssertFalse(ScreenTimeUsageActivity.isUsageActivity(rawValue: raw))
+        XCTAssertFalse(DeviceLockLegacyDeadline.isLegacyActivity(rawValue: raw))
+        XCTAssertTrue(DeviceLockLegacyDeadline.isLegacyActivity(rawValue: "smartoila.lock-until|child"))
     }
 
-    func testTheIntervalEndsAtTheLockEndAndNeverBefore() {
-        let end = now.addingTimeInterval(2 * 3_600)
-        let planned = DeviceLockDeadlineMonitoring.plannedInterval(endsAt: end, now: now)
-        XCTAssertEqual(planned.start, now.addingTimeInterval(DeviceLockDeadlineMonitoring.startLead))
-        XCTAssertEqual(planned.end, end)
+    func testEachEdgeIsAOneOffSixteenMinuteActivityStartingAtTheEdge() {
+        let edges = [now.addingTimeInterval(2 * 3_600), now.addingTimeInterval(4 * 3_600)]
+        let entries = DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: edges, now: now, skew: 0)
+        XCTAssertEqual(entries.map(\.edgeMinute), edges.map(minute))
+        XCTAssertEqual(entries.map(\.wallStart), edges)
+        XCTAssertFalse(entries.contains(where: \.isFallback))
+        let calendar = LockFixture.tashkent
+        let schedule = DeviceLockEdgeMonitoring.schedule(for: entries[0], calendar: calendar)
+        XCTAssertFalse(schedule.repeats)
+        let start = calendar.date(from: schedule.intervalStart)
+        let end = calendar.date(from: schedule.intervalEnd)
+        XCTAssertEqual(start, edges[0])
+        XCTAssertEqual(end, edges[0].addingTimeInterval(16 * 60), "Apple's 15-minute floor, plus a minute")
+        XCTAssertNotNil(schedule.intervalStart.second, "full date components, year to second")
+        XCTAssertNotNil(schedule.intervalStart.year)
     }
 
-    func testAnEndSoonerThanAppleAllowsIsPushedOutToTheMinimum() {
-        let end = now.addingTimeInterval(5 * 60)
-        let planned = DeviceLockDeadlineMonitoring.plannedInterval(endsAt: end, now: now)
-        XCTAssertGreaterThanOrEqual(planned.end.timeIntervalSince(planned.start), DeviceLockDeadlineMonitoring.minimumIntervalLength)
-        XCTAssertGreaterThanOrEqual(planned.end, end, "the extension may open late, never early")
+    func testAnEdgeIsRoundedUpToItsMinuteNeverDown() {
+        let edge = now.addingTimeInterval(3_600 + 30)
+        let entry = DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: [edge], now: now, skew: 0).first
+        XCTAssertEqual(entry?.edgeMinute, minute(now) + 61)
+        XCTAssertGreaterThanOrEqual(entry?.wallStart ?? .distantPast, edge, "an activity may fire late, never before its edge")
     }
 
-    func testReArmOnlyWhenTheDeadlineMoved() {
-        let end = now.addingTimeInterval(3_600)
-        let armed = DeviceLockDeadlineRecord(dsn: "d1", endsAt: end, armedAt: now)
-        XCTAssertTrue(DeviceLockDeadlineMonitoring.shouldArm(existing: nil, dsn: "d1", endsAt: end))
-        XCTAssertFalse(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "d1", endsAt: end))
-        XCTAssertFalse(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "d1", endsAt: end.addingTimeInterval(59)),
-                       "minute jitter from the server's HH:mm must not re-arm (each re-arm is a spurious intervalDidEnd)")
-        XCTAssertTrue(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "d1", endsAt: end.addingTimeInterval(3_600)))
-        XCTAssertTrue(DeviceLockDeadlineMonitoring.shouldArm(existing: armed, dsn: "other", endsAt: end))
+    /// Under a minute away the in-app timer has it; an activity that close is unmeasured. But a
+    /// phone suspended in that minute still needs a re-check, so one fallback goes a minute out.
+    func testAnEdgeUnderAMinuteAwayIsLeftToTheTimerWithAFallbackRecheck() {
+        let entries = DeviceLockEdgeMonitoring.plan(
+            dsn: dsn, edges: [now.addingTimeInterval(30), now.addingTimeInterval(3 * 3_600)], now: now, skew: 0
+        )
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertTrue(entries[0].isFallback)
+        XCTAssertEqual(entries[0].edgeMinute, minute(now) + 1, "now + 60 s, rounded up to its minute")
+        XCTAssertFalse(entries[1].isFallback)
+        XCTAssertEqual(entries[1].edgeMinute, minute(now) + 180)
+        // No fallback when the next edge is far enough to arm by itself.
+        let far = DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: [now.addingTimeInterval(90)], now: now, skew: 0)
+        XCTAssertEqual(far.map(\.isFallback), [false])
+        // Past edges are never armed.
+        XCTAssertTrue(DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: [now.addingTimeInterval(-60)], now: now, skew: 0).isEmpty)
     }
 
-    func testAnUppercaseUUIDDSNStillMatchesAtReleaseTime() throws {
-        // The regression that the on-device proof caught: a real DSN is `UUID().uuidString`
-        // (UPPERCASE), the activity name lowercases it, and an earlier revision stored the RAW dsn
-        // in the record while the extension read the LOWERCASED dsn back out of the activity name —
-        // so `isReleaseDue`'s `record.dsn == dsn` never held and the phone never unlocked.
-        let store = makeStore()
-        let raw = "8D905F9F-770B-4D36-B41E-E34FD6D46B17"
-        let end = now.addingTimeInterval(3_600)
-        var startedName = ""
-        _ = try DeviceLockDeadlineMonitoring.arm(dsn: raw, endsAt: end, now: now, store: store) { name, _ in
-            startedName = name.rawValue
-        }
-        let record = try XCTUnwrap(store.load())
-        // The record is keyed on the SAME normalized form the activity name carries.
-        let parsed = try XCTUnwrap(DeviceLockDeadlineActivityIdentifier.dsn(from: startedName))
-        XCTAssertEqual(record.dsn, parsed)
-        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: parsed, now: end),
-                      "the extension parses `parsed` out of the activity name — it must match the record")
-        // A re-arm with the same DSN in a different case must still be a no-op (not a second arm).
-        let again = try DeviceLockDeadlineMonitoring.arm(dsn: raw.lowercased(), endsAt: end, now: now, store: store) { _, _ in
-            XCTFail("same DSN, same end — must not re-arm")
-        }
-        XCTAssertFalse(again)
+    /// A phone running 100 s fast (under the tamper threshold, so its clock is used for arming)
+    /// already shows an edge 90 s away as nearly past. DeviceActivity runs on that clock, so the
+    /// edge is left to the timer and the fallback lands a full lead ahead on the PHONE's clock.
+    func testAnEdgeThePhonesFastClockShowsAsTooCloseGoesToTheFallback() {
+        let entries = DeviceLockEdgeMonitoring.plan(
+            dsn: dsn, edges: [now.addingTimeInterval(90), now.addingTimeInterval(3_600)], now: now, skew: -100
+        )
+        XCTAssertEqual(entries.map(\.isFallback), [true, false])
+        let wallNow = now.addingTimeInterval(100)
+        XCTAssertGreaterThanOrEqual(entries[0].wallStart.timeIntervalSince(wallNow), DeviceLockEdgeMonitoring.minimumLead)
     }
 
-    func testAnIntervalEndIsTrustedOnlyAtTheRecordedEnd() {
-        let end = now.addingTimeInterval(3_600)
-        let record = DeviceLockDeadlineRecord(dsn: "d1", endsAt: end, armedAt: now)
-        XCTAssertFalse(DeviceLockDeadlineMonitoring.isReleaseDue(record: nil, dsn: "d1", now: end))
-        XCTAssertFalse(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "other", now: end))
-        XCTAssertFalse(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: now),
-                       "the end iOS delivers for a RESTART of the running activity is not the lock's end")
-        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: end.addingTimeInterval(-3)))
-        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: end))
-        XCTAssertTrue(DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: "d1", now: end.addingTimeInterval(900)))
+    func testAtMostTwelveEdgesAreArmed() {
+        let edges = (1 ... 20).map { now.addingTimeInterval(Double($0) * 3_600) }
+        let entries = DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: edges, now: now, skew: 0)
+        XCTAssertEqual(entries.count, 12)
+        XCTAssertEqual(entries.last?.wallStart, edges[11], "the nearest twelve")
     }
 
-    func testArmWritesTheRecordBeforeStartingAndIsIdempotent() throws {
-        let store = makeStore()
-        var starts: [String] = []
-        let end = now.addingTimeInterval(3_600)
-        let started = try DeviceLockDeadlineMonitoring.arm(dsn: "d1", endsAt: end, now: now, store: store) { name, schedule in
-            XCTAssertNotNil(store.load(), "the record must exist before the callback can possibly fire")
-            XCTAssertFalse(schedule.repeats)
-            starts.append(name.rawValue)
-        }
-        XCTAssertTrue(started)
-        XCTAssertEqual(starts, ["smartoila.lock-until|d1"])
-        XCTAssertEqual(store.load(), DeviceLockDeadlineRecord(dsn: "d1", endsAt: end, armedAt: now))
-
-        let again = try DeviceLockDeadlineMonitoring.arm(dsn: "d1", endsAt: end, now: now.addingTimeInterval(30), store: store) { _, _ in
-            XCTFail("the same deadline must not be re-armed")
-        }
-        XCTAssertFalse(again)
+    /// DeviceActivity runs on the phone's clock. While it agrees with the trusted clock the edges go
+    /// on as they are; once it is off by more than the tamper threshold they are moved onto it, so
+    /// they still fire at the TRUE time.
+    func testAClockFarOffTheServerArmsTheEdgesOnThePhonesClock() {
+        let edge = now.addingTimeInterval(3_600)
+        let honest = DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: [edge], now: now, skew: 30)
+        XCTAssertEqual(honest.first?.wallStart, edge, "30 s of drift is not a changed clock")
+        // Trusted is an hour AHEAD of the phone: the phone was set back an hour.
+        let setBack = DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: [edge], now: now, skew: 3_600)
+        XCTAssertEqual(setBack.first?.wallStart, edge.addingTimeInterval(-3_600))
+        XCTAssertEqual(setBack.first?.edgeMinute, minute(edge), "the name keeps the TRUE edge")
     }
 
-    func testAFailedStartLeavesNoRecordBehind() {
-        struct Refused: Error {}
-        let store = makeStore()
-        XCTAssertThrowsError(try DeviceLockDeadlineMonitoring.arm(dsn: "d1", endsAt: now.addingTimeInterval(3_600), now: now, store: store) { _, _ in
-            throw Refused()
-        })
-        XCTAssertNil(store.load(), "a record with no activity behind it would make the next arm skip")
+    func testAnEarlyStartIsEvaluatedAtItsEdgeButAClockJumpIsNot() {
+        let edge = now.addingTimeInterval(3_600)
+        let name = DeviceLockEdgeActivityIdentifier.rawValue(dsn: dsn, edgeMinute: minute(edge))
+        XCTAssertEqual(DeviceLockEdgeMonitoring.evaluationTime(now: edge.addingTimeInterval(-5), activityName: name), edge,
+                       "max(now, edge): a callback a few seconds early reads the edge it was armed for")
+        XCTAssertEqual(DeviceLockEdgeMonitoring.evaluationTime(now: edge.addingTimeInterval(10), activityName: name),
+                       edge.addingTimeInterval(10))
+        XCTAssertEqual(DeviceLockEdgeMonitoring.evaluationTime(now: edge.addingTimeInterval(-3_600), activityName: name),
+                       edge.addingTimeInterval(-3_600), "an hour early is a clock moved forward, not this edge")
+        XCTAssertEqual(DeviceLockEdgeMonitoring.evaluationTime(now: now, activityName: "smartoila.usage|x"), now)
     }
 
-    func testStopTalksToTheCenterOnlyWhenSomethingIsArmedUnlessForced() {
-        let store = makeStore()
-        var stops = 0
-        DeviceLockDeadlineMonitoring.stop(dsn: "d1", store: store) { _ in stops += 1 }
-        XCTAssertEqual(stops, 0, "called on every unlocked poll; no XPC when nothing is armed")
-        DeviceLockDeadlineMonitoring.stop(dsn: "d1", force: true, store: store) { _ in stops += 1 }
-        XCTAssertEqual(stops, 1)
-        store.save(DeviceLockDeadlineRecord(dsn: "d1", endsAt: now.addingTimeInterval(3_600), armedAt: now))
-        DeviceLockDeadlineMonitoring.stop(dsn: "d1", store: store) { names in
-            stops += 1
-            XCTAssertEqual(names.map(\.rawValue), ["smartoila.lock-until|d1"])
-        }
-        XCTAssertEqual(stops, 2)
+    func testArmTouchesOnlyWhatDiffers() {
+        let entries = DeviceLockEdgeMonitoring.plan(
+            dsn: dsn, edges: [now.addingTimeInterval(3_600), now.addingTimeInterval(7_200)], now: now, skew: 0
+        )
+        let center = FakeCenter()
+        let name = { (date: Date) in DeviceLockEdgeActivityIdentifier.rawValue(dsn: self.dsn, edgeMinute: self.minute(date)) }
+        center.armed = [
+            activity(entries[0].name, entries[0].wallStart),                              // desired, in place
+            activity(name(now.addingTimeInterval(1_800)), now.addingTimeInterval(1_800)), // undesired, future
+            activity(name(now.addingTimeInterval(-300)), now.addingTimeInterval(-300)),   // undesired, running
+            activity(name(now.addingTimeInterval(-3_600)), now.addingTimeInterval(-3_600)), // undesired, long over
+            activity("smartoila.lock-until|child", now.addingTimeInterval(-60))            // build 24's
+        ]
+        let result = DeviceLockEdgeMonitoring.arm(entries, center: center, wallNow: now)
+        XCTAssertEqual(Set(center.stopped), [
+            name(now.addingTimeInterval(1_800)), name(now.addingTimeInterval(-3_600)), "smartoila.lock-until|child"
+        ], "a RUNNING activity is left to end by itself: stopping it is a spurious intervalDidEnd")
+        XCTAssertEqual(center.started.map(\.0), [entries[1].name])
+        XCTAssertEqual(result.started, [entries[1].name])
+        XCTAssertEqual(result.failures, 0)
+        // A second pass with the result in place changes nothing.
+        let settled = FakeCenter()
+        settled.armed = entries.map { activity($0.name, $0.wallStart) }
+        let again = DeviceLockEdgeMonitoring.arm(entries, center: settled, wallNow: now)
+        XCTAssertTrue(again.started.isEmpty)
+        XCTAssertTrue(again.stopped.isEmpty)
+    }
+
+    func testAnEntryArmedAtTheWrongTimeIsRestarted() {
+        let entries = DeviceLockEdgeMonitoring.plan(dsn: dsn, edges: [now.addingTimeInterval(3_600)], now: now, skew: 0)
+        let center = FakeCenter()
+        center.armed = [activity(entries[0].name, entries[0].wallStart.addingTimeInterval(3_600))]
+        DeviceLockEdgeMonitoring.arm(entries, center: center, wallNow: now)
+        XCTAssertEqual(center.stopped, [entries[0].name])
+        XCTAssertEqual(center.started.map(\.0), [entries[0].name])
+    }
+
+    func testAFailedStartIsCountedAndTheRestStillArm() {
+        let entries = DeviceLockEdgeMonitoring.plan(
+            dsn: dsn, edges: [now.addingTimeInterval(3_600), now.addingTimeInterval(7_200)], now: now, skew: 0
+        )
+        let center = FakeCenter()
+        center.failNames = [entries[0].name]
+        let result = DeviceLockEdgeMonitoring.arm(entries, center: center, wallNow: now)
+        XCTAssertEqual(result.failures, 1)
+        XCTAssertEqual(result.started, [entries[1].name])
+    }
+
+    func testStopAllStopsEveryLockActivity() {
+        let center = FakeCenter()
+        center.armed = [activity("smartoila.lock-edge|child|1", nil), activity("smartoila.lock-until|child", nil)]
+        DeviceLockEdgeMonitoring.stopAll(center: center)
+        XCTAssertEqual(center.stopped, ["smartoila.lock-edge|child|1", "smartoila.lock-until|child"])
+    }
+
+    func testTheSharedStoreRoundTripsTheSnapshot() {
+        let suite = "DeviceLockEdgeMonitoringTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let store = DeviceLockPolicySharedStore(userDefaults: UserDefaults(suiteName: suite)!)
         XCTAssertNil(store.load())
-    }
-
-    func testTheReleaseMarkBelongsToTheDeadlineItReleased() {
-        let store = makeStore()
-        store.save(DeviceLockDeadlineRecord(dsn: "d1", endsAt: now.addingTimeInterval(3_600), armedAt: now))
-        XCTAssertNil(store.releasedAt())
-        store.markReleased(at: now.addingTimeInterval(3_600))
-        XCTAssertEqual(store.releasedAt(), now.addingTimeInterval(3_600))
-        // A new arm supersedes the mark: it must not read as "already released" for the next lock.
-        store.save(DeviceLockDeadlineRecord(dsn: "d1", endsAt: now.addingTimeInterval(7_200), armedAt: now))
-        XCTAssertNil(store.releasedAt())
+        let snapshot = LockFixture.snapshot(
+            manual: DeviceLockManualWindow(startsAt: now, endsAt: now.addingTimeInterval(60)),
+            schedules: [LockFixture.schedule(60, 120, days: LockFixture.monday)],
+            clock: DeviceLockClockAnchor(wall: now, monotonicNanos: 42, offset: -3.5, bootSessionID: "b")
+        )
+        store.save(snapshot)
+        XCTAssertEqual(store.load(), snapshot)
+        store.markEdgeEvaluated(at: now)
+        XCTAssertEqual(store.lastEdgeEvaluatedAt(), now)
         store.clear()
         XCTAssertNil(store.load())
+        XCTAssertNil(store.lastEdgeEvaluatedAt())
     }
 }
 
-/// The service half: what `GET /device/lock/state` does to `isLocked` now that it carries an end,
-/// and the non-network exit that opens the phone when the end (or the 8 h ceiling) passes.
+// MARK: - Parsing the live lock payload
+
+/// `LockStateResponseDto` as the live backend sends it (api.json, 2026-09-24): the manual window
+/// and every schedule as DATA, plus the server clock.
+final class OilaLockPolicyParsingTests: XCTestCase {
+    private func parse(_ json: String) throws -> OilaLockState {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        return OilaDeviceClient.parseLockState(from: object)
+    }
+
+    private static func payload(isLocked: Bool, manualLockEnabled: Bool, manualLock: String, schedules: String = "[]") -> String {
+        """
+        {"isLocked":\(isLocked),"manualLockEnabled":\(manualLockEnabled),"manualLock":\(manualLock),
+         "serverTime":"2026-09-22T14:05:00.000Z","scheduleLocked":false,"deviceLocalTime":"19:05",
+         "activeSchedule":null,"lockedPackages":["com.example.game"],"appLimits":[],"schedules":\(schedules)}
+        """
+    }
+
+    func testARunningManualWindowAndTheServerClockAreRead() throws {
+        let state = try parse(Self.payload(
+            isLocked: true, manualLockEnabled: true,
+            manualLock: #"{"startsAt":"2026-09-22T14:00:00.000Z","endsAt":"2026-09-22T16:00:00.000Z"}"#
+        ))
+        XCTAssertEqual(state.manualLock, .window(DeviceLockManualWindow(
+            startsAt: LockFixture.utc("2026-09-22T14:00:00Z"), endsAt: LockFixture.utc("2026-09-22T16:00:00Z")
+        )))
+        XCTAssertEqual(state.serverTime, LockFixture.utc("2026-09-22T14:05:00Z"))
+        XCTAssertEqual(state.manualLockEnabled, true)
+        XCTAssertTrue(state.carriesLockPolicy)
+        XCTAssertEqual(state.schedules, [])
+        XCTAssertEqual(state.lockedPackages, ["com.example.game"])
+    }
+
+    /// A FUTURE window arrives with `isLocked: false` and `manualLockEnabled: false`. The window
+    /// object must not leak into the flag (it used to be read under "manualLock" too), and the
+    /// window must survive — it is how the phone locks at `startsAt` with no internet.
+    func testAFutureWindowIsKeptAndDoesNotPoseAsARunningLock() throws {
+        let state = try parse(Self.payload(
+            isLocked: false, manualLockEnabled: false,
+            manualLock: #"{"startsAt":"2026-09-22T18:00:00.000Z","endsAt":"2026-09-22T20:00:00.000Z"}"#
+        ))
+        XCTAssertEqual(state.manualLockEnabled, false)
+        guard case let .window(window) = state.manualLock else { return XCTFail("the future window was dropped") }
+        XCTAssertEqual(window.startsAt, LockFixture.utc("2026-09-22T18:00:00Z"))
+        XCTAssertNil(state.lockedUntil, "manualLock.endsAt is not a generic lock end")
+    }
+
+    func testANullManualLockIsNoneAndAMissingOneIsAbsent() throws {
+        let none = try parse(Self.payload(isLocked: false, manualLockEnabled: false, manualLock: "null"))
+        XCTAssertEqual(none.manualLock, .null)
+        XCTAssertTrue(none.carriesLockPolicy)
+        let unreadable = try parse(Self.payload(isLocked: true, manualLockEnabled: true, manualLock: #"{"startsAt":"soon"}"#))
+        XCTAssertEqual(unreadable.manualLock, .unreadable)
+        XCTAssertEqual(OilaDeviceClient.parseManualLock(from: [:]), .absent)
+    }
+
+    func testSchedulesAreTypedWithIntOrDoubleMinutes() throws {
+        let state = try parse(Self.payload(isLocked: false, manualLockEnabled: false, manualLock: "null", schedules: """
+        [{"id":"s1","deviceId":"d","label":"Tun","startMinute":1320,"endMinute":420,"daysBitmask":127,"enabled":true,
+          "createdAt":"2026-09-01T00:00:00.000Z","updatedAt":"2026-09-01T00:00:00.000Z","deletedAt":null},
+         {"id":"s2","label":"Dars","startMinute":480.0,"endMinute":750.5,"daysBitmask":31.0,"enabled":false,"deletedAt":null},
+         {"id":"s3","label":"Old","startMinute":60,"endMinute":120,"daysBitmask":1,"enabled":true,"deletedAt":"2026-09-10T00:00:00.000Z"},
+         {"id":"s4","label":"Broken","startMinute":60,"endMinute":120,"enabled":true},
+         {"id":"s5","label":"OutOfRange","startMinute":1500,"endMinute":120,"daysBitmask":1,"enabled":true}]
+        """))
+        let schedules = try XCTUnwrap(state.schedules)
+        XCTAssertEqual(schedules.map(\.id), ["s1", "s2", "s3"], "rows without a readable window or bitmask are dropped")
+        XCTAssertEqual(schedules[0], DeviceLockSchedule(id: "s1", startMinute: 1_320, endMinute: 420, daysBitmask: 127, enabled: true, deletedAt: nil))
+        XCTAssertEqual(schedules[1].startMinute, 480)
+        XCTAssertEqual(schedules[1].endMinute, 750)
+        XCTAssertEqual(schedules[1].daysBitmask, 31)
+        XCTAssertFalse(schedules[1].enabled)
+        XCTAssertEqual(schedules[2].deletedAt, "2026-09-10T00:00:00.000Z")
+        XCTAssertFalse(schedules[2].isEnforceable)
+    }
+
+    /// An old backend sends none of `serverTime`, `schedules`, `manualLock`: its `isLocked` is all
+    /// there is, so it is still read.
+    func testAnOldPayloadFallsBackToItsIsLocked() throws {
+        let state = try parse("""
+        {"isLocked":true,"manualLockEnabled":true,"scheduleLocked":false,"deviceLocalTime":"15:45",
+         "activeSchedule":null,"lockedPackages":[],"appLimits":[]}
+        """)
+        XCTAssertFalse(state.carriesLockPolicy)
+        XCTAssertEqual(state.manualLock, .absent)
+        XCTAssertNil(state.schedules)
+        XCTAssertEqual(state.isDeviceLocked, true)
+    }
+
+    func testAnOldSpellingEndIsReadButNeverFromInsideManualLock() {
+        let iso = "2026-09-18T20:00:00Z"
+        let expected = Date(timeIntervalSince1970: 1_789_761_600)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": iso]), expected)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["unlockAt": 1_789_761_600]), expected)
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": 1_789_761_600_000]), expected, "epoch milliseconds")
+        XCTAssertEqual(OilaDeviceClient.parseLockedUntil(from: ["global": ["until": iso]]), expected)
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["manualLock": ["endsAt": iso]]))
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["manualLock": ["until": iso]]))
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": NSNull()]))
+        XCTAssertNil(OilaDeviceClient.parseLockedUntil(from: ["lockedUntil": false]))
+    }
+
+    /// The snapshot a payload yields: data from a current backend, a bounded window from an old
+    /// one, nothing (keep the saved one) from a shape with no lock information at all.
+    func testThePayloadBecomesASnapshot() throws {
+        let wall = LockFixture.utc("2026-09-22T14:04:58Z")
+        let anchor = DeviceLockClockAnchor(wall: wall, monotonicNanos: 1, offset: 2, bootSessionID: nil)
+        let live = try parse(Self.payload(
+            isLocked: false, manualLockEnabled: false,
+            manualLock: #"{"startsAt":"2026-09-22T18:00:00.000Z","endsAt":"2026-09-22T20:00:00.000Z"}"#,
+            schedules: #"[{"startMinute":1320,"endMinute":420,"daysBitmask":127,"enabled":true,"deletedAt":null}]"#
+        ))
+        let snapshot = try XCTUnwrap(OilaTelemetryService.lockPolicySnapshot(from: live, dsn: "child", anchor: anchor))
+        XCTAssertFalse(snapshot.isLegacy)
+        XCTAssertEqual(snapshot.manualLock?.startsAt, LockFixture.utc("2026-09-22T18:00:00Z"))
+        XCTAssertEqual(snapshot.schedules.count, 1)
+        XCTAssertEqual(snapshot.serverTime, LockFixture.utc("2026-09-22T14:05:00Z"))
+        XCTAssertEqual(snapshot.clock, anchor)
+
+        let old = OilaLockState(isLocked: true, raw: [:])
+        let held = try XCTUnwrap(OilaTelemetryService.lockPolicySnapshot(from: old, dsn: "child", anchor: anchor))
+        XCTAssertTrue(held.isLegacy)
+        XCTAssertEqual(held.manualLock, DeviceLockManualWindow(startsAt: wall.addingTimeInterval(2), endsAt: wall.addingTimeInterval(2 + 8 * 3_600)),
+                       "an old backend's bare lock is held at most 8 h without the server")
+        let stale = OilaLockState(isLocked: true, raw: [:], lockedUntil: wall.addingTimeInterval(-60))
+        let staleSnapshot = try XCTUnwrap(OilaTelemetryService.lockPolicySnapshot(from: stale, dsn: "child", anchor: anchor))
+        XCTAssertNil(staleSnapshot.manualLock?.enforced, "an end already past opens the phone")
+
+        XCTAssertNil(OilaTelemetryService.lockPolicySnapshot(from: OilaLockState(isLocked: nil, raw: ["x": 1]), dsn: "child", anchor: anchor))
+    }
+}
+
+// MARK: - The service: re-evaluation, relaunch, migration
+
 @MainActor
-final class OilaTelemetryServiceLockDeadlineTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
+    private typealias F = LockFixture
 
     private final class ServiceStub: OilaDeviceServicing {
         struct Unimplemented: Error {}
@@ -5740,154 +6058,334 @@ final class OilaTelemetryServiceLockDeadlineTests: XCTestCase {
         func fetchHome() async throws -> OilaDeviceHome? { nil }
     }
 
-    private static let lockKeys = [
-        "OILA_LAST_LOCK_STATE", OilaTelemetryService.lockConfirmedAtKey, OilaTelemetryService.lockEndsAtKey,
-        OilaTelemetryService.lockReleasedByDeadlineKey
-    ]
-
-    override func setUp() {
-        super.setUp()
-        for key in Self.lockKeys { UserDefaults.standard.removeObject(forKey: key) }
+    /// Both clocks, moved independently — a child changing the date moves only `wall`.
+    private final class Clocks {
+        var wall: Date
+        var monotonic: UInt64 = 5_000 * 1_000_000_000
+        var boot: String? = "boot-1"
+        init(_ wall: Date) { self.wall = wall }
+        func advance(_ seconds: TimeInterval) {
+            wall = wall.addingTimeInterval(seconds)
+            monotonic += UInt64(seconds * 1_000_000_000)
+        }
     }
 
+    private final class Recorder {
+        var shield: [Bool] = []
+        var armed: [[DeviceLockEdgeMonitoring.Entry]] = []
+        var stoppedAll = 0
+        var retired = 0
+        var clearedAlwaysAllowed = 0
+        var authorized = true
+    }
+
+    private struct Harness {
+        let clocks: Clocks
+        let store: DeviceLockPolicySharedStore
+        let legacy: UserDefaults
+        let recorder: Recorder
+    }
+
+    private var suiteNames: [String] = []
+    private var retained: [OilaTelemetryService] = []
+
     override func tearDown() {
-        for key in Self.lockKeys { UserDefaults.standard.removeObject(forKey: key) }
+        for name in suiteNames { UserDefaults.standard.removePersistentDomain(forName: name) }
+        suiteNames.removeAll()
+        retained.removeAll()
         super.tearDown()
     }
 
-    private func makeService() -> OilaTelemetryService {
-        OilaTelemetryService(service: ServiceStub())
+    private func makeDefaults() -> UserDefaults {
+        let name = "OilaTelemetryServiceLockPolicyTests.\(UUID().uuidString)"
+        suiteNames.append(name)
+        return UserDefaults(suiteName: name)!
     }
 
-    func testAServerEndBecomesTheDeadlineAndOpensThePhoneWhenItPasses() {
-        let service = makeService()
-        let until = now.addingTimeInterval(2 * 3_600)
-        var released = 0
+    private func makeHarness(at wall: Date) -> Harness {
+        Harness(clocks: Clocks(wall), store: DeviceLockPolicySharedStore(userDefaults: makeDefaults()),
+                legacy: makeDefaults(), recorder: Recorder())
+    }
+
+    private func makeService(_ h: Harness) -> OilaTelemetryService {
+        let clocks = h.clocks, recorder = h.recorder
+        let service = OilaTelemetryService(service: ServiceStub(), lockRuntime: OilaLockRuntime(
+            store: h.store,
+            clock: DeviceLockClock(wallNow: { clocks.wall }, monotonicNanos: { clocks.monotonic }, bootSessionID: { clocks.boot }),
+            calendar: { LockFixture.tashkent },
+            pairedDSN: { "8D905F9F-770B-4D36-B41E-E34FD6D46B17" },
+            applyWholeDevice: { recorder.shield.append($0) },
+            armEdges: { entries in
+                guard recorder.authorized else { return false }
+                recorder.armed.append(entries)
+                return true
+            },
+            stopAllEdges: { recorder.stoppedAll += 1 },
+            legacyDefaults: h.legacy,
+            retireLegacyDeadline: { recorder.retired += 1 },
+            clearAlwaysAllowed: { recorder.clearedAlwaysAllowed += 1 }
+        ))
+        retained.append(service)
+        return service
+    }
+
+    private func livePayload(startsAt: Date, endsAt: Date, serverTime: Date, schedules: [[String: Any]] = []) -> OilaLockState {
+        let iso = ISO8601DateFormatter()
+        return OilaDeviceClient.parseLockState(from: [
+            "isLocked": false, "manualLockEnabled": false,
+            "manualLock": ["startsAt": iso.string(from: startsAt), "endsAt": iso.string(from: endsAt)],
+            "serverTime": iso.string(from: serverTime), "scheduleLocked": false, "deviceLocalTime": "13:00",
+            "activeSchedule": NSNull(), "lockedPackages": [], "appLimits": [], "schedules": schedules
+        ])
+    }
+
+    /// Akramjon's case, end to end with no network after the one poll: a FUTURE window is unlocked
+    /// now, locks at `startsAt` by itself, and opens at `endsAt` by itself.
+    func testAFutureWindowLocksAtItsStartAndOpensAtItsEndWithNoServer() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        let service = makeService(h)
+        XCTAssertFalse(service.lockDecisionKnown, "nothing heard yet is unknown")
+        XCTAssertTrue(h.recorder.shield.isEmpty, "and nothing is written to the OS from unknown")
+
+        var announced = 0
         let observer = NotificationCenter.default.addObserver(
-            forName: OilaTelemetryService.oilaLockDeadlineReleased, object: nil, queue: nil
-        ) { _ in released += 1 }
+            forName: OilaTelemetryService.oilaLockEvaluationDidChange, object: nil, queue: nil
+        ) { _ in announced += 1 }
         defer { NotificationCenter.default.removeObserver(observer) }
 
-        service.applyLockState(OilaLockState(isLocked: true, raw: [:], lockedUntil: until), now: now)
-        XCTAssertTrue(service.isLocked)
-        XCTAssertEqual(service.lockEndsAt, until)
-        XCTAssertEqual(service.lockDeadline, until, "two hours is inside the ceiling, so the end is the deadline")
-        XCTAssertEqual(UserDefaults.standard.double(forKey: OilaTelemetryService.lockEndsAtKey), until.timeIntervalSince1970)
-
-        service.releaseExpiredLockIfNeeded(now: until.addingTimeInterval(-1))
-        XCTAssertTrue(service.isLocked, "one second early is early")
-        XCTAssertEqual(released, 0)
-
-        service.releaseExpiredLockIfNeeded(now: until)
+        let startsAt = start.addingTimeInterval(120), endsAt = start.addingTimeInterval(420)
+        service.applyLockState(livePayload(startsAt: startsAt, endsAt: endsAt, serverTime: start))
+        XCTAssertTrue(service.lockDecisionKnown)
         XCTAssertFalse(service.isLocked)
         XCTAssertNil(service.lockEndsAt)
-        XCTAssertTrue(service.lockReleasedByDeadline)
-        XCTAssertEqual(released, 1)
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: "OILA_LAST_LOCK_STATE"), "the release must reach disk")
-        XCTAssertNil(UserDefaults.standard.object(forKey: OilaTelemetryService.lockEndsAtKey))
-    }
+        XCTAssertEqual(service.nextLockCheckAt, startsAt, "the in-app timer is armed at startsAt")
+        XCTAssertEqual(h.recorder.shield.last, false)
+        XCTAssertEqual(h.recorder.armed.last?.map(\.edgeMinute),
+                       [startsAt, endsAt].map { Int($0.timeIntervalSince1970 / 60) }, "both edges armed outside the app")
+        XCTAssertNotNil(h.store.load(), "the policy is saved for the extension")
 
-    func testALockWithNoEndOpensEightHoursAfterTheLastServerAnswer() {
-        let service = makeService()
-        service.applyLockState(OilaLockState(isLocked: true, raw: [:]), now: now)
-        XCTAssertEqual(service.lockDeadline, now.addingTimeInterval(8 * 3_600))
-        // Every server answer moves the ceiling: online, a longer lock keeps being enforced.
-        service.applyLockState(OilaLockState(isLocked: true, raw: [:]), now: now.addingTimeInterval(3_600))
-        XCTAssertEqual(service.lockDeadline, now.addingTimeInterval(9 * 3_600))
-        service.releaseExpiredLockIfNeeded(now: now.addingTimeInterval(9 * 3_600 - 1))
+        h.clocks.advance(120)
+        XCTAssertTrue(service.reevaluateLock(reason: "test"))
         XCTAssertTrue(service.isLocked)
-        service.releaseExpiredLockIfNeeded(now: now.addingTimeInterval(9 * 3_600))
-        XCTAssertFalse(service.isLocked)
-    }
+        XCTAssertEqual(service.lockEndsAt, endsAt, "the cover shows the real end")
+        XCTAssertEqual(service.nextLockCheckAt, endsAt)
+        XCTAssertEqual(h.recorder.shield.last, true, "the OS shield is written by the service itself")
 
-    func testAStaleServerFlagPastItsOwnEndReadsAsUnlocked() {
-        let service = makeService()
-        service.applyLockState(OilaLockState(isLocked: true, raw: [:], lockedUntil: now.addingTimeInterval(-60)), now: now)
-        XCTAssertFalse(service.isLocked, "the end the parent saw wins over a flag that has not caught up")
+        h.clocks.advance(299)
+        service.reevaluateLock(reason: "test")
+        XCTAssertTrue(service.isLocked, "one second before the end is still locked")
+        h.clocks.advance(1)
+        service.reevaluateLock(reason: "test")
+        XCTAssertFalse(service.isLocked)
         XCTAssertNil(service.lockEndsAt)
+        XCTAssertEqual(h.recorder.shield.last, false)
+        XCTAssertEqual(announced, 2, "locked, then unlocked — each flip announced once")
     }
 
-    func testAServerAnswerClearsTheLocalReleaseMark() {
-        let service = makeService()
-        service.applyLockState(OilaLockState(isLocked: true, raw: [:], lockedUntil: now.addingTimeInterval(60)), now: now)
-        service.releaseExpiredLockIfNeeded(now: now.addingTimeInterval(60))
-        XCTAssertTrue(service.lockReleasedByDeadline)
-        service.applyLockState(OilaLockState(isLocked: false, raw: [:]), now: now.addingTimeInterval(120))
-        XCTAssertFalse(service.lockReleasedByDeadline)
-        XCTAssertNil(service.lockDeadline)
+    func testARelaunchDecidesFromTheSavedPolicyWithoutAServer() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        makeService(h).applyLockState(livePayload(startsAt: start, endsAt: start.addingTimeInterval(3_600), serverTime: start))
+        // The process dies; an hour's first half passes; a scene-less relaunch with no network.
+        h.clocks.advance(1_800)
+        h.recorder.shield.removeAll()
+        let relaunched = makeService(h)
+        XCTAssertTrue(relaunched.isLocked)
+        XCTAssertEqual(relaunched.lockEndsAt, start.addingTimeInterval(3_600))
+        XCTAssertEqual(h.recorder.shield, [true], "written at init, with no scene and no coordinator")
+        h.clocks.advance(1_800)
+        XCTAssertFalse(makeService(h).isLocked, "and a relaunch past the end is open")
     }
 
-    func testAnUnrecognizedAnswerNeitherStampsNorReleases() {
-        let service = makeService()
-        service.applyLockState(OilaLockState(isLocked: true, raw: [:]), now: now)
-        let deadline = service.lockDeadline
-        service.applyLockState(OilaLockState(isLocked: nil, raw: ["somethingElse": 1]), now: now.addingTimeInterval(3_600))
-        XCTAssertTrue(service.isLocked, "an unrecognized 200 keeps the last-known lock")
-        XCTAssertEqual(service.lockDeadline, deadline, "and must not refresh the ceiling of a lock it said nothing about")
-    }
-
-    func testAnExpiredPersistedLockIsReleasedOnLaunchAndSaidSoOnDisk() {
-        UserDefaults.standard.set(true, forKey: "OILA_LAST_LOCK_STATE")
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: OilaTelemetryService.lockConfirmedAtKey)
-        UserDefaults.standard.set(Date().addingTimeInterval(-1).timeIntervalSince1970, forKey: OilaTelemetryService.lockEndsAtKey)
-
-        let service = makeService()
-
+    /// No ceiling on a schedule any more: a 10-hour night schedule holds for its whole night offline
+    /// (the old 8 h no-server ceiling opened it at 05:00), and opens at 07:00 by itself.
+    func testANightScheduleHoldsAllNightOfflineAndOpensOnTime() {
+        let evening = F.local(2026, 9, 21, 20, 59)
+        let h = makeHarness(at: evening)
+        let service = makeService(h)
+        service.applyLockState(livePayload(
+            startsAt: evening.addingTimeInterval(-7_200), endsAt: evening.addingTimeInterval(-3_600), serverTime: evening,
+            schedules: [["startMinute": 21 * 60, "endMinute": 7 * 60, "daysBitmask": 127, "enabled": true, "deletedAt": NSNull()]]
+        ))
         XCTAssertFalse(service.isLocked)
-        XCTAssertTrue(service.lockReleasedByDeadline, "the enforcement side opens the OS shield from this")
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: "OILA_LAST_LOCK_STATE"),
-                       "left `true`, the next relaunch would restore a lock the deadline already ended")
-        XCTAssertNil(UserDefaults.standard.object(forKey: OilaTelemetryService.lockEndsAtKey))
-    }
-
-    func testALivePersistedLockIsRestoredWithItsEnd() {
-        let until = Date().addingTimeInterval(3_600)
-        UserDefaults.standard.set(true, forKey: "OILA_LAST_LOCK_STATE")
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: OilaTelemetryService.lockConfirmedAtKey)
-        UserDefaults.standard.set(until.timeIntervalSince1970, forKey: OilaTelemetryService.lockEndsAtKey)
-
-        let service = makeService()
-
+        h.clocks.advance(60)
+        service.reevaluateLock(reason: "test")
         XCTAssertTrue(service.isLocked)
-        XCTAssertEqual(service.lockEndsAt?.timeIntervalSince1970 ?? 0, until.timeIntervalSince1970, accuracy: 0.001)
-        XCTAssertFalse(service.lockReleasedByDeadline)
+        XCTAssertEqual(service.lockEndsAt, F.local(2026, 9, 22, 7, 0))
+        h.clocks.advance(9 * 3_600 + 59 * 60)
+        service.reevaluateLock(reason: "test")
+        XCTAssertTrue(service.isLocked, "06:59, ten hours without the server")
+        h.clocks.advance(60)
+        service.reevaluateLock(reason: "test")
+        XCTAssertFalse(service.isLocked)
     }
 
-    func testAnExpiredReleaseAtInitPersistsTheDurableFlag() {
-        UserDefaults.standard.set(true, forKey: "OILA_LAST_LOCK_STATE")
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: OilaTelemetryService.lockConfirmedAtKey)
-        UserDefaults.standard.set(Date().addingTimeInterval(-1).timeIntervalSince1970, forKey: OilaTelemetryService.lockEndsAtKey)
-
-        let service = makeService()
-
-        XCTAssertTrue(service.lockReleasedByDeadline)
-        // Persisted, because a scene-less launch that cannot open the shield must hand the fact on.
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: OilaTelemetryService.lockReleasedByDeadlineKey),
-                      "the durable flag must survive to the next launch (didSet does not fire in init)")
+    /// The child moves the date forward to end the lock: the trusted clock does not move with it.
+    func testMovingThePhonesClockDoesNotMoveTheLock() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        let service = makeService(h)
+        service.applyLockState(livePayload(startsAt: start, endsAt: start.addingTimeInterval(3_600), serverTime: start))
+        XCTAssertTrue(service.isLocked)
+        h.clocks.wall = h.clocks.wall.addingTimeInterval(5 * 3_600)
+        service.reevaluateLock(reason: "clock_changed")
+        XCTAssertTrue(service.isLocked, "the wall clock moved; the monotonic one did not")
+        // …and the real end still opens it, even with the wall clock moved back.
+        h.clocks.wall = start.addingTimeInterval(-86_400)
+        h.clocks.monotonic += 3_600 * 1_000_000_000
+        service.reevaluateLock(reason: "clock_changed")
+        XCTAssertFalse(service.isLocked)
     }
 
-    func testTheDurableFlagCarriesTheReleaseToALaterLaunchThatIsNoLongerLocked() {
-        // The scene-less-launch hole: process 1 released in memory and cleared OILA_LAST_LOCK_STATE
-        // but never opened the shield (no coordinator); process 2 must still know to open it.
-        UserDefaults.standard.set(false, forKey: "OILA_LAST_LOCK_STATE")
-        UserDefaults.standard.set(true, forKey: OilaTelemetryService.lockReleasedByDeadlineKey)
+    /// The server's clock wins over a phone whose clock is simply wrong, from the first poll.
+    func testThePhoneClockIsCorrectedByTheServerTime() {
+        let serverNow = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: serverNow.addingTimeInterval(-2 * 3_600)) // the phone is two hours slow
+        let service = makeService(h)
+        service.applyLockState(livePayload(startsAt: serverNow.addingTimeInterval(-60), endsAt: serverNow.addingTimeInterval(3_600), serverTime: serverNow))
+        XCTAssertTrue(service.isLocked, "by the phone's own clock the window is two hours away")
+        XCTAssertEqual(h.recorder.armed.last?.first?.wallStart, serverNow.addingTimeInterval(3_600 - 2 * 3_600),
+                       "the end is armed where the phone's clock will read it")
+    }
 
-        let service = makeService()
+    func testTheExtensionsEdgeEvaluationIsNotUndoneInTheGap() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        let service = makeService(h)
+        let startsAt = start.addingTimeInterval(600)
+        service.applyLockState(livePayload(startsAt: startsAt, endsAt: startsAt.addingTimeInterval(3_600), serverTime: start))
+        h.clocks.advance(595) // five seconds before the edge
+        h.store.markEdgeEvaluated(at: startsAt) // the extension's early callback, evaluated at its edge
+        var lockedWhenRelayed: Bool?
+        let observer = NotificationCenter.default.addObserver(
+            forName: OilaTelemetryService.oilaLockExtensionDidEvaluate, object: nil, queue: nil
+        ) { _ in lockedWhenRelayed = service.isLocked }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        service.handleExtensionLockEdge()
+
+        XCTAssertTrue(service.isLocked, "the extension's answer is not undone in the gap")
+        XCTAssertEqual(lockedWhenRelayed, true, "the enforcement side is told only after the service re-decided")
+    }
+
+    func testAnUnrecognizedPayloadKeepsTheSavedPolicy() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        let service = makeService(h)
+        service.applyLockState(livePayload(startsAt: start, endsAt: start.addingTimeInterval(3_600), serverTime: start))
+        let saved = h.store.load()
+        service.applyLockState(OilaLockState(isLocked: nil, raw: ["somethingElse": 1]))
+        XCTAssertTrue(service.isLocked, "an unexpected shape neither locks nor unlocks")
+        XCTAssertEqual(h.store.load(), saved)
+    }
+
+    func testAnOldBackendsBareLockIsHeldAtMostEightHours() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        let service = makeService(h)
+        service.applyLockState(OilaLockState(isLocked: true, raw: [:]))
+        XCTAssertTrue(service.isLocked)
+        XCTAssertEqual(service.lockEndsAt, start.addingTimeInterval(8 * 3_600))
+        service.applyLockState(OilaLockState(isLocked: false, raw: [:]))
+        XCTAssertFalse(service.isLocked)
+    }
+
+    func testEdgesAreReArmedOnlyWhenThePlanChangesAndRetriedWhenUnauthorized() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        h.recorder.authorized = false
+        let service = makeService(h)
+        service.applyLockState(livePayload(startsAt: start.addingTimeInterval(600), endsAt: start.addingTimeInterval(1_200), serverTime: start))
+        XCTAssertTrue(h.recorder.armed.isEmpty)
+        h.recorder.authorized = true
+        service.reevaluateLock(reason: "tick")
+        XCTAssertEqual(h.recorder.armed.count, 1, "retried once authorization is there")
+        service.reevaluateLock(reason: "tick")
+        service.reevaluateLock(reason: "tick")
+        XCTAssertEqual(h.recorder.armed.count, 1, "an unchanged plan does not talk to DeviceActivity every 30 s")
+        XCTAssertEqual(h.recorder.shield.count, 4, "the shield is re-asserted on every evaluation (read-compare-write in the helper)")
+    }
+
+    // MARK: Upgrade from build 24
+
+    func testABuild24LockIsHeldToItsOwnEndAfterAnOfflineUpgrade() {
+        let now = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: now)
+        h.legacy.set(true, forKey: OilaTelemetryService.legacyLockStateKey)
+        h.legacy.set(now.addingTimeInterval(-3_600).timeIntervalSince1970, forKey: OilaTelemetryService.legacyLockConfirmedAtKey)
+        h.legacy.set(now.addingTimeInterval(2 * 3_600).timeIntervalSince1970, forKey: OilaTelemetryService.legacyLockEndsAtKey)
+
+        let service = makeService(h)
+
+        XCTAssertTrue(service.isLocked, "an upgrade must not unlock early")
+        XCTAssertEqual(service.lockEndsAt, now.addingTimeInterval(2 * 3_600))
+        XCTAssertEqual(h.store.load()?.isLegacy, true)
+        XCTAssertNil(h.legacy.object(forKey: OilaTelemetryService.legacyLockStateKey), "the old keys are gone")
+        XCTAssertNil(h.legacy.object(forKey: OilaTelemetryService.legacyLockEndsAtKey))
+        XCTAssertNil(h.legacy.object(forKey: OilaTelemetryService.legacyLockConfirmedAtKey))
+        XCTAssertEqual(h.recorder.retired, 1, "build 24's lock-until activity is stopped once")
+        XCTAssertEqual(h.recorder.clearedAlwaysAllowed, 1)
+        _ = makeService(h)
+        XCTAssertEqual(h.recorder.retired, 1, "only on the first launch of this build")
+        XCTAssertEqual(h.recorder.clearedAlwaysAllowed, 2, "the always-allowed set is cleared at every launch")
+    }
+
+    func testABuild24LockWithNoEndNeverOutlivesEightHoursFromItsLastConfirmation() {
+        let now = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: now)
+        h.legacy.set(true, forKey: OilaTelemetryService.legacyLockStateKey)
+        h.legacy.set(now.addingTimeInterval(-7 * 3_600).timeIntervalSince1970, forKey: OilaTelemetryService.legacyLockConfirmedAtKey)
+        XCTAssertEqual(makeService(h).lockEndsAt, now.addingTimeInterval(3_600))
+        XCTAssertEqual(OilaTelemetryService.migratedLegacyWindow(wasLocked: true, endsAt: nil, confirmedAt: nil, now: now)?.endsAt,
+                       now.addingTimeInterval(8 * 3_600), "with nothing known: bounded, never permanent")
+        XCTAssertEqual(OilaTelemetryService.migratedLegacyWindow(wasLocked: true, endsAt: now.addingTimeInterval(86_400), confirmedAt: now.addingTimeInterval(86_400), now: now)?.endsAt,
+                       now.addingTimeInterval(8 * 3_600), "a future stamp (clock moved back) still cannot buy more than 8 h")
+    }
+
+    func testAnExpiredBuild24LockOpensThePhoneOnUpgrade() {
+        let now = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: now)
+        h.legacy.set(true, forKey: OilaTelemetryService.legacyLockStateKey)
+        h.legacy.set(now.timeIntervalSince1970, forKey: OilaTelemetryService.legacyLockConfirmedAtKey)
+        h.legacy.set(now.addingTimeInterval(-1).timeIntervalSince1970, forKey: OilaTelemetryService.legacyLockEndsAtKey)
+        let service = makeService(h)
+        XCTAssertFalse(service.isLocked)
+        XCTAssertTrue(service.lockDecisionKnown)
+        XCTAssertEqual(h.recorder.shield, [false], "the shield build 24 left up is opened at once")
+    }
+
+    func testTheMigrationNeverOverridesAPolicyAlreadySaved() {
+        let now = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: now)
+        h.store.save(F.snapshot())
+        h.legacy.set(true, forKey: OilaTelemetryService.legacyLockStateKey)
+        h.legacy.set(now.addingTimeInterval(3_600).timeIntervalSince1970, forKey: OilaTelemetryService.legacyLockEndsAtKey)
+        XCTAssertFalse(makeService(h).isLocked)
+        XCTAssertNil(h.legacy.object(forKey: OilaTelemetryService.legacyLockStateKey))
+    }
+
+    // MARK: Unpair
+
+    /// What `stop()` does to the lock (it runs `clearLockPolicy()`): the policy, the edges, the timer
+    /// and the OS shield belong to the family that just left.
+    func testUnpairClearsThePolicyTheEdgesAndTheShield() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        let service = makeService(h)
+        service.applyLockState(livePayload(startsAt: start, endsAt: start.addingTimeInterval(3_600), serverTime: start))
+        XCTAssertTrue(service.isLocked)
+
+        service.clearLockPolicy()
 
         XCTAssertFalse(service.isLocked)
-        XCTAssertTrue(service.lockReleasedByDeadline, "so the enforcement coordinator's gate still fires this launch")
-    }
-
-    func testAServerVerdictClearsTheDurableFlag() {
-        UserDefaults.standard.set(false, forKey: "OILA_LAST_LOCK_STATE")
-        UserDefaults.standard.set(true, forKey: OilaTelemetryService.lockReleasedByDeadlineKey)
-        let service = makeService()
-        XCTAssertTrue(service.lockReleasedByDeadline)
-
-        service.applyLockState(OilaLockState(isLocked: false, raw: [:]), now: Date())
-
-        XCTAssertFalse(service.lockReleasedByDeadline)
-        XCTAssertNil(UserDefaults.standard.object(forKey: OilaTelemetryService.lockReleasedByDeadlineKey),
-                     "a server verdict supersedes the local release")
+        XCTAssertNil(service.lockEndsAt)
+        XCTAssertNil(service.nextLockCheckAt)
+        XCTAssertFalse(service.lockDecisionKnown)
+        XCTAssertNil(h.store.load())
+        XCTAssertEqual(h.recorder.stoppedAll, 1)
+        XCTAssertEqual(h.recorder.shield.last, false)
+        service.reevaluateLock(reason: "tick")
+        XCTAssertFalse(service.isLocked, "and nothing comes back from a policy that is gone")
     }
 }

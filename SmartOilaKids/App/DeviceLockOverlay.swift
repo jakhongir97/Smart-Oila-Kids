@@ -1,11 +1,12 @@
 import SwiftUI
 
 struct DeviceLockOverlay: View {
-    let localTime: String?
+    /// The server's active-schedule window ("21:00 – 07:00"); shown only when no end is known.
     let scheduleRange: String?
-    /// When the lock ends, if known — `OilaTelemetryService.lockDeadline`. Rendered as the one line
-    /// the PO asked the child to see (2026-09-16): the phone opens by itself at this time, internet
-    /// or not.
+    /// When the locked episode ends — `OilaTelemetryService.lockEndsAt`, worked out on the phone.
+    /// Rendered as the one line the PO asked the child to see (2026-09-16): the phone opens by
+    /// itself at this time, internet or not. The offline note is shown only with it: it is a promise
+    /// about a known end, never about a lock with none.
     var endsAt: Date? = nil
 
     @StateObject private var sos = LockOverlaySOSModel()
@@ -53,13 +54,6 @@ struct DeviceLockOverlay: View {
                                 .multilineTextAlignment(.center)
                         } else if let scheduleRange, !scheduleRange.isEmpty {
                             StatusPill(text: L10n.tr("lock.schedule", scheduleRange), state: .neutral)
-                        }
-
-                        if let localTime, !localTime.isEmpty {
-                            Text(L10n.tr("lock.local_time", localTime))
-                                .font(AppTypography.caption(11))
-                                .foregroundStyle(AppColors.inkTertiary)
-                                .multilineTextAlignment(.center)
                         }
                     }
                     .frame(maxWidth: .infinity)
