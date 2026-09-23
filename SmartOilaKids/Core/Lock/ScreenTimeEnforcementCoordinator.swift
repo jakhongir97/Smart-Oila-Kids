@@ -142,8 +142,6 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         self.uploadUsage = uploadUsage ?? { days in
             try await OilaDeviceClient.shared.reportDailyUsage(days: days)
         }
-        }
-        }
         self.stopUsage = stopUsage ?? { dsn in
             ScreenTimeUsageMonitoring.stop(dsn: dsn)
         }
@@ -170,6 +168,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
 
         let dsnChanged = normalized != currentDSN
+        let previousDSN = currentDSN
         currentDSN = normalized
 
         if lockStateObserver == nil {

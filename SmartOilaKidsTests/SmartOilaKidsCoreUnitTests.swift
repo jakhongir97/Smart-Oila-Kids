@@ -4790,9 +4790,9 @@ final class TelemetryPairingLossTests: XCTestCase {
 
     private static let pendingFixesKey = "OILA_PENDING_LOCATION_FIXES"
     private static let persistedKeys = [
-        pendingFixesKey, "OILA_PENDING_SOS", "OILA_LAST_LOCK_STATE", "OILA_LAST_SUCCESSFUL_CONTACT",
-        OilaTelemetryService.lockConfirmedAtKey, OilaTelemetryService.lockEndsAtKey,
-        OilaTelemetryService.lockReleasedByDeadlineKey
+        pendingFixesKey, "OILA_PENDING_SOS", "OILA_LAST_SUCCESSFUL_CONTACT",
+        OilaTelemetryService.legacyLockStateKey, OilaTelemetryService.legacyLockConfirmedAtKey,
+        OilaTelemetryService.legacyLockEndsAtKey, OilaTelemetryService.legacyLockReleasedByDeadlineKey
     ]
 
     override func setUp() {
