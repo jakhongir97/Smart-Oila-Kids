@@ -30,7 +30,8 @@ import os
 ///    rung measures, so a phone that made the one-tap pick is counted whole without any label;
 ///  * a per-token TOMBSTONE — the label a token last carried before it lost it. Naming the same
 ///    icon again renames that ledger entry instead of starting a second package that climbs
-///    today's minutes a second time (audit gap 5).
+///    today's minutes a second time (audit gap 5); giving that name to a DIFFERENT icon drops
+///    today's figure under it, because those minutes were the first icon's (audit gap 6).
 @MainActor
 final class ScreenTimeRestrictedAppsStore: ObservableObject {
     static let shared = ScreenTimeRestrictedAppsStore()
@@ -276,7 +277,18 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         // this one's. Left in the ledger it would be reported under this label and this token's
         // staircase would start at its height (the next rung is armed above the ledger), so today's
         // figure goes (audit gap 6). Earlier days stay as they were reported.
-        if catalogue.entries().contains(where: { $0.bundleId == normalized && $0.token != token }) {
+        //
+        // It moves in two steps as often as in one: the other icon lost the name first (cleared,
+        // un-picked, reset) and its TOMBSTONE still points here — its minutes are still under the
+        // name. Checked before `forgetTombstones` below erases that trace; left in place, this
+        // token would report them as its own and the other icon, named later, would climb the same
+        // minutes again under its new name. Dropping today is always safe: the token that holds the
+        // name climbs back to its own true figure from midnight (`includesPastActivity`).
+        let tokenKey = Self.tokenKey(token)
+        let alreadyHeldHere = catalogue.entry(for: token)?.bundleId == normalized
+        let heldElsewhere = catalogue.entries().contains { $0.bundleId == normalized && $0.token != token }
+            || loadTombstones().contains { $0.bundleId == normalized && $0.token != tokenKey }
+        if heldElsewhere && !alreadyHeldHere {
             ledger.remove(bundleId: normalized, dayKey: ScreenTimeUsageDayFormatter.dayKey(for: Date()))
         }
         // Time already counted for THIS token is the same app's time — it moves with the label, or

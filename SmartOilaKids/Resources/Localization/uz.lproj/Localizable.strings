@@ -369,8 +369,8 @@
 "screentime.restricted.list_hint_linking" = "Quyidagi ro'yxatdan o'sha ilovaning belgisini bosing.";
 "screentime.restricted.list_hint" = "Yashil ✓ — saytda ko'rinadi, ota-ona saytdan bloklaydi va vaqtini ko'radi. Nomsiz ilovaga bosing va nomini ro'yxatdan tanlang (yoki yozing) — u ham saytga tushadi.";
 "screentime.restricted.list_title" = "Telefondagi ilovalar (%d)";
-"screentime.picker.restricted.header" = "Yuqoridagi “All Apps & Categories” tugmasini yoqing va Saqlash bosing — hamma ilova ro'yxatga tushadi.";
-"screentime.restricted.pick_hint" = "Ochilgan ro'yxatda yuqoridagi “All Apps & Categories” tugmasini yoqing va Saqlash bosing — telefondagi hamma ilova bir marta tushadi.";
+"screentime.picker.restricted.header" = "Eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing — hamma ilova ro'yxatga tushadi.";
+"screentime.restricted.pick_hint" = "Ochilgan ro'yxatda eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing — telefondagi hamma ilova bir marta tushadi.";
 "screentime.restricted.pick_again" = "Tanlangan ilovalarni o'zgartirish";
 "screentime.restricted.pick" = "Ilovalarni tanlash";
 "screentime.picker.guided.hint" = "Ro'yxatdan faqat %@ ni belgilang va Saqlash bosing. Boshqa ilovalarga tegmang — bittadan ortiq belgilansa, saqlab bo'lmaydi.";
@@ -382,5 +382,5 @@
 
 /* build 26 — USAGE */
 "home2.screentime_setup.title" = "Ekran vaqti hisoblanmayapti";
-"home2.screentime_setup.body" = "Ota-ona ekran vaqtini ko'rishi uchun ilovalarni bir marta tanlang: “All Apps & Categories” tugmasini yoqing va Saqlash bosing.";
+"home2.screentime_setup.body" = "Ota-ona ekran vaqtini ko'rishi uchun ilovalarni bir marta tanlang: eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing.";
 "screentime.other_apps.name" = "Boshqa ilovalar";
