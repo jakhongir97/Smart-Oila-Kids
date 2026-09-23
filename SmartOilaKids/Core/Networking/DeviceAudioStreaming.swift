@@ -58,7 +58,7 @@ struct StreamCommand: Equatable {
     /// obeyed.
     ///
     /// `expiresAt` is minted by the server but compared against the device's own wall clock — and on
-    /// this product the clock belongs to the child. `SettingsProtectionController` documents the
+    /// this product the clock belongs to the child. `PINLockoutClock` documents the
     /// same threat model: no Screen Time restriction covers the Date & Time pane, so winding the
     /// clock forward is a one-tap change. With no allowance at all, a clock running fast makes
     /// `Date() > effectiveDeadline` true for EVERY wake, forever — the parent's live checks stop

@@ -84,9 +84,6 @@
 "settings.diagnostics_geo_badge_live" = "LIVE";
 "settings.diagnostics_geo_badge_stale" = "STALE";
 "settings.diagnostics_geo_badge_waiting" = "WAIT";
-"settings.control_protection_pin_invalid" = "Aniq 4 ta raqam kiriting.";
-"settings.control_protection_pin_mismatch" = "PIN-kodlar mos kelmadi.";
-"settings.control_protection_pin_incorrect" = "PIN-kod noto'g'ri.";
 
 "notifications.device_control.schedule_started_title" = "Bloklash jadvali boshlandi";
 "notifications.device_control.schedule_started_body" = "Ota-ona to'liq qurilma jadvali ushbu iPhone'ni blokladi.";
@@ -245,8 +242,6 @@
 "settings2.disconnect_sub" = "Ota-ona PIN kodi talab qilinadi";
 "settings2.enable" = "Yoqish";
 "disconnect2.title" = "Aloqani uzish";
-"disconnect2.body" = "Bu shu telefondagi kuzatuvni to'xtatadi va uni ulanish ekraniga qaytaradi. Davom etish uchun ota-ona PIN kodini kiriting.";
-"disconnect2.parent_managed_body" = "Bu qurilmani faqat ota-ona uzishi mumkin. Ota-onangizdan uni Oila360 ilovasidan o'chirishni so'rang.";
 "disconnect2.locked_out" = "Juda ko'p urinish. %d daqiqadan so'ng qayta urinib ko'ring.";
 "disconnect2.confirm" = "Uzish";
 "disconnect2.cancel" = "Bekor qilish";
@@ -255,19 +250,8 @@
 "disconnect2.rate_limited" = "Juda ko'p urinish. Bir daqiqadan so'ng qayta urinib ko'ring.";
 "disconnect2.offline" = "Internet aloqasi yo'q. Uzish uchun internet kerak — qayta urinib ko'ring.";
 "disconnect2.failed" = "Uzib bo'lmadi. Qayta urinib ko'ring.";
-"disconnect2.confirm_title" = "Haqiqatan uzasizmi?";
-"disconnect2.confirm_body" = "Qurilma ota-onadan uziladi va ilova yangi o'rnatilgan holatiga qaytadi.";
-"disconnect2.confirm_yes" = "Ha, uzish";
-"disconnect2.confirm_cancel" = "Bekor qilish";
 
 /* MARK: - First-run parent PIN provisioning */
-"pin_setup.title" = "PIN kod kiriting";
-"pin_setup.subtitle" = "Bola qurilmasini istalgan vaqtda o'chira olmasligi uchun PIN kodni kiriting";
-"pin_setup.confirm_title" = "PIN kodni takrorlang";
-"pin_setup.confirm_subtitle" = "Tasdiqlash uchun PIN kodni yana bir marta kiriting";
-"pin_setup.mismatch" = "PIN kodlar mos kelmadi. Qaytadan urinib ko'ring";
-"pin_setup.save" = "Saqlash";
-"pin_setup.skip" = "Hozir emas";
 
 "perm2.decline_bg" = "Yo'q, faqat ochiqda";
 
@@ -350,21 +334,6 @@
 "chat2.system.generic" = "Tizim xabari";
 
 /* Parent PIN provisioning (Settings) */
-"settings2.section_parent" = "Ota-ona boshqaruvi";
-"settings2.parent_pin_set" = "Ota-ona PIN kodini o‘rnatish";
-"settings2.parent_pin_set_sub" = "Bu qurilmani uzish uchun kerak";
-"settings2.parent_pin_change" = "Ota-ona PIN kodini o‘zgartirish";
-"settings2.parent_pin_change_sub" = "Joriy PIN kod talab qilinadi";
-"settings2.parent_pin_remove" = "Ota-ona PIN kodini o‘chirish";
-"settings2.parent_pin_remove_sub" = "Keyin uzish faqat Oila360 ilovasida bo‘ladi";
-"settings2.parent_pin_prompt_current" = "Davom etish uchun joriy ota-ona PIN kodini kiriting.";
-"settings2.parent_pin_prompt_new" = "4 xonali PIN kod tanlang. Uni bolangizga aytmang — aynan shu kod qurilmani uzishga ruxsat beradi.";
-"settings2.parent_pin_prompt_confirm" = "Tasdiqlash uchun yangi PIN kodni yana bir marta kiriting.";
-"settings2.parent_pin_save" = "PIN kodni saqlash";
-"settings2.parent_pin_saved" = "Ota-ona PIN kodi saqlandi. Qurilmani uzishdan oldin u so‘raladi.";
-"settings2.parent_pin_removed" = "Ota-ona PIN kodi o‘chirildi. Endi qurilmani faqat Oila360 ilovasidan uzish mumkin.";
-"settings2.parent_pin_locked_out" = "Juda ko‘p urinish. Keyinroq qayta urinib ko‘ring.";
-"settings2.parent_pin_set_unavailable" = "PIN kodni faqat ulangandan keyin darhol o‘rnatish mumkin. Buning uchun qurilmani Oila360 ilovasidan qayta ulang.";
 "a11y.step_progress" = "%2$d dan %1$d-qadam";
 
 /* Screen Time — app picker and the always-allowed set */

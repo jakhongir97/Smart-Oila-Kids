@@ -46,12 +46,6 @@ struct BolajonHomeView: View {
     /// Observed so the SOS takeover can be dismissed the moment the device lock engages —
     /// the root-level lock cover must never end up behind another presentation.
     @ObservedObject private var lockState = OilaTelemetryService.shared
-    /// Home is where the first-run PIN prompt is offered, so it needs the controller that owns the
-    /// one-shot grant. Presentation only: every rule about WHEN a first PIN may be set lives in
-    /// `SettingsProtectionController` / `FirstPINProvisioning`.
-    @ObservedObject private var protection = SettingsProtectionController.shared
-    /// Observed only to stay out of the consent sheet's way — see `armFirstRunPINPromptIfNeeded`.
-    @ObservedObject private var audioStream = DeviceAudioStreamManager.shared
     /// Drives the header chip's permission half. Owned here (not read from Settings) because the chip
     /// has to be right the moment Home appears, and Settings may never have been opened.
     @StateObject private var permissionManager = LocationPermissionManager()
@@ -78,8 +72,6 @@ struct BolajonHomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var path: [HomeRoute] = []
     @State private var showSOSConfirm = false
-    /// True while the first-run parent-PIN sheet is up.
-    @State private var showFirstRunPINSetup = false
     /// One location re-ask per launch. See `reaskForLocationIfNeverAnswered`.
     @State private var didReaskForLocation = false
     /// Bumped whenever the chat unread badge has to be re-read from
@@ -118,7 +110,6 @@ struct BolajonHomeView: View {
 #if DEBUG
                 if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_SOS"] == "1" { showSOSConfirm = true }
 #endif
-                armFirstRunPINPromptIfNeeded()
                 // App launched/opened from a push — consume the pending deep-link and drill in.
                 // `consume` CLEARS the stored intent, so it must be routed on every destination it
                 // can return: testing only for `.tasks` silently discarded a pending `.chat` one
@@ -155,10 +146,6 @@ struct BolajonHomeView: View {
                 // Without push there is nothing to tell Home the parent wrote — coming back to
                 // the foreground is the reliable moment to re-read the unread count.
                 guard phase == .active else { return }
-                // Re-tried here as well as on appear because the prompt yields rather than fights:
-                // if the device was locked or the consent sheet was up at first appear, the grant is
-                // still unspent and the next foreground is the natural moment to offer it again.
-                armFirstRunPINPromptIfNeeded()
                 reaskForLocationIfNeverAnswered()
                 chatUnreadRefreshToken += 1
                 // Same reasoning for everything else on this screen. `.task` fires once and the
@@ -174,15 +161,9 @@ struct BolajonHomeView: View {
                 chatWasOpen = chatOpen
             }
             .onChange(of: lockState.isLocked) { locked in
-                // Both Home presentations step aside for the lock takeover, for the same reason: the
-                // root presents it as a full-screen cover, and a sheet already up would block that
-                // presentation outright — leaving a locked child looking at a PIN keypad instead.
-                // This is a teardown, not an answer, so the grant survives and the prompt is offered
-                // again the next time Home appears unlocked.
-                if locked {
-                    showSOSConfirm = false
-                    showFirstRunPINSetup = false
-                }
+                // The SOS sheet steps aside for the lock takeover: the root presents it as a
+                // full-screen cover, and a sheet already up would block that presentation outright.
+                if locked { showSOSConfirm = false }
             }
             .sheet(isPresented: $showSOSConfirm, onDismiss: { viewModel.resetSOS() }) {
                 SOSConfirmTakeover(
@@ -196,38 +177,9 @@ struct BolajonHomeView: View {
                 .sosSheetChrome(dismissDisabled: viewModel.isSendingSOS)
             }
         }
-        // Attached OUTSIDE the NavigationStack, not next to the SOS sheet: two `.sheet` modifiers on
-        // the same view do not both work, and this one has to cover the whole Home stack anyway —
-        // the child may already have drilled into Tasks or Chat when the app is foregrounded.
-        // Swiping it away is NOT an answer: this sheet appears on the monitored child's own Home
-        // screen, and spending the grant on a swipe let the child remove the parent-PIN protection —
-        // and with it the only thing standing between them and Disconnect — with one gesture.
-        .sheet(isPresented: $showFirstRunPINSetup, onDismiss: { protection.endFirstRunPINPrompt() }) {
-            ParentPINFlowSheet(intent: .firstRun)
-        }
         .bolajonNavigationTint()
     }
 
-    /// Offer the first-run parent-PIN prompt, at most once per pairing.
-    ///
-    /// The gate itself is `SettingsProtectionController.beginFirstRunPINPrompt()`, which returns false
-    /// when the grant is already spent or a PIN exists. The grant is spent by an explicit ANSWER
-    /// inside the sheet, not by presenting it. Everything below is about not stealing the screen from
-    /// something more important:
-    ///
-    /// - `refreshAvailability()` first, because `hasCustomPIN` may be a stale `true` left by a
-    ///   PREVIOUS family — the verifier is device-global in the Keychain and survives a reinstall,
-    ///   and the new pairing wipes the storage without touching this live object. Without the
-    ///   refresh the new parent is silently refused their prompt.
-    /// - `oilaPaired` because the grant is a per-pairing thing, and the debug Home route can render
-    ///   this screen with no session at all.
-    /// - the device lock, exactly as the SOS takeover yields to it: a full-screen cover the child
-    ///   cannot dismiss must not have a sheet stranded on top of it.
-    /// - the live-capture consent sheet, which is presented from `RootView` and would collide.
-    ///
-    /// Not listed: the permissions flow, which routes to a different root entirely and cannot be on
-    /// screen at the same time as Home, and the live-capture banner, which is a sibling row rather
-    /// than a presentation and so has nothing to contend for.
     /// Ask for location once per launch when the child has never actually answered iOS's prompt.
     ///
     /// Both location steps in onboarding ship a visible decline, and nothing anywhere asked again —
@@ -241,17 +193,6 @@ struct BolajonHomeView: View {
         guard permissionManager.locationAuthorizationStatus == .notDetermined else { return }
         didReaskForLocation = true
         permissionManager.requestLocationPermission()
-    }
-
-    private func armFirstRunPINPromptIfNeeded() {
-        // Cheap first, because this runs on every foreground for the life of the pairing: the marker
-        // is a plain `UserDefaults` read and, unlike `hasCustomPIN`, it cannot be stale — so it is
-        // the one check that can safely short-circuit the Keychain read and the `LAContext` probe.
-        guard !protection.isFirstRunPINPromptAnswered else { return }
-        guard sessionStore.oilaPaired, !lockState.isLocked else { return }
-        guard !(AppRuntime.audioStreamingEnabled && audioStream.needsConsent) else { return }
-        protection.refreshAvailability()
-        if protection.beginFirstRunPINPrompt() { showFirstRunPINSetup = true }
     }
 
     /// The one door every Home refresh goes through.

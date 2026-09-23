@@ -35,6 +35,10 @@ struct OilaAPIError: LocalizedError {
     /// never send another request for the life of the install.
     static let credentialAbsentCode = "CREDENTIAL_ABSENT"
 
+    /// The backend's errorCode for a valid device token whose PAIRING is gone (unpaired, child
+    /// deleted, handset swapped). Distinct from `UNAUTHORIZED`, which is a bad token.
+    static let deviceUnpairedCode = "DEVICE_UNPAIRED"
+
     /// The device credential is no longer valid server-side — the caller should force re-pairing.
     ///
     /// `NO_LOCAL_CREDENTIAL` is excluded on purpose. Requests used to be sent WITHOUT an
@@ -570,8 +574,9 @@ struct OilaDeviceFile {
 enum OilaUnpairOutcome: String {
     /// The server accepted the revoke.
     case revoked = "device_unpair_revoked"
-    /// The route is not deployed (404/405/501). Was the norm until D-099 shipped; kept because a
-    /// deployment that loses the route again must not strand every child on this screen.
+    /// The route is not deployed (404/405/501). Live since 2026-08-28; since build 26 this is NOT a
+    /// disconnect either — the PO's rule is "success kelsa uzasiz, aks holda yo'q", and a missing
+    /// route is not a success.
     case routeMissing = "device_unpair_route_missing"
     /// The request never reached a server — no signal, DNS, a dropped connection.
     case unreachable = "device_unpair_unreachable"
@@ -580,13 +585,19 @@ enum OilaUnpairOutcome: String {
     case pinRequired = "device_unpair_pin_required"
     /// 429: more than 10 attempts a minute. Still paired; the child has to wait.
     case rateLimited = "device_unpair_rate_limited"
-    /// No request left the app — this device holds no readable credential, so there was nothing to
-    /// revoke. Kept apart from `.revoked` (the word has to mean the SERVER acted, or the diagnostic
-    /// is worse than silence) AND from `.rejected`, because the caller must still be allowed to
-    /// finish the local teardown: with no token there is nothing a retry could ever accomplish, and
-    /// refusing would strand the handset on the disconnect screen forever. It is not a bypass —
-    /// a child cannot arrange this state, only a locked Keychain before first unlock can.
+    /// No request left the app: the Keychain could not be READ right now (notably
+    /// errSecInteractionNotAllowed before first unlock). Transient, so the handset stays paired —
+    /// resetting here would let an unreadable Keychain stand in for the parent's PIN.
     case noCredential = "device_unpair_no_credential"
+    /// No request left the app: the Keychain answered definitively that this device holds NO
+    /// credential (`CREDENTIAL_ABSENT`). The server link cannot be reached from this phone at all —
+    /// no retry can ever produce a token that is not there — so the caller may finish the local
+    /// teardown; the parent still sees the device and removes it from Oila360.
+    case credentialAbsent = "device_unpair_credential_absent"
+    /// 401 with an errorCode OTHER than `DEVICE_UNPAIRED` (`UNAUTHORIZED`: a missing, malformed,
+    /// expired or foreign-signed token). The server did NOT say the pairing is gone, so this is not
+    /// a disconnect — the handset stays paired and the telemetry probe owns a dead credential.
+    case credentialRejected = "device_unpair_credential_rejected"
     /// A server answered, but with neither a revoke nor a not-implemented. Kept distinct so a 500
     /// is never filed as "offline", which would send anyone reading this to the wrong side.
     case rejected = "device_unpair_rejected"
@@ -721,23 +732,25 @@ final class OilaDeviceClient: OilaDeviceServicing {
         try persist(tokens)
     }
 
-    /// Ends this device's session. The local credential is ALWAYS cleared (the `defer`); the
-    /// server-side revoke is best-effort.
+    /// The LOCAL half of a disconnect, run only after `unpairDevice(pin:)` said the link is cut. The
+    /// local credential is ALWAYS cleared (the `defer`).
     ///
-    /// `POST /device/unpair` is the real revoke and is attempted first. `/auth/logout` afterwards is
-    /// a legacy leftover and MUST NOT be read as the signal that anything was revoked: it is a
-    /// refresh-token route, and a paired device holds a single long-lived `deviceToken` and no
-    /// refresh token, so for the case that matters here the route cannot succeed even in principle.
-    /// It is still attempted because a legacy install that does hold a refresh token is entitled to
-    /// have it invalidated; the `unpairDevice()` outcome is what says whether the LINK was cut.
+    /// `/auth/logout` is a legacy leftover and MUST NOT be read as the signal that anything was
+    /// revoked: it is a refresh-token route, and a paired device holds a single long-lived
+    /// `deviceToken` and no refresh token. It is still attempted, behind `try?`, because a legacy
+    /// install that does hold a refresh token is entitled to have it invalidated.
     ///
-    /// Neither call may prevent the disconnect. `unpairDevice()` does not throw and `/auth/logout`
-    /// is behind `try?`, so a child with no signal at all still reaches the local teardown — which
-    /// is the requirement: a phone that cannot be disconnected offline is a phone the child cannot
-    /// disconnect at the moment they most need to.
+    /// Build 26 changed who decides: the server, through the parent's PIN. This function used to
+    /// send its own PIN-less unpair and then clear the credential whatever the answer, so a phone
+    /// with no signal still disconnected — which is exactly what the product owner's rule "success
+    /// kelsa uzasiz, aks holda yo'q" forbids. The disconnect screen now owns the unpair and calls
+    /// this only on a yes.
     func logout() async throws {
         defer { secureTokens.clear() }
-        await unpairDevice()
+        // No `unpairDevice()` here any more (build 26). The disconnect screen has ALREADY sent the
+        // PIN-carrying unpair and only calls this after the server said yes; a second, PIN-less
+        // unpair was a wasted attempt out of the 10-a-minute budget and overwrote the real
+        // outcome in the lifecycle diagnostics.
         var body: [String: Any] = [:]
         if let refresh = secureTokens.refreshToken()?.trimmedNonEmpty {
             body["refreshToken"] = refresh
@@ -795,18 +808,21 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 // Same reasoning as `logout()`: a 401 means the credential this call exists to
                 // revoke is already dead, so minting a fresh one to announce its revocation is work
                 // with no possible outcome.
-                allowRefresh: false
+                allowRefresh: false,
+                // This answer wipes the phone, so a 2xx only counts when the envelope says
+                // `"success": true` in so many words — a proxy page or an empty body is not a yes.
+                requireExplicitSuccess: true
             )
             outcome = .revoked
         } catch let error as OilaAPIError {
             detail = error.errorCode ?? "http_\(error.statusCode)"
             if error.holdsNoCredential {
-                // Nothing was sent: this device holds no readable credential, so there was nothing
-                // for the server to revoke and no request left the app. Not `.revoked` — that word
-                // has to mean the SERVER acted, or the diagnostic is worse than silence.
-                outcome = .noCredential
+                // Nothing was sent: this device holds no usable credential, so no request left the
+                // app. Not `.revoked` — that word has to mean the SERVER acted. Absent (conclusive)
+                // and unreadable (transient) are told apart because only the first may reset.
+                outcome = error.isCredentialAbsent ? .credentialAbsent : .noCredential
             } else {
-                outcome = Self.unpairOutcome(forStatusCode: error.statusCode)
+                outcome = Self.unpairOutcome(statusCode: error.statusCode, errorCode: error.errorCode)
             }
         } catch {
             // A transport failure, not an answer: no signal, DNS, a dropped connection.
@@ -823,21 +839,22 @@ final class OilaDeviceClient: OilaDeviceServicing {
         return outcome
     }
 
-    /// Maps an unpair response status onto the outcome vocabulary.
+    /// Maps an unpair response onto the outcome vocabulary.
     ///
-    /// 404 (no such route), 405 (the path exists for another verb) and 501 (declared but not
-    /// implemented) all mean "this deployment does not have it yet" and none of them is an app
-    /// error. 401 means the device Bearer was refused, which on this route the contract defines as a
-    /// COMPLETED unpair — the call that worked is what revoked it. 403 is the opposite and used to
-    /// be folded in with it: `UNPAIR_PIN_INVALID`, the device is still paired, and treating it as a
-    /// revoke wiped the phone on a wrong PIN. 429 is the brute-force ceiling. Everything else is a
-    /// server that answered something unexpected and is filed as such.
-    static func unpairOutcome(forStatusCode statusCode: Int) -> OilaUnpairOutcome {
+    /// Only TWO answers mean the link is cut: a 2xx with an explicit success envelope (mapped by the
+    /// caller) and a 401 whose errorCode is `DEVICE_UNPAIRED` — on this route that is what a retry
+    /// after a dropped 200 lands on, and "retrying instead of doing the local reset strands the
+    /// handset". Every other 401 is `UNAUTHORIZED` (a bad token), which says nothing about the
+    /// pairing. 403 is `UNPAIR_PIN_INVALID`: wrong PIN, still paired. 429 is the 10-a-minute
+    /// ceiling. 404/405/501 mean the route is missing. Everything else is filed as `.rejected`, so a
+    /// 500 is never mistaken for "offline".
+    static func unpairOutcome(statusCode: Int, errorCode: String?) -> OilaUnpairOutcome {
         switch statusCode {
-        case 404, 405, 501: return .routeMissing
-        case 401: return .revoked
+        case 401:
+            return errorCode == OilaAPIError.deviceUnpairedCode ? .revoked : .credentialRejected
         case 403: return .pinRequired
         case 429: return .rateLimited
+        case 404, 405, 501: return .routeMissing
         default: return .rejected
         }
     }
@@ -1439,7 +1456,8 @@ final class OilaDeviceClient: OilaDeviceServicing {
         query: [URLQueryItem] = [],
         body: Any? = nil,
         authorized: Bool,
-        allowRefresh: Bool = true
+        allowRefresh: Bool = true,
+        requireExplicitSuccess: Bool = false
     ) async throws -> Any {
         let bodyData = try body.map { try JSONSerialization.data(withJSONObject: $0) }
         return try await send(
@@ -1449,7 +1467,8 @@ final class OilaDeviceClient: OilaDeviceServicing {
             bodyData: bodyData,
             contentType: body == nil ? nil : "application/json",
             authorized: authorized,
-            allowRefresh: allowRefresh
+            allowRefresh: allowRefresh,
+            requireExplicitSuccess: requireExplicitSuccess
         )
     }
 
@@ -1464,7 +1483,8 @@ final class OilaDeviceClient: OilaDeviceServicing {
         bodyData: Data?,
         contentType: String?,
         authorized: Bool,
-        allowRefresh: Bool = true
+        allowRefresh: Bool = true,
+        requireExplicitSuccess: Bool = false
     ) async throws -> Any {
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
@@ -1510,7 +1530,9 @@ final class OilaDeviceClient: OilaDeviceServicing {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
 
         if (200 ... 299).contains(http.statusCode) {
-            let success = (json?["success"] as? Bool) ?? true
+            // A missing envelope reads as success everywhere except where the caller opted out:
+            // `requireExplicitSuccess` is for answers that destroy state (the unpair).
+            let success = (json?["success"] as? Bool) ?? !requireExplicitSuccess
             if success {
                 return json?["data"] ?? [:]
             }
@@ -1543,7 +1565,8 @@ final class OilaDeviceClient: OilaDeviceServicing {
             return try await send(
                 path: path, method: method, query: query,
                 bodyData: bodyData, contentType: contentType,
-                authorized: authorized, allowRefresh: false
+                authorized: authorized, allowRefresh: false,
+                requireExplicitSuccess: requireExplicitSuccess
             )
         }
 

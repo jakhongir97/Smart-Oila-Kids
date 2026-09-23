@@ -203,8 +203,8 @@ final class SecureTokenStore: SecureTokenStoring {
     /// The absence of the UserDefaults marker is the only evidence available that the container is
     /// new, and it is sufficient: nothing else survives a delete either.
     ///
-    /// The same shape the parent-PIN verifier already uses (`SessionStore.setOilaPaired(true)` →
-    /// `SettingsProtectionController.wipePersistedPINState`): device-global Keychain state is wiped
+    /// The same shape the build-25 PIN verifier cleanup uses (`SessionStore.setOilaPaired(true)` →
+    /// `LegacyLocalPINCleanup.purge`): device-global Keychain state is wiped
     /// at the moment authority changes hands, rather than being trusted because it is present. This
     /// deliberately does NOT touch the PIN verifier itself — that one is already handled at pairing
     /// by the owner of that mechanism, and a second wipe from here would be a second thing to keep

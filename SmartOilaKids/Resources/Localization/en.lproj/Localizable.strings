@@ -84,9 +84,6 @@
 "settings.diagnostics_geo_badge_live" = "LIVE";
 "settings.diagnostics_geo_badge_stale" = "STALE";
 "settings.diagnostics_geo_badge_waiting" = "WAITING";
-"settings.control_protection_pin_invalid" = "Enter exactly 4 digits.";
-"settings.control_protection_pin_mismatch" = "PINs do not match.";
-"settings.control_protection_pin_incorrect" = "Incorrect PIN.";
 
 "notifications.device_control.schedule_started_title" = "Screen-time schedule started";
 "notifications.device_control.schedule_started_body" = "A parent full-device schedule locked this iPhone.";
@@ -245,8 +242,6 @@
 "settings2.disconnect_sub" = "Parent PIN required";
 "settings2.enable" = "Enable";
 "disconnect2.title" = "Disconnect";
-"disconnect2.body" = "This stops monitoring on this phone and returns it to pairing. Enter the parent PIN to continue.";
-"disconnect2.parent_managed_body" = "Only a parent can disconnect this device. Ask your parent to remove it in the Oila360 app.";
 "disconnect2.locked_out" = "Too many attempts. Try again in %d min.";
 "disconnect2.confirm" = "Disconnect";
 "disconnect2.cancel" = "Cancel";
@@ -255,19 +250,8 @@
 "disconnect2.rate_limited" = "Too many attempts. Wait a minute, then try again.";
 "disconnect2.offline" = "No connection. Disconnecting needs the internet — try again.";
 "disconnect2.failed" = "Could not disconnect. Try again.";
-"disconnect2.confirm_title" = "Really disconnect?";
-"disconnect2.confirm_body" = "The device will be disconnected from the parent and the app will go back to how it was right after installing.";
-"disconnect2.confirm_yes" = "Yes, disconnect";
-"disconnect2.confirm_cancel" = "Cancel";
 
 /* MARK: - First-run parent PIN provisioning */
-"pin_setup.title" = "Set a PIN code";
-"pin_setup.subtitle" = "Set a PIN code so the child can't disconnect the device whenever they want";
-"pin_setup.confirm_title" = "Repeat the PIN code";
-"pin_setup.confirm_subtitle" = "Enter the PIN code once more to confirm";
-"pin_setup.mismatch" = "The PIN codes don't match. Try again";
-"pin_setup.save" = "Save";
-"pin_setup.skip" = "Not now";
 
 "perm2.decline_bg" = "No, only when open";
 
@@ -350,21 +334,6 @@
 "chat2.system.generic" = "System message";
 
 /* Parent PIN provisioning (Settings) */
-"settings2.section_parent" = "Parent controls";
-"settings2.parent_pin_set" = "Set parent PIN";
-"settings2.parent_pin_set_sub" = "Needed to disconnect this device";
-"settings2.parent_pin_change" = "Change parent PIN";
-"settings2.parent_pin_change_sub" = "Current PIN required";
-"settings2.parent_pin_remove" = "Remove parent PIN";
-"settings2.parent_pin_remove_sub" = "Disconnect will then need the Oila360 app";
-"settings2.parent_pin_prompt_current" = "Enter the current parent PIN to continue.";
-"settings2.parent_pin_prompt_new" = "Choose a 4-digit PIN. Keep it from your child — this code is what allows the device to be disconnected.";
-"settings2.parent_pin_prompt_confirm" = "Enter the new PIN once more to confirm.";
-"settings2.parent_pin_save" = "Save PIN";
-"settings2.parent_pin_saved" = "The parent PIN is saved. It will be asked before this device can be disconnected.";
-"settings2.parent_pin_removed" = "The parent PIN is removed. This device can now only be disconnected from the Oila360 app.";
-"settings2.parent_pin_locked_out" = "Too many attempts. Try again later.";
-"settings2.parent_pin_set_unavailable" = "A PIN can only be set right after linking. Re-link this device from the Oila360 app to set one.";
 "a11y.step_progress" = "Step %1$d of %2$d";
 
 /* Screen Time — app picker and the always-allowed set */

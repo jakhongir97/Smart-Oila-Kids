@@ -1,382 +1,85 @@
 import XCTest
 @testable import SmartOilaKids
 
-/// Covers the local parent-PIN gate used by the Bolajon360 disconnect screen
-/// (`BolajonSettingsView` → `DisconnectView`). There is no backend parent-PIN endpoint,
-/// so the gate is validated locally against `SettingsProtectionController`.
-@MainActor
-final class SettingsProtectionControllerTests: XCTestCase {
-    private func makeController() -> (SettingsProtectionController, UserDefaults, String) {
-        let suiteName = "SettingsProtectionControllerTests.\(UUID().uuidString)"
+/// Build 26: the parent's unpair PIN lives on the SERVER. The product owner's rule (2026-09-23):
+/// "UZISH qilganda siz PIN so'raysiz doim. PIN olib API ga zapros berasiz. Success kelsa uzasiz aks
+/// holda yo'q." These pin that rule where it is decided — `UnpairScreenAction` — and the removal of
+/// the build-25 LOCAL PIN.
+final class UnpairScreenActionTests: XCTestCase {
+    /// The only two answers that may reset the phone.
+    func testOnlyAServerYesOrAnAbsentCredentialResets() {
+        XCTAssertEqual(UnpairScreenAction.decide(.revoked), .reset)
+        XCTAssertEqual(UnpairScreenAction.decide(.credentialAbsent), .reset,
+                       "no credential at all means no retry can ever reach the server")
+    }
+
+    /// "aks holda yo'q" — every other answer keeps the phone paired.
+    func testEveryOtherAnswerKeepsThePhonePaired() {
+        let others: [OilaUnpairOutcome] = [
+            .pinRequired, .rateLimited, .unreachable, .noCredential, .credentialRejected, .routeMissing, .rejected,
+        ]
+        for outcome in others {
+            if case .reset = UnpairScreenAction.decide(outcome) {
+                XCTFail("\(outcome) must not disconnect the phone")
+            }
+        }
+    }
+
+    func testAWrongPINClearsTheDigitsAndSaysSo() {
+        XCTAssertEqual(UnpairScreenAction.decide(.pinRequired),
+                       .stay(messageKey: "disconnect2.pin_incorrect", clearDigits: true))
+        XCTAssertEqual(UnpairScreenAction.decide(.rateLimited),
+                       .stay(messageKey: "disconnect2.rate_limited", clearDigits: true))
+    }
+
+    /// The parent typed the PIN right and the network failed: keep the digits so a retry is one tap.
+    func testOfflineKeepsTheDigits() {
+        XCTAssertEqual(UnpairScreenAction.decide(.unreachable),
+                       .stay(messageKey: "disconnect2.offline", clearDigits: false))
+    }
+
+    /// Every message the mapping can name must exist in the app's strings (all three languages share
+    /// one key set, enforced by `scripts/check_localization_parity.py`).
+    func testEveryMessageKeyResolves() {
+        let all: [OilaUnpairOutcome] = [
+            .revoked, .credentialAbsent, .pinRequired, .rateLimited, .unreachable, .noCredential,
+            .credentialRejected, .routeMissing, .rejected,
+        ]
+        for outcome in all {
+            guard case let .stay(key, _) = UnpairScreenAction.decide(outcome) else { continue }
+            XCTAssertNotEqual(L10n.tr(key), key, "\(key) must resolve to real copy")
+        }
+    }
+}
+
+final class LegacyLocalPINCleanupTests: XCTestCase {
+    func testThePurgeDeletesTheBuild25VerifierAndItsKeys() {
+        let suiteName = "LegacyPINCleanup.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        // In-memory PIN store: the Keychain is device-global and not isolable per test.
-        return (
-            SettingsProtectionController(userDefaults: defaults, pinStore: InMemoryPINCredentialStore()),
-            defaults,
-            suiteName
-        )
-    }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = KeychainPINCredentialStore()
+        store.save(Data("build-25-verifier".utf8))
+        for key in LegacyLocalPINCleanup.legacyKeys { defaults.set(true, forKey: key) }
+        XCTAssertNotNil(store.load(), "precondition: a build-25 verifier is present")
 
-    /// Saving a FIRST pin requires an open first-run prompt, which is what the C1 sheet and the C4
-    /// "set PIN" row both claim before presenting. Tests that only care about the resulting PIN go
-    /// through here so they exercise the real authority rather than a bypass.
-    @discardableResult
-    private func provisionFirstPIN(_ controller: SettingsProtectionController, _ pin: String) -> Bool {
-        guard controller.beginFirstRunPINPrompt() else { return false }
-        defer { controller.endFirstRunPINPrompt() }
-        return controller.saveCustomPIN(pin, authority: .firstRunGrant)
-    }
+        LegacyLocalPINCleanup.purge(userDefaults: defaults)
 
-    func testVerifyCustomPINRejectsWhenNoPINStored() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertFalse(controller.hasCustomPIN)
-        XCTAssertFalse(controller.verifyCustomPIN("1234"))
-    }
-
-    func testSaveCustomPINThenVerifyAcceptsCorrectAndRejectsWrong() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertTrue(provisionFirstPIN(controller, "1234"))
-        XCTAssertTrue(controller.hasCustomPIN)
-
-        // Correct PIN unlocks disconnect; any wrong PIN blocks it.
-        XCTAssertTrue(controller.verifyCustomPIN("1234"))
-        XCTAssertFalse(controller.verifyCustomPIN("0000"))
-        XCTAssertFalse(controller.verifyCustomPIN("4321"))
-    }
-
-    func testSaveCustomPINRejectsWrongLengthAndLeavesNoPIN() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertFalse(provisionFirstPIN(controller, "12"))
-        XCTAssertFalse(provisionFirstPIN(controller, ""))
-        XCTAssertFalse(controller.hasCustomPIN)
-        XCTAssertFalse(controller.verifyCustomPIN("12"))
-    }
-
-    func testVerifyCustomPINRejectsShortInputWithStoredPIN() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertTrue(provisionFirstPIN(controller, "4321"))
-        XCTAssertFalse(controller.verifyCustomPIN("432"))
-        XCTAssertFalse(controller.verifyCustomPIN(""))
-        XCTAssertTrue(controller.verifyCustomPIN("4321"))
-    }
-
-    /// Repeated wrong guesses must trip a lockout that survives a relaunch — otherwise the
-    /// disconnect gate (the one control keeping a monitored child linked) is brute-forceable on
-    /// device.
-    func testDisconnectPINLocksOutAfterRepeatedFailuresAndSurvivesRelaunch() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertTrue(provisionFirstPIN(controller, "1234"))
-
-        // Four wrong guesses stay below the threshold.
-        for _ in 0 ..< 4 {
-            XCTAssertNil(controller.recordPINAttempt(success: false))
+        XCTAssertNil(store.load())
+        for key in LegacyLocalPINCleanup.legacyKeys {
+            XCTAssertNil(defaults.object(forKey: key), "\(key) must be gone")
         }
-        XCTAssertNil(controller.pinLockRemaining)
-
-        // The fifth trips a persistent lockout.
-        XCTAssertNotNil(controller.recordPINAttempt(success: false))
-        XCTAssertNotNil(controller.pinLockRemaining)
-
-        // A relaunch (new controller, same storage) cannot reset the lockout.
-        let relaunched = SettingsProtectionController(userDefaults: defaults, pinStore: InMemoryPINCredentialStore())
-        XCTAssertNotNil(relaunched.pinLockRemaining)
-
-        // A correct attempt clears the lockout + failure counter.
-        relaunched.recordPINAttempt(success: true)
-        XCTAssertNil(relaunched.pinLockRemaining)
     }
 
-    /// The PIN verifier must be a salted slow-KDF record (16-byte salt + 32-byte key), stored in the
-    /// injected credential store — not a raw hash of the 4-digit code — so two installs with the
-    /// same PIN produce different records and the small keyspace can't be precomputed.
-    func testStoredPINRecordIsSaltedNotRawHash() {
-        let suite = "SettingsProtectionSalt.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let storeA = InMemoryPINCredentialStore()
-        let controllerA = SettingsProtectionController(userDefaults: defaults, pinStore: storeA)
-        XCTAssertTrue(controllerA.beginFirstRunPINPrompt())
-        XCTAssertTrue(controllerA.saveCustomPIN("1234", authority: .firstRunGrant))
-        controllerA.endFirstRunPINPrompt()
-        let recordA = storeA.load()
-        XCTAssertEqual(recordA?.count, 48)
-        XCTAssertTrue(controllerA.verifyCustomPIN("1234"))
-        XCTAssertFalse(controllerA.verifyCustomPIN("0000"))
-
-        // Same PIN on a second install → a different salted record (no shared precomputation).
-        // A second install means a second grant, so the shared defaults have to be re-armed.
-        defaults.removeObject(forKey: SettingsProtectionController.firstRunPINPromptAnsweredKey)
-        let storeB = InMemoryPINCredentialStore()
-        let controllerB = SettingsProtectionController(userDefaults: defaults, pinStore: storeB)
-        XCTAssertTrue(controllerB.beginFirstRunPINPrompt())
-        XCTAssertTrue(controllerB.saveCustomPIN("1234", authority: .firstRunGrant))
-        XCTAssertNotEqual(storeA.load(), storeB.load())
-    }
-}
-
-/// The gate that used to live in the disconnect view and now lives in the model. These are the tests
-/// that would have caught "a new call site inherits zero protection": every one of them calls
-/// `saveCustomPIN` the way a careless view would.
-@MainActor
-final class PINProvisioningAuthorityTests: XCTestCase {
-    private func makeController() -> (SettingsProtectionController, UserDefaults, String) {
-        let suiteName = "PINProvisioningAuthorityTests.\(UUID().uuidString)"
+    /// The purge must not touch the ladder: a lockout the child ran up on build 25 keeps running.
+    func testThePurgeLeavesARunningLockoutAlone() {
+        let suiteName = "LegacyPINCleanupLadder.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
-        return (
-            SettingsProtectionController(userDefaults: defaults, pinStore: InMemoryPINCredentialStore()),
-            defaults,
-            suiteName
-        )
-    }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(3, forKey: UnpairPINThrottle.failCountKey)
 
-    func testFirstPINCannotBeSavedWithoutAnOpenPrompt() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        LegacyLocalPINCleanup.purge(userDefaults: defaults)
 
-        // The grant is live — but nobody claimed it, so no prompt is open and the write is refused.
-        XCTAssertTrue(controller.firstPINProvisioning.isAllowed)
-        XCTAssertFalse(controller.saveCustomPIN("1234", authority: .firstRunGrant))
-        XCTAssertFalse(controller.hasCustomPIN)
-
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        XCTAssertTrue(controller.saveCustomPIN("1234", authority: .firstRunGrant))
-        XCTAssertTrue(controller.hasCustomPIN)
-    }
-
-    /// The lockout-reset oracle. Without the `!hasCustomPIN` requirement, a first-run screen
-    /// reachable while a PIN exists would let five wrong guesses be wiped and five more taken,
-    /// forever — the escalating ladder is the only thing making the 4-digit space expensive.
-    func testFirstRunAuthorityCannotOverwriteAnExistingPINOrClearItsLockout() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        XCTAssertTrue(controller.saveCustomPIN("1234", authority: .firstRunGrant))
-        for _ in 0 ..< 5 { controller.recordPINAttempt(success: false) }
-        XCTAssertNotNil(controller.pinLockRemaining, "precondition: a lockout is running")
-
-        // A prompt claimed against an existing PIN is refused outright...
-        XCTAssertFalse(controller.beginFirstRunPINPrompt())
-        // ...and so is the write. Note `endFirstRunPINPrompt()` is deliberately NOT called: the
-        // prompt from the first save is still open, so the only thing refusing this is the
-        // `!hasCustomPIN` requirement — which is precisely the guard under test.
-        XCTAssertFalse(controller.saveCustomPIN("9999", authority: .firstRunGrant))
-        XCTAssertNotNil(controller.pinLockRemaining, "the lockout must survive the refused write")
-        XCTAssertFalse(controller.verifyCustomPIN("9999"))
-    }
-
-    /// `.verifiedCurrentPIN` is not a word a view can say to get its way: it is checked against the
-    /// unlock session that only a correct entry through the model opens.
-    func testChangingAPINRequiresProvingTheCurrentOne() {
-        let suite = "PINProvisioningChange.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let store = InMemoryPINCredentialStore()
-        let controller = SettingsProtectionController(userDefaults: defaults, pinStore: store)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        XCTAssertTrue(controller.saveCustomPIN("1234", authority: .firstRunGrant))
-        controller.endFirstRunPINPrompt()
-
-        // Saving opens an unlock session of its own, so the interesting state is a RELAUNCH over the
-        // same storage: the PIN is still there and the proof of it is not. Same store object, or the
-        // refusal below would be `hasCustomPIN` rather than the missing session.
-        let relaunched = SettingsProtectionController(userDefaults: defaults, pinStore: store)
-        XCTAssertTrue(relaunched.hasCustomPIN, "precondition: the PIN survived the relaunch")
-        XCTAssertFalse(relaunched.saveCustomPIN("5678", authority: .verifiedCurrentPIN),
-                       "naming the authority is not holding it")
-        XCTAssertTrue(relaunched.verifyCustomPIN("1234"), "and the refused write left the old PIN alone")
-
-        XCTAssertEqual(relaunched.verifyCurrentPINForAuthorization("0000"), .incorrect)
-        XCTAssertEqual(relaunched.verifyCurrentPINForAuthorization("1234"), .authorized)
-        XCTAssertTrue(relaunched.saveCustomPIN("5678", authority: .verifiedCurrentPIN))
-        XCTAssertTrue(relaunched.verifyCustomPIN("5678"))
-    }
-
-    /// The shared verification contract: a live lockout answers without spending an attempt, so a
-    /// caller cannot walk the ladder by hammering it while locked out.
-    func testALiveLockoutRejectsWithoutConsumingAnAttempt() {
-        let (controller, defaults, suite) = makeController()
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        XCTAssertTrue(controller.saveCustomPIN("1234", authority: .firstRunGrant))
-        for _ in 0 ..< 4 { XCTAssertEqual(controller.verifyCurrentPINForAuthorization("0000"), .incorrect) }
-        guard case .lockedOut = controller.verifyCurrentPINForAuthorization("0000") else {
-            return XCTFail("the fifth wrong guess must trip the lockout")
-        }
-        let lockedUntil = controller.pinLockedUntil
-        guard case .lockedOut = controller.verifyCurrentPINForAuthorization("0000") else {
-            return XCTFail("a locked-out gate must keep saying so")
-        }
-        XCTAssertEqual(controller.pinLockedUntil, lockedUntil, "and must not extend the lockout it is already serving")
-        // Even the CORRECT PIN waits: otherwise the lockout would be a no-op for whoever knows it.
-        guard case .lockedOut = controller.verifyCurrentPINForAuthorization("1234") else {
-            return XCTFail("the lockout applies to every entry, not only wrong ones")
-        }
-    }
-}
-
-/// The disconnect step machine, and specifically the reversal in it. Nothing covered the no-PIN
-/// branch before, because before build 14 there was no no-PIN branch — the screen refused. A
-/// reversal that only exists in a view body is one a later refactor can undo without noticing.
-final class DisconnectFlowTests: XCTestCase {
-
-    /// D1, as a test. WAS: no PIN meant the button was hidden and a monitored child could not unpair
-    /// at all. NOW, by the product owner's instruction: no PIN skips the PIN step entirely.
-    func testNoPINSkipsStraightToTheConfirmDialog() {
-        XCTAssertEqual(DisconnectFlow.entry(hasCustomPIN: false), .confirm)
-    }
-
-    func testAProvisionedPINIsStillProvedFirst() {
-        XCTAssertEqual(DisconnectFlow.entry(hasCustomPIN: true), .enterPIN)
-    }
-
-    /// The gap between "correct PIN" and "device wiped" — there used to be none.
-    func testACorrectPINBuysTheConfirmDialogAndNotTheTeardown() {
-        XCTAssertEqual(DisconnectFlow.afterPIN(.authorized), .confirm)
-    }
-
-    func testAWrongPINOrALockoutSendsTheParentBackToTheKeypad() {
-        XCTAssertEqual(DisconnectFlow.afterPIN(.incorrect), .retry)
-        XCTAssertEqual(DisconnectFlow.afterPIN(.lockedOut(until: Date().addingTimeInterval(60))), .retry)
-    }
-}
-
-/// The one-shot grant that replaced the wall-clock window. Task 1's "consumed whether the parent
-/// sets a PIN or skips" and task 2's "latched permanently once answered" are the same property, and
-/// these are the tests that hold it.
-@MainActor
-final class FirstRunPINGrantTests: XCTestCase {
-    private func makeController(_ defaults: UserDefaults) -> SettingsProtectionController {
-        SettingsProtectionController(userDefaults: defaults, pinStore: InMemoryPINCredentialStore())
-    }
-
-    func testAnExplicitAnswerSpendsTheGrantAndNeverReopens() {
-        let suite = "FirstRunPINGrant.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let controller = makeController(defaults)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt(), "a fresh install is offered its one prompt")
-        // "Not now" — an explicit tap inside the sheet, which is what spends the grant.
-        controller.recordFirstRunPINPromptAnswered()
-        controller.endFirstRunPINPrompt()
-
-        XCTAssertFalse(controller.hasCustomPIN)
-        XCTAssertFalse(controller.beginFirstRunPINPrompt(), "\"not now\" answers the prompt")
-        XCTAssertEqual(controller.firstPINProvisioning, .closedPromptAnswered)
-        // …and a relaunch cannot farm a second one, which is the whole point of persisting it.
-        XCTAssertFalse(makeController(defaults).beginFirstRunPINPrompt())
-    }
-
-    /// The defect this contract exists to prevent: the sheet appears on the MONITORED CHILD's own
-    /// Home screen, and the grant used to be spent the instant it was presented. One downward swipe
-    /// therefore removed the parent-PIN option permanently — and with no PIN, Disconnect is a single
-    /// confirm dialog the child can tap. A swipe is not an answer.
-    func testASwipeDoesNotSpendTheGrant() {
-        let suite = "FirstRunPINGrantSwipe.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let controller = makeController(defaults)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        // Swiped away: `onDismiss` runs, but no button inside the sheet was ever tapped.
-        controller.endFirstRunPINPrompt()
-
-        XCTAssertEqual(controller.firstPINProvisioning, .allowed)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt(), "the parent still gets their chance")
-        XCTAssertTrue(makeController(defaults).beginFirstRunPINPrompt(), "and it survives a relaunch")
-    }
-
-    /// Re-presentation is guarded in memory, so an already-open prompt cannot be opened twice.
-    func testAnOpenPromptIsNotReopened() {
-        let suite = "FirstRunPINGrantOpen.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let controller = makeController(defaults)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        XCTAssertFalse(controller.beginFirstRunPINPrompt(), "already on screen")
-        controller.endFirstRunPINPrompt()
-        XCTAssertTrue(controller.beginFirstRunPINPrompt(), "closed unanswered, so offerable again")
-    }
-
-    /// A force-quit with the prompt on screen is not an answer either, so the grant survives — but
-    /// the WRITE authority does not, and that is the half that matters. The relaunched process must
-    /// re-present the sheet before it can save anything, which is what stops a killed prompt from
-    /// leaving a standing licence to write a PIN.
-    func testAKilledPromptKeepsTheGrantButLosesTheWriteAuthority() {
-        let suite = "FirstRunPINGrantKill.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        XCTAssertTrue(makeController(defaults).beginFirstRunPINPrompt())
-        // No `endFirstRunPINPrompt()`: the process died with the sheet up.
-        let relaunched = makeController(defaults)
-        // The in-memory half died with it, so the write authority is gone.
-        XCTAssertFalse(relaunched.saveCustomPIN("1234", authority: .firstRunGrant))
-        // The parent's unanswered chance is still there.
-        XCTAssertTrue(relaunched.beginFirstRunPINPrompt())
-    }
-
-    /// Both reset paths have to clear the marker. The static one runs at `setOilaPaired(true)` and
-    /// inside the disconnect purge; the instance one is its main-actor twin. Miss either and the
-    /// next family silently never gets a prompt — and the prompt is now the only place a first PIN
-    /// is offered, so they never get a PIN either.
-    func testBothResetPathsReArmTheGrantForTheNextFamily() {
-        let suite = "FirstRunPINGrantReset.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let controller = makeController(defaults)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        controller.recordFirstRunPINPromptAnswered()
-        controller.endFirstRunPINPrompt()
-        XCTAssertFalse(controller.beginFirstRunPINPrompt())
-
-        SettingsProtectionController.wipePersistedPINState(userDefaults: defaults)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt(), "a re-pairing reopens provisioning")
-        controller.recordFirstRunPINPromptAnswered()
-        controller.endFirstRunPINPrompt()
-        XCTAssertFalse(controller.beginFirstRunPINPrompt())
-
-        controller.resetForNewPairing()
-        XCTAssertTrue(controller.beginFirstRunPINPrompt(), "and so does the main-actor twin")
-    }
-
-    /// The stale-`hasCustomPIN` bug: the new pairing wipes the Keychain through the static path,
-    /// which cannot touch a live controller's published state. Without the refresh the new parent's
-    /// prompt is refused because the PREVIOUS family's PIN still appears to exist.
-    func testRefreshingAvailabilityIsWhatLetsTheNextFamilySeeThePrompt() {
-        let suite = "FirstRunPINGrantStale.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let store = InMemoryPINCredentialStore()
-        let controller = SettingsProtectionController(userDefaults: defaults, pinStore: store)
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        XCTAssertTrue(controller.saveCustomPIN("1234", authority: .firstRunGrant))
-        controller.endFirstRunPINPrompt()
-
-        // A new pairing, exactly as `SessionStore` performs it: storage wiped underneath the object.
-        store.delete()
-        defaults.removeObject(forKey: SettingsProtectionController.firstRunPINPromptAnsweredKey)
-        XCTAssertFalse(controller.beginFirstRunPINPrompt(), "stale hasCustomPIN still refuses")
-
-        controller.refreshAvailability()
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
+        XCTAssertEqual(defaults.integer(forKey: UnpairPINThrottle.failCountKey), 3)
     }
 }
 
@@ -390,18 +93,18 @@ final class PairingClearsPreviousFamilyPINTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        // A previous family's verifier, exactly as a reinstall would leave it: Keychain-resident,
-        // with a persisted lockout in the defaults the new install would then inherit.
+        // A build-25 local verifier, exactly as a reinstall would leave it: Keychain-resident, with a
+        // persisted unpair lockout in the defaults the new install would then inherit.
         let store = KeychainPINCredentialStore()
         store.save(Data("previous-family-verifier".utf8))
-        defaults.set(3, forKey: SettingsProtectionController.pinFailCountKey)
+        defaults.set(3, forKey: UnpairPINThrottle.failCountKey)
         XCTAssertNotNil(store.load(), "precondition: the stale verifier is present")
 
         SessionStore(userDefaults: defaults).setOilaPaired(true)
 
-        XCTAssertNil(store.load(), "the previous family's PIN must not survive a new pairing")
+        XCTAssertNil(store.load(), "the build-25 local PIN verifier must not survive a new pairing")
         XCTAssertNil(
-            defaults.object(forKey: SettingsProtectionController.pinFailCountKey),
+            defaults.object(forKey: UnpairPINThrottle.failCountKey),
             "nor its lockout, which would rate-limit the new family out of their own device"
         )
     }
@@ -436,7 +139,7 @@ final class ClearSessionRevokesAuthorityTests: XCTestCase {
         defaults.set("Joxon", forKey: "SETTINGS_CACHE_PROFILE_NAME")
         defaults.set("[]", forKey: "SETTINGS_CACHE_CONNECTED_DEVICES")
         KeychainPINCredentialStore().save(Data("family-pin".utf8))
-        defaults.set(2, forKey: SettingsProtectionController.pinFailCountKey)
+        defaults.set(2, forKey: UnpairPINThrottle.failCountKey)
         // The artifacts that used to survive a disconnect, keyed exactly as production writes them.
         groupDefaults.set(Data("usage".utf8), forKey: "SCREEN_TIME_USAGE_SNAPSHOT_CHILD-1")
         groupDefaults.set(Data("history".utf8), forKey: "SCREEN_TIME_USAGE_HISTORY_SNAPSHOT_CHILD-1_2026-08-18")
@@ -457,7 +160,7 @@ final class ClearSessionRevokesAuthorityTests: XCTestCase {
             KeychainPINCredentialStore().load(),
             "the PIN verifier is device-global in the Keychain — leaving it hands the next family a secret only the previous parent knows"
         )
-        XCTAssertNil(defaults.object(forKey: SettingsProtectionController.pinFailCountKey))
+        XCTAssertNil(defaults.object(forKey: UnpairPINThrottle.failCountKey))
         XCTAssertNil(defaults.object(forKey: "SETTINGS_CACHE_PROFILE_NAME"),
                      "the previous child's name must not survive into the next pairing")
         XCTAssertNil(defaults.object(forKey: "SETTINGS_CACHE_CONNECTED_DEVICES"))
@@ -497,7 +200,9 @@ final class ClearSessionRevokesAuthorityTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "OILA_PENDING_SOS"))
         XCTAssertNil(defaults.object(forKey: "OILA_PENDING_LOCATION_FIXES"))
 
-        // And the next family gets their one first-run PIN prompt.
-        XCTAssertNil(defaults.object(forKey: SettingsProtectionController.firstRunPINPromptAnsweredKey))
+        // No build-25 local-PIN state survives either.
+        for key in LegacyLocalPINCleanup.legacyKeys {
+            XCTAssertNil(defaults.object(forKey: key), "\(key) must not survive a disconnect")
+        }
     }
 }

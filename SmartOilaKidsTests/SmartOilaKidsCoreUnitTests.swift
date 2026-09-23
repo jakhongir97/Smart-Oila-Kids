@@ -4042,58 +4042,6 @@ final class LiveSessionReclaimTests: XCTestCase {
     }
 }
 
-// MARK: - First-PIN provisioning grant
-
-/// The disconnect PIN is the control that keeps a monitored child linked, and the gate that allows
-/// the FIRST one to be set used to be a bare wall-clock comparison on a device whose Date & Time
-/// panel the child controls. These pin the tamper resistance, not the arithmetic — there is no
-/// arithmetic left.
-///
-/// The regression these replace is `testClockRolledForwardIntoTheWindowIsRefusedOnceLatched`: the
-/// child winds the clock back to `pairedAt + 5 minutes`, producing a positive, in-window elapsed
-/// that no sign check refuses, and only the one-way latch stood in the way. The strongest possible
-/// form of that test is now a type signature — `decide` takes no date — so what is asserted here is
-/// that the gate cannot be reopened by ANY input the child can reach, and that the one-way property
-/// the latch supplied survived the replacement.
-final class FirstPINProvisioningTests: XCTestCase {
-
-    func testAFreshPairingMayProvisionItsFirstPIN() {
-        XCTAssertEqual(
-            FirstPINProvisioning.decide(hasCustomPIN: false, promptAnswered: false),
-            .allowed
-        )
-    }
-
-    /// One-way, and the ONLY inputs are two booleans the child cannot write: the marker is cleared
-    /// by a pairing, and `hasCustomPIN` by the Keychain. Nothing here reads a clock, which is what
-    /// makes the rewind attack unreachable rather than merely mitigated.
-    func testAnsweringThePromptClosesProvisioningForGood() {
-        XCTAssertEqual(
-            FirstPINProvisioning.decide(hasCustomPIN: false, promptAnswered: true),
-            .closedPromptAnswered
-        )
-    }
-
-    /// An existing PIN is checked BEFORE the marker, because this is the branch that keeps the
-    /// provisioning path from being a lockout-reset oracle — see `saveCustomPIN`.
-    func testAnExistingPINClosesProvisioningWhateverTheMarkerSays() {
-        XCTAssertEqual(
-            FirstPINProvisioning.decide(hasCustomPIN: true, promptAnswered: false),
-            .closedPINExists
-        )
-        XCTAssertEqual(
-            FirstPINProvisioning.decide(hasCustomPIN: true, promptAnswered: true),
-            .closedPINExists
-        )
-    }
-
-    func testOnlyTheAllowedDecisionIsAllowed() {
-        XCTAssertTrue(FirstPINProvisioning.Decision.allowed.isAllowed)
-        XCTAssertFalse(FirstPINProvisioning.Decision.closedPINExists.isAllowed)
-        XCTAssertFalse(FirstPINProvisioning.Decision.closedPromptAnswered.isAllowed)
-    }
-}
-
 // MARK: - status.report routing
 
 /// The Android child app answers `status.report` by posting a fresh `/device/status` snapshot at
@@ -4986,79 +4934,87 @@ final class PushAudioSubjectGuardTests: XCTestCase {
 /// nor its reset had a test. Both have already regressed once: a flat penalty allowed ~288 guesses a
 /// day, and a tier that never reset let a child re-arm a 24-hour lockout of the parent's own controls
 /// with five taps, indefinitely.
+/// The phone's ladder now counts the SERVER's wrong-PIN answers (build 26): the backend allows 10
+/// guesses a minute, which walks all 10 000 codes in about 17 hours without it.
 @MainActor
 final class PINLockoutLadderTests: XCTestCase {
-    private func makeController() -> (SettingsProtectionController, UserDefaults, String) {
+    private func makeThrottle() -> (UnpairPINThrottle, UserDefaults, String) {
         let suite = "PINLadder.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        return (SettingsProtectionController(userDefaults: defaults,
-                                             pinStore: InMemoryPINCredentialStore()),
-                defaults, suite)
+        return (UnpairPINThrottle(userDefaults: defaults), defaults, suite)
     }
 
     /// End a running lockout the way time would: push its monotonic deadline into the past while
     /// leaving the boot anchor current, so `PINLockoutClock` resolves `.clear` and not `.restart`.
     private func expireLockout(_ defaults: UserDefaults) {
         let uptime = ProcessInfo.processInfo.systemUptime
-        defaults.set(uptime - 1, forKey: SettingsProtectionController.pinLockUptimeUntilKey)
-        defaults.set(Date().timeIntervalSince1970 - uptime,
-                     forKey: SettingsProtectionController.pinLockBootAnchorKey)
-    }
-
-    private func provisionPIN(_ controller: SettingsProtectionController, _ pin: String) {
-        XCTAssertTrue(controller.beginFirstRunPINPrompt())
-        XCTAssertTrue(controller.saveCustomPIN(pin, authority: .firstRunGrant))
-        controller.recordFirstRunPINPromptAnswered()
-        controller.endFirstRunPINPrompt()
+        defaults.set(uptime - 1, forKey: UnpairPINThrottle.lockUptimeUntilKey)
+        defaults.set(Date().timeIntervalSince1970 - uptime, forKey: UnpairPINThrottle.lockBootAnchorKey)
     }
 
     func testTheLadderIsStrictlyEscalatingAndCapped() {
-        let ladder = SettingsProtectionController.pinLockoutLadder
+        let ladder = UnpairPINThrottle.ladder
         XCTAssertEqual(ladder, ladder.sorted(), "each tier must be at least as long as the last")
         XCTAssertEqual(Set(ladder).count, ladder.count, "a repeated tier is a flat penalty in disguise")
         XCTAssertEqual(ladder.first, 60)
         XCTAssertEqual(ladder.last, 86_400)
     }
 
-    func testFiveWrongGuessesStartALockoutAndAFurtherFiveEscalateIt() {
-        let (controller, defaults, suite) = makeController()
+    func testFiveServerRefusalsStartALockoutAndAFurtherFiveEscalateIt() {
+        let (throttle, defaults, suite) = makeThrottle()
         defer { defaults.removePersistentDomain(forName: suite) }
-        provisionPIN(controller, "1234")
 
-        for _ in 0 ..< 4 { XCTAssertNil(controller.recordPINAttempt(success: false)) }
-        XCTAssertNotNil(controller.recordPINAttempt(success: false), "the 5th failure locks")
-        let first = controller.pinLockRemaining
+        for _ in 0 ..< 4 { XCTAssertNil(throttle.recordRejectedPIN()) }
+        XCTAssertNil(throttle.remaining, "four misses are not a lockout yet")
+        XCTAssertNotNil(throttle.recordRejectedPIN(), "the 5th refusal locks")
+        let first = throttle.remaining
         XCTAssertNotNil(first)
 
-        // Serve it out by expiring the monotonic deadline in place (keeping the boot anchor valid,
-        // so the resolver reads "time served" rather than "anchors changed"), then fail five more:
-        // the next tier must be strictly longer.
         expireLockout(defaults)
-        for _ in 0 ..< 5 { _ = controller.recordPINAttempt(success: false) }
-        let second = controller.pinLockRemaining
+        XCTAssertNil(throttle.remaining, "a served lockout lets the next guess through")
+        for _ in 0 ..< 5 { _ = throttle.recordRejectedPIN() }
+        let second = throttle.remaining
         XCTAssertNotNil(second)
         XCTAssertGreaterThan(second ?? 0, first ?? 0, "the ladder must climb, not repeat")
     }
 
-    /// The oracle this closes: a parent who once fumbled their PIN carried the top tier forever, so a
-    /// child could re-arm a 24-hour lockout of the parent's own disconnect controls at will.
-    func testACorrectPINResetsTheTierAndNotJustTheCounter() {
-        let (controller, defaults, suite) = makeController()
+    /// A served lockout keeps its tier: only an accepted PIN or a new pairing walks it back down.
+    func testServingALockoutDoesNotResetTheTier() {
+        let (throttle, defaults, suite) = makeThrottle()
         defer { defaults.removePersistentDomain(forName: suite) }
-        provisionPIN(controller, "1234")
+        for _ in 0 ..< 5 { _ = throttle.recordRejectedPIN() }
+        expireLockout(defaults)
+        _ = throttle.remaining
+        XCTAssertEqual(defaults.integer(forKey: UnpairPINThrottle.tierKey), 1)
+    }
 
-        for _ in 0 ..< 5 { _ = controller.recordPINAttempt(success: false) }
-        XCTAssertNotNil(controller.pinLockRemaining, "precondition: locked out")
+    func testResetAndWipeClearTheWholeLadder() {
+        let (throttle, defaults, suite) = makeThrottle()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for _ in 0 ..< 5 { _ = throttle.recordRejectedPIN() }
+        XCTAssertNotNil(throttle.remaining, "precondition: locked out")
 
-        controller.recordPINAttempt(success: true)
-        XCTAssertNil(controller.pinLockRemaining, "a correct PIN ends the lockout")
+        throttle.reset()
 
-        // …and the ladder is back at the bottom rung, not still at the top.
-        for _ in 0 ..< 5 { _ = controller.recordPINAttempt(success: false) }
-        XCTAssertEqual(controller.pinLockRemaining.map { $0.rounded() },
-                       SettingsProtectionController.pinLockoutLadder[0],
-                       "the tier must reset with the counter")
+        XCTAssertNil(throttle.remaining)
+        XCTAssertNil(throttle.lockedUntil)
+        for _ in 0 ..< 5 { _ = throttle.recordRejectedPIN() }
+        XCTAssertEqual(throttle.remaining.map { $0.rounded() }, UnpairPINThrottle.ladder[0],
+                       "after a reset the ladder starts at the bottom rung again")
+
+        UnpairPINThrottle.wipe(userDefaults: defaults)
+        for key in [UnpairPINThrottle.failCountKey, UnpairPINThrottle.lockUntilKey, UnpairPINThrottle.tierKey,
+                    UnpairPINThrottle.lockUptimeUntilKey, UnpairPINThrottle.lockBootAnchorKey] {
+            XCTAssertNil(defaults.object(forKey: key), "\(key) must not survive a pairing boundary")
+        }
+    }
+
+    /// A lockout running when build 25 updated to 26 keeps running: same storage keys.
+    func testTheBuild25LockoutKeysAreStillHonoured() {
+        XCTAssertEqual(UnpairPINThrottle.failCountKey, "SETTINGS_PROTECTION_PIN_FAILS")
+        XCTAssertEqual(UnpairPINThrottle.lockUptimeUntilKey, "SETTINGS_PROTECTION_PIN_LOCK_UPTIME_UNTIL")
+        XCTAssertEqual(UnpairPINThrottle.lockBootAnchorKey, "SETTINGS_PROTECTION_PIN_LOCK_BOOT_ANCHOR")
     }
 }
 

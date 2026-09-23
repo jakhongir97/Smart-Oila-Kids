@@ -1,56 +1,22 @@
-import CommonCrypto
 import Foundation
-import LocalAuthentication
 import Security
-import UIKit
+import Combine
 
-/// Whether the parent may still set the FIRST disconnect PIN.
-///
-/// The gate exists because first-PIN provisioning is the one step with no existing secret to check,
-/// and it must not be gated on device-owner authentication — Face ID and the passcode on a child's
-/// phone belong to the CHILD, so that gate would hand the monitored user the key.
-///
-/// It used to be a wall-clock window: `Date().timeIntervalSince(pairedAt) <= 900`, behind a one-way
-/// latch. Two separate things killed it.
-///
-/// 1. The clock belongs to the child. No Screen Time restriction covers the Date & Time pane (only
-///    supervised MDM does), so turning off "Set Automatically" and winding the clock back to just
-///    after `pairedAt` reopened the window days later. A sign check does NOT close that —
-///    `pairedAt + 5 minutes` is a positive, in-window elapsed — so the latch was carrying the whole
-///    defence on its own.
-/// 2. `pairedAt` is stamped at code redemption, BEFORE the multi-step B1–B11 permissions flow. By
-///    the time Home first opens the window has routinely already elapsed AND latched, so the
-///    first-run prompt this release adds would have been refused on exactly the devices it is for.
-///
-/// So the clock is gone entirely: there is no longer a timestamp to rewind into. What replaces it is
-/// a one-shot grant — live from a pairing until the first-run prompt is ANSWERED (a PIN saved, or
-/// "not now"), then closed for good until the next pairing clears it. That keeps the one-way
-/// property the latch supplied while removing the input the child controlled, which is why this is
-/// strictly more secure than the window it replaces rather than a relaxation of it.
-///
-/// Deliberate consequence: there is ONE grant per pairing, not one per surface. Answering the
-/// first-run prompt therefore also closes the C4 Settings "set PIN" row (which falls back to
-/// `settings2.parent_pin_set_unavailable`). A parent who taps "not now" and changes their mind
-/// re-links from the Oila360 app, which is the same remedy the elapsed window had.
-enum FirstPINProvisioning {
-    enum Decision: Equatable {
-        case allowed
-        /// A PIN already exists. Change and remove are the paths, and both prove the current one.
-        case closedPINExists
-        /// The one-shot grant has been spent. Only a re-pairing reopens it.
-        case closedPromptAnswered
-
-        var isAllowed: Bool { self == .allowed }
-    }
-
-    /// Pure so the gate is testable without a controller, a Keychain or a clock. Note what is NOT a
-    /// parameter: the current date. That absence is the fix.
-    static func decide(hasCustomPIN: Bool, promptAnswered: Bool) -> Decision {
-        if hasCustomPIN { return .closedPINExists }
-        if promptAnswered { return .closedPromptAnswered }
-        return .allowed
-    }
-}
+// MARK: - The parent's unpair PIN lives on the SERVER (build 26)
+//
+// Through build 25 this file held a LOCAL parent PIN: a Keychain PBKDF2 verifier created on the
+// child's own phone (first-run sheet on Home, set/change/remove rows in Settings), checked before the
+// unpair request was even sent. The product owner retired it on 2026-09-23:
+//
+//   "PIN manti'gi o'zgargan. Hozir PINni bola telefonida o'rnatilmaydi. PIN ota-onada o'rnatiladi.
+//    Shunga UZISH qilganda siz PIN so'raysiz doim. PIN olib API ga zapros berasiz. Success kelsa
+//    uzasiz aks holda yo'q."
+//
+// So the PIN is set by the parent (`PUT /parent/children/{id}/unpair-pin`, a scrypt hash this app
+// never sees), the disconnect screen ALWAYS shows the keypad (the user chose "always keypad" over the
+// backend's `unpairPinRequired` flag on 2026-09-24), and ONLY the server's yes disconnects. What is
+// left here is what the phone still owns: the brute-force ladder in front of the server's
+// 10-a-minute limit, the outcome -> screen mapping, and the one-time removal of the old verifier.
 
 /// Resolves how much of a disconnect-PIN lockout is left, on a clock the child does not own.
 ///
@@ -97,569 +63,178 @@ enum PINLockoutClock {
     }
 }
 
-/// Why a PIN write is allowed. `saveCustomPIN` refuses without one of these.
+/// The phone's own brake on guessing the parent's PIN, fed by the SERVER's `403 UNPAIR_PIN_INVALID`.
 ///
-/// Every real gate used to live in the disconnect view — the model checked only the digit count and
-/// a Keychain round-trip — so a second call site inherited no protection at all. Naming the
-/// authority at the call site and checking it here is what makes that impossible to forget.
-enum PINProvisioningAuthority: Equatable {
-    /// The one-shot first-run grant, while its prompt is actually on screen.
-    case firstRunGrant
-    /// The parent proved the CURRENT PIN moments ago via `verifyCurrentPINForAuthorization`.
-    case verifiedCurrentPIN
-}
-
-/// Result of checking an entered PIN against the stored verifier.
-///
-/// The three call sites (disconnect, change PIN, remove PIN) each hand-rolled the same contract —
-/// reject during a lockout WITHOUT consuming an attempt, record every wrong guess, clear the ladder
-/// on a correct one — and any surface that got it wrong would be an unmetered oracle for the one
-/// secret the disconnect gate rate-limits. One method, one contract.
-enum PINVerificationOutcome: Equatable {
-    case authorized
-    case incorrect
-    /// Either a lockout that was already running, or the one this attempt just triggered.
-    case lockedOut(until: Date)
-}
-
-/// Who may take a paired device off a parent's account from the device itself, and in what order.
-///
-/// Disconnect is a PARENT action, and a parent-provisioned PIN is still the only thing that can
-/// prove one is present — never the child's own biometric or passcode, which on this phone belong to
-/// the monitored user.
-///
-/// POLICY CHANGE, and it is a deliberate WEAKENING of the previous one. The C6 screen used to hide
-/// the disconnect control outright when no PIN was set, so a monitored child could not unpair at
-/// all; the refusal was belt-and-braces in three independent places (the screen's mode, the hidden
-/// button, and a guard in the button's action). Ibrohim, the product owner, specified the opposite
-/// for build 14 — "Agar PIN kiritilmagan bo'lsa Prosta HA dialog chiqarasiz yani PIN kiritish step
-/// skip bo'ladi" — so with no PIN the button is shown and goes straight to the confirm dialog. All
-/// three refusals had to go together: leaving any one of them would have shipped a dead button.
-///
-/// The mitigation was moved rather than dropped. The first-run PIN prompt on Home makes setting a
-/// PIN the prominent default for every new pairing, with "not now" as a quiet ghost button, so the
-/// protection now depends on a parent answering that prompt rather than on this screen refusing to
-/// render. That is a weaker guarantee and it is recorded here as one.
-///
-/// Lifted out of the view because a policy reversal that no test can see is a policy reversal that
-/// can be undone by accident.
-enum DisconnectFlow {
-    /// The step the screen opens on.
-    enum Entry: Equatable {
-        case enterPIN
-        case confirm
-    }
-
-    static func entry(hasCustomPIN: Bool) -> Entry {
-        hasCustomPIN ? .enterPIN : .confirm
-    }
-
-    /// What proving the PIN buys. Never the teardown: a correct PIN used to call
-    /// `performDisconnect()` on the very next line, which left the most irreversible action in the
-    /// app with no confirmation at all.
-    enum AfterPIN: Equatable {
-        case confirm
-        case retry
-    }
-
-    static func afterPIN(_ outcome: PINVerificationOutcome) -> AfterPIN {
-        outcome == .authorized ? .confirm : .retry
-    }
-}
-
+/// The backend throttles `POST /device/unpair` at 10 attempts a minute, which walks all 10 000
+/// four-digit codes in about 17 hours. The escalating ladder that used to guard the local PIN
+/// (1 min → 5 min → 15 min → 1 h → 24 h after every 5 misses) is kept and now counts the server's
+/// refusals instead, which puts the same search at weeks. It persists in UserDefaults — clearing it
+/// means deleting the app, which `denyAppRemoval` refuses and which would lose the credential anyway —
+/// and it is measured on the monotonic clock (`PINLockoutClock`) so moving the date does not end it.
 @MainActor
-final class SettingsProtectionController: ObservableObject {
-    static let shared = SettingsProtectionController()
+final class UnpairPINThrottle: ObservableObject {
+    static let shared = UnpairPINThrottle()
 
-    @Published private(set) var isEnabled: Bool
-    @Published private(set) var isDeviceAuthenticationAvailable = false
-    @Published private(set) var hasCustomPIN = false
-    /// Set by `verifyCurrentPINForAuthorization`, and the proof `saveCustomPIN` demands for
-    /// `.verifiedCurrentPIN`. Deliberately short-lived and cleared on backgrounding, so "the parent
-    /// proved the current PIN" cannot be inherited by whoever picks the phone up next.
-    @Published private(set) var hasActiveUnlockSession = false
-    /// End of the current disconnect-PIN lockout, or nil when not locked out. Persisted so a
-    /// relaunch cannot reset a brute-force lockout.
-    @Published private(set) var pinLockedUntil: Date?
+    /// End of the running lockout, for the countdown text. The authority is `remaining`.
+    @Published private(set) var lockedUntil: Date?
 
-    var isProtectionAvailable: Bool {
-        isDeviceAuthenticationAvailable || hasCustomPIN
-    }
-
-    init(
-        userDefaults: UserDefaults = .standard,
-        pinStore: PINCredentialStoring = KeychainPINCredentialStore()
-    ) {
+    init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        self.pinStore = pinStore
-
-        // One-time migration off the old unsalted-SHA-256-in-UserDefaults scheme. The old hash
-        // can't be reversed into the new salted-KDF verifier, so we simply drop it; a parent
-        // re-sets the PIN under the hardened scheme. (Pre-release, so no live PINs are lost.)
-        userDefaults.removeObject(forKey: legacyPINHashKey)
-
-        // The wall-clock provisioning window is gone (see `FirstPINProvisioning`), and with it the
-        // latch that recorded "the window was observed closed". Its key is dropped rather than
-        // reused as the new one-shot marker on purpose: reusing it would silently deny the first-run
-        // prompt to every install that merely happened to open Settings more than 15 minutes after
-        // pairing — a condition that has nothing to do with whether a parent has answered anything.
-        userDefaults.removeObject(forKey: Self.legacyFirstPINWindowLatchKey)
-
-        if userDefaults.object(forKey: protectionEnabledKey) == nil {
-            self.isEnabled = true
-        } else {
-            self.isEnabled = userDefaults.bool(forKey: protectionEnabledKey)
-        }
-
-        // Restore the published deadline for any countdown UI. The AUTHORITATIVE answer is
-        // `pinLockRemaining`, which re-resolves against the monotonic clock on every read — a stale
-        // or wound-forward wall-clock value here cannot shorten a lockout, it can only mis-draw a
-        // label for one frame.
-        let persistedLock = userDefaults.double(forKey: pinLockUntilKey)
-        if persistedLock > Date().timeIntervalSince1970 {
-            self.pinLockedUntil = Date(timeIntervalSince1970: persistedLock)
-        }
-
-        foregroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.clearUnlockSession()
-            }
-        }
-
-        refreshAvailability()
-    }
-
-    deinit {
-        if let foregroundObserver {
-            NotificationCenter.default.removeObserver(foregroundObserver)
+        let persisted = userDefaults.double(forKey: Self.lockUntilKey)
+        if persisted > Date().timeIntervalSince1970 {
+            lockedUntil = Date(timeIntervalSince1970: persisted)
         }
     }
 
-    func refreshAvailability() {
-        let context = LAContext()
-        var error: NSError?
-        let canAuthenticate = context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
-        isDeviceAuthenticationAvailable = canAuthenticate
-        hasCustomPIN = pinStore.load() != nil
-
-        guard isProtectionAvailable else {
-            if isEnabled {
-                setEnabled(false)
-            } else {
-                clearUnlockSession()
-            }
-            return
-        }
-
-        hasActiveUnlockSession = unlockSessionExpiration.map { $0 > Date() } ?? false
-    }
-
-    @discardableResult
-    func enableProtection() -> Bool {
-        refreshAvailability()
-        guard isProtectionAvailable else { return false }
-        setEnabled(true)
-        return true
-    }
-
-    func disableProtection() {
-        setEnabled(false)
-    }
-
-    func removeCustomPIN() {
-        guard hasCustomPIN else { return }
-        pinStore.delete()
-        clearLockoutState()
-        refreshAvailability()
-    }
-
-    /// Wipe every trace of the previous family's settings PIN. Called from the disconnect purge.
-    ///
-    /// The verifier lives device-globally in the Keychain (`settings_protection_pin_v2`,
-    /// AfterFirstUnlockThisDeviceOnly) while the purge only regenerated the DSN and cleared two
-    /// caches — so it SURVIVED an unpair. After a re-pair `hasCustomPIN` was still true, which meant
-    /// the new parent was offered only "change PIN" and "remove PIN", both of which demand the
-    /// PREVIOUS family's secret, and the disconnect flow opened straight into verification against
-    /// that stale verifier with a persisted lockout. On a resold or handed-down phone the previous
-    /// owner effectively retained on-device disconnect authority over another family's child.
-    ///
-    /// Unconditional (no `hasCustomPIN` guard) so a Keychain read failure cannot skip the wipe.
-    ///
-    /// The main-actor counterpart to `wipePersistedPINState`, for callers that hold a live controller
-    /// and need `hasCustomPIN` refreshed in the same breath. The pairing path itself uses the static
-    /// version, because `SessionStore` is not main-actor isolated.
-    func resetForNewPairing() {
-        pinStore.delete()
-        clearLockoutState()
-        userDefaults.removeObject(forKey: Self.firstRunPINPromptAnsweredKey)
-        isFirstRunPINPromptOpen = false
-        refreshAvailability()
-    }
-
-    // MARK: - First-run PIN grant
-    //
-    // The grant is TWO pieces of state and they do different jobs. The persisted marker says "this
-    // pairing's one prompt has been used" and is spent the moment the prompt is put on screen, so a
-    // force-quit mid-prompt cannot farm a second one. The in-memory flag says "that prompt is open
-    // right now" and is what keeps the SAVE authorized for the life of the sheet — without it,
-    // spending the marker at presentation would refuse the very write the prompt exists to make.
-    // The in-memory half dying with the process is the correct failure mode: a sheet that is no
-    // longer on screen cannot authorize anything.
-
-    /// Whether this pairing's one first-run prompt has already been answered.
-    var isFirstRunPINPromptAnswered: Bool {
-        userDefaults.bool(forKey: Self.firstRunPINPromptAnsweredKey)
-    }
-
-    /// Whether a first PIN may still be provisioned on this install.
-    var firstPINProvisioning: FirstPINProvisioning.Decision {
-        FirstPINProvisioning.decide(
-            hasCustomPIN: hasCustomPIN,
-            promptAnswered: isFirstRunPINPromptAnswered
-        )
-    }
-
-    /// Open the provisioning prompt. Returns false — and presents nothing — when the grant is already
-    /// spent or a PIN exists.
-    ///
-    /// The one-shot marker used to be written HERE, at presentation. That handed the monitored child
-    /// the simplest possible defeat: the sheet appears on their own Home screen, and one downward
-    /// swipe spent the only chance this pairing had of ever getting a parent PIN. Without a PIN,
-    /// Disconnect is a single confirm dialog — so a swipe permanently removed the protection.
-    /// The grant is now spent only by an explicit answer (see `endFirstRunPINPrompt`), and
-    /// re-presentation is guarded by the in-memory `isFirstRunPINPromptOpen` instead.
-    ///
-    /// It WRITES, so call it from `.onAppear` or a button action, never from a view body: this is an
-    /// `ObservableObject` that is read during rendering.
-    @discardableResult
-    func beginFirstRunPINPrompt() -> Bool {
-        guard firstPINProvisioning.isAllowed, !isFirstRunPINPromptOpen else { return false }
-        isFirstRunPINPromptOpen = true
-        return true
-    }
-
-    /// The parent gave the prompt a real answer — saved a PIN, or tapped "not now". THIS is what
-    /// spends the one-shot grant, and it is called only from those two explicit taps.
-    ///
-    /// Separated from `endFirstRunPINPrompt` because `onDismiss` cannot tell a decision from a swipe,
-    /// and treating them alike is what let the child spend the parent's only chance.
-    func recordFirstRunPINPromptAnswered() {
-        userDefaults.set(true, forKey: Self.firstRunPINPromptAnsweredKey)
-    }
-
-    /// The prompt left the screen, by any route. Closes the write authorization only; whether the
-    /// grant was spent is decided by `recordFirstRunPINPromptAnswered`.
-    func endFirstRunPINPrompt() {
-        isFirstRunPINPromptOpen = false
-    }
-
-    /// Synchronous, nonisolated wipe of the PERSISTED PIN + lockout.
-    ///
-    /// `SessionStore.purgeChildScopedData()` is not main-actor isolated and must complete before the
-    /// disconnect returns, so it cannot await this controller. Hopping to the main actor instead
-    /// would let the purge return while the previous family's verifier was still on disk. This
-    /// writes the same storage the instance methods do (keys shared as statics above); the observable
-    /// `hasCustomPIN` is refreshed separately.
-    nonisolated static func wipePersistedPINState(userDefaults: UserDefaults = .standard) {
-        KeychainPINCredentialStore().delete()
-        userDefaults.removeObject(forKey: pinFailCountKey)
-        userDefaults.removeObject(forKey: pinLockUntilKey)
-        userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
-        userDefaults.removeObject(forKey: pinLockBootAnchorKey)
-        userDefaults.removeObject(forKey: pinLockoutTierKey)
-        // A genuine re-pairing is the documented way to reopen first-PIN provisioning, so the
-        // one-shot marker has to clear here too. This is the path that runs at `setOilaPaired(true)`
-        // AND inside the disconnect purge; `resetForNewPairing()` is the main-actor twin. Both have
-        // to clear it or the NEXT family never sees the prompt at all — which, now that the prompt
-        // is the only place a first PIN gets offered, means they silently never get one.
-        userDefaults.removeObject(forKey: firstRunPINPromptAnsweredKey)
-    }
-
-    nonisolated static let firstRunPINPromptAnsweredKey = "SETTINGS_PROTECTION_FIRST_RUN_PIN_ANSWERED"
-    /// Dead storage from the wall-clock window, removed once at init. Kept named so the migration
-    /// reads as a migration rather than a magic string.
-    nonisolated static let legacyFirstPINWindowLatchKey = "SETTINGS_PROTECTION_FIRST_PIN_WINDOW_CLOSED"
-
-    private func clearLockoutState() {
-        userDefaults.removeObject(forKey: pinFailCountKey)
-        userDefaults.removeObject(forKey: pinLockUntilKey)
-        userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
-        userDefaults.removeObject(forKey: pinLockBootAnchorKey)
-        userDefaults.removeObject(forKey: pinLockoutTierKey)
-        pinLockedUntil = nil
-    }
-
-    // MARK: - Direct gate (used by the Bolajon360 PIN screens)
-    //
-    // The PIN screens own their own lavender keypad, so they validate the entered PIN through these
-    // methods rather than through a presentation continuation. They are synchronous and free of UI
-    // so they are unit-testable — and, since this release, they are also where the ENFORCEMENT
-    // lives. The rule is that no view may authorize a PIN write; it can only report which authority
-    // it holds, and this class decides whether that authority is real.
-
-    /// True when `pin` matches the stored custom PIN. False if no custom PIN is set or the
-    /// input is the wrong length. Never throws — safe to call on every keystroke.
-    func verifyCustomPIN(_ pin: String) -> Bool {
-        // Deny (without recording an attempt — this is called on every keystroke) while a lockout
-        // is active, so no caller can turn live verification into an unlimited guessing oracle.
-        guard pinLockRemaining == nil else { return false }
-        let normalized = normalizePIN(pin)
-        guard normalized.count == pinLength else { return false }
-        return verify(normalized)
-    }
-
-    /// The one way to spend a PIN attempt: applies the lockout, records the outcome, and on success
-    /// opens the short unlock session that `.verifiedCurrentPIN` is checked against.
-    ///
-    /// Callers must route "the parent typed the current PIN" through here rather than pairing
-    /// `verifyCustomPIN` with their own `recordPINAttempt` call. Two screens already did the latter,
-    /// identically, and a third that forgot half of it would be an unmetered oracle for the secret
-    /// the disconnect gate exists to rate-limit.
-    func verifyCurrentPINForAuthorization(_ pin: String) -> PINVerificationOutcome {
-        if let pinLockedUntil, pinLockedUntil > Date() {
-            // A live lockout rejects WITHOUT consuming an attempt — otherwise waiting it out would
-            // be pointless and the ladder could be walked by a caller that never guesses.
-            return .lockedOut(until: pinLockedUntil)
-        }
-        guard verifyCustomPIN(pin) else {
-            if let until = recordPINAttempt(success: false) { return .lockedOut(until: until) }
-            return .incorrect
-        }
-        recordPINAttempt(success: true)
-        startUnlockSession()
-        return .authorized
-    }
-
-    /// Stores a new custom PIN. `authority` is the whole point: it names WHY this write is allowed,
-    /// and the check below is what makes a new call site inherit the gates instead of none.
-    ///
-    /// Returns false when the input isn't exactly `pinLength` digits, when the claimed authority
-    /// isn't actually held, or when the Keychain write cannot be read back.
-    @discardableResult
-    func saveCustomPIN(_ pin: String, authority: PINProvisioningAuthority) -> Bool {
-        let normalized = normalizePIN(pin)
-        guard normalized.count == pinLength else { return false }
-
-        switch authority {
-        case .firstRunGrant:
-            // `!hasCustomPIN` is load-bearing beyond "this is the first PIN". This method clears an
-            // active lockout on success (see below), so a first-run screen that could be reached
-            // while a PIN existed would be a lockout-reset oracle: five wrong guesses, then open the
-            // provisioning prompt to wipe the penalty and guess five more, forever. Requiring that
-            // no PIN exists means there is no lockout worth resetting when this branch runs.
-            guard !hasCustomPIN, isFirstRunPINPromptOpen else { return false }
-        case .verifiedCurrentPIN:
-            guard hasCustomPIN, hasActiveUnlockSession else { return false }
-        }
-
-        pinStore.save(makeRecord(for: normalized))
-        // Confirm the record actually landed. `PINCredentialStoring.save` returns Void, so a
-        // Keychain rejection would otherwise be swallowed and this method would claim success while
-        // leaving the parent with no PIN at all — the same silent-failure class this release is
-        // fixing in SecureTokenStore. Verifying the just-chosen PIN round-trips proves the write.
-        guard verify(normalized) else { return false }
-        // A lockout is a rate limit on guessing the OLD secret; carrying it over would leave the
-        // parent unable to use the PIN they just chose.
-        recordPINAttempt(success: true)
-        startUnlockSession()
-        refreshAvailability()
-        return true
-    }
-
-    // NOTE: there is deliberately no biometric / device-passcode unlock here. This screen runs on the
-    // CHILD's phone, where Face ID, Touch ID and the passcode all belong to the child — see the note
-    // on `DisconnectFlow` above. The app therefore never calls
-    // `LAContext.evaluatePolicy`, and `NSFaceIDUsageDescription` has been removed from Info.plist to
-    // match. The `canEvaluatePolicy` probe in `refreshAvailability()` needs no usage description.
-
-    // MARK: - Disconnect-PIN brute-force lockout
-    //
-    // The disconnect gate is the one control keeping a monitored child linked, so guessing the
-    // parent PIN must be rate-limited. Attempts and the lockout deadline are persisted, so a
-    // relaunch (or a reinstall that preserves UserDefaults via a backup) cannot reset them.
-
-    /// Seconds remaining on the disconnect-PIN lockout, or nil when entry is currently allowed.
-    /// Start (or restart) a lockout, recording the deadline on BOTH clocks.
-    @discardableResult
-    private func beginLockout(duration: TimeInterval) -> Date {
-        let now = Date()
-        let uptime = ProcessInfo.processInfo.systemUptime
-        let until = now.addingTimeInterval(duration)
-        userDefaults.set(until.timeIntervalSince1970, forKey: pinLockUntilKey)
-        userDefaults.set(uptime + duration, forKey: pinLockUptimeUntilKey)
-        userDefaults.set(now.timeIntervalSince1970 - uptime, forKey: pinLockBootAnchorKey)
-        pinLockedUntil = until
-        return until
-    }
-
-    /// Seconds left to serve, or nil when nothing is running.
-    ///
-    /// Measured monotonically. If the anchors say the recorded deadline belongs to a different boot —
-    /// which is also what a wall-clock change looks like from in here — the tier's full penalty is
-    /// restarted rather than trusted, because the alternative is a lockout the child can end from the
-    /// Date & Time screen.
-    var pinLockRemaining: TimeInterval? {
+    /// Seconds left to serve, or nil when a PIN may be sent. Re-resolved against the monotonic clock
+    /// on every read; a reboot or a clock change restarts the current tier rather than ending it.
+    var remaining: TimeInterval? {
         let resolution = PINLockoutClock.resolve(
-            uptimeUntil: userDefaults.object(forKey: pinLockUptimeUntilKey) as? TimeInterval,
-            bootAnchor: userDefaults.object(forKey: pinLockBootAnchorKey) as? TimeInterval,
+            uptimeUntil: userDefaults.object(forKey: Self.lockUptimeUntilKey) as? TimeInterval,
+            bootAnchor: userDefaults.object(forKey: Self.lockBootAnchorKey) as? TimeInterval,
             now: Date(),
             uptime: ProcessInfo.processInfo.systemUptime
         )
         switch resolution {
         case .clear:
-            if pinLockedUntil != nil { clearExpiredLockoutDeadline() }
+            if lockedUntil != nil { clearDeadline() }
             return nil
         case let .locked(remaining):
-            // Keep the published wall-clock date roughly in step so any countdown UI stays sane.
-            let until = Date().addingTimeInterval(remaining)
-            if pinLockedUntil == nil { pinLockedUntil = until }
+            if lockedUntil == nil { lockedUntil = Date().addingTimeInterval(remaining) }
             return remaining
         case .restart:
-            // Serve the CURRENT tier again. `pinLockoutTierKey` already points one past the tier that
-            // was served, so step back to it rather than escalating on a reboot.
-            let tier = max(userDefaults.integer(forKey: pinLockoutTierKey) - 1, 0)
-            let duration = Self.pinLockoutLadder[min(tier, Self.pinLockoutLadder.count - 1)]
+            // `tierKey` already points one past the tier that was served; serve that tier again.
+            let tier = max(userDefaults.integer(forKey: Self.tierKey) - 1, 0)
+            let duration = Self.ladder[min(tier, Self.ladder.count - 1)]
             beginLockout(duration: duration)
             return duration
         }
     }
 
-    /// Drop the DEADLINE of a lockout that has finished serving, leaving the fail counter and the
-    /// tier alone — unlike `clearLockoutState()`, which resets the whole ladder and is for a proven
-    /// PIN or a re-pairing. Only a correct PIN may walk the ladder back down.
-    private func clearExpiredLockoutDeadline() {
-        userDefaults.removeObject(forKey: pinLockUntilKey)
-        userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
-        userDefaults.removeObject(forKey: pinLockBootAnchorKey)
-        pinLockedUntil = nil
-    }
-
-    /// Records the outcome of a disconnect-PIN attempt. Success clears the failure counter and any
-    /// lockout; failure increments the counter and, at `maxPINAttempts`, starts a persistent
-    /// lockout. Returns the lockout end date when this attempt triggered a lockout, else nil.
+    /// The server refused the PIN. Returns the lockout end when this miss started one.
     @discardableResult
-    func recordPINAttempt(success: Bool) -> Date? {
-        if success {
-            userDefaults.removeObject(forKey: pinFailCountKey)
-            userDefaults.removeObject(forKey: pinLockUntilKey)
-            userDefaults.removeObject(forKey: pinLockUptimeUntilKey)
-            userDefaults.removeObject(forKey: pinLockBootAnchorKey)
-            // The TIER has to reset too. It persists on purpose so a relaunch cannot walk the
-            // ladder back down, but leaving it standing after a CORRECT entry meant a parent who
-            // once fumbled the PIN into a lockout carried the top tier forever: the child could
-            // then re-arm a 24-hour lockout of the parent's own disconnect controls with five taps,
-            // any time, indefinitely. A proven-correct PIN is the one event that should clear it.
-            userDefaults.removeObject(forKey: pinLockoutTierKey)
-            pinLockedUntil = nil
+    func recordRejectedPIN() -> Date? {
+        let fails = userDefaults.integer(forKey: Self.failCountKey) + 1
+        guard fails >= Self.maxAttempts else {
+            userDefaults.set(fails, forKey: Self.failCountKey)
             return nil
         }
-        let fails = userDefaults.integer(forKey: pinFailCountKey) + 1
-        if fails >= maxPINAttempts {
-            // ESCALATING lockout. A flat 5-minute penalty with the counter reset to 0 each time
-            // allowed a constant ~288 guesses/day, which walks the whole 4-digit space in about
-            // five weeks of an unattended device — and the child holds the device. Each subsequent
-            // lockout in the same run climbs the ladder and the tier persists, so a relaunch cannot
-            // reset it.
-            let tier = min(userDefaults.integer(forKey: pinLockoutTierKey), Self.pinLockoutLadder.count - 1)
-            let until = beginLockout(duration: Self.pinLockoutLadder[tier])
-            userDefaults.set(0, forKey: pinFailCountKey)
-            userDefaults.set(min(tier + 1, Self.pinLockoutLadder.count - 1), forKey: pinLockoutTierKey)
-            return until
+        let tier = min(userDefaults.integer(forKey: Self.tierKey), Self.ladder.count - 1)
+        let until = beginLockout(duration: Self.ladder[tier])
+        userDefaults.set(0, forKey: Self.failCountKey)
+        userDefaults.set(min(tier + 1, Self.ladder.count - 1), forKey: Self.tierKey)
+        return until
+    }
+
+    /// Clears the whole ladder. Called when the server accepted the PIN (the phone is being reset
+    /// anyway) and by `wipe` on every pairing boundary.
+    func reset() {
+        Self.wipe(userDefaults: userDefaults)
+        lockedUntil = nil
+    }
+
+    /// Re-reads the persisted deadline into `lockedUntil` without writing anything — for callers
+    /// that wiped the keys through `wipe(userDefaults:)` from a nonisolated context.
+    func resyncPublishedDeadline() {
+        let persisted = userDefaults.double(forKey: Self.lockUntilKey)
+        lockedUntil = persisted > Date().timeIntervalSince1970 ? Date(timeIntervalSince1970: persisted) : nil
+    }
+
+    /// Nonisolated twin of `reset()` for `SessionStore`, which is not main-actor isolated and must
+    /// finish its purge before returning. A new family never inherits the previous one's lockout.
+    nonisolated static func wipe(userDefaults: UserDefaults = .standard) {
+        for key in [failCountKey, lockUntilKey, tierKey, lockUptimeUntilKey, lockBootAnchorKey] {
+            userDefaults.removeObject(forKey: key)
         }
-        userDefaults.set(fails, forKey: pinFailCountKey)
-        return nil
+    }
+
+    @discardableResult
+    private func beginLockout(duration: TimeInterval) -> Date {
+        let now = Date()
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let until = now.addingTimeInterval(duration)
+        userDefaults.set(until.timeIntervalSince1970, forKey: Self.lockUntilKey)
+        userDefaults.set(uptime + duration, forKey: Self.lockUptimeUntilKey)
+        userDefaults.set(now.timeIntervalSince1970 - uptime, forKey: Self.lockBootAnchorKey)
+        lockedUntil = until
+        return until
+    }
+
+    /// Drops a served deadline but keeps the fail counter and tier: only an accepted PIN (or a new
+    /// pairing) walks the ladder back down.
+    private func clearDeadline() {
+        userDefaults.removeObject(forKey: Self.lockUntilKey)
+        userDefaults.removeObject(forKey: Self.lockUptimeUntilKey)
+        userDefaults.removeObject(forKey: Self.lockBootAnchorKey)
+        lockedUntil = nil
     }
 
     private let userDefaults: UserDefaults
-    private let pinStore: PINCredentialStoring
-    private var unlockSessionExpiration: Date?
-    private var foregroundObserver: NSObjectProtocol?
-    /// See the first-run grant section: in-memory on purpose.
-    private var isFirstRunPINPromptOpen = false
-    private let unlockGracePeriod: TimeInterval = 120
-    private let pinLength = 4
-    private let protectionEnabledKey = "SETTINGS_PROTECTION_ENABLED"
-    private let legacyPINHashKey = "SETTINGS_PROTECTION_PIN_HASH"
-    private var pinFailCountKey: String { Self.pinFailCountKey }
-    private var pinLockUntilKey: String { Self.pinLockUntilKey }
-    private var pinLockoutTierKey: String { Self.pinLockoutTierKey }
-    private var pinLockUptimeUntilKey: String { Self.pinLockUptimeUntilKey }
-    private var pinLockBootAnchorKey: String { Self.pinLockBootAnchorKey }
-    nonisolated static let pinFailCountKey = "SETTINGS_PROTECTION_PIN_FAILS"
-    nonisolated static let pinLockUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UNTIL"
-    nonisolated static let pinLockoutTierKey = "SETTINGS_PROTECTION_PIN_LOCK_TIER"
-    /// The lockout deadline on the MONOTONIC clock (`ProcessInfo.systemUptime`).
-    nonisolated static let pinLockUptimeUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UPTIME_UNTIL"
-    /// Approximate boot instant (`wall clock − systemUptime`), used to detect that the monotonic
-    /// deadline belongs to a different boot — or that the wall clock has been moved.
-    nonisolated static let pinLockBootAnchorKey = "SETTINGS_PROTECTION_PIN_LOCK_BOOT_ANCHOR"
-    /// Escalating lockout durations: 1min, 5min, 15min, 1h, 24h. Index persisted in
-    /// `pinLockoutTierKey` so a relaunch cannot walk back down the ladder.
-    static let pinLockoutLadder: [TimeInterval] = [60, 300, 900, 3600, 86_400]
-    private let maxPINAttempts = 5
 
-    // MARK: - PIN verifier (salted, slow KDF)
+    // The keys are the build-25 names on purpose: a lockout running across the update keeps running.
+    nonisolated static let failCountKey = "SETTINGS_PROTECTION_PIN_FAILS"
+    nonisolated static let lockUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UNTIL"
+    nonisolated static let tierKey = "SETTINGS_PROTECTION_PIN_LOCK_TIER"
+    /// The deadline on the MONOTONIC clock (`ProcessInfo.systemUptime`).
+    nonisolated static let lockUptimeUntilKey = "SETTINGS_PROTECTION_PIN_LOCK_UPTIME_UNTIL"
+    /// `wall clock − systemUptime` when the lockout began, to tell this boot from another one.
+    nonisolated static let lockBootAnchorKey = "SETTINGS_PROTECTION_PIN_LOCK_BOOT_ANCHOR"
+    /// 1 min, 5 min, 15 min, 1 h, 24 h.
+    nonisolated static let ladder: [TimeInterval] = [60, 300, 900, 3600, 86_400]
+    nonisolated static let maxAttempts = 5
+}
 
-    /// Builds a `salt || verifier` record for a fresh PIN.
-    private func makeRecord(for pin: String) -> Data {
-        let salt = PINKeyDerivation.randomSalt()
-        return salt + PINKeyDerivation.derive(pin: pin, salt: salt)
-    }
+/// What the disconnect screen does with the server's answer. Pure, so the one rule the product owner
+/// cares about — "success kelsa uzasiz, aks holda yo'q" — is pinned by tests rather than by a view.
+enum UnpairScreenAction: Equatable {
+    /// The server cut the link (or there is no credential left that could ever reach it): return the
+    /// app to its freshly installed state.
+    case reset
+    /// Still paired. `messageKey` is the Localizable key to show; `clearDigits` empties the keypad.
+    case stay(messageKey: String, clearDigits: Bool)
 
-    /// Constant-time verify of `pin` against the stored `salt || verifier` record.
-    private func verify(_ pin: String) -> Bool {
-        guard let record = pinStore.load(),
-              record.count == PINKeyDerivation.saltLength + PINKeyDerivation.keyLength else {
-            return false
+    static func decide(_ outcome: OilaUnpairOutcome) -> UnpairScreenAction {
+        switch outcome {
+        case .revoked, .credentialAbsent:
+            return .reset
+        case .pinRequired:
+            return .stay(messageKey: "disconnect2.pin_incorrect", clearDigits: true)
+        case .rateLimited:
+            return .stay(messageKey: "disconnect2.rate_limited", clearDigits: true)
+        case .unreachable:
+            // Keep the digits: the parent typed them correctly, the network failed.
+            return .stay(messageKey: "disconnect2.offline", clearDigits: false)
+        case .noCredential, .credentialRejected, .routeMissing, .rejected:
+            return .stay(messageKey: "disconnect2.failed", clearDigits: false)
         }
-        let salt = record.prefix(PINKeyDerivation.saltLength)
-        let stored = record.suffix(PINKeyDerivation.keyLength)
-        let candidate = PINKeyDerivation.derive(pin: pin, salt: Data(salt))
-        return PINKeyDerivation.constantTimeEquals(Data(stored), candidate)
-    }
-
-    private func startUnlockSession() {
-        unlockSessionExpiration = Date().addingTimeInterval(unlockGracePeriod)
-        hasActiveUnlockSession = true
-    }
-
-    private func setEnabled(_ enabled: Bool) {
-        isEnabled = enabled
-        userDefaults.set(enabled, forKey: protectionEnabledKey)
-
-        if !enabled {
-            clearUnlockSession()
-        }
-    }
-
-    private func clearUnlockSession() {
-        unlockSessionExpiration = nil
-        hasActiveUnlockSession = false
-    }
-
-    private func normalizePIN(_ value: String) -> String {
-        String(value.filter(\.isNumber).prefix(pinLength))
     }
 }
 
-// MARK: - PIN credential storage
+/// One-time removal of the build-25 LOCAL PIN: the Keychain verifier survives app updates (and even
+/// reinstalls), and nothing reads it any more, so it is deleted rather than left as a secret that
+/// looks meaningful. Also runs on every pairing boundary via `SessionStore`.
+enum LegacyLocalPINCleanup {
+    nonisolated static func purge(userDefaults: UserDefaults = .standard) {
+        KeychainPINCredentialStore().delete()
+        for key in legacyKeys { userDefaults.removeObject(forKey: key) }
+    }
 
-/// Persists the disconnect-PIN verifier record (`salt || KDF(pin, salt)`). Abstracted so tests can
-/// use an in-memory store instead of the shared system Keychain.
-protocol PINCredentialStoring {
-    func load() -> Data?
-    func save(_ data: Data)
-    func delete()
+    /// Every UserDefaults key the local-PIN feature ever wrote, other than the lockout ladder's
+    /// (which `UnpairPINThrottle` still owns).
+    nonisolated static let legacyKeys = [
+        "SETTINGS_PROTECTION_ENABLED",
+        "SETTINGS_PROTECTION_PIN_HASH",
+        "SETTINGS_PROTECTION_FIRST_RUN_PIN_ANSWERED",
+        "SETTINGS_PROTECTION_FIRST_PIN_WINDOW_CLOSED",
+    ]
 }
 
-/// Keychain-backed store (`kSecClassGenericPassword`, AfterFirstUnlockThisDeviceOnly). The verifier
-/// lives in the Keychain — not UserDefaults — so a device backup or plist dump can neither lift the
-/// verifier for offline brute-forcing nor simply delete the PIN to bypass the gate.
-final class KeychainPINCredentialStore: PINCredentialStoring {
+// MARK: - Legacy PIN storage (delete-only)
+
+/// Where build 25 kept the local PIN verifier (`kSecClassGenericPassword`, service = bundle id,
+/// account `settings_protection_pin_v2`). Kept only so `LegacyLocalPINCleanup` can delete it and a
+/// test can plant one; nothing reads a PIN from it any more.
+final class KeychainPINCredentialStore {
     private let service: String
     private let account: String
 
@@ -705,53 +280,5 @@ final class KeychainPINCredentialStore: PINCredentialStoring {
 
     func delete() {
         SecItemDelete(baseQuery as CFDictionary)
-    }
-}
-
-/// In-memory store for tests (the Keychain is process/device-global and not test-isolable).
-final class InMemoryPINCredentialStore: PINCredentialStoring {
-    private var data: Data?
-    init(data: Data? = nil) { self.data = data }
-    func load() -> Data? { data }
-    func save(_ data: Data) { self.data = data }
-    func delete() { data = nil }
-}
-
-/// PBKDF2-HMAC-SHA256 password stretching for the (short, 4-digit) disconnect PIN. A slow KDF plus
-/// a random per-install salt means the small keyspace can't be precomputed or brute-forced offline
-/// as cheaply as a raw SHA-256 hash; the on-device attempt lockout guards online guessing.
-enum PINKeyDerivation {
-    static let saltLength = 16
-    static let keyLength = 32
-    static let rounds: UInt32 = 150_000
-
-    static func randomSalt() -> Data {
-        var bytes = [UInt8](repeating: 0, count: saltLength)
-        _ = SecRandomCopyBytes(kSecRandomDefault, saltLength, &bytes)
-        return Data(bytes)
-    }
-
-    static func derive(pin: String, salt: Data) -> Data {
-        let pinBytes = Array(pin.utf8)
-        var derived = [UInt8](repeating: 0, count: keyLength)
-        salt.withUnsafeBytes { saltBuffer in
-            _ = CCKeyDerivationPBKDF(
-                CCPBKDFAlgorithm(kCCPBKDF2),
-                pin, pinBytes.count,
-                saltBuffer.bindMemory(to: UInt8.self).baseAddress, salt.count,
-                CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
-                rounds,
-                &derived, keyLength
-            )
-        }
-        return Data(derived)
-    }
-
-    /// Length-safe constant-time comparison so verification time can't leak how many bytes matched.
-    static func constantTimeEquals(_ lhs: Data, _ rhs: Data) -> Bool {
-        guard lhs.count == rhs.count else { return false }
-        var diff: UInt8 = 0
-        for (a, b) in zip(lhs, rhs) { diff |= a ^ b }
-        return diff == 0
     }
 }

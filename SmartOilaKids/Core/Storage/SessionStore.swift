@@ -199,8 +199,8 @@ final class SessionStore: ObservableObject {
     /// It used to be a PARENT-PRESENCE signal: first-PIN provisioning was legal for 15 minutes after
     /// it. That is gone, and deliberately — the child owns the Date & Time pane, so the comparison
     /// was reading an attacker-controlled clock, and the stamp lands at code redemption, BEFORE the
-    /// B1–B11 permissions flow, so the window was routinely spent before Home ever opened. See
-    /// `FirstPINProvisioning`, which now uses a one-shot grant and reads no clock at all. The stamp
+    /// B1–B11 permissions flow, so the window was routinely spent before Home ever opened. The local
+    /// PIN it gated is gone altogether since build 26 (the parent sets the PIN on the server). The stamp
     /// itself stays because it records when this device joined a family, which nothing else does.
     var pairedAt: Date? {
         let stamp = userDefaults.double(forKey: Keys.pairedAt)
@@ -223,18 +223,12 @@ final class SessionStore: ObservableObject {
             migratedFromLegacy = false
             userDefaults.set(false, forKey: Keys.migratedFromLegacy)
 
-            // Wipe any parent-PIN verifier left over from a PREVIOUS pairing of this device.
-            //
-            // The unpair path already clears it (purgeChildScopedData → wipePersistedPINState), but
-            // that only runs when this install performs the disconnect. Deleting and reinstalling
-            // the app does NOT: UserDefaults goes, the Keychain stays, and the verifier is written
-            // `AfterFirstUnlockThisDeviceOnly`. So a handed-down or resold phone reached a fresh
-            // pairing with `hasCustomPIN` already true, and the new family was offered only "change
-            // PIN" and "remove PIN" — both of which demand the PREVIOUS family's secret — while the
-            // disconnect screen verified against that stale verifier, complete with its persisted
-            // lockout. Pairing is precisely the moment that authority transfers, so it is where the
-            // old secret has to go.
-            SettingsProtectionController.wipePersistedPINState(userDefaults: userDefaults)
+            // A new pairing is where authority over the device transfers, so nothing PIN-related
+            // from a previous family may survive it: not the build-25 local verifier (Keychain,
+            // `AfterFirstUnlockThisDeviceOnly`, which outlives a delete-and-reinstall) and not a
+            // running lockout, which would rate-limit the new parent out of their own PIN.
+            LegacyLocalPINCleanup.purge(userDefaults: userDefaults)
+            UnpairPINThrottle.wipe(userDefaults: userDefaults)
         }
     }
 
@@ -297,12 +291,11 @@ final class SessionStore: ObservableObject {
         for key in ["SETTINGS_CACHE_PROFILE_NAME", "SETTINGS_CACHE_CONNECTED_DEVICES"] {
             userDefaults.removeObject(forKey: key)
         }
-        // 3. Clear the settings/disconnect PIN and its lockout. The verifier lives device-globally
-        //    in the Keychain, so it used to survive an unpair: the NEXT family inherited a PIN only
-        //    the previous parent knew, could not clear it without that secret, and the previous
-        //    owner kept on-device disconnect authority over another family's child.
-        SettingsProtectionController.wipePersistedPINState(userDefaults: userDefaults)
-        Task { @MainActor in SettingsProtectionController.shared.refreshAvailability() }
+        // 3. Clear the unpair-PIN lockout (and any build-25 local PIN verifier). The next family's
+        //    parent sets their own PIN on the server; they must not inherit this one's penalty.
+        LegacyLocalPINCleanup.purge(userDefaults: userDefaults)
+        UnpairPINThrottle.wipe(userDefaults: userDefaults)
+        Task { @MainActor in UnpairPINThrottle.shared.resyncPublishedDeadline() }
         // 4. Clear the one-time microphone consent. It is device-global and not DSN-scoped, so
         //    child A's consent would otherwise authorize listening on child B after a handover —
         //    with no sheet shown, because the grant short-circuits the prompt.

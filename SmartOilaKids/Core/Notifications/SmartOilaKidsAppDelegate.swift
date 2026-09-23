@@ -19,6 +19,9 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // `@StateObject` whose autoclosure is not evaluated until the first scene body, long after
         // the delegate has finished launching.
         SecureTokenStore.purgeCredentialsOrphanedByReinstall()
+        // Build 26 retired the LOCAL parent PIN (the parent sets it on the server now). Its Keychain
+        // verifier outlives updates, so it is deleted once here; idempotent, cheap when absent.
+        LegacyLocalPINCleanup.purge()
         // Configure Firebase Cloud Messaging as early as possible so APNs registration below can
         // hand its token to Firebase and mint a real FCM token. No-op until the SDK + plist ship.
         FCMPushRegistrar.shared.configureIfPossible()

@@ -2,11 +2,11 @@ import FamilyControls
 import SwiftUI
 import UIKit
 
-// Bolajon360 Settings (C4) → Permissions status (C5) → Disconnect / parent PIN (C6).
+// Bolajon360 Settings (C4) → Permissions status (C5) → Disconnect (C6).
 // These screens are pushed onto the Home NavigationStack (see homeRouteDestination); the
 // standalone `BolajonSettingsView` below is a self-contained stack used only by the debug
-// route. Disconnect reuses the oila360 logout + SessionStore.clearSession (which routes back
-// to pairing). The parent-PIN gate is local (SettingsProtectionController) — decision #5.
+// route. Disconnect sends the parent's PIN to `POST /device/unpair` and resets the app through
+// SessionStore.clearSession only when the server says yes (build 26: the PIN lives on the server).
 
 /// Standalone Settings stack (debug route only). The production flow pushes the Settings
 /// screens directly onto the Home stack.
@@ -53,15 +53,10 @@ struct SettingsRootView: View {
     @Binding var path: [HomeRoute]
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var permissionManager = LocationPermissionManager()
-    /// Drives the parent-PIN rows: `hasCustomPIN` decides whether this screen offers "set" or
-    /// "change / remove", and it changes the moment the provisioning sheet saves or clears one.
-    @ObservedObject private var protection = SettingsProtectionController.shared
     /// Contact + credential state behind the header chip and the connection row.
     @ObservedObject private var telemetry = OilaTelemetryService.shared
     @Environment(\.openURL) private var openURL
 
-    /// Non-nil while the parent-PIN sheet is up; the case decides which steps it runs.
-    @State private var pinFlowIntent: ParentPINFlowIntent?
     /// True while the language sheet is up.
     @State private var isLanguagePickerPresented = false
     @ObservedObject private var alwaysAllowed = ScreenTimeAlwaysAllowedStore.shared
@@ -167,10 +162,6 @@ struct SettingsRootView: View {
                         action: linkHealth.isHealthy ? nil : { path.append(.settingsPermissions) })
                 }
 
-                section(title: "settings2.section_parent") {
-                    parentPINRows
-                }
-
                 section(title: "settings2.section_other") {
                     // Language is reachable AFTER setup, not only during it. A1 is the only
                     // other place it can be picked and that is behind a completed pairing, so
@@ -185,28 +176,17 @@ struct SettingsRootView: View {
                     row(glyph: .symbol("hand.raised.fill"), tint: AppColors.glyphPurple,
                         title: "settings2.privacy_policy", subtitle: "settings2.privacy_policy_sub",
                         action: { openURL(AppConfig.privacyPolicyURL) })
-                    // The subtitle ("a parent PIN is required") is only true when one is set. With
-                    // no PIN the disconnect screen now goes straight to the confirm dialog — see
-                    // `DisconnectFlow` — so promising a PIN here would be a lie
-                    // about the one control a parent is relying on. No subtitle beats a wrong one.
+                    // "A parent PIN is required" is true on every phone now: the disconnect screen
+                    // always asks for the PIN the parent set in Oila360 and the server checks it.
                     row(glyph: .brokenLink, tint: AppColors.sosCoral,
                         title: "settings2.disconnect",
-                        subtitle: protection.hasCustomPIN ? "settings2.disconnect_sub" : nil,
+                        subtitle: "settings2.disconnect_sub",
                         titleColor: AppColors.sosCoral, action: { path.append(.settingsDisconnect) })
                 }
             }
         }
         .onAppear {
             permissionManager.refreshStatuses()
-            // Re-reads the Keychain, so the rows are right even if the PIN changed elsewhere — and
-            // so `hasCustomPIN` is not a stale `true` left by a PREVIOUS family, which would show
-            // this parent "change / remove" rows demanding a secret they have never seen.
-            protection.refreshAvailability()
-        }
-        // `onDismiss` closes the grant's write authorization for every way out of the sheet —
-        // saved, cancelled, or swiped down — which the sheet itself cannot do for the swipe.
-        .sheet(item: $pinFlowIntent, onDismiss: { protection.endFirstRunPINPrompt() }) { intent in
-            ParentPINFlowSheet(intent: intent)
         }
         .sheet(isPresented: $isLanguagePickerPresented) {
             LanguagePickerSheet()
@@ -220,49 +200,6 @@ struct SettingsRootView: View {
             )
         }
         .onAppear { alwaysAllowedSelection = alwaysAllowed.selection }
-    }
-
-    /// Set the disconnect PIN when there is none; otherwise offer change + remove, both of which
-    /// the sheet gates behind the current PIN.
-    @ViewBuilder
-    private var parentPINRows: some View {
-        if protection.hasCustomPIN {
-            row(glyph: .symbol("lock.rotation"), tint: AppColors.glyphPurple,
-                title: "settings2.parent_pin_change", subtitle: "settings2.parent_pin_change_sub",
-                action: { startPINFlow(.change) })
-            row(glyph: .symbol("lock.slash.fill"), tint: AppColors.sosCoral,
-                title: "settings2.parent_pin_remove", subtitle: "settings2.parent_pin_remove_sub",
-                titleColor: AppColors.sosCoral, action: { startPINFlow(.remove) })
-        } else if canProvisionFirstPIN {
-            row(glyph: .symbol("lock.fill"), tint: AppColors.glyphPurple,
-                title: "settings2.parent_pin_set", subtitle: "settings2.parent_pin_set_sub",
-                action: { startPINFlow(.set) })
-        } else {
-            // No PIN and the one-shot grant is spent: say so instead of offering a control that
-            // cannot work. This is now the LESS common route to a first PIN — the C1 first-run
-            // prompt is where a parent normally meets it, and answering that prompt is precisely
-            // what spends the grant. Reaching this row therefore usually means "you already chose
-            // not now", and the copy's remedy (re-link from the Oila360 app) is still the right one.
-            row(glyph: .symbol("lock.fill"), tint: AppColors.inkTertiary,
-                title: "settings2.parent_pin_set", subtitle: "settings2.parent_pin_set_unavailable",
-                action: nil)
-        }
-    }
-
-    /// Read-only in the view body — the decision lives in `FirstPINProvisioning`, which also carries
-    /// the long explanation of why the gate is a one-shot grant and not device-owner authentication
-    /// or a clock. Nothing here writes; claiming the grant happens in `startPINFlow`.
-    private var canProvisionFirstPIN: Bool {
-        protection.firstPINProvisioning.isAllowed
-    }
-
-    private func startPINFlow(_ intent: ParentPINFlowIntent) {
-        // Claiming the grant is what authorizes the SAVE, so it has to happen here rather than
-        // being re-derived inside the sheet: `saveCustomPIN(.firstRunGrant)` refuses unless a prompt
-        // is actually open. A refused claim presents nothing, which is also the belt-and-braces
-        // check that this row cannot be tapped into a state the model would reject.
-        if intent.provisionsFirstPIN, !protection.beginFirstRunPINPrompt() { return }
-        pinFlowIntent = intent
     }
 
     private enum RowGlyph {
@@ -393,335 +330,6 @@ private struct LanguagePickerSheet: View {
                 .padding(.bottom, 24)
             }
         }
-    }
-}
-
-// MARK: - C4 Parent PIN provisioning
-//
-// The disconnect gate (C6) only opens against a parent-provisioned PIN, but nothing in the app
-// could provision one — so `hasCustomPIN` was permanently false and disconnect always fell back
-// to "ask a parent in the Oila360 app". These rows are the missing writer: a parent sets the PIN
-// during handover and can later change or remove it by proving the current one.
-
-/// What the parent asked to do with the disconnect PIN. Also decides which step the sheet opens on.
-enum ParentPINFlowIntent: String, Identifiable {
-    /// The C1 first-run prompt: the same double entry, product-owner copy, and a quiet "not now".
-    case firstRun
-    case set
-    case change
-    case remove
-
-    var id: String { rawValue }
-
-    /// The two intents that write a FIRST PIN. Both spend the one-shot grant and both save under
-    /// `.firstRunGrant`; they differ only in copy and in which screen offers them.
-    var provisionsFirstPIN: Bool { self == .firstRun || self == .set }
-}
-
-/// Keypad sheet that sets, changes or removes the disconnect PIN. Deliberately reuses the C6
-/// disconnect screen's layout (badge → copy → dots → keypad) so the two PIN surfaces read as one
-/// feature, and its rate-limit contract so neither can be used as an unmetered guessing oracle.
-struct ParentPINFlowSheet: View {
-    let intent: ParentPINFlowIntent
-
-    @ObservedObject private var protection = SettingsProtectionController.shared
-    @Environment(\.dismiss) private var dismiss
-
-    /// `current` proves knowledge of the existing PIN; `entry` + `confirm` are the create-flow's
-    /// enter-it-twice semantics; `done` is the terminal receipt.
-    private enum Step { case current, entry, confirm, done }
-
-    @State private var step: Step
-    /// The digits on screen right now.
-    @State private var pin = ""
-    /// First of the two new-PIN entries, held only until `confirm` matches it.
-    @State private var firstEntry = ""
-    @State private var errorText: String?
-
-    private let pinLength = 4
-
-    init(intent: ParentPINFlowIntent) {
-        self.intent = intent
-        // Nothing to prove when there is no PIN yet, so the first-PIN intents start straight on the
-        // new-PIN entry; change and remove open on the current-PIN challenge.
-        _step = State(initialValue: intent.provisionsFirstPIN ? Step.entry : Step.current)
-    }
-
-    var body: some View {
-        ZStack {
-            AppColors.screenBackground.ignoresSafeArea()
-            // Badge + copy + dots + error line + keypad + two buttons overflow a short sheet as
-            // soon as an error appears or Dynamic Type grows — which left Save/Cancel off-screen
-            // and untappable. The minHeight keeps the bottom-anchored layout when it does fit.
-            GeometryReader { proxy in
-                ScrollView {
-                    pinContent
-                        .padding(.horizontal, BolajonMetrics.screenPadding)
-                        .padding(.bottom, 8)
-                        .frame(minHeight: proxy.size.height)
-                }
-            }
-        }
-    }
-
-    private var pinContent: some View {
-        VStack(spacing: 0) {
-            badge
-                .padding(.top, 20)
-
-            Text(L10n.tr(titleKey))
-                .font(AppTypography.title(21))
-                .foregroundStyle(AppColors.inkPrimary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 14)
-
-            Text(L10n.tr(promptKey))
-                .font(AppTypography.bodyText(15))
-                .foregroundStyle(AppColors.inkSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
-                .padding(.horizontal, 6)
-
-            if step != .done {
-                sharedPINDots.padding(.top, 20)
-            }
-
-            if let errorText {
-                Text(errorText)
-                    .font(AppTypography.caption(12))
-                    .foregroundStyle(AppColors.sosCoral)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 12)
-            }
-
-            Spacer(minLength: 16)
-
-            if step == .done {
-                BolajonPrimaryButton(title: L10n.tr("common.done")) {
-                    // An explicit answer — this is what spends the one-shot first-run grant.
-                    protection.recordFirstRunPINPromptAnswered()
-                    dismiss()
-                }
-            } else {
-                NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendDigit, onBackspace: removeDigit)
-                    .padding(.bottom, 12)
-                BolajonPrimaryButton(
-                    title: L10n.tr(primaryTitleKey),
-                    // White on `sosCoral` is 3.22:1; the darker sibling carries a white label properly.
-                    fill: isDestructiveStep ? AppColors.livePresenceCoral : AppColors.ctaPurple,
-                    disabled: pin.count != pinLength
-                ) {
-                    submit()
-                }
-                // The D1 mitigation, and the only place it can live: because a device with no PIN
-                // now disconnects on a plain confirm, the strength of this screen's default is what
-                // decides whether most families end up protected. Saving is the filled primary;
-                // opting out is a ghost button. Deliberately NOT symmetric.
-                GhostButton(title: L10n.tr(secondaryTitleKey)) {
-                    // "Not now" is also an answer. A SWIPE is not, and must leave the grant intact.
-                    protection.recordFirstRunPINPromptAnswered()
-                    dismiss()
-                }
-            }
-        }
-    }
-
-    // MARK: Copy
-
-    /// The first-run prompt is the only intent whose HEADING moves with the step: the product
-    /// owner's copy names each entry ("enter a PIN" / "repeat the PIN"), where the Settings intents
-    /// name the task once and let the subtitle carry the step. Its receipt borrows the Settings
-    /// heading, which is the one that reads correctly above "PIN saved".
-    private var titleKey: String {
-        switch intent {
-        case .firstRun:
-            switch step {
-            case .confirm: return "pin_setup.confirm_title"
-            case .done: return "settings2.parent_pin_set"
-            case .current, .entry: return "pin_setup.title"
-            }
-        case .set: return "settings2.parent_pin_set"
-        case .change: return "settings2.parent_pin_change"
-        case .remove: return "settings2.parent_pin_remove"
-        }
-    }
-
-    private var promptKey: String {
-        if intent == .firstRun {
-            switch step {
-            case .confirm: return "pin_setup.confirm_subtitle"
-            case .done: return "settings2.parent_pin_saved"
-            case .current, .entry: return "pin_setup.subtitle"
-            }
-        }
-        switch step {
-        case .current: return "settings2.parent_pin_prompt_current"
-        case .entry: return "settings2.parent_pin_prompt_new"
-        case .confirm: return "settings2.parent_pin_prompt_confirm"
-        case .done: return intent == .remove ? "settings2.parent_pin_removed" : "settings2.parent_pin_saved"
-        }
-    }
-
-    private var primaryTitleKey: String {
-        switch step {
-        case .current: return intent == .remove ? "settings2.parent_pin_remove" : "setup.continue"
-        case .entry: return "setup.continue"
-        case .confirm: return intent == .firstRun ? "pin_setup.save" : "settings2.parent_pin_save"
-        case .done: return "common.done"
-        }
-    }
-
-    /// "Not now" on the first-run prompt, "Cancel" everywhere else. Same button, and both mean the
-    /// same thing to the model — the grant is spent either way.
-    private var secondaryTitleKey: String {
-        intent == .firstRun ? "pin_setup.skip" : "common.cancel"
-    }
-
-    /// Only the step that actually clears the PIN wears the coral treatment.
-    private var isDestructiveStep: Bool { intent == .remove && step == .current }
-
-    // MARK: Chrome
-
-    private var badgeTint: Color {
-        if step == .done { return AppColors.successGreen }
-        return intent == .remove ? AppColors.sosCoral : AppColors.glyphPurple
-    }
-
-    private var badgeSymbol: String {
-        if step == .done { return "checkmark" }
-        return intent == .remove ? "lock.slash.fill" : "lock.fill"
-    }
-
-    private var badge: some View {
-        ZStack {
-            Circle().fill(badgeTint.opacity(0.12)).frame(width: 88, height: 88)
-            Image(systemName: badgeSymbol)
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(badgeTint)
-        }
-    }
-
-    /// `CodeEntryField` with its keypad suppressed, rather than a third hand-rolled row of circles.
-    /// The shared component carries the VoiceOver element these screens never had — the local dots
-    /// were four decorative `Circle`s, so a blind parent got no announcement of how many digits had
-    /// landed — and it is the same view A3 Connect uses, so the two surfaces cannot drift apart.
-    /// The keypad stays separate because this layout puts the error line between dots and keys.
-    private var sharedPINDots: some View {
-        CodeEntryField(code: $pin, length: pinLength, showKeypad: false, dotStyle: true)
-    }
-
-    // MARK: Entry
-
-    private func appendDigit(_ digit: String) {
-        guard step != .done, pin.count < pinLength else { return }
-        pin += digit
-        AppHaptics.tap()
-    }
-
-    private func removeDigit() {
-        guard step != .done, !pin.isEmpty else { return }
-        pin.removeLast()
-        AppHaptics.tap()
-    }
-
-    private func submit() {
-        guard pin.count == pinLength else { return }
-
-        switch step {
-        case .current:
-            verifyCurrentPIN()
-        case .entry:
-            firstEntry = pin
-            pin = ""
-            errorText = nil
-            step = .confirm
-        case .confirm:
-            confirmNewPIN()
-        case .done:
-            break
-        }
-    }
-
-    /// The lockout contract lives in the model now (`verifyCurrentPINForAuthorization`), which both
-    /// PIN surfaces share: a live lockout rejects without consuming an attempt, every wrong guess is
-    /// recorded, and a correct one opens the short unlock session that authorizes the write.
-    private func verifyCurrentPIN() {
-        switch protection.verifyCurrentPINForAuthorization(pin) {
-        case let .lockedOut(until):
-            errorText = lockoutMessage(until.timeIntervalSinceNow)
-            pin = ""
-        case .incorrect:
-            pin = ""
-            errorText = L10n.tr("disconnect2.pin_incorrect")
-        case .authorized:
-            pin = ""
-            errorText = nil
-
-            switch intent {
-            case .remove:
-                protection.removeCustomPIN()
-                AppHaptics.success()
-                step = .done
-            case .firstRun, .set, .change:
-                step = .entry
-            }
-        }
-    }
-
-    private func confirmNewPIN() {
-        guard pin == firstEntry else {
-            // Restart the pair rather than letting the parent retry only the second entry — a
-            // mistyped first entry would otherwise be saved as the real PIN.
-            errorText = L10n.tr(mismatchKey)
-            pin = ""
-            firstEntry = ""
-            step = .entry
-            return
-        }
-
-        guard protection.saveCustomPIN(pin, authority: saveAuthority) else {
-            errorText = L10n.tr(saveFailureKey)
-            pin = ""
-            firstEntry = ""
-            // A `.change` that reaches here has almost certainly lost its unlock session to a
-            // backgrounding between the two steps, and the model will keep refusing until the
-            // current PIN is proved again. Sending it back to `.entry` would loop forever.
-            step = intent == .change ? .current : .entry
-            return
-        }
-
-        pin = ""
-        firstEntry = ""
-        errorText = nil
-        AppHaptics.success()
-        step = .done
-    }
-
-    /// Which authority the model is asked to check. A view can only NAME one; whether it actually
-    /// holds it is decided in `SettingsProtectionController.saveCustomPIN`.
-    private var saveAuthority: PINProvisioningAuthority {
-        intent.provisionsFirstPIN ? .firstRunGrant : .verifiedCurrentPIN
-    }
-
-    private var mismatchKey: String {
-        intent == .firstRun ? "pin_setup.mismatch" : "settings.control_protection_pin_mismatch"
-    }
-
-    /// A refused save has two real causes and they need different words. On a first-PIN path the
-    /// digits were fine and the GRANT was not (spent, or a PIN appeared meanwhile), so calling it an
-    /// invalid PIN would send the parent round the same loop; on a change the honest reading is that
-    /// the proof of the current PIN expired, and that screen restarts at the challenge.
-    private var saveFailureKey: String {
-        intent.provisionsFirstPIN
-            ? "settings2.parent_pin_set_unavailable"
-            : "settings.control_protection_pin_invalid"
-    }
-
-    private func lockoutMessage(_ remaining: TimeInterval) -> String {
-        let minutes = max(1, Int((remaining / 60).rounded(.up)))
-        return String(format: L10n.tr("disconnect2.locked_out"), minutes)
     }
 }
 
@@ -924,57 +532,38 @@ struct SettingsPermissionsScreen: View {
     }
 }
 
-// MARK: - C6 Disconnect / parent PIN
+// MARK: - C6 Disconnect
 
+/// Disconnect, as the product owner specified it on 2026-09-23: "UZISH qilganda siz PIN so'raysiz
+/// doim. PIN olib API ga zapros berasiz. Success kelsa uzasiz aks holda yo'q."
+///
+/// So the keypad is ALWAYS shown (chosen over the backend's `unpairPinRequired` flag, 2026-09-24),
+/// the four digits go straight to `POST /device/unpair {pin}`, and only the server's yes — a 2xx with
+/// `"success": true`, or `401 DEVICE_UNPAIRED` for a retry after a dropped yes — returns the app to
+/// its freshly installed state. Everything else keeps the phone paired and says why
+/// (`UnpairScreenAction`). With no PIN set by the parent the server accepts any four digits; that is
+/// the product owner's call, recorded here so nobody "fixes" it by guessing.
+///
+/// There is no confirmation dialog after the PIN: typing the parent's PIN IS the confirmation, and
+/// a dialog would put a second question between a parent and a phone they already authorized.
 struct SettingsDisconnectScreen: View {
     @EnvironmentObject private var sessionStore: SessionStore
-    @ObservedObject private var protection = SettingsProtectionController.shared
+    @ObservedObject private var throttle = UnpairPINThrottle.shared
     @Environment(\.dismiss) private var dismiss
 
-    // The policy this screen renders — including WHY a device with no PIN now disconnects on a plain
-    // confirm, and who decided that — lives on `DisconnectFlow`. It is testable there; here it is
-    // only drawn.
-    @State private var entry: DisconnectFlow.Entry = .confirm
     @State private var pin = ""
     @State private var errorText: String?
     @State private var isDisconnecting = false
-    /// Raised once the PIN step is satisfied (or skipped, with no PIN set). Nothing is torn down
-    /// until this dialog is answered — a correct PIN used to call `performDisconnect()` on the very
-    /// next line, so the last irreversible step in the app had no confirmation at all.
-    @State private var isConfirmingDisconnect = false
-    /// Raised when the SERVER answered 403 `UNPAIR_PIN_INVALID` — a parent has set an unpair PIN
-    /// through `PUT /parent/children/{id}/unpair-pin` and this handset has to produce it. The app
-    /// cannot know this up front (the PIN lives on the server as a scrypt hash, by design), so the
-    /// screen learns it from the first attempt and re-opens the keypad for the parent's PIN.
-    @State private var serverPINRequired = false
 
     private let pinLength = 4
 
-    private var showsPINField: Bool { entry == .enterPIN || serverPINRequired }
-    private var busy: Bool { isDisconnecting }
-
-    private var bodyText: String {
-        // The server's PIN demand outranks both local variants: once it is up, the digits this
-        // screen is asking for are the parent's, not the ones set on this phone.
-        if serverPINRequired { return L10n.tr("disconnect2.server_pin_body") }
-        switch entry {
-        // `disconnect2.parent_managed_body` ("ask your parent to remove it in Oila360") is no longer
-        // true of this screen and is deliberately not reused. The no-PIN variant borrows the confirm
-        // dialog's own body, which is the only existing copy that describes what the button does;
-        // the dialog then repeats it at the moment of commitment, which is what a destructive
-        // confirmation is for.
-        case .enterPIN: return L10n.tr("disconnect2.body")
-        case .confirm: return L10n.tr("disconnect2.confirm_body")
-        }
-    }
-
-    private var isComplete: Bool { !showsPINField || pin.count == pinLength }
+    private var isComplete: Bool { pin.count == pinLength }
 
     var body: some View {
         ZStack {
             AppColors.screenBackground.ignoresSafeArea()
-            // Same overflow as the parent-PIN sheet: badge + copy + dots + error + keypad + two
-            // buttons run past a short screen, and "Uzish"/"Cancel" end up untappable.
+            // Badge + copy + dots + error + keypad + two buttons run past a short screen, and
+            // "Uzish"/"Cancel" would end up untappable without the scroll.
             GeometryReader { proxy in
                 ScrollView {
                     disconnectContent
@@ -986,19 +575,9 @@ struct SettingsDisconnectScreen: View {
         }
         .navigationTitle(L10n.tr("disconnect2.title"))
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: resolveEntryStep)
-        // A dialog rather than an inline step: it is modal, it names the consequence, and its
-        // destructive role gives the confirming tap a colour the "Uzish" button cannot carry on its
-        // own. Cancel leaves the entered PIN in place, so answering "no" costs nothing.
-        .confirmationDialog(
-            L10n.tr("disconnect2.confirm_title"),
-            isPresented: $isConfirmingDisconnect,
-            titleVisibility: .visible
-        ) {
-            Button(L10n.tr("disconnect2.confirm_yes"), role: .destructive) { performDisconnect() }
-            Button(L10n.tr("disconnect2.confirm_cancel"), role: .cancel) {}
-        } message: {
-            Text(L10n.tr("disconnect2.confirm_body"))
+        .onAppear {
+            pin = ""
+            errorText = lockoutText()
         }
     }
 
@@ -1008,7 +587,7 @@ struct SettingsDisconnectScreen: View {
                 .padding(.top, 8)
 
             // The screen title ("Aloqani uzish") lives in the native navigation bar.
-            Text(bodyText)
+            Text(L10n.tr("disconnect2.server_pin_body"))
                 .font(AppTypography.bodyText(15))
                 .foregroundStyle(AppColors.inkSecondary)
                 .multilineTextAlignment(.center)
@@ -1016,9 +595,8 @@ struct SettingsDisconnectScreen: View {
                 .padding(.top, 18)
                 .padding(.horizontal, 6)
 
-            if showsPINField {
-                sharedPINDots.padding(.top, 22)
-            }
+            CodeEntryField(code: $pin, length: pinLength, showKeypad: false, dotStyle: true)
+                .padding(.top, 22)
 
             if let errorText {
                 Text(errorText)
@@ -1031,31 +609,21 @@ struct SettingsDisconnectScreen: View {
 
             Spacer(minLength: 16)
 
-            if showsPINField {
-                NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendPIN, onBackspace: removePIN)
-                    .disabled(busy)
-                    .padding(.bottom, 12)
-            }
-            // Outside the `showsPINField` branch on purpose: the no-PIN screen has no keypad and no
-            // dots, but it does have this button. Nesting it was the second of the three refusals.
+            NumericKeypad(keyFill: AppColors.cardWhite, onDigit: appendPIN, onBackspace: removePIN)
+                .disabled(isDisconnecting)
+                .padding(.bottom, 12)
             uzishButton
             GhostButton(title: L10n.tr("disconnect2.cancel"), action: { dismiss() })
         }
     }
 
-    /// The shared component, for the VoiceOver element the hand-rolled circles never had — see the
-    /// note on `ParentPINFlowSheet.sharedPINDots`.
-    private var sharedPINDots: some View {
-        CodeEntryField(code: $pin, length: pinLength, showKeypad: false, dotStyle: true)
-    }
-
     private var uzishButton: some View {
         Button {
             AppHaptics.tap()
-            handlePrimary()
+            submit()
         } label: {
             ZStack {
-                if busy {
+                if isDisconnecting {
                     ProgressView().tint(AppColors.sosCoral)
                 } else {
                     Text(L10n.tr("disconnect2.confirm"))
@@ -1068,17 +636,17 @@ struct SettingsDisconnectScreen: View {
             .background(Capsule().fill(isComplete ? AppColors.sosCoral : AppColors.sosCoral.opacity(0.16)))
         }
         .buttonStyle(.plain)
-        .disabled(!isComplete || busy)
+        .disabled(!isComplete || isDisconnecting)
     }
 
     private func appendPIN(_ digit: String) {
-        guard showsPINField, pin.count < pinLength, !busy else { return }
+        guard pin.count < pinLength, !isDisconnecting else { return }
         pin += digit
         AppHaptics.tap()
     }
 
     private func removePIN() {
-        guard showsPINField, !pin.isEmpty, !busy else { return }
+        guard !pin.isEmpty, !isDisconnecting else { return }
         pin.removeLast()
         AppHaptics.tap()
     }
@@ -1090,136 +658,49 @@ struct SettingsDisconnectScreen: View {
         }
     }
 
-    private func resolveEntryStep() {
-        // Re-read the Keychain first. `hasCustomPIN` can be a stale `true` from a PREVIOUS family
-        // (the verifier is device-global and survives a reinstall), and this screen would then
-        // demand a secret nobody in the house knows.
-        protection.refreshAvailability()
-#if DEBUG
-        // Screenshot hook: force the PIN-entry variant (keypad + dots). Verification only.
-        if ProcessInfo.processInfo.environment["SMARTOILA_DEBUG_DISCONNECT_MODE"] == "pin" {
-            entry = .enterPIN
-            pin = ""
-            errorText = nil
-            return
-        }
-#endif
-        entry = DisconnectFlow.entry(hasCustomPIN: protection.hasCustomPIN)
-        pin = ""
-        errorText = nil
-        // Re-entering the screen must not inherit a previous visit's 403. The server is asked again
-        // from scratch, which is also what keeps the app correct after a parent CLEARS the PIN.
-        serverPINRequired = false
-    }
-
-    private func handlePrimary() {
-        guard !busy else { return }
-        // The server already told us a PIN is required, and the confirm dialog was answered before
-        // we ever asked it. Re-confirming here would make the child answer "really disconnect?" once
-        // per wrong digit.
-        if serverPINRequired {
-            performDisconnect(pin: pin)
-            return
-        }
-        // The third refusal was a `mode == .verifyPIN` guard here, which would have swallowed the
-        // tap even once the button rendered. With no PIN there is nothing to verify, so the PIN step
-        // is skipped exactly as the brief describes — straight to the confirm dialog.
-        guard showsPINField else {
-            isConfirmingDisconnect = true
-            return
-        }
-        validateEnteredPIN()
-    }
-
-    private func validateEnteredPIN() {
-        let outcome = protection.verifyCurrentPINForAuthorization(pin)
-        switch DisconnectFlow.afterPIN(outcome) {
-        case .confirm:
-            // The digits stay on screen: cancelling the dialog returns here, and re-tapping "Uzish"
-            // should not mean re-typing the PIN. A second tap simply verifies the same digits again.
-            errorText = nil
-            isConfirmingDisconnect = true
-        case .retry:
-            pin = ""
-            errorText = failureMessage(for: outcome)
-        }
-    }
-
-    /// Both failures read as "try again" to the parent; only the lockout also says when.
-    private func failureMessage(for outcome: PINVerificationOutcome) -> String {
-        if case let .lockedOut(until) = outcome {
-            return lockoutMessage(until.timeIntervalSinceNow)
-        }
-        return L10n.tr("disconnect2.pin_incorrect")
-    }
-
-    private func lockoutMessage(_ remaining: TimeInterval) -> String {
+    /// "Too many attempts, try again in N min" while the phone's own ladder is running, else nil.
+    private func lockoutText() -> String? {
+        guard let remaining = throttle.remaining else { return nil }
         let minutes = max(1, Int((remaining / 60).rounded(.up)))
         return String(format: L10n.tr("disconnect2.locked_out"), minutes)
     }
 
-    /// Runs only after the confirm dialog is answered — and, when a local PIN exists, after it has
-    /// been validated.
-    ///
-    /// This screen used to be a LOCAL disconnect and nothing else: it called `logout()`, cleared the
-    /// session, and left the `deviceToken` alive on the server, so the parent's app went on showing
-    /// a child device that was still connected — the exact symptom reported in the team chat. The
-    /// revoke call existed (`unpairDevice()`) and was never wired to anything, because through build
-    /// 16 the route answered 404. It is live now, so this is what Ibrohim's brief actually asked for:
-    /// *"API ga request yuborasiz va yangi ilova o'rnatilgan holatga qaytarib qo'yasiz."*
-    ///
-    /// The teardown is now GATED ON THE SERVER'S ANSWER, which is the part that makes the parent's
-    /// PIN worth setting. Wiping the phone regardless would mean a child could defeat the whole
-    /// gate by turning on airplane mode — the request fails, the app resets, and the PIN never got
-    /// a vote. So only `.revoked` (the server cut it, or 401 says it already had) and
-    /// `.routeMissing` (a deployment without the route — refusing there would strand every child)
-    /// proceed. `.pinRequired`, `.rateLimited` and `.unreachable` leave the handset paired and say
-    /// why.
-    private func performDisconnect(pin submittedPIN: String? = nil) {
-        guard !isDisconnecting else { return }
+    private func submit() {
+        guard isComplete, !isDisconnecting else { return }
+        // A running lockout refuses WITHOUT sending: a request would spend one of the server's
+        // attempts and teach the guesser nothing the ladder is not already withholding.
+        if let lockout = lockoutText() {
+            pin = ""
+            errorText = lockout
+            return
+        }
+        let submittedPIN = pin
         isDisconnecting = true
         errorText = nil
         Task {
             let outcome = await OilaDeviceClient.shared.unpairDevice(pin: submittedPIN)
-            switch outcome {
-            // `.noCredential` proceeds for the same reason `.routeMissing` does, not because it is a
-            // success: no request left the app, so no retry can ever change the answer, and refusing
-            // would strand the handset on this screen. Not a bypass — reaching it needs a Keychain
-            // sealed before first unlock, which is not something a child can arrange.
-            case .revoked, .routeMissing, .noCredential:
-                // Order matters: the credential is already dead server-side, and `logout()` is a
-                // best-effort tidy of the refresh session. `clearSession()` is what returns the app
-                // to the pairing screen and wipes the per-child local stores.
+            let action = UnpairScreenAction.decide(outcome)
+            if case .reset = action {
+                // The link is cut server-side. `logout()` is only the local tidy-up now (it no
+                // longer sends a second unpair); `clearSession()` returns the app to pairing and
+                // wipes every per-child store.
                 try? await OilaDeviceClient.shared.logout()
-                await MainActor.run {
+            }
+            await MainActor.run {
+                isDisconnecting = false
+                switch action {
+                case .reset:
+                    throttle.reset()
                     sessionStore.clearSession()
-                    isDisconnecting = false
-                }
-            case .pinRequired:
-                await MainActor.run {
-                    isDisconnecting = false
-                    // A wrong PIN and the first (deliberately PIN-less) probe land here alike. Only
-                    // the former is an error the child made; the probe is how the app discovers a
-                    // PIN exists at all, so it opens the keypad with no accusation attached.
-                    errorText = submittedPIN == nil ? nil : L10n.tr("disconnect2.pin_incorrect")
-                    serverPINRequired = true
-                    pin = ""
-                }
-            case .rateLimited:
-                await MainActor.run {
-                    isDisconnecting = false
-                    errorText = L10n.tr("disconnect2.rate_limited")
-                    pin = ""
-                }
-            case .unreachable:
-                await MainActor.run {
-                    isDisconnecting = false
-                    errorText = L10n.tr("disconnect2.offline")
-                }
-            case .rejected:
-                await MainActor.run {
-                    isDisconnecting = false
-                    errorText = L10n.tr("disconnect2.failed")
+                case let .stay(messageKey, clearDigits):
+                    if clearDigits { pin = "" }
+                    // A wrong PIN walks the phone's ladder; when that miss starts a lockout, say
+                    // how long instead of "wrong PIN".
+                    if outcome == .pinRequired, throttle.recordRejectedPIN() != nil {
+                        errorText = lockoutText() ?? L10n.tr(messageKey)
+                    } else {
+                        errorText = L10n.tr(messageKey)
+                    }
                 }
             }
         }

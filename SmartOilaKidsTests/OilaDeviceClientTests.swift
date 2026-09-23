@@ -404,18 +404,33 @@ final class OilaDeviceClientTests: XCTestCase {
         )
     }
 
-    /// The route is not deployed yet (backend ask B1). Until it is, every disconnect hits one of
-    /// these three statuses, and none of them is an app failure — the day it ships, the same code
-    /// starts cutting the link with no change here.
-    func testUndeployedRouteIsReportedAsMissingRatherThanFailing() async {
+    /// A missing route is not a success. Before build 26 these three statuses wiped the phone; the
+    /// PO's rule since 2026-09-23 is "success kelsa uzasiz, aks holda yo'q", and the route has been
+    /// live since 2026-08-28, so a deployment that loses it must leave the handset paired.
+    func testMissingRouteIsReportedAsMissingAndIsNotARevoke() async {
         for code in [404, 405, 501] {
             TestHTTPURLProtocol.reset()
             let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
             TestHTTPURLProtocol.requestHandler = { [self] request in status(request, code) }
 
-            let outcome = await client.unpairDevice()
+            let outcome = await client.unpairDevice(pin: "1234")
 
             XCTAssertEqual(outcome, .routeMissing, "HTTP \(code) means the deployment lacks the route")
+            XCTAssertNotEqual(outcome, .revoked)
+        }
+    }
+
+    /// The unpair answer wipes the phone, so a 2xx without an explicit `"success": true` — a
+    /// captive portal, a proxy page, an empty body — must not count as the server saying yes.
+    func testATwoHundredWithoutAnExplicitSuccessEnvelopeIsNotARevoke() async {
+        for body in ["", "<html>captive portal</html>", #"{"data":{}}"#, #"{"success":false}"#] {
+            TestHTTPURLProtocol.reset()
+            let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+            TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, body) }
+
+            let outcome = await client.unpairDevice(pin: "1234")
+
+            XCTAssertNotEqual(outcome, .revoked, "body \(body.debugDescription) is not a confirmed unpair")
         }
     }
 
@@ -443,42 +458,37 @@ final class OilaDeviceClientTests: XCTestCase {
         XCTAssertEqual(outcome, .rejected)
     }
 
-    /// No credential means no request was ever sent, so nothing was revoked. Claiming `.revoked`
-    /// here would be the one outcome that actively misleads.
-    ///
-    /// It is its own case rather than `.rejected` since the teardown started depending on the
-    /// answer: `.rejected` now REFUSES to disconnect (a 500 must not wipe the phone), and folding
-    /// this in with it would strand a handset that has nothing to revoke and no retry that could
-    /// ever change that. Not a bypass — reaching this state needs a Keychain sealed before first
-    /// unlock, not anything a child can do.
-    func testMissingCredentialIsNotReportedAsRevokedOrAsAServerRefusal() async {
+    /// No credential means no request was ever sent, so nothing was revoked. A Keychain that says
+    /// definitively "no such item" is `.credentialAbsent` — the one no-request outcome the screen may
+    /// finish locally, because no retry can ever produce a token that is not there.
+    func testMissingCredentialIsReportedAsAbsentNotAsRevokedOrAServerRefusal() async {
         let client = makeClient(tokens: InMemoryTokenStore(access: nil))
 
-        let outcome = await client.unpairDevice()
+        let outcome = await client.unpairDevice(pin: "1234")
 
-        XCTAssertEqual(outcome, .noCredential)
+        XCTAssertEqual(outcome, .credentialAbsent)
         XCTAssertNotEqual(outcome, .revoked)
         XCTAssertNotEqual(outcome, .rejected)
         XCTAssertTrue(TestHTTPURLProtocol.recordedRequests.isEmpty, "there is nothing to send")
     }
 
-    /// The disconnect path calls `logout()`, so the revoke has to happen from there — and it has to
-    /// happen while the credential is still readable, i.e. before the `defer` that clears it.
-    func testLogoutAttemptsTheUnpairBeforeClearingTheCredential() async throws {
+    /// The disconnect screen has already sent the PIN-carrying unpair when it calls `logout()`, so
+    /// logout must not send a second, PIN-less one — that burned an attempt out of the server's
+    /// 10-a-minute budget and overwrote the real outcome in the diagnostics.
+    func testLogoutNoLongerSendsASecondUnpair() async throws {
         let tokens = InMemoryTokenStore(access: "DEVICE_JWT")
         let client = makeClient(tokens: tokens)
         TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, #"{"success":true,"data":{}}"#) }
 
         try await client.logout()
 
-        let unpair = try XCTUnwrap(
-            TestHTTPURLProtocol.recordedRequests.first { $0.url?.path.contains("device/unpair") == true }
+        XCTAssertNil(
+            TestHTTPURLProtocol.recordedRequests.first { $0.url?.path.contains("device/unpair") == true },
+            "logout is the local tidy-up after the unpair, not a second unpair"
         )
-        XCTAssertEqual(unpair.value(forHTTPHeaderField: "Authorization"), "Bearer DEVICE_JWT")
-        XCTAssertNil(tokens.access, "the local teardown still happens whatever the server said")
+        XCTAssertNil(tokens.access, "the local credential is still cleared")
     }
 
-    /// `unpairDevice` may never be the reason a child stays paired to a phone they are holding.
     func testLogoutStillClearsTheCredentialWhenTheDeviceIsOffline() async throws {
         let tokens = InMemoryTokenStore(access: "DEVICE_JWT")
         let client = makeClient(tokens: tokens)
@@ -490,26 +500,40 @@ final class OilaDeviceClientTests: XCTestCase {
     }
 
     func testUnpairOutcomeStatusMapping() {
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 404), .routeMissing)
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 405), .routeMissing)
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 501), .routeMissing)
-        // The contract is explicit that on THIS route a 401 means the call that succeeded is what
-        // revoked the token, so a retry after a dropped response must read as a completed unpair.
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 401), .revoked)
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 500), .rejected)
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 400), .rejected)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 404, errorCode: nil), .routeMissing)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 405, errorCode: nil), .routeMissing)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 501, errorCode: nil), .routeMissing)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 500, errorCode: nil), .rejected)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 400, errorCode: "VALIDATION_FAILED"), .rejected)
     }
 
-    /// The single most expensive line in the old mapping: 403 sat next to 401 as `.revoked`, on the
-    /// reasoning that a refused Bearer cannot be used again either way. Under D-099 a 403 is
-    /// `UNPAIR_PIN_INVALID` and the device is STILL PAIRED, so the old mapping wiped the phone on
-    /// exactly the answer that means "wrong PIN" — handing the child the disconnect the parent's PIN
-    /// exists to withhold.
+    /// Only `DEVICE_UNPAIRED` means the pairing is gone — it is what a retry after a dropped 200
+    /// lands on. `UNAUTHORIZED` (missing, malformed, expired, foreign-signed token) says nothing
+    /// about the pairing, and used to wipe the phone exactly like a real unpair.
+    func testOnlyDeviceUnpairedReadsAsACompletedUnpair() {
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 401, errorCode: "DEVICE_UNPAIRED"), .revoked)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 401, errorCode: "UNAUTHORIZED"), .credentialRejected)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 401, errorCode: nil), .credentialRejected)
+    }
+
+    func testDeviceUnpairedFromTheServerIsARevokeEndToEnd() async {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        TestHTTPURLProtocol.requestHandler = { [self] request in
+            status(request, 401, #"{"success":false,"errorCode":"DEVICE_UNPAIRED","message":"x"}"#)
+        }
+
+        let outcome = await client.unpairDevice(pin: "1234")
+
+        XCTAssertEqual(outcome, .revoked)
+    }
+
+    /// Under D-099 a 403 is `UNPAIR_PIN_INVALID` and the device is STILL PAIRED — reading it as a
+    /// revoke would hand the child the disconnect the parent's PIN exists to withhold.
     func testWrongPINIsNotReadAsARevoke() {
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 403), .pinRequired)
-        XCTAssertNotEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 403), .revoked)
-        XCTAssertEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 429), .rateLimited)
-        XCTAssertNotEqual(OilaDeviceClient.unpairOutcome(forStatusCode: 429), .revoked)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 403, errorCode: "UNPAIR_PIN_INVALID"), .pinRequired)
+        XCTAssertNotEqual(OilaDeviceClient.unpairOutcome(statusCode: 403, errorCode: nil), .revoked)
+        XCTAssertEqual(OilaDeviceClient.unpairOutcome(statusCode: 429, errorCode: "RATE_LIMITED"), .rateLimited)
+        XCTAssertNotEqual(OilaDeviceClient.unpairOutcome(statusCode: 429, errorCode: nil), .revoked)
     }
 
     /// The PIN-less probe is how the app discovers whether a parent set one at all, so it has to go

@@ -84,9 +84,6 @@
 "settings.diagnostics_geo_badge_live" = "LIVE";
 "settings.diagnostics_geo_badge_stale" = "STALE";
 "settings.diagnostics_geo_badge_waiting" = "WAIT";
-"settings.control_protection_pin_invalid" = "Введите ровно 4 цифры.";
-"settings.control_protection_pin_mismatch" = "PIN-коды не совпадают.";
-"settings.control_protection_pin_incorrect" = "Неверный PIN-код.";
 
 "notifications.device_control.schedule_started_title" = "Расписание блокировки началось";
 "notifications.device_control.schedule_started_body" = "Родительское расписание полной блокировки заблокировало этот iPhone.";
@@ -245,8 +242,6 @@
 "settings2.disconnect_sub" = "Требуется родительский PIN-код";
 "settings2.enable" = "Включить";
 "disconnect2.title" = "Отключить связь";
-"disconnect2.body" = "Наблюдение на этом телефоне остановится, и он вернётся к привязке. Введите родительский PIN-код, чтобы продолжить.";
-"disconnect2.parent_managed_body" = "Отвязать это устройство может только родитель. Попросите родителя удалить его в приложении Oila360.";
 "disconnect2.locked_out" = "Слишком много попыток. Повторите через %d мин.";
 "disconnect2.confirm" = "Отключить";
 "disconnect2.cancel" = "Отмена";
@@ -255,19 +250,8 @@
 "disconnect2.rate_limited" = "Слишком много попыток. Подождите минуту и повторите.";
 "disconnect2.offline" = "Нет соединения. Для отключения нужен интернет — повторите попытку.";
 "disconnect2.failed" = "Не удалось отключить. Попробуйте снова.";
-"disconnect2.confirm_title" = "Действительно отключить?";
-"disconnect2.confirm_body" = "Устройство будет отвязано от родителя, а приложение вернётся к состоянию сразу после установки.";
-"disconnect2.confirm_yes" = "Да, отключить";
-"disconnect2.confirm_cancel" = "Отмена";
 
 /* MARK: - First-run parent PIN provisioning */
-"pin_setup.title" = "Задайте PIN-код";
-"pin_setup.subtitle" = "Задайте PIN-код, чтобы ребёнок не мог отключить устройство в любой момент";
-"pin_setup.confirm_title" = "Повторите PIN-код";
-"pin_setup.confirm_subtitle" = "Введите PIN-код ещё раз для подтверждения";
-"pin_setup.mismatch" = "PIN-коды не совпадают. Попробуйте снова";
-"pin_setup.save" = "Сохранить";
-"pin_setup.skip" = "Не сейчас";
 
 "perm2.decline_bg" = "Нет, только при открытом";
 
@@ -350,21 +334,6 @@
 "chat2.system.generic" = "Системное сообщение";
 
 /* Parent PIN provisioning (Settings) */
-"settings2.section_parent" = "Родительские настройки";
-"settings2.parent_pin_set" = "Задать родительский PIN";
-"settings2.parent_pin_set_sub" = "Нужен, чтобы отвязать это устройство";
-"settings2.parent_pin_change" = "Изменить родительский PIN";
-"settings2.parent_pin_change_sub" = "Требуется текущий PIN";
-"settings2.parent_pin_remove" = "Удалить родительский PIN";
-"settings2.parent_pin_remove_sub" = "После этого отвязать можно только в приложении Oila360";
-"settings2.parent_pin_prompt_current" = "Введите текущий родительский PIN, чтобы продолжить.";
-"settings2.parent_pin_prompt_new" = "Придумайте 4-значный PIN. Не сообщайте его ребёнку — именно этот код позволяет отвязать устройство.";
-"settings2.parent_pin_prompt_confirm" = "Введите новый PIN ещё раз для подтверждения.";
-"settings2.parent_pin_save" = "Сохранить PIN";
-"settings2.parent_pin_saved" = "Родительский PIN сохранён. Он будет запрошен перед отвязкой этого устройства.";
-"settings2.parent_pin_removed" = "Родительский PIN удалён. Теперь отвязать устройство можно только в приложении Oila360.";
-"settings2.parent_pin_locked_out" = "Слишком много попыток. Повторите позже.";
-"settings2.parent_pin_set_unavailable" = "PIN можно задать только сразу после привязки. Привяжите устройство заново в приложении Oila360.";
 "a11y.step_progress" = "Шаг %1$d из %2$d";
 
 /* Screen Time — app picker and the always-allowed set */
