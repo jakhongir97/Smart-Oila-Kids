@@ -24,7 +24,9 @@ import os
 /// labelled apps whenever the lane starts or the labels change, and send the ledger the monitor
 /// extension fills to `PUT /device/apps/usage/daily` whenever it changes and whenever the app comes
 /// forward. The response is the same enforcement state the old usage route returned, and it is
-/// applied the same way.
+/// applied the same way. Since build 26 the same activity also measures the whole phone (the
+/// one-tap pick's categories), reported as the `ios.other` row — which this coordinator lists in
+/// every app-list publish and never enforces, because it is not an app.
 /// The three server facts, read together so enforcement always applies a consistent picture
 /// rather than three separately-observed properties that can be half-updated.
 struct ScreenTimeEnforcementLockState: Equatable {
@@ -58,6 +60,11 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     typealias ArmDeadlineAction = (String, Date) throws -> Bool
     /// `(dsn, force)`: stop the deadline activity; `force` also when no record says one is armed.
     typealias StopDeadlineAction = (String, Bool) -> Void
+    /// Stop the usage activity of `dsn`. Injected so tests can see a pairing change retire it.
+    typealias StopUsageAction = (String) -> Void
+    /// Whether the phone can measure its device total right now (the one-tap pick left category
+    /// tokens, on iOS 17.4+) — the condition for listing `ios.other` in the app-list publish.
+    typealias TotalMonitoringAction = () -> Bool
 
     static let shared = ScreenTimeEnforcementCoordinator()
 
@@ -69,6 +76,13 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     nonisolated static let catalogueResyncInterval: TimeInterval = 24 * 60 * 60
 
     nonisolated static let lastCatalogueSyncKey = "SCREEN_TIME_CATALOGUE_SYNCED_AT"
+
+    /// The shape of the app-list publish. Bumped when a build changes WHAT the list carries, so the
+    /// first launch of that build publishes once instead of waiting out a 24 h stamp written by the
+    /// previous build. 2 = build 26: `ios.other` joins the list. `PUT /device/apps/sync` is a FULL
+    /// replace, so a list without the row the usage report sums would read as "uninstalled".
+    nonisolated static let catalogueSyncVersion = 2
+    nonisolated static let catalogueSyncVersionKey = "SCREEN_TIME_CATALOGUE_SYNC_VERSION"
 
     /// Deliberately a log line and not only a diagnostics field: when a parent says "I pressed
     /// block and nothing happened", this is the one record that says whether the phone ever heard
@@ -87,6 +101,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         uploadUsage: UploadUsageAction? = nil,
         armDeadline: ArmDeadlineAction? = nil,
         stopDeadline: StopDeadlineAction? = nil,
+        stopUsage: StopUsageAction? = nil,
+        totalMonitoringPossible: TotalMonitoringAction? = nil,
         usageLedger: ScreenTimeUsageLedger = ScreenTimeUsageLedger(),
         userDefaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
@@ -131,7 +147,10 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             ScreenTimeRestrictedAppsStore.shared.reloadFromDisk()
         }
         self.armUsage = armUsage ?? { dsn in
-            try ScreenTimeUsageMonitoring.arm(dsn: dsn)
+            // A cold launch arms before anything has loaded the label store; mirror the one-tap
+            // pick's categories first, or the device total would wait for the next foreground.
+            ScreenTimeRestrictedAppsStore.mirrorStoredCategories()
+            return try ScreenTimeUsageMonitoring.arm(dsn: dsn)
         }
         self.uploadUsage = uploadUsage ?? { days in
             try await OilaDeviceClient.shared.reportDailyUsage(days: days)
@@ -141,6 +160,12 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
         self.stopDeadline = stopDeadline ?? { dsn, force in
             DeviceLockDeadlineMonitoring.stop(dsn: dsn, force: force)
+        }
+        self.stopUsage = stopUsage ?? { dsn in
+            ScreenTimeUsageMonitoring.stop(dsn: dsn)
+        }
+        self.totalMonitoringPossible = totalMonitoringPossible ?? {
+            ScreenTimeUsageMonitoring.isSupported && ScreenTimeUsageTotalCategoryStore().hasTokens
         }
         self.usageLedger = usageLedger
         self.userDefaults = userDefaults
@@ -176,6 +201,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         if dsnChanged, let previous = previousDSN { stopDeadline(previous, true) }
 
         applyNow()
+        // The old pairing's usage activity would otherwise keep firing and re-arming itself from
+        // the extension — a wasted activity slot and wake-ups for a family this phone left.
+        if dsnChanged, let previous = previousDSN { stopUsage(previous) }
         armUsageMonitoring(reason: dsnChanged ? "start_new_dsn" : "start")
         Task {
             await syncCatalogueIfNeeded(force: dsnChanged)
@@ -193,7 +221,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
         deadlineReleaseObserver = nil
         if let dsn = currentDSN {
-            ScreenTimeUsageMonitoring.stop(dsn: dsn)
+            stopUsage(dsn)
             // The deadline activity belongs to the pairing that ended: left armed, it would fire
             // on a phone paired to another family (or to none).
             stopDeadline(dsn, true)
@@ -254,7 +282,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         do {
             let armed = try armUsage(dsn)
             RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(
-                status: armed > 0 ? "monitoring" : "no_labelled_apps",
+                status: armed > 0 ? "monitoring" : "nothing_picked",
                 dsn: dsn,
                 selectedApps: armed,
                 lastError: "-"
@@ -274,7 +302,12 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             return
         }
         let days = ScreenTimeUsageReport.days(ledger: usageLedger, now: now())
-        guard !days.isEmpty else { return }
+        // Said out loud: a phone that never armed (nothing picked) sends nothing, and until build 26
+        // that silence was exactly what "the web shows 0 minutes" looked like in the log.
+        guard !days.isEmpty else {
+            Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=skipped(no_days)")
+            return
+        }
         // Nothing changed since the last accepted report: the server already holds this.
         let signature = Self.usageSignature(days)
         guard signature != lastUploadedUsageSignature else { return }
@@ -371,8 +404,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
 
         let state = lockStateAction()
-        let lockedPackages = state.lockedPackages + latestUsageLockedPackages
-        let limitReached = state.limitReached + latestUsageLimitReached
+        let lockedPackages = Self.enforceablePackages(state.lockedPackages + latestUsageLockedPackages)
+        let limitReached = Self.enforceablePackages(state.limitReached + latestUsageLimitReached)
 
         blockedApplications.apply(
             wholeDeviceLocked: state.isLocked,
@@ -435,6 +468,13 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         Self.log.notice("screentime_apply deadline_release global=0")
     }
 
+    /// Every package that names an app. `ios.other` is the device total minus the labelled apps
+    /// (`ScreenTimeUsageReport.otherPackageName`), not an app: no token stands for it, so a parent
+    /// who blocks or limits it on the web must not show up here as one more "unenforceable" block.
+    nonisolated static func enforceablePackages(_ packages: [String]) -> [String] {
+        packages.filter { AppCatalogue.normalizedBundleId($0) != ScreenTimeUsageReport.otherPackageName }
+    }
+
     /// Apps whose daily budget is spent. Pure, because the rule ("a budget the server says is
     /// reached is a block until the day rolls over") is the whole reason iOS can enforce a time
     /// limit at all: `DeviceActivityEvent` thresholds take opaque tokens, never bundle ids.
@@ -457,16 +497,27 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         return elapsed < 0 || elapsed >= interval
     }
 
+    /// Pure: publish when asked to, when the last publish had an older shape (the one forced sync
+    /// after an upgrade that changes what the list carries), or when a probe is due anyway.
+    nonisolated static func isCatalogueSyncDue(force: Bool, lastSyncedAt: Date?, syncedVersion: Int, now: Date) -> Bool {
+        force || syncedVersion < catalogueSyncVersion || shouldProbeCatalogue(lastSyncedAt: lastSyncedAt, now: now)
+    }
+
     func syncCatalogueIfNeeded(force: Bool) async {
         guard let dsn = currentDSN else { return }
 
-        let lastSyncedAt = userDefaults.object(forKey: Self.lastCatalogueSyncKey) as? Date
-        guard force || Self.shouldProbeCatalogue(lastSyncedAt: lastSyncedAt, now: now()) else { return }
+        guard Self.isCatalogueSyncDue(
+            force: force,
+            lastSyncedAt: userDefaults.object(forKey: Self.lastCatalogueSyncKey) as? Date,
+            syncedVersion: userDefaults.integer(forKey: Self.catalogueSyncVersionKey),
+            now: now()
+        ) else { return }
 
         let installed = InstalledAppProbe.installedEntries(canOpen: canOpenScheme)
         let entries = Self.mergedSyncEntries(
             probed: InstalledAppProbe.syncEntries(for: installed),
-            labelled: labelledEntries()
+            labelled: labelledEntries(),
+            otherApps: totalMonitoringPossible() ? Self.otherAppsSyncEntry() : nil
         )
 
         // `SyncAppsDto` declares `minItems: 1`. An empty probe is a real answer ("none of the apps
@@ -486,14 +537,17 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         // Stamped after the hand-off, not before: a stamp written first would suppress the next
         // probe even when nothing was ever published.
         userDefaults.set(now(), forKey: Self.lastCatalogueSyncKey)
+        userDefaults.set(Self.catalogueSyncVersion, forKey: Self.catalogueSyncVersionKey)
     }
 
-    /// The probe result plus every labelled app, one row per package. A labelled catalogue app the
-    /// probe also found is listed once (the probe's row); a labelled app the probe cannot see — no
-    /// scheme, or a custom-named one — is added under its label. Pure, pinned by a test.
+    /// The probe result plus every labelled app, one row per package, plus `otherApps` last when
+    /// the phone measures its total. A labelled catalogue app the probe also found is listed once
+    /// (the probe's row); a labelled app the probe cannot see — no scheme, or a custom-named one —
+    /// is added under its label. Pure, pinned by a test.
     nonisolated static func mergedSyncEntries(
         probed: [DeviceAppLockSyncEntry],
-        labelled: [ApplicationTokenCatalogue.Entry]
+        labelled: [ApplicationTokenCatalogue.Entry],
+        otherApps: DeviceAppLockSyncEntry? = nil
     ) -> [DeviceAppLockSyncEntry] {
         var seen = Set(probed.map(\.packageName))
         var result = probed
@@ -506,7 +560,19 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
                 name: (name?.isEmpty == false ? name : nil) ?? AppCatalogue.displayName(forBundleId: packageName) ?? packageName
             ))
         }
+        if let otherApps, seen.insert(otherApps.packageName).inserted {
+            result.append(otherApps)
+        }
         return result
+    }
+
+    /// "Boshqa ilovalar": the row the usage report sums everything unlabelled into. Named in the
+    /// app language, like every other name this phone publishes.
+    nonisolated static func otherAppsSyncEntry() -> DeviceAppLockSyncEntry {
+        DeviceAppLockSyncEntry(
+            packageName: ScreenTimeUsageReport.otherPackageName,
+            name: L10n.tr("screentime.other_apps.name")
+        )
     }
 
     // MARK: - Private
@@ -593,6 +659,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private let uploadUsage: UploadUsageAction
     private let armDeadline: ArmDeadlineAction
     private let stopDeadline: StopDeadlineAction
+    private let stopUsage: StopUsageAction
+    private let totalMonitoringPossible: TotalMonitoringAction
     private let usageLedger: ScreenTimeUsageLedger
     private let userDefaults: UserDefaults
     private let now: () -> Date

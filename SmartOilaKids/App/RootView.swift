@@ -133,12 +133,12 @@ struct RootView: View {
                 )
             }
         }
-        .background(alignment: .topLeading) {
-            if shouldRunLocalChildServices,
-               AppRuntime.screenTimeFeaturesEnabled {
-                ScreenTimeUsageReportBridgeView(dsn: sessionStore.dsn)
-            }
-        }
+        // No `ScreenTimeUsageReportBridgeView` any more (build 26). It rendered the DeviceActivity
+        // report only to feed `DeviceApplicationUsageReportCoordinator` — the deprecated ADDITIVE
+        // `POST /device/apps/usage` — and the report extension's snapshot never reaches the app
+        // (sandboxed, measured 2026-09-16). Screen time is the monitor extension's ledger, sent by
+        // `PUT /device/apps/usage/daily`; a second, additive path is a double count waiting for the
+        // sandbox to change.
         .sheet(isPresented: audioConsentPresented) {
             AudioConsentSheet(
                 // Mic and camera are consented to separately; the sheet must describe the hardware

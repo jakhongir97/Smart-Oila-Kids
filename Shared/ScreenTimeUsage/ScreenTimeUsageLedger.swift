@@ -21,6 +21,10 @@ import os
 /// Written by BOTH processes (the extension on every threshold, the app when it re-arms or the day
 /// rolls over), so every write goes through `record` — merge-by-max, never replace — and posts a
 /// Darwin notification so the other process can upload or re-arm.
+///
+/// One key is not an app (build 26): `deviceTotalKey` is the staircase over every category of the
+/// one-tap "All Apps & Categories" pick — the whole phone. It never goes on the wire as itself;
+/// `ScreenTimeUsageReport` turns it into the `ios.other` row (total minus the labelled apps).
 struct ScreenTimeUsageLedger {
     struct Day: Codable, Equatable {
         /// Local calendar day, `YYYY-MM-DD` — the `date` the server expects.
@@ -43,6 +47,10 @@ struct ScreenTimeUsageLedger {
     static let firstStepSeconds = 60
     /// Today plus the seven days the server accepts (`[today − 7, today + 1]`).
     static let retainedDays = 8
+    /// The device-wide rung's key. Reserved: no bundle id can collide with it (a bundle id holds only
+    /// letters, digits, `-` and `.`; device-minted ids are `ios.app.<hex>`), a label is never renamed
+    /// onto or off it, and the report never sends it — the server would list it as an app.
+    static let deviceTotalKey = "__device_total__"
 
     init(userDefaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()) {
         self.userDefaults = userDefaults
@@ -108,11 +116,15 @@ struct ScreenTimeUsageLedger {
     /// A token was re-labelled: what was counted under the old package is the same app's time, so
     /// it moves to the new package (merge-by-max) instead of being reported twice — once under a
     /// name the server now believes is uninstalled. Every retained day, not only today.
+    ///
+    /// The device total is never a label, so it is never moved in either direction: renaming it
+    /// away would zero the phone's total, renaming onto it would count an app as the whole phone.
     func rename(from oldBundleId: String, to newBundleId: String, now: Date = Date()) {
         guard let userDefaults else { return }
         let oldKey = Self.normalizedBundleId(oldBundleId)
         let newKey = Self.normalizedBundleId(newBundleId)
-        guard !oldKey.isEmpty, !newKey.isEmpty, oldKey != newKey else { return }
+        guard !oldKey.isEmpty, !newKey.isEmpty, oldKey != newKey,
+              oldKey != Self.deviceTotalKey, newKey != Self.deviceTotalKey else { return }
         var all = days()
         var changed = false
         for index in all.indices {
@@ -124,6 +136,24 @@ struct ScreenTimeUsageLedger {
         guard changed, let data = try? JSONEncoder().encode(all) else { return }
         userDefaults.set(data, forKey: Self.storageKey)
         Self.log.notice("usage_ledger renamed from=\(oldKey, privacy: .public) to=\(newKey, privacy: .public)")
+        Self.postDidChange()
+    }
+
+    /// Forget one app's figure for one day — a label that MOVED to another token: what the old
+    /// token climbed today is not the new token's time, and left in place the new token's staircase
+    /// would start at the old one's height (the next rung is armed above the ledger). Earlier days
+    /// are history the server already holds and are left as they were reported. Never the total.
+    func remove(bundleId: String, dayKey: String, now: Date = Date()) {
+        guard let userDefaults else { return }
+        let key = Self.normalizedBundleId(bundleId)
+        guard !key.isEmpty, key != Self.deviceTotalKey else { return }
+        var all = days()
+        guard let index = all.firstIndex(where: { $0.dayKey == dayKey }),
+              all[index].seconds.removeValue(forKey: key) != nil else { return }
+        all[index].updatedAt = now
+        guard let data = try? JSONEncoder().encode(all) else { return }
+        userDefaults.set(data, forKey: Self.storageKey)
+        Self.log.notice("usage_ledger removed app=\(key, privacy: .public) day=\(dayKey, privacy: .public)")
         Self.postDidChange()
     }
 
@@ -215,7 +245,9 @@ enum ScreenTimeUsageActivity {
         return value.isEmpty ? nil : value
     }
 
-    /// `usage|<bundle id>|<threshold seconds>|<day key>`. A bundle id never contains `|`. The
+    /// `usage|<bundle id>|<threshold seconds>|<day key>` — the device-total rung is the same shape
+    /// with `ScreenTimeUsageLedger.deviceTotalKey` in the bundle slot, so the extension records it
+    /// through the one parser and the one `record`. A bundle id never contains `|`. The
     /// threshold is in the name so the extension records the exact staircase height the system
     /// confirmed, not a guess from a ledger it may be reading a step late — and the DAY is in the
     /// name because iOS delivers the callback with latency: a rung crossed at 23:58 can arrive at

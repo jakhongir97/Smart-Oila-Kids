@@ -329,17 +329,14 @@ final class DeviceAppLockSyncCoordinatorTests: XCTestCase {
     }
 }
 
+/// `POST /device/apps/usage` is deprecated and ADDITIVE (the server adds each item to the day); the
+/// live report is `PUT /device/apps/usage/daily`, which REPLACES whole days. Since build 26 this
+/// coordinator never queues or sends, and a queue an older build left behind is purged unsent.
 final class DeviceApplicationUsageReportCoordinatorTests: XCTestCase {
-    func testUpdateSnapshotUploadsOnlyDeltaUsageForTheCurrentDay() async {
-        let service = DeviceApplicationUsageReportServiceSpy(
-            results: [
-                .success(.init(lockedPackages: [], stats: [])),
-                .success(.init(lockedPackages: [], stats: []))
-            ]
-        )
-        let suiteName = "DeviceApplicationUsageReportCoordinatorTests.delta.\(UUID().uuidString)"
+    func testASnapshotIsNeverQueuedOrPostedAnyMore() async {
+        let service = DeviceApplicationUsageReportServiceSpy()
+        let suiteName = "DeviceApplicationUsageReportCoordinatorTests.retired.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
-        userDefaults.removePersistentDomain(forName: suiteName)
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
 
         let coordinator = DeviceApplicationUsageReportCoordinator(
@@ -361,112 +358,44 @@ final class DeviceApplicationUsageReportCoordinatorTests: XCTestCase {
                 ]
             )
         )
-        await coordinator.updateSnapshot(
-            makeUsageSnapshot(
-                dsn: "child-usage",
-                dayKey: "2026-03-19",
-                entries: [
-                    .init(packageName: "com.example.chat", appName: "Chat", usedTime: 180),
-                    .init(packageName: "com.example.maps", appName: "Maps", usedTime: 60)
-                ]
-            )
-        )
+        await coordinator.retryNow()
 
         let recordedCalls = await service.recordedCalls()
         let pendingBatchCount = await coordinator.pendingBatchCount()
-
-        XCTAssertEqual(recordedCalls, [
-            DeviceApplicationUsageReportCall(
-                dsn: "child-usage",
-                items: [
-                    DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 120),
-                    DeviceApplicationUsageReportItemRequest(packageName: "com.example.maps", usedSeconds: 60)
-                ]
-            ),
-            DeviceApplicationUsageReportCall(
-                dsn: "child-usage",
-                items: [
-                    DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 60)
-                ]
-            )
-        ])
+        XCTAssertTrue(recordedCalls.isEmpty, "the additive route would count these minutes a second time")
         XCTAssertEqual(pendingBatchCount, 0)
+        XCTAssertFalse(DeviceApplicationUsageReportCoordinator.postsAdditiveUsage)
     }
 
-    func testFailedUploadPersistsQueueUntilANewCoordinatorRetriesIt() async {
-        let suiteName = "DeviceApplicationUsageReportCoordinatorTests.retry.\(UUID().uuidString)"
+    func testAQueueAnOlderBuildPersistedIsPurgedUnsent() async throws {
+        let suiteName = "DeviceApplicationUsageReportCoordinatorTests.purge.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
-        userDefaults.removePersistentDomain(forName: suiteName)
         defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        // Exactly what a build-25 phone persisted after a failed POST.
+        let storageKey = "DEVICE_APPLICATION_USAGE_REPORT_STATE"
+        userDefaults.set(Data(#"""
+        {"pendingBatches":[{"id":"old-1","dsn":"child-usage","dayKey":"2026-09-20","items":[{"packageName":"com.example.chat","appName":"Chat","usedSeconds":240,"totalUsedSeconds":240}],"createdAt":780000000}],"accountedUsageByKey":{"child-usage|2026-09-20|com.example.chat":240}}
+        """#.utf8), forKey: storageKey)
 
-        let failingService = DeviceApplicationUsageReportServiceSpy(
-            results: [.failure(DeviceApplicationUsageReportTestError.offline)]
-        )
-        let firstCoordinator = DeviceApplicationUsageReportCoordinator(
-            service: failingService,
+        let service = DeviceApplicationUsageReportServiceSpy()
+        let coordinator = DeviceApplicationUsageReportCoordinator(
+            service: service,
             userDefaults: userDefaults,
             responseHandler: { _, _ in },
             diagnosticsUpdater: { _, _, _, _, _, _, _, _ in },
             retryScheduler: { _, _ in Task {} }
         )
+        await coordinator.updateDSN("child-usage")
+        await coordinator.retryNow()
 
-        await firstCoordinator.updateDSN("child-usage")
-        await firstCoordinator.updateSnapshot(
-            makeUsageSnapshot(
-                dsn: "child-usage",
-                dayKey: "2026-03-19",
-                entries: [
-                    .init(packageName: "com.example.chat", appName: "Chat", usedTime: 240)
-                ]
-            )
-        )
-
-        let firstPendingBatchCount = await firstCoordinator.pendingBatchCount()
-        let failingCalls = await failingService.recordedCalls()
-
-        XCTAssertEqual(firstPendingBatchCount, 1)
-        XCTAssertEqual(failingCalls, [
-            DeviceApplicationUsageReportCall(
-                dsn: "child-usage",
-                items: [DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 240)]
-            )
-        ])
-
-        let succeedingService = DeviceApplicationUsageReportServiceSpy(
-            results: [.success(.init(
-                lockedPackages: ["com.example.chat"],
-                stats: [
-                    DeviceApplicationUsageReportStat(
-                        packageName: "com.example.chat",
-                        usageDate: "2026-03-19",
-                        usedSeconds: 240,
-                        dailyLimitSeconds: 300,
-                        remainingSeconds: 60,
-                        isLimitReached: false
-                    )
-                ]
-            ))]
-        )
-        let secondCoordinator = DeviceApplicationUsageReportCoordinator(
-            service: succeedingService,
-            userDefaults: userDefaults,
-            responseHandler: { _, _ in },
-            diagnosticsUpdater: { _, _, _, _, _, _, _, _ in },
-            retryScheduler: { _, _ in Task {} }
-        )
-
-        await secondCoordinator.updateDSN("child-usage")
-
-        let succeedingCalls = await succeedingService.recordedCalls()
-        let secondPendingBatchCount = await secondCoordinator.pendingBatchCount()
-
-        XCTAssertEqual(succeedingCalls, [
-            DeviceApplicationUsageReportCall(
-                dsn: "child-usage",
-                items: [DeviceApplicationUsageReportItemRequest(packageName: "com.example.chat", usedSeconds: 240)]
-            )
-        ])
-        XCTAssertEqual(secondPendingBatchCount, 0)
+        let recordedCalls = await service.recordedCalls()
+        let pendingBatchCount = await coordinator.pendingBatchCount()
+        XCTAssertTrue(recordedCalls.isEmpty, "flushed, the old deltas would be ADDED to the day the daily report already set")
+        XCTAssertEqual(pendingBatchCount, 0)
+        let stored = try XCTUnwrap(userDefaults.data(forKey: storageKey))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: stored) as? [String: Any])
+        XCTAssertEqual((object["pendingBatches"] as? [Any])?.count, 0, "purged on disk too, so no later build can flush it")
+        XCTAssertEqual((object["accountedUsageByKey"] as? [String: Any])?.count, 0)
     }
 
     private func makeUsageSnapshot(
@@ -799,10 +728,6 @@ private struct DeviceAppLockSyncCall: Equatable {
 }
 
 private enum DeviceAppLockSyncTestError: Error {
-    case offline
-}
-
-private enum DeviceApplicationUsageReportTestError: Error {
     case offline
 }
 

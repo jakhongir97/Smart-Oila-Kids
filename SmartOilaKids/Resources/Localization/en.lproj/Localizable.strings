@@ -415,3 +415,8 @@
 "screentime.restricted.pending_installed_title" = "Apps found on this phone";
 "screentime.restricted.pending_web" = "Blocked on the web — not linked on this phone yet";
 "screentime.restricted.pending_web_title" = "Needs linking";
+
+/* build 26 — USAGE */
+"home2.screentime_setup.title" = "Screen time is not being counted";
+"home2.screentime_setup.body" = "For the parent to see screen time, choose apps once: switch on “All Apps & Categories” and press Save.";
+"screentime.other_apps.name" = "Other apps";

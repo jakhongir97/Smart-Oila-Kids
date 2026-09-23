@@ -181,15 +181,27 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
 // MARK: - Per-app usage (the staircase)
 
 private extension SmartOilaKidsDeviceActivityMonitorExtension {
-    /// "This app has been used for N seconds today." Record N, arm N + step, tell the server.
+    /// "This app (or, for `__device_total__`, the whole phone) has been used for N seconds today."
+    /// Record N, arm N + step, tell the server.
     ///
     /// Three writes, and the order matters: the ledger first (so a crash after it still leaves
     /// the figure), the re-arm second (so the next rung exists before anything slow happens), the
     /// upload last (network, bounded by a timeout, and the app will retry it anyway).
+    ///
+    /// None of the three for a rung that cannot be true: more usage than its day has had seconds.
+    /// Recording it would put an impossible figure on the parent's screen, and re-arming above it
+    /// is how one spurious callback turns into a staircase that climbs by itself.
     func handleUsageThreshold(event: DeviceActivityEvent.Name, activity: DeviceActivityName) {
         guard let dsn = ScreenTimeUsageActivity.dsn(from: activity.rawValue),
               let parsed = ScreenTimeUsageActivity.parse(eventName: event.rawValue) else {
             Self.log.error("schedule_monitor usage_event_unparsed event=\(event.rawValue, privacy: .public)")
+            return
+        }
+        let bound = ScreenTimeUsageMonitoring.plausibleSecondsBound(dayKey: parsed.dayKey, now: Date())
+        guard parsed.thresholdSeconds <= bound else {
+            Self.log.error(
+                "schedule_monitor usage_step rejected reason=beyond_elapsed app=\(parsed.bundleId, privacy: .public) seconds=\(parsed.thresholdSeconds, privacy: .public) day=\(parsed.dayKey, privacy: .public) bound=\(bound, privacy: .public)"
+            )
             return
         }
         // The DAY comes from the event, never from the clock: a rung crossed at 23:58 may be

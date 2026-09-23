@@ -415,3 +415,8 @@
 "screentime.restricted.pending_installed_title" = "Приложения, найденные на телефоне";
 "screentime.restricted.pending_web" = "Заблокировано на сайте — на телефоне ещё не связано";
 "screentime.restricted.pending_web_title" = "Нужно связать";
+
+/* build 26 — USAGE */
+"home2.screentime_setup.title" = "Экранное время не считается";
+"home2.screentime_setup.body" = "Чтобы родитель видел экранное время, один раз выберите приложения: включите «All Apps & Categories» и нажмите «Сохранить».";
+"screentime.other_apps.name" = "Другие приложения";
