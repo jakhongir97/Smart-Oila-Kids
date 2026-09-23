@@ -42,7 +42,7 @@ struct BolajonTasksView: View {
                                         Task { await viewModel.complete(task) }
                                     }
                                 }
-                                .opacity(task.isCompleted || task.isCancelled ? 0.75 : 1)
+                                .opacity(task.isActive ? 1 : 0.75)
                             }
                         }
                     }
@@ -117,12 +117,12 @@ private struct TaskRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(task.title)
                     .font(AppTypography.bodyStrong(15))
-                    .foregroundStyle(task.isCompleted || task.isCancelled
-                                     ? AppColors.inkTertiary : AppColors.inkPrimary)
+                    .foregroundStyle(task.isActive ? AppColors.inkPrimary : AppColors.inkTertiary)
                     .strikethrough(task.isCompleted || task.isCancelled, color: AppColors.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)
-                // No reward pill on a cancelled chore — there is nothing left to earn.
-                if !task.isCompleted, !task.isCancelled, task.rewardPoints > 0 {
+                // The pill is a promise ("finish this, earn that"), so only an `Active` chore gets
+                // one — a cancelled or expired chore has nothing left to earn.
+                if task.isActive, task.rewardPoints > 0 {
                     reward(color: AppColors.starAmber)
                 }
             }
@@ -138,7 +138,9 @@ private struct TaskRow: View {
                         .font(AppTypography.bodyStrong(14))
                         .foregroundStyle(AppColors.successGreen)
                 }
-            } else {
+            } else if task.isActive {
+                // `Active` alone (DeviceHomeTaskDto): an Expired task, or a status this build does
+                // not know, shows no button rather than one the server will not honour.
                 Button(action: onDone) {
                     Text(L10n.tr("tasks2.done"))
                         .font(AppTypography.bodyStrong(14))
@@ -259,6 +261,8 @@ final class BolajonTasksViewModel: ObservableObject {
     }
 
     func complete(_ task: OilaDeviceTask) async {
+        // Same line as the row: only an `Active` task is the child's to complete.
+        guard task.isActive else { return }
         // Guard against a double-tap firing the non-idempotent complete POST twice (the second
         // call 404s/errors and surfaces a spurious banner). Mirrors the Home screen's guard.
         guard !completingTaskIDs.contains(task.id) else { return }

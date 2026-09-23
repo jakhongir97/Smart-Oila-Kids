@@ -200,9 +200,10 @@ final class BolajonChatViewModel: ObservableObject {
         didSet {
             // `SendMessageDto.text` is capped at 4000 characters. Clamp here — a paste that blows
             // past the cap used to reach the server and come back as a generic failure, with the
-            // child's message already gone from the composer.
-            guard draft.count > Self.maxMessageLength else { return }
-            draft = String(draft.prefix(Self.maxMessageLength))
+            // child's message already gone from the composer. See `clampedToServerLimit` for why
+            // the count is UTF-16 units and not what `String.count` calls characters.
+            guard let clamped = Self.clampedToServerLimit(draft) else { return }
+            draft = clamped
             errorMessage = L10n.tr("chat2.too_long", Self.maxMessageLength)
         }
     }
@@ -648,7 +649,30 @@ final class BolajonChatViewModel: ObservableObject {
     private static let pageSize = 40
 
     /// `SendMessageDto.text` is declared 1..4000 in the spec.
-    private static let maxMessageLength = 4000
+    nonisolated static let maxMessageLength = 4000
+
+    /// `text` cut to the server's limit, or nil when it already fits.
+    ///
+    /// Counted in UTF-16 code units, not in what `String.count` calls characters (grapheme
+    /// clusters). The backend is JavaScript: a string's `length` there is UTF-16 units, and nothing
+    /// on that side counts graphemes — its validators and the database count code points at most,
+    /// which is never more than the UTF-16 figure. So a text that fits in 4000 units fits the server
+    /// however it counts, while the grapheme count let through far more whenever the text was
+    /// emoji-heavy: 🏳️‍🌈 is ONE character and six units, 👍 is one and two, and a message of 3000
+    /// emoji passed the local check only to come back as a generic send failure. The cut still lands
+    /// on a character boundary, so it never splits a surrogate pair or an emoji sequence.
+    nonisolated static func clampedToServerLimit(_ text: String, maxUTF16: Int = maxMessageLength) -> String? {
+        guard text.utf16.count > maxUTF16 else { return nil }
+        var used = 0
+        var kept = 0
+        for character in text {
+            let width = character.utf16.count
+            guard used + width <= maxUTF16 else { break }
+            used += width
+            kept += 1
+        }
+        return String(text.prefix(kept))
+    }
 
     static func parseISO(_ any: Any?) -> Date? {
         guard let string = (any as? String)?.trimmedNonEmpty else { return nil }

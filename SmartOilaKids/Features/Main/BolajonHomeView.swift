@@ -618,7 +618,8 @@ private struct HomeTaskRow: View {
                         .font(.system(size: 11, weight: .bold))
                 }
                 .foregroundStyle(AppColors.successGreen)
-            } else {
+            } else if task.isActive {
+                // `Active` alone (DeviceHomeTaskDto): anything else is not the child's to complete.
                 Button(action: onDone) {
                     Text(L10n.tr("tasks2.done"))
                         .font(AppTypography.bodyStrong(13))
@@ -839,10 +840,11 @@ final class BolajonHomeViewModel: ObservableObject {
     // `BolajonTasksViewModel.starTotal` for why the local sum under-reports.
     var starTotal: Int { serverStarTotal ?? localStarTotal }
     var localStarTotal: Int { tasks.filter { $0.isCompleted }.reduce(0) { $0 + $1.rewardPoints } }
-    // Home lists the still-to-do tasks. Cancelled ones are excluded HERE and only here: the Tasks
-    // screen still shows them (struck through) so the child learns the chore was called off, but
-    // Home's "what should I do now" card must not.
-    var activeTasks: [OilaDeviceTask] { tasks.filter { !$0.isCompleted && !$0.isCancelled } }
+    // Home lists the still-to-do tasks — `Active` ones only, the one status the child can complete.
+    // Cancelled (and Expired, or any status a newer backend adds) are excluded HERE and only here:
+    // the Tasks screen still shows them so the child learns the chore was called off, but Home's
+    // "what should I do now" card must not.
+    var activeTasks: [OilaDeviceTask] { tasks.filter(\.isActive) }
 
     /// Home preview rows: up to two pending tasks plus the most-recently-completed one, so the
     /// card shows a "Bajarildi" row like the design (which mixes pending + a done task).
@@ -995,6 +997,9 @@ final class BolajonHomeViewModel: ObservableObject {
     }
 
     func complete(_ task: OilaDeviceTask) async {
+        // The row only offers "done" on `Active`; this holds the same line for any other caller, so
+        // a stale row can never POST a completion the contract does not allow.
+        guard task.isActive else { return }
         guard !completingTaskIDs.contains(task.id) else { return }
         completingTaskIDs.insert(task.id)
         defer { completingTaskIDs.remove(task.id) }

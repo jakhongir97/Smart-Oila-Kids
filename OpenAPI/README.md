@@ -7,6 +7,38 @@ Place backend specs here:
 
 Current workspace already contains both files and they can be used directly.
 
+## ♻️ REFRESHED 2026-09-24 — both live documents re-captured (build 26)
+
+`oila360_live_openapi.json` was rebuilt from the two live documents as fetched on 2026-09-24
+(`api.json`: 128 paths, 80 schemas; `ingestion.json`: 8 paths, 19 schemas), merged the documented way.
+Result: **135 paths, 182 operations, 98 schemas** (was 116 / 151 / 66). Every operation the previous
+snapshot described is still live; nothing was removed.
+
+- **31 operations added, none on the device surface.** All admin, parent or auth: promo codes, plan
+  prices, app bundles, campaign links/costs/funnel, acquisition stats, store-review admin,
+  subscription trial, payment switch, `POST /auth/telegram/contact`, admin location history, and
+  `DELETE /parent/children/{id}/lock/manual`. The child client-count floor stays **27**.
+- **Device routes re-described, same paths and verbs:** `GET /device/lock/state` is now typed
+  (`LockStateResponseDto`: `serverTime`, `manualLock{startsAt,endsAt}`, `schedules[]`, …);
+  `GET /device/home` gained the required `unpairPinRequired` and a typed child; every device 401 now
+  separates `DEVICE_UNPAIRED` ("a valid device token whose pairing is gone") from `UNAUTHORIZED`
+  ("a missing, malformed, expired or foreign-signed token") with "Switch on `errorCode`: only
+  DEVICE_UNPAIRED means the pairing is gone"; `DeviceHomeTaskDto.status` says only `Active` may be
+  completed; `PostDeviceStatusDto.diagnostics` lists its known keys (including `usageAccess`);
+  `POST /device/location/batch` documents that a 400 rejects the whole batch.
+- **Two things the merge rule used to promise never happens, now happen.** `/health` is in both
+  documents (identical — one copy kept). `AppUsageStatDto` is in both with the same fields and
+  different prose; the **ingestion** copy is kept, because it is the one the device surface returns.
+- `AttributionTouchDto`, the DTO this file used to carry for `POST /attribution/touch` after deriving
+  it from the running server (see 2026-08-18 below), is gone: the published document now types that
+  route with its own `RecordTouchDto`, which replaces the derivation.
+
+What the child app changed in the same build to match (build 26, contract lane): a 401 resets the
+pairing only on `DEVICE_UNPAIRED` (one confirmation probe); `UNAUTHORIZED` or a bare 401 is logged and
+backed off, never a reset. `usageAccess` is now sent from the Screen Time authorization. A Screen Time
+switch-off is reported through `POST /device/apps/removal-attempt`. The "done" button shows on
+`Active` tasks only. A 400 on `location/batch` drops that batch instead of re-queueing it.
+
 ## ➕ ADDED 2026-09-16 — the daily usage report (ingestion surface refreshed)
 
 The device-telemetry half of the backend is published separately, behind the docs basic-auth, at

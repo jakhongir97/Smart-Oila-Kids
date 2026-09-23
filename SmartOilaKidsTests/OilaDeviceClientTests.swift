@@ -200,20 +200,42 @@ final class OilaDeviceClientTests: XCTestCase {
         XCTAssertEqual(tokens.access, "NEW")
     }
 
-    func testUnauthorizedWithoutRefreshTokenSurfacesRequiresRePair() async {
-        // A paired device holds no refresh token, so a 401 can't be refreshed away.
-        let tokens = InMemoryTokenStore(access: "OLD", refresh: nil)
-        let client = makeClient(tokens: tokens)
-        TestHTTPURLProtocol.requestHandler = { [self] request in status(request, 401) }
-
+    /// What a 401 surfaces as for a paired device (no refresh token, so it can't be refreshed away).
+    private func surfacedError(for body: String) async -> OilaAPIError? {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "OLD", refresh: nil))
+        TestHTTPURLProtocol.requestHandler = { [self] request in status(request, 401, body) }
         do {
             try await client.updateFCMToken("fcm-token")
             XCTFail("expected the 401 to surface as an error")
+            return nil
         } catch let error as OilaAPIError {
-            XCTAssertTrue(error.requiresRePair)
+            return error
         } catch {
             XCTFail("unexpected error type: \(error)")
+            return nil
         }
+    }
+
+    func testABare401IsARefusedTokenNotAGonePairing() async {
+        // Flipped in build 26. A 401 with no errorCode — a proxy, a gateway — used to mean
+        // "re-pair", which is how a backend auth blip could wipe every child's pairing.
+        let error = await surfacedError(for: #"{"success":false}"#)
+        XCTAssertEqual(error?.statusCode, 401)
+        XCTAssertEqual(error?.requiresRePair, false)
+        XCTAssertEqual(error?.isCredentialRejected, true)
+    }
+
+    func testDeviceUnpairedSurfacesAsAGonePairing() async {
+        let error = await surfacedError(for: #"{"success":false,"message":"Device unpaired","errorCode":"DEVICE_UNPAIRED"}"#)
+        XCTAssertEqual(error?.errorCode, OilaAPIError.deviceUnpairedCode)
+        XCTAssertEqual(error?.requiresRePair, true)
+    }
+
+    func testUnauthorizedKeepsItsErrorCodeAndIsNotAGonePairing() async {
+        let error = await surfacedError(for: #"{"success":false,"message":"Invalid token","errorCode":"UNAUTHORIZED"}"#)
+        XCTAssertEqual(error?.errorCode, "UNAUTHORIZED", "the server's own code survives the missing refresh token")
+        XCTAssertEqual(error?.requiresRePair, false)
+        XCTAssertEqual(error?.isCredentialRejected, true)
     }
 
     // MARK: Location batch

@@ -19,9 +19,11 @@ import UserNotifications
 ///    stray key does not just lose the diagnostics — it makes the child look offline. Every key
 ///    emitted here is one the ingest schema documents.
 /// 2. **A missing key means "never reported", not "denied".** So concepts iOS does not have are
-///    OMITTED rather than sent as `unavailable`: `batteryOptimization`, `usageAccess`,
-///    `accessibility`, `overlay`, `autoStart` are Android notions, and claiming `unavailable` for
-///    them would put a row on the parent's screen that says nothing and can never change.
+///    OMITTED rather than sent as `unavailable`: `batteryOptimization`, `accessibility`, `overlay`,
+///    `autoStart` are Android notions, and claiming `unavailable` for them would put a row on the
+///    parent's screen that says nothing and can never change. `usageAccess` is NOT one of them any
+///    more (build 26): iOS has a real equivalent — the Screen Time (Family Controls) authorization
+///    that app blocking and usage measurement both depend on — see `usageAccessValue`.
 /// 3. **Values are exactly `granted | denied | not_determined | unavailable`.** Anything else is
 ///    rejected, so the mapping below is total and has no default-through case.
 ///
@@ -41,13 +43,38 @@ enum DeviceDiagnosticsReporter {
     static let emittableKeys: Set<String> = [
         "location", "locationBackground", "locationServices",
         "notifications", "microphone", "camera",
-        "backgroundRefresh", "lowPowerMode"
+        "backgroundRefresh", "lowPowerMode", "usageAccess"
     ]
+
+    /// `usageAccess` for the Screen Time (Family Controls) authorization.
+    ///
+    /// Android's `usageAccess` is the special access its app blocking and usage stats hang on; on
+    /// iOS that role is played by the Family Controls authorization, so the key means the same thing
+    /// to the parent on both platforms: "can this phone measure and block apps". Fed from
+    /// `ScreenTimeAuthorizationManager.status` rather than the raw `AuthorizationCenter` answer, so
+    /// the ~1 s of `.notDetermined` FamilyControls reports at cold launch on an approved phone
+    /// (measured 2026-09-16) is not reported as a revocation. `.unavailable` is the manager's word for
+    /// "cannot be granted on this phone" (restricted, unsupported account, or Screen Time switched
+    /// off in this build), which is exactly the contract's `unavailable`.
+    ///
+    /// This is also how a child switching Screen Time off reaches the parent even when the
+    /// removal-attempt alert cannot (see `DeviceControlIntegrityNotifier.recordScreenTimeRevoked`):
+    /// every status post carries `denied` from then on.
+    static func usageAccessValue(_ status: ScreenTimePermissionStatus) -> String {
+        switch status {
+        case .granted: return Value.granted
+        case .denied: return Value.denied
+        case .notDetermined: return Value.notDetermined
+        case .unavailable: return Value.unavailable
+        }
+    }
 
     /// Pure so the mapping is testable without a device, a permission prompt, or a network.
     ///
     /// - Parameter locationServicesEnabled: the device-wide switch. `nil` when it could not be read
     ///   off the main thread in time; the key is then omitted rather than guessed.
+    /// - Parameter usageAccess: the Screen Time authorization as `ScreenTimeAuthorizationManager`
+    ///   last resolved it.
     static func map(
         location: CLAuthorizationStatus,
         locationServicesEnabled: Bool?,
@@ -55,7 +82,8 @@ enum DeviceDiagnosticsReporter {
         microphone: AVAudioSession.RecordPermission,
         camera: AVAuthorizationStatus,
         backgroundRefresh: UIBackgroundRefreshStatus,
-        lowPowerMode: Bool
+        lowPowerMode: Bool,
+        usageAccess: ScreenTimePermissionStatus
     ) -> [String: String] {
         var map: [String: String] = [:]
 
@@ -133,6 +161,8 @@ enum DeviceDiagnosticsReporter {
         // as "normal power" so that, as with every other key here, `denied` is the state worth
         // looking at.
         map["lowPowerMode"] = lowPowerMode ? Value.denied : Value.granted
+
+        map["usageAccess"] = usageAccessValue(usageAccess)
 
         return map
     }
