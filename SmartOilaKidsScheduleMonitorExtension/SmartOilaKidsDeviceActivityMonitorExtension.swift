@@ -15,10 +15,10 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         super.intervalDidStart(for: activity)
         Self.log.notice("schedule_monitor interval_start activity=\(activity.rawValue, privacy: .public)")
 
-        // The lock-deadline activity exists for its END only; the lock itself was applied by the
-        // app when the server said so. Nothing to do here but say it started.
-        if DeviceLockDeadlineActivityIdentifier.isDeadlineActivity(rawValue: activity.rawValue) {
-            Self.log.notice("schedule_monitor lock_deadline interval_start")
+        // A whole-device lock edge: the phone may be offline and the app dead, and this is the one
+        // process iOS wakes at the minute. Re-evaluate the rule; never lock or unlock blindly.
+        if DeviceLockEdgeActivityIdentifier.isLockEdgeActivity(rawValue: activity.rawValue) {
+            handleLockEdge(activity: activity, callback: .intervalStart)
             return
         }
 
@@ -60,8 +60,11 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         super.intervalDidEnd(for: activity)
         Self.log.notice("schedule_monitor interval_end activity=\(activity.rawValue, privacy: .public)")
 
-        if DeviceLockDeadlineActivityIdentifier.isDeadlineActivity(rawValue: activity.rawValue) {
-            releaseLockAtDeadline(activity: activity)
+        // An edge activity ends 16 minutes after its edge — or early, when it is restarted or
+        // stopped. Either way the rule at this moment is the answer.
+        if DeviceLockEdgeActivityIdentifier.isLockEdgeActivity(rawValue: activity.rawValue)
+            || DeviceLockLegacyDeadline.isLegacyActivity(rawValue: activity.rawValue) {
+            handleLockEdge(activity: activity, callback: .intervalEnd)
             return
         }
 
@@ -143,38 +146,69 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
     private let sharedStore = DeviceAppLimitSharedStore()
     private let eventStore = DeviceControlEventSharedStore()
     private let usageLedger = ScreenTimeUsageLedger()
-    private let deadlineStore = DeviceLockDeadlineSharedStore()
+    private let lockPolicyStore = DeviceLockPolicySharedStore()
 }
 
-// MARK: - The lock deadline
+// MARK: - The whole-device lock edges
 
 private extension SmartOilaKidsDeviceActivityMonitorExtension {
-    /// The whole-device lock's end arrived and the app may not be running: open the phone.
+    enum LockEdgeCallback: String {
+        case intervalStart = "start"
+        case intervalEnd = "end"
+    }
+
+    /// A lock edge arrived and the app may not be running: decide the lock by the rule and make the
+    /// OS match — the backend contract of 2026-09-23 ("at startsAt and endsAt re-check by itself")
+    /// in the one process iOS promises to wake for it, internet or not.
     ///
-    /// This is the product rule of 2026-09-16 in the one process iOS promises to wake for it —
-    /// "if the internet is off, the phone unlocks by itself after that time". It writes the two
-    /// keys the whole-device lock owns on the DEFAULT store and nothing else: `shield.applications`
-    /// holds the per-app blocks, which outlive the lock and which the app's change guard would not
-    /// put back. Then it marks the App Group so a relaunched app knows the OS is already open, and
-    /// tells an app that happens to be alive to drop its cover.
+    /// 1. Load the policy the app saved and evaluate it on the trusted clock — at the edge's own
+    ///    minute for an `intervalDidStart` that fired a little early (`evaluationTime`), at now for
+    ///    an `intervalDidEnd` (sixteen minutes on, or a restart/stop).
+    /// 2. Write the two whole-device keys on the DEFAULT store through the shared helper; the
+    ///    per-app blocks in `shield.applications` are not touched.
+    /// 3. Arm the next edges, so the chain carries on with the app dead for days.
+    /// 4. Tell an app that happens to be alive, and log one line.
     ///
-    /// Guarded by the recorded end: iOS delivers `intervalDidEnd` for a RESTART of a running
-    /// activity too (measured 2026-09-16), and a parent extending the lock must not open it.
-    func releaseLockAtDeadline(activity: DeviceActivityName) {
-        let now = Date()
-        let record = deadlineStore.load()
-        guard let dsn = DeviceLockDeadlineActivityIdentifier.dsn(from: activity.rawValue),
-              DeviceLockDeadlineMonitoring.isReleaseDue(record: record, dsn: dsn, now: now) else {
-            let remaining = record.map { Int($0.endsAt.timeIntervalSince(now)) } ?? -1
-            Self.log.notice("schedule_monitor lock_deadline ignored reason=not_due record=\(record == nil ? 0 : 1, privacy: .public) remaining_s=\(remaining, privacy: .public)")
+    /// Because it re-evaluates instead of flipping, a restart's spurious callback pair, an edge the
+    /// parent has since moved and a clock moved forward (which fires every edge early) all come out
+    /// right.
+    func handleLockEdge(activity: DeviceActivityName, callback: LockEdgeCallback) {
+        let raw = activity.rawValue
+        guard let snapshot = lockPolicyStore.load() else {
+            // No policy yet: either unpaired (nothing may lock) or build 24's activity firing before
+            // this build's app has ever run. Then build 24's own promise stands — open at its end.
+            var released = false
+            if callback == .intervalEnd, DeviceLockLegacyDeadline.isLegacyActivity(rawValue: raw),
+               let end = DeviceLockLegacyDeadline.recordedEnd(), Date().timeIntervalSince(end) >= -5 {
+                DeviceLockPolicy.applyWholeDevice(locked: false)
+                DeviceLockLegacyDeadline.clear()
+                released = true
+            }
+            Self.log.notice("schedule_monitor lock_edge callback=\(callback.rawValue, privacy: .public) outcome=no_snapshot legacy_released=\(released ? 1 : 0, privacy: .public)")
             return
         }
-        DeviceLockDeadlineMonitoring.releaseGlobalShield()
-        deadlineStore.markReleased(at: now)
-        DeviceLockDeadlineSharedStore.postReleased()
-        // Read back in this process, the way every App Group write here is verified.
-        let readBack = deadlineStore.releasedAt() != nil
-        Self.log.notice("schedule_monitor lock_deadline released overdue_s=\(Int(now.timeIntervalSince(record?.endsAt ?? now)), privacy: .public) mark_read_back=\(readBack ? 1 : 0, privacy: .public)")
+        let clock = DeviceLockClock.live
+        let wallNow = clock.wallNow()
+        let trustedNow = clock.trustedNow(anchor: snapshot.clock)
+        let evaluationTime = callback == .intervalStart
+            ? DeviceLockEdgeMonitoring.evaluationTime(now: trustedNow, activityName: raw)
+            : trustedNow
+        let calendar = DeviceLockPolicy.phoneCalendar()
+        let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
+        let wrote = DeviceLockPolicy.applyWholeDevice(locked: locked)
+        lockPolicyStore.markEdgeEvaluated(at: evaluationTime)
+        let edges = DeviceLockPolicy.edges(
+            after: evaluationTime, horizon: DeviceLockEdgeMonitoring.horizon, snapshot: snapshot, calendar: calendar
+        )
+        let entries = DeviceLockEdgeMonitoring.plan(
+            dsn: snapshot.dsn, edges: edges, now: trustedNow, skew: trustedNow.timeIntervalSince(wallNow)
+        )
+        let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: wallNow)
+        DeviceLockEdgeMonitoring.postDidEvaluate()
+        let nextIn = edges.first.map { Int($0.timeIntervalSince(trustedNow)) } ?? -1
+        Self.log.notice(
+            "schedule_monitor lock_edge callback=\(callback.rawValue, privacy: .public) activity=\(raw, privacy: .public) locked=\(locked ? 1 : 0, privacy: .public) wrote=\(wrote ? 1 : 0, privacy: .public) eval_ahead_s=\(Int(evaluationTime.timeIntervalSince(trustedNow)), privacy: .public) skew_s=\(Int(trustedNow.timeIntervalSince(wallNow)), privacy: .public) next_edge_in_s=\(nextIn, privacy: .public) armed=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public)"
+        )
     }
 }
 

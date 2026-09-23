@@ -37,7 +37,6 @@
 "lock.schedule" = "Jadval: %@";
 "lock.until" = "%@ gacha";
 "lock.offline_note" = "Internet bo'lmasa ham %@ da o'zi ochiladi.";
-"lock.local_time" = "Qurilma vaqti: %@";
 
 
 
@@ -370,11 +369,7 @@
 /* Screen Time — app picker and the always-allowed set */
 "common.save" = "Saqlash";
 "screentime.picker.restricted.title" = "Ilovalarni tanlang";
-"screentime.picker.allowed.title" = "Doim ruxsat etilgan";
 "screentime.picker.restricted.hint" = "Qoidalar qaysi ilovalarga tegishli ekanini tanlang. Apple bu tanlovni faqat shu telefonda qilishga ruxsat beradi — web'dan tanlab bo'lmaydi.";
-"screentime.picker.allowed.hint" = "Bu ilovalar telefon bloklanganda ham ishlaydi. Telefon va Xabarlar'ni qo'shing — bola sizga doim qo'ng'iroq qila olsin.";
-"settings2.always_allowed" = "Doim ruxsat etilgan ilovalar";
-"settings2.always_allowed_sub" = "Telefon bloklanganda ham ishlaydigan ilovalar";
 "settings2.restricted_apps" = "Bloklanadigan va hisoblanadigan ilovalar";
 "settings2.restricted_apps_sub" = "Bir martalik sozlash: ota-ona bloklay oladigan va vaqtini ko'radigan ilovalarni tanlang";
 "settings2.restricted_apps_count" = "%d tayyor, %d nomi tanlanmagan";

@@ -2,15 +2,22 @@ import FamilyControls
 import Foundation
 import ManagedSettings
 
-/// The app-group half of the always-allowed set, readable from the app AND from the schedule
-/// monitor extension.
+/// The app-group half of the always-allowed set — RETIRED in build 26.
 ///
-/// The extension applies the same global shield as the app, from outside the app, when a schedule
-/// window opens. If only the app excepted Phone/Messages/itself, a shield raised by the extension
-/// at 22:00 would still strand the child — so both sides must read one set. This type is
-/// deliberately not actor-isolated and holds no state: the extension wakes for a few hundred
-/// milliseconds with no main actor to hop to.
+/// The set let whoever held the phone exempt any app from the parent's whole-device lock through a
+/// Settings row on the child's phone. The product rule (PO, 2026-09-21) is that the parent controls
+/// blocking from the web and the child phone has no switches, so the row is gone, the whole-device
+/// lock is plain `.all()` (`DeviceLockPolicy.applyWholeDevice`), and `clear()` wipes any stored set
+/// at every launch. The type stays compiled only because removing it would ripple through files
+/// other work is touching; nothing reads it any more.
 enum ScreenTimeAlwaysAllowedSharedStore {
+    /// Forget any stored set. Called at every launch by `OilaTelemetryService`, so a selection an
+    /// earlier build saved can never be read again.
+    static func clear(defaults: UserDefaults? = appGroupDefaults()) {
+        defaults?.removeObject(forKey: selectionKey)
+        defaults?.removeObject(forKey: configuredKey)
+    }
+
     /// Resolved here rather than borrowed from `ScreenTimeUsageAppGroup`, which is in the app-only
     /// `Shared/ScreenTimeUsage` sources and is not compiled into the monitor extension. Same env
     /// override and same fallback, so all three readers agree on one container.

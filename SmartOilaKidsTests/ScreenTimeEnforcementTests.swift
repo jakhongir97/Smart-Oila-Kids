@@ -334,8 +334,8 @@ final class BlockedApplicationsControllerTests: XCTestCase {
         XCTAssertEqual(protection, [true, true])
     }
 
-    /// A whole-device lock ending (the 8 h deadline) opens the shield keys only; the phone stays
-    /// undeletable.
+    /// A whole-device lock ending (an edge, before any server answer) opens the shield keys only;
+    /// the phone stays undeletable.
     func testDeletionProtectionOutlivesAWholeDeviceLockRelease() {
         var protection: [Bool] = []
         var released = 0
@@ -345,7 +345,7 @@ final class BlockedApplicationsControllerTests: XCTestCase {
         let controller = BlockedApplicationsController(
             authorizationStatus: { .granted },
             apply: { _, _, _ in },
-            releaseGlobal: { released += 1 },
+            wholeDevice: { locked in if !locked { released += 1 } },
             removalProtectionEnabled: { true },
             removalProtection: { protection.append($0) },
             tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
@@ -353,7 +353,7 @@ final class BlockedApplicationsControllerTests: XCTestCase {
         )
 
         controller.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
-        controller.releaseWholeDeviceLock()
+        controller.applyWholeDeviceOnly(locked: false)
         controller.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
 
         XCTAssertEqual(released, 1)
@@ -464,14 +464,14 @@ final class BlockedApplicationsControllerTests: XCTestCase {
     }
 }
 
-/// The always-allowed set is a REFINEMENT of the whole-device lock, never a precondition for it.
-/// The branch this was ported from had it the other way around — no set, no shield — which would
-/// have turned the one Screen Time feature proven on hardware into a button that does nothing.
-final class AlwaysAllowedExceptionsTests: XCTestCase {
+/// The always-allowed set is RETIRED (build 26): its Settings row let whoever held the phone exempt
+/// any app from the parent's whole-device lock, and the parent controls blocking from the web (PO,
+/// 2026-09-21). What remains is the guarantee that a set an earlier build stored is never read again.
+final class AlwaysAllowedRetiredTests: XCTestCase {
     private var suiteNames: [String] = []
 
     private func makeDefaults() -> UserDefaults {
-        let name = "AlwaysAllowedExceptionsTests.\(UUID().uuidString)"
+        let name = "AlwaysAllowedRetiredTests.\(UUID().uuidString)"
         suiteNames.append(name)
         return UserDefaults(suiteName: name)!
     }
@@ -484,38 +484,17 @@ final class AlwaysAllowedExceptionsTests: XCTestCase {
         super.tearDown()
     }
 
-    func testAnEmptyExceptionSetStillLocksTheWholeDevice() {
-        XCTAssertEqual(BlockedApplicationsController.categoryPolicy(alwaysAllowed: []), .all())
-    }
-
-    /// A fresh device has no exception set, and that is the normal state — not a broken one.
-    func testAFreshDeviceIsSimplyUnconfigured() {
-        let defaults = makeDefaults()
-
-        XCTAssertFalse(ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults))
-        XCTAssertTrue(ScreenTimeAlwaysAllowedSharedStore.allowedApplicationTokens(defaults: defaults).isEmpty)
-    }
-
-    /// "Configured" with nothing in it excepts nothing, so it must not read as configured — that
-    /// would let a UI claim Phone is protected when it is not.
-    func testAnEmptyStoredSelectionIsNotAValidConfiguration() {
+    func testClearingForgetsAStoredSet() {
         let defaults = makeDefaults()
         defaults.set(true, forKey: ScreenTimeAlwaysAllowedSharedStore.configuredKey)
+        defaults.set(Data("a stored selection".utf8), forKey: ScreenTimeAlwaysAllowedSharedStore.selectionKey)
 
+        ScreenTimeAlwaysAllowedSharedStore.clear(defaults: defaults)
+
+        XCTAssertNil(defaults.object(forKey: ScreenTimeAlwaysAllowedSharedStore.selectionKey))
+        XCTAssertNil(defaults.object(forKey: ScreenTimeAlwaysAllowedSharedStore.configuredKey))
         XCTAssertFalse(ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults))
-    }
-
-    /// Tokens are voided when authorization is revoked, so a stored blob can stop decoding. It must
-    /// fail closed to "no exceptions" — a full lock — rather than throwing or excepting garbage.
-    func testAnUndecodableSelectionFailsClosed() {
-        let defaults = makeDefaults()
-        defaults.set(true, forKey: ScreenTimeAlwaysAllowedSharedStore.configuredKey)
-        defaults.set(Data("not a FamilyActivitySelection".utf8),
-                     forKey: ScreenTimeAlwaysAllowedSharedStore.selectionKey)
-
         XCTAssertTrue(ScreenTimeAlwaysAllowedSharedStore.allowedApplicationTokens(defaults: defaults).isEmpty)
-        XCTAssertFalse(ScreenTimeAlwaysAllowedSharedStore.isConfigured(defaults: defaults))
-        XCTAssertEqual(BlockedApplicationsController.categoryPolicy(alwaysAllowed: []), .all())
     }
 }
 
@@ -860,17 +839,18 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
     }
 }
 
-// MARK: - The lock deadline on the enforcement side (2026-09-18)
+// MARK: - The whole-device lock on the enforcement side (build 26)
 
-/// When the lock's deadline passes, the OS shield must open — through the key-scoped release, never
-/// through the server-state path, and on launch only when the previous process left it up.
+/// The whole-device half is decided on the phone from the saved policy
+/// (`OilaTelemetryService.reevaluateLock`), so it may be applied before the server answers this
+/// launch — an offline cold launch inside a window locks, one past its end opens. The per-app half
+/// stays behind the server-confirmation gate.
 @MainActor
-final class ScreenTimeLockDeadlineEnforcementTests: XCTestCase {
+final class ScreenTimeLockEnforcementTests: XCTestCase {
     private var suiteNames: [String] = []
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func makeDefaults() -> UserDefaults {
-        let name = "ScreenTimeLockDeadlineEnforcementTests.\(UUID().uuidString)"
+        let name = "ScreenTimeLockEnforcementTests.\(UUID().uuidString)"
         suiteNames.append(name)
         return UserDefaults(suiteName: name)!
     }
@@ -884,182 +864,137 @@ final class ScreenTimeLockDeadlineEnforcementTests: XCTestCase {
     private struct Harness {
         let coordinator: ScreenTimeEnforcementCoordinator
         let blocked: BlockedApplicationsController
+        /// Full applies: (whole device, per-app bundle ids).
         let applied: () -> [(Bool, [String])]
-        let released: () -> Int
-        let armed: () -> [(String, Date)]
-        let stopped: () -> [(String, Bool)]
+        /// Whole-device-only writes (the gate's one allowed write).
+        let wholeDevice: () -> [Bool]
     }
 
     private func makeHarness(
         defaults: UserDefaults,
+        authorized: Bool = true,
         state: @escaping () -> ScreenTimeEnforcementLockState
     ) -> Harness {
         var applied: [(Bool, [String])] = []
-        var released = 0
-        var armed: [(String, Date)] = []
-        var stopped: [(String, Bool)] = []
+        var wholeDevice: [Bool] = []
         let blocked = BlockedApplicationsController(
-            authorizationStatus: { .granted },
+            authorizationStatus: { authorized ? .granted : .denied },
             apply: { locked, _, ids in applied.append((locked, ids)) },
-            releaseGlobal: { released += 1 },
+            wholeDevice: { wholeDevice.append($0) },
             tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
             userDefaults: defaults
         )
         let coordinator = ScreenTimeEnforcementCoordinator(
             lockState: state,
             blockedApplications: blocked,
-            authorizationStatus: { .granted },
+            authorizationStatus: { authorized ? .granted : .denied },
             canOpenScheme: { _ in false },
             syncUpdate: { _, _ in },
-            armDeadline: { dsn, end in armed.append((dsn, end)); return true },
-            stopDeadline: { dsn, force in stopped.append((dsn, force)) },
             userDefaults: defaults,
-            now: { self.now }
+            now: { Date(timeIntervalSince1970: 1_800_000_000) }
         )
-        return Harness(
-            coordinator: coordinator, blocked: blocked,
-            applied: { applied }, released: { released }, armed: { armed }, stopped: { stopped }
-        )
+        return Harness(coordinator: coordinator, blocked: blocked, applied: { applied }, wholeDevice: { wholeDevice })
     }
 
-    func testALockWithAnEndArmsTheExtensionActivityAndAnUnlockStopsIt() {
-        let defaults = makeDefaults()
-        var state = ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: [], limitReached: [],
-                                                   lockEndsAt: now.addingTimeInterval(3_600))
-        let h = makeHarness(defaults: defaults) { state }
-        h.coordinator.start(dsn: "child-1")
-        XCTAssertTrue(h.armed().isEmpty, "nothing before the server has answered this launch")
-
-        h.coordinator.handleLockStateDidChange()
-        XCTAssertEqual(h.applied().last?.0, true)
-        XCTAssertEqual(h.armed().map(\.0), ["child-1"])
-        XCTAssertEqual(h.armed().first?.1, now.addingTimeInterval(3_600))
-
-        state = .released
-        h.coordinator.handleLockStateDidChange()
-        XCTAssertEqual(h.applied().last?.0, false)
-        XCTAssertEqual(h.stopped().last?.0, "child-1")
-        XCTAssertEqual(h.stopped().last?.1, false, "an unlocked poll stops without forcing an XPC call")
-
-        h.coordinator.stop()
-        XCTAssertEqual(h.stopped().last?.1, true, "unpair always stops: the activity must not outlive the family")
-    }
-
-    func testALockWithoutAnEndArmsNothing() {
+    func testAnOfflineColdLaunchInsideASavedWindowLocksTheWholeDeviceOnly() {
         let defaults = makeDefaults()
         let h = makeHarness(defaults: defaults) {
-            ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: [], limitReached: [])
+            ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: ["com.burbn.instagram"], limitReached: [], lockKnown: true)
         }
         h.coordinator.start(dsn: "child-1")
-        h.coordinator.handleLockStateDidChange()
-        XCTAssertEqual(h.applied().last?.0, true)
-        XCTAssertTrue(h.armed().isEmpty, "the rolling 8 h ceiling is the app's to enforce, not an activity to re-arm every poll")
-        h.coordinator.stop()
-    }
-
-    func testADeadlineReleaseRestoresThePerAppShieldNotJustTheWholeDeviceKeys() {
-        // A whole-device lock nils `shield.applications`, so when the deadline release runs the
-        // per-app blocks that coexisted with it must be RE-WRITTEN, not silently dropped. With the
-        // app alive and the state confirmed, `handleLockDeadlineReleased` runs the full `applyNow`,
-        // which writes the selective shield (per-app tokens, categories nil).
-        let defaults = makeDefaults()
-        var state = ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: ["com.burbn.instagram"], limitReached: [],
-                                                   lockEndsAt: now.addingTimeInterval(3_600))
-        let h = makeHarness(defaults: defaults) { state }
-        h.coordinator.start(dsn: "child-1")
-        h.coordinator.handleLockStateDidChange()
-        XCTAssertEqual(h.applied().last?.0, true, "locked: whole device")
+        XCTAssertEqual(h.wholeDevice(), [true], "the saved policy says locked: lock, before any server answer")
+        XCTAssertTrue(h.applied().isEmpty, "the per-app half still waits for the server")
         XCTAssertTrue(h.blocked.appliedWholeDeviceLock)
-
-        // Deadline passes: the service set isLocked=false; the server still lists the per-app block.
-        state = ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: ["com.burbn.instagram"], limitReached: [],
-                                               releasedByDeadline: true)
-        h.coordinator.handleLockDeadlineReleased()
-
-        XCTAssertFalse(h.blocked.appliedWholeDeviceLock)
-        // The last write is the SELECTIVE shield: not a whole-device lock, and the per-app block kept.
-        XCTAssertEqual(h.applied().last?.0, false)
-        XCTAssertEqual(h.applied().last?.1, ["com.burbn.instagram"], "the parent's per-app block is re-enforced, not dropped")
-        XCTAssertEqual(h.blocked.appliedBundleIds, ["com.burbn.instagram"])
-        XCTAssertEqual(h.stopped().last?.0, "child-1", "the deadline activity is retired")
-        XCTAssertFalse(defaults.bool(forKey: BlockedApplicationsController.persistedGlobalLockKey))
+        XCTAssertTrue(defaults.bool(forKey: BlockedApplicationsController.persistedGlobalLockKey))
         h.coordinator.stop()
     }
 
-    func testAnExpiredLockLeftUpByThePreviousProcessIsOpenedOnLaunch() {
+    func testAnOfflineColdLaunchPastTheEndOpensTheWholeDeviceAndKeepsThePerAppBlocks() {
         let defaults = makeDefaults()
-        // What the previous process persisted: a whole-device lock, applied.
+        // What the previous process persisted: a whole-device lock and a per-app block, applied.
         defaults.set(true, forKey: BlockedApplicationsController.persistedGlobalLockKey)
         defaults.set(["com.burbn.instagram"], forKey: BlockedApplicationsController.persistedBundleIdsKey)
         let h = makeHarness(defaults: defaults) {
-            ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: [], limitReached: [], releasedByDeadline: true)
+            ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: [], limitReached: [], lockKnown: true)
         }
-
         h.coordinator.start(dsn: "child-1")
-
-        XCTAssertEqual(h.released(), 1, "the OS shield the last process left up must open at launch, offline")
-        XCTAssertTrue(h.applied().isEmpty, "…and nothing else may be written before a server answer")
+        XCTAssertEqual(h.wholeDevice(), [false], "the lock the last process left up opens at launch, offline")
+        XCTAssertTrue(h.applied().isEmpty, "and nothing else is written before a server answer")
         XCTAssertFalse(h.blocked.appliedWholeDeviceLock)
-        // The cache is emptied so the first server-confirmed apply re-writes the per-app shield
-        // rather than being blocked by the change guard (the whole-device lock had nil'ed it).
-        XCTAssertTrue(h.blocked.appliedBundleIds.isEmpty)
-        // Idempotent: released() does not climb on a second pre-server applyNow (nothing left to open).
-        h.coordinator.restrictedAppsDidChange()
-        XCTAssertEqual(h.released(), 1)
+        XCTAssertEqual(h.blocked.appliedBundleIds, ["com.burbn.instagram"], "the per-app picture is untouched")
         h.coordinator.stop()
     }
 
-    func testLaunchWithoutAnExpiredLockTouchesNothing() {
+    func testAnUnknownDecisionWritesNothingBeforeTheServer() {
         let defaults = makeDefaults()
         defaults.set(true, forKey: BlockedApplicationsController.persistedGlobalLockKey)
         let h = makeHarness(defaults: defaults) {
-            // Restored as still locked (deadline not passed): nothing may change before the server.
-            ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: [], limitReached: [])
+            ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: [], limitReached: [])
         }
         h.coordinator.start(dsn: "child-1")
-        XCTAssertEqual(h.released(), 0)
+        XCTAssertTrue(h.wholeDevice().isEmpty, "no snapshot is not 'unlocked'")
         XCTAssertTrue(h.applied().isEmpty)
         XCTAssertTrue(h.blocked.appliedWholeDeviceLock)
         h.coordinator.stop()
-
-        // And a launch that was never locked at all: same.
-        let fresh = makeDefaults()
-        let h2 = makeHarness(defaults: fresh) {
-            ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: [], limitReached: [], releasedByDeadline: true)
-        }
-        h2.coordinator.start(dsn: "child-1")
-        XCTAssertEqual(h2.released(), 0, "no persisted lock, nothing to open")
-        h2.coordinator.stop()
     }
 
-    func testReleaseWholeDeviceLockIsANoOpWhenNoLockIsApplied() {
+    func testNothingIsWrittenWithoutAuthorization() {
         let defaults = makeDefaults()
-        var released = 0
-        let blocked = BlockedApplicationsController(
-            authorizationStatus: { .granted },
-            apply: { _, _, _ in },
-            releaseGlobal: { released += 1 },
-            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
-            userDefaults: defaults
-        )
-        blocked.releaseWholeDeviceLock()
-        XCTAssertEqual(released, 0)
-        blocked.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
-        blocked.releaseWholeDeviceLock()
-        XCTAssertEqual(released, 1)
-        XCTAssertFalse(blocked.appliedWholeDeviceLock)
-        // The next server-confirmed apply re-writes: the cache no longer claims anything is applied.
-        var applies = 0
-        let blocked2 = BlockedApplicationsController(
-            authorizationStatus: { .granted },
-            apply: { _, _, _ in applies += 1 },
-            releaseGlobal: {},
-            tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
-            userDefaults: defaults
-        )
-        blocked2.apply(wholeDeviceLocked: true, lockedPackages: [], limitReached: [])
-        blocked2.releaseWholeDeviceLock()
-        blocked2.apply(wholeDeviceLocked: false, lockedPackages: [], limitReached: [])
-        XCTAssertEqual(applies, 2, "after a local release the server's next verdict is always written")
+        let h = makeHarness(defaults: defaults, authorized: false) {
+            ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: [], limitReached: [], lockKnown: true)
+        }
+        h.coordinator.start(dsn: "child-1")
+        XCTAssertTrue(h.wholeDevice().isEmpty)
+        XCTAssertFalse(h.blocked.appliedWholeDeviceLock)
+        h.coordinator.stop()
+    }
+
+    /// An edge passing offline: the service flips `isLocked` and announces it; the enforcement
+    /// side follows through the gate until the server answers, and fully afterwards.
+    func testALocalEvaluationFollowsThroughTheGateAndThenTheFullApply() {
+        let defaults = makeDefaults()
+        var state = ScreenTimeEnforcementLockState(isLocked: true, lockedPackages: ["com.burbn.instagram"], limitReached: [], lockKnown: true)
+        let h = makeHarness(defaults: defaults) { state }
+        h.coordinator.start(dsn: "child-1")
+        XCTAssertEqual(h.wholeDevice(), [true])
+
+        state.isLocked = false
+        h.coordinator.handleLockEvaluationDidChange()
+        XCTAssertEqual(h.wholeDevice(), [true, false], "the end edge opens the phone before any server answer")
+        XCTAssertTrue(h.applied().isEmpty)
+
+        h.coordinator.handleLockStateDidChange()
+        XCTAssertEqual(h.applied().last?.0, false)
+        XCTAssertEqual(h.applied().last?.1, ["com.burbn.instagram"], "the per-app block is enforced once the server answers")
+        h.coordinator.stop()
+    }
+
+    /// The extension wrote the default store while this process slept, so the change guard's
+    /// picture may be stale: its notification makes the next apply write everything again.
+    func testTheExtensionsEdgeMakesTheNextApplyWriteEverything() {
+        let defaults = makeDefaults()
+        let h = makeHarness(defaults: defaults) {
+            ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: ["com.burbn.instagram"], limitReached: [], lockKnown: true)
+        }
+        h.coordinator.start(dsn: "child-1")
+        h.coordinator.handleLockStateDidChange()
+        XCTAssertEqual(h.applied().count, 1)
+        h.coordinator.handleLockStateDidChange()
+        XCTAssertEqual(h.applied().count, 1, "an unchanged state is not re-written")
+        h.coordinator.handleExtensionLockEdge()
+        XCTAssertEqual(h.applied().count, 2, "after the extension's edge it is")
+        h.coordinator.stop()
+    }
+
+    func testApplyWholeDeviceOnlyPersistsWhatItApplied() {
+        let defaults = makeDefaults()
+        let h = makeHarness(defaults: defaults) { .released }
+        h.blocked.applyWholeDeviceOnly(locked: true)
+        h.blocked.applyWholeDeviceOnly(locked: true)
+        XCTAssertEqual(h.wholeDevice(), [true, true], "the helper itself reads before it writes")
+        XCTAssertTrue(defaults.bool(forKey: BlockedApplicationsController.persistedGlobalLockKey))
+        h.blocked.applyWholeDeviceOnly(locked: false)
+        XCTAssertFalse(h.blocked.appliedWholeDeviceLock)
+        XCTAssertFalse(defaults.bool(forKey: BlockedApplicationsController.persistedGlobalLockKey))
     }
 }

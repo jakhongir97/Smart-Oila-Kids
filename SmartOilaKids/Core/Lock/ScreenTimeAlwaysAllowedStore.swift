@@ -2,9 +2,14 @@ import FamilyControls
 import Foundation
 import ManagedSettings
 
-/// The apps a shielded child can still reach.
+/// The apps a shielded child can still reach — RETIRED in build 26, kept compiled only.
 ///
-/// THE REASON THIS EXISTS. A whole-device lock applies `shield.applicationCategories = .all()`,
+/// Nothing presents it or reads it any more: its Settings row let whoever held the phone exempt any
+/// app from the parent's whole-device lock, and the parent controls blocking from the web (PO,
+/// 2026-09-21). The whole-device lock is plain `.all()`, and the stored set is cleared at every
+/// launch (`ScreenTimeAlwaysAllowedSharedStore.clear`). What follows is the original rationale.
+///
+/// THE REASON THIS EXISTED. A whole-device lock applies `shield.applicationCategories = .all()`,
 /// and `.all()` reaches Phone and Messages. Apple exempts the authorizing app, so Bolajon360 and
 /// its SOS button stay reachable (measured on device), but a child who cannot dial a parent
 /// directly is still a worse product than one who can. This set is how a parent says "these stay

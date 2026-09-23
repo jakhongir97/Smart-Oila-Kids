@@ -8,7 +8,9 @@ import os
 /// immediately on a `lock.refresh` push), and every one of them used to be decoded and dropped
 /// because iOS had no way to act on a bundle id:
 ///
-/// * `isLocked` → shield the whole device.
+/// * the whole-device lock → shield the whole device. Decided on the phone from the saved policy
+///   (`OilaTelemetryService.reevaluateLock`), which also writes it directly in any process; this
+///   side keeps its own cache in step and applies it before a server answer too (see `applyNow`).
 /// * `lockedPackages[]` → hide those apps.
 /// * `appLimits[].isLimitReached` → hide an app whose daily budget is spent.
 ///
@@ -31,15 +33,10 @@ struct ScreenTimeEnforcementLockState: Equatable {
     var isLocked: Bool
     var lockedPackages: [String]
     var limitReached: [String]
-    /// When the whole-device lock ends, if the server said (or the active schedule implies). Drives
-    /// the one-off `DeviceActivity` whose end opens the phone when the app is not running. The
-    /// 8 h no-server ceiling is deliberately NOT part of this: while the app is alive it enforces
-    /// that itself, and a dead app's phone opens the moment the child opens Bolajon360 (exempt
-    /// from the shield) through the launch-time release.
-    var lockEndsAt: Date? = nil
-    /// `OilaTelemetryService.lockReleasedByDeadline`: this process opened the lock on its own
-    /// because the deadline passed, and no server answer has arrived since.
-    var releasedByDeadline: Bool = false
+    /// `OilaTelemetryService.lockDecisionKnown`: a saved policy snapshot exists, so `isLocked` is a
+    /// decision rather than "nothing heard yet". Only a known decision is written before the server
+    /// has answered this launch.
+    var lockKnown: Bool = false
 
     static let released = ScreenTimeEnforcementLockState(isLocked: false, lockedPackages: [], limitReached: [])
 }
@@ -53,11 +50,6 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     typealias LabelledEntriesAction = () -> [ApplicationTokenCatalogue.Entry]
     typealias ArmUsageAction = (String) throws -> Int
     typealias UploadUsageAction = ([ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse
-    /// `(dsn, endsAt)`: arm the deadline activity ending at `endsAt`; returns true when a new one
-    /// was started. Injected so tests never touch `DeviceActivityCenter`.
-    typealias ArmDeadlineAction = (String, Date) throws -> Bool
-    /// `(dsn, force)`: stop the deadline activity; `force` also when no record says one is armed.
-    typealias StopDeadlineAction = (String, Bool) -> Void
 
     static let shared = ScreenTimeEnforcementCoordinator()
 
@@ -85,8 +77,6 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         reloadLabels: (() -> Void)? = nil,
         armUsage: ArmUsageAction? = nil,
         uploadUsage: UploadUsageAction? = nil,
-        armDeadline: ArmDeadlineAction? = nil,
-        stopDeadline: StopDeadlineAction? = nil,
         usageLedger: ScreenTimeUsageLedger = ScreenTimeUsageLedger(),
         userDefaults: UserDefaults = .standard,
         now: @escaping () -> Date = Date.init
@@ -97,10 +87,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
                 isLocked: service.isLocked,
                 lockedPackages: service.lockedPackages,
                 limitReached: ScreenTimeEnforcementCoordinator.limitReachedBundleIds(from: service.appLimits),
-                // The server's (or the active schedule's) end — NOT `lockDeadline`, whose 8 h ceiling
-                // moves with every poll and would re-arm the activity twice a minute.
-                lockEndsAt: service.lockEndsAt,
-                releasedByDeadline: service.lockReleasedByDeadline
+                lockKnown: service.lockDecisionKnown
             )
         }
         self.blockedApplications = blockedApplications ?? BlockedApplicationsController.shared
@@ -136,12 +123,6 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         self.uploadUsage = uploadUsage ?? { days in
             try await OilaDeviceClient.shared.reportDailyUsage(days: days)
         }
-        self.armDeadline = armDeadline ?? { dsn, endsAt in
-            try DeviceLockDeadlineMonitoring.arm(dsn: dsn, endsAt: endsAt)
-        }
-        self.stopDeadline = stopDeadline ?? { dsn, force in
-            DeviceLockDeadlineMonitoring.stop(dsn: dsn, force: force)
-        }
         self.usageLedger = usageLedger
         self.userDefaults = userDefaults
         self.now = now
@@ -162,18 +143,15 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
 
         let dsnChanged = normalized != currentDSN
-        let previousDSN = currentDSN
         currentDSN = normalized
 
         if lockStateObserver == nil {
             observeLockState()
-            observeLockDeadlineRelease()
+            observeLockEvaluation()
+            observeExtensionLockEdge()
             observeTokenCatalogue()
             observeUsageLedger()
         }
-        // A pairing that changed under a still-armed deadline activity: the old family's end must
-        // not open (or fail to open) the new family's phone.
-        if dsnChanged, let previous = previousDSN { stopDeadline(previous, true) }
 
         applyNow()
         armUsageMonitoring(reason: dsnChanged ? "start_new_dsn" : "start")
@@ -188,15 +166,16 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             NotificationCenter.default.removeObserver(lockStateObserver)
         }
         lockStateObserver = nil
-        if let deadlineReleaseObserver {
-            NotificationCenter.default.removeObserver(deadlineReleaseObserver)
+        if let lockEvaluationObserver {
+            NotificationCenter.default.removeObserver(lockEvaluationObserver)
         }
-        deadlineReleaseObserver = nil
+        lockEvaluationObserver = nil
+        if let extensionEdgeObserver {
+            NotificationCenter.default.removeObserver(extensionEdgeObserver)
+        }
+        extensionEdgeObserver = nil
         if let dsn = currentDSN {
             ScreenTimeUsageMonitoring.stop(dsn: dsn)
-            // The deadline activity belongs to the pairing that ended: left armed, it would fire
-            // on a phone paired to another family (or to none).
-            stopDeadline(dsn, true)
         }
         currentDSN = nil
         // A request in flight belongs to the pairing that just ended; its answer must not be
@@ -347,9 +326,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     func applyNow() {
         guard AppRuntime.screenTimeFeaturesEnabled, currentDSN != nil else { return }
 
-        // Nothing the server has not confirmed THIS LAUNCH may change what is enforced. Without
-        // this, every cold start (and every launch with no network) applies an all-empty state and
-        // lifts a lock the parent never lifted — the OS keeps ManagedSettings across launches, so
+        // Nothing the server has not confirmed THIS LAUNCH may change the PER-APP blocks. Without
+        // this, every cold start (and every launch with no network) applies an all-empty list and
+        // lifts blocks the parent never lifted — the OS keeps ManagedSettings across launches, so
         // "no data yet" and "no restrictions" are not the same thing and must not be treated alike.
         guard hasServerConfirmedState else {
             blockedApplications.restorePersistedState()
@@ -359,13 +338,13 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             //    it on this launch even if the server never answers — otherwise a child phone
             //    updated over TestFlight while offline stays deletable until its first poll.
             blockedApplications.assertAppRemovalProtectionIfAuthorized()
-            // 2. The previous process left the OS shielded and the lock's deadline has since
-            //    passed (the telemetry service released it on launch, or the monitor extension
-            //    already opened the phone). Open only the whole-device keys.
+            // 2. The whole-device half, from the saved policy and the clock. It IS something the
+            //    server said — a window or a schedule it sent earlier — so an offline cold launch
+            //    inside a lock locks, and one past its end opens. Only a known decision: with no
+            //    snapshot at all there is nothing to apply.
             let state = lockStateAction()
-            if state.releasedByDeadline, !state.isLocked, blockedApplications.appliedWholeDeviceLock {
-                blockedApplications.releaseWholeDeviceLock()
-                Self.log.notice("screentime_apply deadline_release_on_launch")
+            if state.lockKnown {
+                blockedApplications.applyWholeDeviceOnly(locked: state.isLocked)
             }
             return
         }
@@ -375,11 +354,13 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         let limitReached = state.limitReached + latestUsageLimitReached
 
         blockedApplications.apply(
-            wholeDeviceLocked: state.isLocked,
+            // A server answer about the per-app half (the usage upload's, say) can arrive before
+            // any lock policy has: an unknown whole-device decision keeps what is applied rather
+            // than reading as "unlocked".
+            wholeDeviceLocked: state.lockKnown ? state.isLocked : blockedApplications.appliedWholeDeviceLock,
             lockedPackages: lockedPackages,
             limitReached: limitReached
         )
-        syncDeadlineMonitoring(state)
 
         Self.log.notice(
             "screentime_apply global=\(state.isLocked ? 1 : 0, privacy: .public) blocked=\(self.blockedApplications.appliedBundleIds.count, privacy: .public) auth=\(self.authorizationStatusAction().rawValue, privacy: .public)"
@@ -400,39 +381,22 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         )
     }
 
-    /// Keep the extension's one-off deadline activity in step with the lock: armed while the phone
-    /// is locked with a known end, stopped otherwise. `DeviceLockDeadlineMonitoring.arm` is a
-    /// no-op when the same end is already armed, so calling this on every poll costs nothing and
-    /// provokes no spurious `intervalDidEnd`.
-    private func syncDeadlineMonitoring(_ state: ScreenTimeEnforcementLockState) {
-        guard let dsn = currentDSN else { return }
-        guard state.isLocked, let endsAt = state.lockEndsAt else {
-            stopDeadline(dsn, false)
-            return
-        }
-        guard authorizationStatusAction() == .granted else { return }
-        do {
-            _ = try armDeadline(dsn, endsAt)
-        } catch {
-            Self.log.error("lock_deadline arm_failed error=\(String(describing: error), privacy: .public)")
-        }
-    }
-
-    /// `OilaTelemetryService` opened the lock because its deadline passed. Reconcile the OS to match.
-    ///
-    /// `applyNow()`, not a bare key-scoped release: `OilaTelemetryService.isLocked` is already false
-    /// (the service set it before posting), so when the server state is confirmed this re-runs the
-    /// full enforcement — which clears the whole-device categories AND rewrites `shield.applications`
-    /// with the per-app blocks that coexisted with the lock (a whole-device lock nils
-    /// `shield.applications`, so a categories-only release would leave the parent's per-app blocks
-    /// unenforced). When the state is NOT yet confirmed (a scene-less/offline launch), `applyNow`'s
-    /// own gate falls through to the key-scoped `releaseWholeDeviceLock`, which is all that is
-    /// possible with no server state. Either way the deadline activity is retired.
-    func handleLockDeadlineReleased() {
+    /// `OilaTelemetryService` re-decided the lock locally (an edge passed, the clock changed, a
+    /// relaunch). The service has already written the OS; this keeps the per-app picture and the
+    /// controller's cache in step. Before a server answer this launch, `applyNow`'s gate writes the
+    /// whole-device half only.
+    func handleLockEvaluationDidChange() {
         guard currentDSN != nil else { return }
         applyNow()
-        if let dsn = currentDSN { stopDeadline(dsn, false) }
-        Self.log.notice("screentime_apply deadline_release global=0")
+    }
+
+    /// The monitor extension evaluated an edge and wrote the default store while this process may
+    /// have been suspended: whatever `BlockedApplicationsController` believes is applied may now be
+    /// wrong, so it is forgotten and everything is written again.
+    func handleExtensionLockEdge() {
+        guard currentDSN != nil else { return }
+        blockedApplications.resetAppliedCache()
+        applyNow()
     }
 
     /// Apps whose daily budget is spent. Pure, because the rule ("a budget the server says is
@@ -541,13 +505,27 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
     }
 
-    private func observeLockDeadlineRelease() {
-        deadlineReleaseObserver = NotificationCenter.default.addObserver(
-            forName: OilaTelemetryService.oilaLockDeadlineReleased,
+    private func observeLockEvaluation() {
+        lockEvaluationObserver = NotificationCenter.default.addObserver(
+            forName: OilaTelemetryService.oilaLockEvaluationDidChange,
             object: nil,
             queue: nil
         ) { [weak self] _ in
-            Task { @MainActor in self?.handleLockDeadlineReleased() }
+            Task { @MainActor in self?.handleLockEvaluationDidChange() }
+        }
+    }
+
+    /// The monitor extension's Darwin "I evaluated an edge", relayed by `OilaTelemetryService` AFTER
+    /// it has re-decided (see `handleExtensionLockEdge`). Not observed on the Darwin centre directly:
+    /// the two observers' order is not guaranteed, and running first would re-apply the OLD answer
+    /// over the one the extension just wrote.
+    private func observeExtensionLockEdge() {
+        extensionEdgeObserver = NotificationCenter.default.addObserver(
+            forName: OilaTelemetryService.oilaLockExtensionDidEvaluate,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleExtensionLockEdge() }
         }
     }
 
@@ -591,8 +569,6 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private let reloadLabels: () -> Void
     private let armUsage: ArmUsageAction
     private let uploadUsage: UploadUsageAction
-    private let armDeadline: ArmDeadlineAction
-    private let stopDeadline: StopDeadlineAction
     private let usageLedger: ScreenTimeUsageLedger
     private let userDefaults: UserDefaults
     private let now: () -> Date
@@ -600,7 +576,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private var uploadRequestedWhileBusy = false
     private var lastUploadedUsageSignature: String?
     private var lockStateObserver: NSObjectProtocol?
-    private var deadlineReleaseObserver: NSObjectProtocol?
+    private var lockEvaluationObserver: NSObjectProtocol?
+    private var extensionEdgeObserver: NSObjectProtocol?
     private var currentDSN: String?
     /// Set the first time the server tells this launch anything about the lock state; see
     /// `applyNow`.
@@ -694,7 +671,7 @@ extension ScreenTimeEnforcementCoordinator {
         }
         if ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] == "9" {
             hasRunProof = true
-            runLockDeadlineProof()
+            runLockEdgeReport()
             return
         }
         if ["4", "5"].contains(ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF"] ?? "") {
@@ -956,95 +933,41 @@ extension ScreenTimeEnforcementCoordinator {
         }
     }
 
-    /// Proof 9 (2026-09-18): the lock-deadline release, end to end, on hardware.
+    /// Proof 9 (build 26): what the whole-device lock pipeline holds right now, read-only.
     ///
-    /// Shields the whole phone on the DEFAULT store (the shipping lock), arms the one-off deadline
-    /// activity to end `SMARTOILA_SCREEN_TIME_PROOF_SECONDS` from now (default 16 min — Apple's
-    /// 15-minute floor plus the start lead), and then polls what the APP can read back: whether
-    /// `shield.applicationCategories` on the default store went back to nil (the extension's
-    /// write), whether the App Group carries the release mark, and whether the Darwin notification
-    /// arrived. Three things nobody had measured before this: the extension writing the DEFAULT
-    /// store; a one-off schedule armed a minute ahead delivering its end; the round trip to the app.
-    ///
-    /// The dead-app variant is the same run with two human steps after `monitor_proof9 armed`:
-    /// force-quit Bolajon360 and switch on airplane mode. The icons un-dim at the deadline by
-    /// themselves, and `idevicesyslog -m schedule_monitor` shows `lock_deadline released` from the
-    /// extension's own process. Relaunching the app then logs `deadline_release_on_launch`.
-    ///
-    /// Clean up afterwards with proof mode 3 if the run is interrupted (the shield is real).
-    /// Proof milestones go to BOTH os_log (for `idevicesyslog`) and stdout (so a `devicectl …
-    /// --console` attach shows them when the device is reachable only over the CoreDevice tunnel).
-    private func proof9Note(_ message: String) {
-        Self.proofLog.notice("\(message, privacy: .public)")
-        print("PROOF9 " + message)
-    }
-
-    func runLockDeadlineProof() {
-        Task { @MainActor in
-            guard let dsn = self.currentDSN ?? OilaDeviceIdentity.persistedDSN() else {
-                self.proof9Note("monitor_proof9 abort reason=no_dsn")
-                return
-            }
-            // ISOLATE from the live lane. Otherwise this app's own enforcement coordinator — which
-            // polls the server, sees THIS child unlocked, and writes the default store's category
-            // keys to nil while stopping any deadline activity it did not arm — stomps the manual
-            // shield below within one 30 s poll. Stopping it makes the proof measure the deadline
-            // activity alone. (A real lock never has this problem: the coordinator holds `.all()`.)
-            self.stop()
-            let seconds = TimeInterval(ProcessInfo.processInfo.environment["SMARTOILA_SCREEN_TIME_PROOF_SECONDS"].flatMap(Int.init) ?? 16 * 60)
-            let endsAt = Date().addingTimeInterval(seconds)
-            let defaultStore = ManagedSettingsStore()
-            let deadlineStore = DeviceLockDeadlineSharedStore()
-
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                nil,
-                { _, _, _, _, _ in
-                    let mark = DeviceLockDeadlineSharedStore().releasedAt()
-                    ScreenTimeEnforcementCoordinator.proofLog.notice("monitor_proof9 darwin_notification released_mark=\(mark == nil ? 0 : 1, privacy: .public) categories_nil=\(ManagedSettingsStore().shield.applicationCategories == nil ? 1 : 0, privacy: .public)")
-                    print("PROOF9 darwin_notification released_mark=\(mark == nil ? 0 : 1) categories_nil=\(ManagedSettingsStore().shield.applicationCategories == nil ? 1 : 0)")
-                },
-                DeviceLockDeadlineSharedStore.releasedDarwinNotification as CFString,
-                nil,
-                .deliverImmediately
-            )
-
-            // The shipping lock, exactly: the default store, whole device.
-            defaultStore.shield.applications = nil
-            defaultStore.shield.applicationCategories = .all()
-            defaultStore.shield.webDomains = nil
-            defaultStore.shield.webDomainCategories = .all()
-            self.proof9Note("monitor_proof9 shielded categories_nil=\(defaultStore.shield.applicationCategories == nil ? 1 : 0)")
-
-            // A fresh arm every run: the record from a previous run would make `arm` a no-op.
-            DeviceLockDeadlineMonitoring.stop(dsn: dsn, force: true, store: deadlineStore)
-            do {
-                let started = try DeviceLockDeadlineMonitoring.arm(dsn: dsn, endsAt: endsAt, store: deadlineStore)
-                let planned = DeviceLockDeadlineMonitoring.plannedInterval(endsAt: endsAt, now: Date())
-                self.proof9Note("monitor_proof9 armed started=\(started ? 1 : 0) ends_at=\(Int(endsAt.timeIntervalSince1970)) interval_end=\(Int(planned.end.timeIntervalSince1970)) activities=\(DeviceActivityCenter().activities.count)")
-            } catch {
-                self.proof9Note("monitor_proof9 arm_failed error=\(String(describing: error))")
-                DeviceLockDeadlineMonitoring.releaseGlobalShield(store: defaultStore)
-                return
-            }
-
-            let deadline = Date().addingTimeInterval(seconds + 180)
-            var attempt = 0
-            while Date() < deadline {
-                try? await Task.sleep(nanoseconds: 10 * 1_000_000_000)
-                attempt += 1
-                let categoriesNil = defaultStore.shield.applicationCategories == nil
-                let webNil = defaultStore.shield.webDomainCategories == nil
-                let mark = deadlineStore.releasedAt()
-                self.proof9Note("monitor_proof9 poll=\(attempt) remaining_s=\(Int(endsAt.timeIntervalSinceNow)) categories_nil=\(categoriesNil ? 1 : 0) web_nil=\(webNil ? 1 : 0) released_mark=\(mark == nil ? 0 : 1)")
-                if categoriesNil, mark != nil {
-                    self.proof9Note("monitor_proof9 PASS extension_opened_default_store late_s=\(Int(Date().timeIntervalSince(endsAt)))")
-                    return
-                }
-            }
-            self.proof9Note("monitor_proof9 FAIL nothing_released — clearing the shield myself")
-            DeviceLockDeadlineMonitoring.releaseGlobalShield(store: defaultStore)
-            DeviceLockDeadlineMonitoring.stop(dsn: dsn, force: true, store: deadlineStore)
+    /// For the hardware check the unit tests cannot make: set a 5-minute manual window 2 minutes
+    /// ahead from the parent web, launch a Debug build with `SMARTOILA_SCREEN_TIME_PROOF=9` to print
+    /// the plan the extension will work from (snapshot, trusted clock, decision, next edges, every
+    /// armed lock activity with its start), then force-quit Bolajon360 and switch on airplane mode.
+    /// The icons should dim at the start and un-dim at the end by themselves, with
+    /// `idevicesyslog -m schedule_monitor` showing `lock_edge` lines from the extension's process.
+    /// Writes nothing. Lines go to os_log AND stdout (a `devicectl … --console` attach shows those).
+    func runLockEdgeReport() {
+        let snapshot = DeviceLockPolicySharedStore().load()
+        let clock = DeviceLockClock.live
+        let wall = clock.wallNow()
+        let trusted = clock.trustedNow(anchor: snapshot?.clock)
+        let calendar = DeviceLockPolicy.phoneCalendar()
+        let locked = DeviceLockPolicy.isLocked(at: trusted, snapshot: snapshot, calendar: calendar)
+        let edges = DeviceLockPolicy.edges(
+            after: trusted, horizon: DeviceLockEdgeMonitoring.horizon, snapshot: snapshot, calendar: calendar
+        )
+        let armed = LiveDeviceLockEdgeCenter().lockActivities()
+        let categoriesSet = ManagedSettingsStore().shield.applicationCategories != nil
+        let manual = snapshot?.manualLock.map {
+            "\(Int($0.startsAt.timeIntervalSince(trusted)))s..\(Int($0.endsAt.timeIntervalSince(trusted)))s"
+        } ?? "-"
+        let lines = [
+            "monitor_proof9 snapshot=\(snapshot == nil ? 0 : 1) legacy=\(snapshot?.isLegacy == true ? 1 : 0) manual=\(manual) schedules=\(snapshot?.schedules.count ?? 0)",
+            "monitor_proof9 clock offset_s=\(Int(snapshot?.clock?.offset ?? 0)) skew_s=\(Int(trusted.timeIntervalSince(wall)))",
+            "monitor_proof9 locked=\(locked ? 1 : 0) categories_set=\(categoriesSet ? 1 : 0) next_edges_s=\(edges.prefix(4).map { String(Int($0.timeIntervalSince(trusted))) }.joined(separator: ","))",
+            "monitor_proof9 armed=\(armed.count) " + armed.map { activity in
+                "\(activity.name)@\(activity.start.map { String(Int($0.timeIntervalSince(wall))) } ?? "?")s"
+            }.joined(separator: " ")
+        ]
+        for line in lines {
+            Self.proofLog.notice("\(line, privacy: .public)")
+            print("PROOF9 " + line)
         }
     }
 

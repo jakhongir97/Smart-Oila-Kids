@@ -16,8 +16,9 @@ import os
 ///
 /// Therefore:
 ///
-/// * **whole-device lock** → `shield.applicationCategories = .all()`. Needs no identity at all,
-///   and is proven on hardware.
+/// * **whole-device lock** → `shield.applicationCategories = .all()` (+ web categories), through
+///   `DeviceLockPolicy.applyWholeDevice` — the one helper the telemetry service and the monitor
+///   extension write the same two keys with. Needs no identity at all, and is proven on hardware.
 /// * **per-app block** → `shield.applications = Set<ApplicationToken>`, with the tokens resolved
 ///   from `ApplicationTokenCatalogue`, which the usage-report extension fills in as it sees apps.
 ///   An app the child has never opened has no token yet and cannot be blocked individually — the
@@ -74,7 +75,7 @@ final class BlockedApplicationsController {
     init(
         authorizationStatus: AuthorizationStatusAction? = nil,
         apply: ApplyAction? = nil,
-        releaseGlobal: (() -> Void)? = nil,
+        wholeDevice: ((Bool) -> Void)? = nil,
         removalProtectionEnabled: (() -> Bool)? = nil,
         removalProtection: RemovalProtectionAction? = nil,
         tokenCatalogue: ApplicationTokenCatalogue = ApplicationTokenCatalogue(),
@@ -125,43 +126,22 @@ final class BlockedApplicationsController {
             // `blockedApplications` is deliberately never written: it is inert for third-party
             // apps (see the note above) and writing a setting that does nothing would make the
             // diagnostics screen lie about what is enforced.
-            if wholeDeviceLocked {
-                // `.all(except:)` when a parent has chosen apps that must survive a lock (Phone and
-                // Messages, typically), plain `.all()` otherwise — which is exactly the behaviour
-                // proven on hardware, with Apple's own exemption keeping Bolajon360 and its SOS
-                // button reachable either way. The exception set is a refinement, never a
-                // precondition: a lock that refuses to apply until someone completes a setup step
-                // is a lock the parent pressed and did not get.
-                store.shield.applications = nil
-                store.shield.applicationCategories = Self.categoryPolicy(
-                    alwaysAllowed: ScreenTimeAlwaysAllowedSharedStore.allowedApplicationTokens()
-                )
-                store.shield.webDomains = nil
-                store.shield.webDomainCategories = .all()
-            } else {
-                store.shield.applications = tokens.isEmpty ? nil : tokens
-                store.shield.applicationCategories = nil
-                store.shield.webDomains = nil
-                store.shield.webDomainCategories = nil
-            }
+            //
+            // The whole-device half is plain `.all()` — exactly the behaviour proven on hardware,
+            // with Apple's own exemption keeping Bolajon360 and its SOS button reachable — written
+            // by the shared helper. The per-app shield is written EITHER WAY: a whole-device lock
+            // used to nil it, so the parent's per-app blocks vanished for the lock's duration and
+            // were not there when an edge opened the phone with no app process to put them back.
+            DeviceLockPolicy.applyWholeDevice(locked: wholeDeviceLocked, store: store)
+            store.shield.applications = tokens.isEmpty ? nil : tokens
+            store.shield.webDomains = nil
         }
         self.clearAction = { DeviceLockManagedSettingsStoreFactory.clearAllSettings(store) }
-        // `clearAllSettings()` on the DEFAULT store wipes every setting this app has written
-        // there, which is exactly the intent: this controller is the only writer of that store.
-        // (The one other writer, since 2026-09-18, is the monitor extension's deadline release —
-        // which writes the same two keys `releaseGlobal` does, and nothing else.)
-        self.releaseGlobalAction = releaseGlobal ?? { DeviceLockDeadlineMonitoring.releaseGlobalShield(store: store) }
-    }
-
-    /// The shield policy for a whole-device lock, as a pure function of the exception set.
-    ///
-    /// Pinned by a test because the empty case is the one that must never change: an unconfigured
-    /// phone still gets a FULL lock. A previous design refused to shield at all until a parent had
-    /// completed a setup step, which turns "block the phone" into a button that does nothing.
-    nonisolated static func categoryPolicy(
-        alwaysAllowed: Set<ApplicationToken>
-    ) -> ShieldSettings.ActivityCategoryPolicy<Application> {
-        alwaysAllowed.isEmpty ? .all() : .all(except: alwaysAllowed)
+        // `clearAllSettings()` on the DEFAULT store wipes every setting this app has written there,
+        // which is exactly the intent on a lost authorization or an unpair. The other writers of
+        // that store — `OilaTelemetryService.reevaluateLock` and the monitor extension at an edge —
+        // write only the two whole-device keys, through the same helper as this.
+        self.wholeDeviceAction = wholeDevice ?? { locked in DeviceLockPolicy.applyWholeDevice(locked: locked, store: store) }
     }
 
     /// Apps this build refuses to hide, whatever the server says.
@@ -288,33 +268,32 @@ final class BlockedApplicationsController {
         persistAppliedState()
     }
 
-    /// Open a whole-device lock whose DEADLINE passed, and nothing else.
+    /// Write ONLY the whole-device half — the one write allowed before the server has confirmed a
+    /// state this launch (`ScreenTimeEnforcementCoordinator.applyNow`'s gate).
     ///
-    /// The lock's own two keys go back to nil (`shield.applicationCategories`,
-    /// `shield.webDomainCategories`); `shield.applications` — the per-app blocks — is not touched,
-    /// because those outlive a whole-device lock and, after a relaunch, this object does not even
-    /// know which tokens it holds (`appliedTokens` is not persisted). This is the ONE write allowed
-    /// before the server has confirmed a state this launch: it is driven by a deadline the server
-    /// itself issued (`OilaTelemetryService.lockReleasedByDeadline`), and a phone that stays
-    /// shielded after its end is the failure the product rule of 2026-09-16 exists to prevent.
-    /// The schedule-monitor extension makes the identical write when the app is not running.
-    func releaseWholeDeviceLock() {
-        guard appliedWholeDeviceLock else { return }
-        appliedWholeDeviceLock = false
-        // Forget what was applied, so the NEXT server-confirmed `apply()` re-writes rather than
-        // being blocked by the change guard. This matters because a whole-device lock nils
-        // `shield.applications`: the per-app blocks the parent set are gone from the OS while the
-        // categories shield stood in for them, and clearing only the categories here would leave
-        // them unenforced with the guard seeing "nothing changed". Emptying the cache forces the
-        // per-app shield to be rewritten the moment the server confirms the unlocked state (the
-        // usual online case) — and the launch gate's caller has already opened the categories.
-        appliedBundleIds = []
-        appliedTokens = []
-        unresolvedBundleIds = []
-        lastAppliedStatus = nil
-        releaseGlobalAction()
+    /// The decision comes from the saved policy snapshot and the clock
+    /// (`OilaTelemetryService.reevaluateLock`), so an offline cold launch inside a lock window locks,
+    /// and one past its end opens — both are things the server itself scheduled. `shield.applications`
+    /// is not touched: after a relaunch this object does not know which tokens it holds
+    /// (`appliedTokens` is not persisted), and the per-app blocks are exactly what the gate protects.
+    /// Nothing is written without authorization (the keys would be inert).
+    func applyWholeDeviceOnly(locked: Bool) {
+        guard authorizationStatusAction() == .granted else { return }
+        wholeDeviceAction(locked)
+        guard appliedWholeDeviceLock != locked else { return }
+        appliedWholeDeviceLock = locked
         persistAppliedState()
-        Self.log.notice("screentime_release_global reason=deadline")
+        Self.log.notice("screentime_apply whole_device_only locked=\(locked ? 1 : 0, privacy: .public)")
+    }
+
+    /// Forget what this object believes the OS holds, so the next `apply` writes everything.
+    ///
+    /// The monitor extension writes the default store's whole-device keys at an edge while this
+    /// process may be suspended; afterwards the change guard's picture can be stale in either
+    /// direction. Called on the extension's Darwin notification.
+    func resetAppliedCache() {
+        lastAppliedStatus = nil
+        appliedTokens = []
     }
 
     /// Seed the change-detection cache from what a previous launch applied, WITHOUT writing
@@ -389,7 +368,7 @@ final class BlockedApplicationsController {
     private let authorizationStatusAction: AuthorizationStatusAction
     private let applyAction: ApplyAction
     private let clearAction: () -> Void
-    private let releaseGlobalAction: () -> Void
+    private let wholeDeviceAction: (Bool) -> Void
     private let removalProtectionEnabledAction: () -> Bool
     private let removalProtectionAction: RemovalProtectionAction
     private var appliedTokens: Set<ApplicationToken> = []

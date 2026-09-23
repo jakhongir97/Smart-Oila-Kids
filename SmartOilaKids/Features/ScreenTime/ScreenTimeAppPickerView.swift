@@ -19,11 +19,10 @@ import SwiftUI
 /// pairing.
 struct ScreenTimeAppPickerView: View {
     enum Purpose {
-        /// Apps the parent wants blocked or limited.
+        /// Apps the parent wants blocked or limited. The only purpose left: the "always allowed"
+        /// picker was removed in build 26 (it let whoever held the phone exempt any app from the
+        /// parent's whole-device lock; the parent controls blocking from the web — PO, 2026-09-21).
         case restricted
-        /// Apps that stay reachable while a global shield is up. See ScreenTimeAlwaysAllowedStore —
-        /// without this set a global lock covers Phone, Messages and this app itself.
-        case alwaysAllowed
     }
 
     let purpose: Purpose
@@ -55,10 +54,6 @@ struct ScreenTimeAppPickerView: View {
                             onDone(draft)
                             dismiss()
                         }
-                        // An EMPTY always-allowed set is not a valid configuration — it excepts
-                        // nothing, which is the state that put Phone behind the shield. Saving one
-                        // is blocked rather than accepted-and-ignored, so the parent finds out here
-                        // instead of when their child cannot call them.
                         .disabled(!Self.saveAllowed(draft: draft, previous: selection, purpose: purpose, guided: guidedName != nil))
                     }
                 }
@@ -81,26 +76,22 @@ struct ScreenTimeAppPickerView: View {
         return expanded
     }
 
-    /// Whether the Save button is live. An EMPTY always-allowed set is refused (it excepts nothing,
-    /// which is the state that put Phone behind the shield). A guided pick is refused unless exactly
-    /// ONE app was added: zero means nothing to link, two means the app cannot tell which is which.
+    /// Whether the Save button is live. A guided pick is refused unless exactly ONE app was added:
+    /// zero means nothing to link, two means the app cannot tell which is which.
     static func saveAllowed(
         draft: FamilyActivitySelection,
         previous: FamilyActivitySelection,
         purpose: Purpose,
         guided: Bool
     ) -> Bool {
-        if purpose == .alwaysAllowed, draft.applicationTokens.isEmpty { return false }
+        _ = purpose
         if guided { return draft.applicationTokens.subtracting(previous.applicationTokens).count == 1 }
         return true
     }
 
     private var title: String {
         if let guidedName { return L10n.tr("screentime.picker.guided.title", guidedName) }
-        switch purpose {
-        case .restricted: return L10n.tr("screentime.picker.restricted.title")
-        case .alwaysAllowed: return L10n.tr("screentime.picker.allowed.title")
-        }
+        return L10n.tr("screentime.picker.restricted.title")
     }
 
     private var headerText: String? {
@@ -110,9 +101,7 @@ struct ScreenTimeAppPickerView: View {
 
     private var hint: String {
         if let guidedName { return L10n.tr("screentime.picker.guided.hint", guidedName) }
-        return purpose == .alwaysAllowed
-            ? L10n.tr("screentime.picker.allowed.hint")
-            : L10n.tr("screentime.picker.restricted.hint")
+        return L10n.tr("screentime.picker.restricted.hint")
     }
 
     @ViewBuilder

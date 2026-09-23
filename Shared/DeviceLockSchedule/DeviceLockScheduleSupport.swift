@@ -93,53 +93,421 @@ enum DeviceAppLimitEventIdentifier {
     }
 }
 
-// MARK: - The lock deadline (2026-09-18)
+// MARK: - The whole-device lock policy (build 26, 2026-09-24)
+//
+// The backend contract of 2026-09-23 (Akramjon): `GET /device/lock/state` now carries the parent's
+// manual window (`manualLock {startsAt, endsAt} | null`, a FUTURE window included), every schedule
+// (`schedules[]`) and the server clock (`serverTime`), and says outright that `isLocked` is "kept
+// for old child builds". The bug it exists to end: the app saved the server's `isLocked` and locked
+// by it, so a phone that lost the internet while locked never heard the `false` and stayed locked.
+// The product rule it serves (PO, 2026-09-16): the child's phone always has a start and an end.
+//
+// So the phone decides by itself, from the last data it heard and its own clock, with no server:
+// locked iff a manual window is running or a schedule is active. Everything below is shared by the
+// app and the schedule-monitor extension — the one process iOS wakes at an edge when the app is
+// dead — so the two can never disagree about what the rule says.
 
-/// The whole-device lock's END, shared between the app and the schedule-monitor extension.
-///
-/// The product rule (PO, 2026-09-16): a phone lock never lasts more than 8 hours, the parent
-/// chooses from-when to-when, and the child's phone must unlock BY ITSELF at the end even when it
-/// has no internet. The app enforces the end while it is alive (`OilaTelemetryService`); this
-/// record is how the extension enforces it when the app is not — the extension is the only
-/// process iOS promises to wake at the end of a `DeviceActivitySchedule`.
-struct DeviceLockDeadlineRecord: Codable, Equatable {
-    let dsn: String
-    /// The instant the lock ends. Absolute, never a wall-clock "HH:mm": the schedule this arms
-    /// is one-off and the release compares against the clock.
+/// The parent's manual lock: one window with a start and an end (`ManualLockWindowDto`).
+struct DeviceLockManualWindow: Codable, Equatable {
+    let startsAt: Date
     let endsAt: Date
-    /// When the app armed the activity for this end. Diagnostics only.
-    let armedAt: Date
+
+    /// The backend refuses a window longer than 8 h (`PUT /parent/children/{id}/lock/manual`, D-122).
+    /// The phone enforces the same ceiling on what it RECEIVES — plus a minute for the backend's own
+    /// "startsAt may be up to 1 minute in the past" — so no payload, however malformed, can lock a
+    /// child for longer. The 8 h rule is the manual window's only: schedules are recurring rules the
+    /// parent set on purpose, and they decide offline for as long as they say.
+    static let maximumLength: TimeInterval = 8 * 3_600 + 60
+
+    /// The window as enforced, half-open (`startsAt <= now < endsAt`), end clamped. nil when the
+    /// window is inverted or empty: a window we cannot read locks nothing (schedules still apply).
+    var enforced: Range<Date>? {
+        guard endsAt > startsAt else { return nil }
+        return startsAt ..< min(endsAt, startsAt.addingTimeInterval(Self.maximumLength))
+    }
 }
 
-/// One activity per DSN, under a prefix of its own. It must NOT share `smartoila.global-lock.schedule`:
-/// `DeviceLockScheduleMonitorController.stopCurrentMonitoring` sweeps every activity under that
-/// prefix at every cold launch, and a stop on a running activity delivers `intervalDidEnd` — which
-/// would read as "the lock ended" seconds after the app started.
-enum DeviceLockDeadlineActivityIdentifier {
-    private static let prefix = "smartoila.lock-until"
+/// One row of `schedules[]` (`LockScheduleDto`).
+///
+/// Minutes are in the PHONE's current time zone (the spec's "device timezone"; the phone's own zone
+/// is the only one it can evaluate offline, and a zone change re-evaluates at once). `endMinute` is
+/// exclusive; `endMinute < startMinute` crosses midnight. `daysBitmask` has Monday at bit 0, and a
+/// bit names the day a window STARTS: a Friday 22:00–07:00 window locks Saturday until 07:00 even
+/// when Saturday's bit is off.
+struct DeviceLockSchedule: Codable, Equatable {
+    var id: String?
+    var startMinute: Int
+    var endMinute: Int
+    var daysBitmask: Int
+    var enabled: Bool
+    /// The server's `deletedAt`, verbatim. Any value at all means deleted.
+    var deletedAt: String?
+
+    /// Whether this row can lock at all. `start == end` is INACTIVE: the parent API accepts it and
+    /// "all day" and "never" are equally plausible readings, so it is read as the one that cannot
+    /// lock a child by surprise (the same convention `DeviceLockScheduleMonitorController` used).
+    var isEnforceable: Bool {
+        enabled
+            && deletedAt == nil
+            && daysBitmask & 0x7F != 0
+            && startMinute != endMinute
+            && (0 ..< 1_440).contains(startMinute)
+            && (0 ..< 1_440).contains(endMinute)
+    }
+
+    /// `weekdayIndex` is Monday = 0 … Sunday = 6; `minute` is the local minute of the day.
+    func isActive(weekdayIndex today: Int, minute: Int) -> Bool {
+        guard isEnforceable else { return false }
+        let todayBit = (daysBitmask >> today) & 1 == 1
+        if startMinute < endMinute {
+            return todayBit && startMinute <= minute && minute < endMinute
+        }
+        let yesterdayBit = (daysBitmask >> ((today + 6) % 7)) & 1 == 1
+        return (todayBit && minute >= startMinute) || (yesterdayBit && minute < endMinute)
+    }
+}
+
+/// Where the phone's clock stood against the server's at the last successful poll.
+///
+/// The child owns the wall clock: moving it forward would end a lock early, moving it back would
+/// start a schedule late. The monotonic clock (`CLOCK_MONOTONIC`, which on Darwin keeps counting
+/// while the phone sleeps — `ProcessInfo.systemUptime` does not) cannot be set, so "server time at
+/// the anchor + monotonic time elapsed since" is a clock the child cannot move for as long as the
+/// phone does not reboot. That is Akramjon's optional point 4.
+struct DeviceLockClockAnchor: Codable, Equatable {
+    /// The phone's wall clock at the midpoint of the request that carried `serverTime`.
+    let wall: Date
+    /// `CLOCK_MONOTONIC` at the same instant, nanoseconds.
+    let monotonicNanos: UInt64
+    /// `serverTime - wall`, seconds. 0 when the server sent no time (the anchor still pins the
+    /// phone's own clock against later changes).
+    let offset: TimeInterval
+    /// `kern.bootsessionuuid` when readable: a per-boot identity that, unlike the monotonic value,
+    /// cannot collide with a later boot that has simply been up longer.
+    let bootSessionID: String?
+}
+
+/// Everything the phone last heard about the whole-device lock, saved in the App Group so the app
+/// (any launch, scene or not) and the extension evaluate the same data.
+struct DeviceLockPolicySnapshot: Codable, Equatable {
+    /// Normalized (`DeviceLockEdgeActivityIdentifier.normalize`): the form the edge names carry.
+    let dsn: String
+    let manualLock: DeviceLockManualWindow?
+    let schedules: [DeviceLockSchedule]
+    /// The server's clock when the payload was read; nil from an old backend or a migration.
+    let serverTime: Date?
+    /// The phone's wall clock when it was received. Diagnostics.
+    let receivedAt: Date
+    let clock: DeviceLockClockAnchor?
+    /// Built from an old-backend payload that carried only `isLocked` (see
+    /// `OilaTelemetryService.lockPolicySnapshot`), or from build 24's saved lock on upgrade.
+    let isLegacy: Bool
+}
+
+/// The pure rule. No state, no clock of its own: `now` and the calendar are always passed in, so a
+/// test can pin a zone (and a DST change) and the extension can evaluate at an edge's own minute.
+enum DeviceLockPolicy {
+    /// How far ahead `episodeEnd` looks for the end of a lock. A week plus a day covers every
+    /// weekly schedule pattern; a lock with no end inside it shows no "until" line.
+    static let episodeSearchHorizon: TimeInterval = 8 * 86_400
+
+    /// The phone's calendar for the rule: Gregorian (a Buddhist or Islamic `Calendar.current` must not
+    /// change which weekday bit applies) in the phone's CURRENT zone, followed live.
+    static func phoneCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .autoupdatingCurrent
+        return calendar
+    }
+
+    /// Monday = 0 … Sunday = 6, from `Calendar`'s Sunday = 1 … Saturday = 7.
+    static func weekdayIndex(calendarWeekday: Int) -> Int {
+        (calendarWeekday + 5) % 7
+    }
+
+    /// THE RULE: locked iff `startsAt <= now < endsAt` for the (clamped) manual window, or any
+    /// enforceable schedule is active at the phone's local weekday and minute. No snapshot = no lock.
+    static func isLocked(at date: Date, snapshot: DeviceLockPolicySnapshot?, calendar: Calendar) -> Bool {
+        guard let snapshot else { return false }
+        return evaluate(at: date, snapshot: snapshot, calendar: gregorian(in: calendar.timeZone))
+    }
+
+    /// The end of the CURRENT contiguous locked episode — a manual window and the schedules that
+    /// overlap or abut it are one episode, because the phone does not open between them. nil when
+    /// unlocked, or when no end exists inside `episodeSearchHorizon`.
+    static func episodeEnd(at date: Date, snapshot: DeviceLockPolicySnapshot?, calendar: Calendar) -> Date? {
+        guard isLocked(at: date, snapshot: snapshot, calendar: calendar) else { return nil }
+        return edges(after: date, horizon: episodeSearchHorizon, snapshot: snapshot, calendar: calendar).first
+    }
+
+    /// Every instant in `(date, date + horizon]` at which the rule's answer CHANGES, ascending.
+    ///
+    /// Built as "candidate instants, kept where the answer flips", so correctness never depends on
+    /// predicting which boundaries matter: a schedule that starts inside a running manual window,
+    /// two schedules that abut, a window that crosses midnight — none produce a false edge. The
+    /// candidates are the manual window's two ends, every schedule start/end minute on every local
+    /// day in range (BOTH occurrences on a DST fall-back night, none inside a spring-forward gap),
+    /// and the zone's DST transitions themselves (where a skipped start minute takes effect).
+    static func edges(after date: Date, horizon: TimeInterval, snapshot: DeviceLockPolicySnapshot?, calendar: Calendar) -> [Date] {
+        guard let snapshot, horizon > 0 else { return [] }
+        let calendar = gregorian(in: calendar.timeZone)
+        let through = date.addingTimeInterval(horizon)
+        let candidates = Set(candidateInstants(after: date, through: through, snapshot: snapshot, calendar: calendar)).sorted()
+        var state = evaluate(at: date, snapshot: snapshot, calendar: calendar)
+        var result: [Date] = []
+        for instant in candidates {
+            let next = evaluate(at: instant, snapshot: snapshot, calendar: calendar)
+            guard next != state else { continue }
+            result.append(instant)
+            state = next
+        }
+        return result
+    }
+
+    /// The whole-device lock on the OS: the two category keys on the DEFAULT store, and only those.
+    ///
+    /// Plain `.all()`: the always-allowed exception set was removed with its Settings row (PO,
+    /// 2026-09-21 — the parent controls blocking from the web, the child phone has no switches), so
+    /// a stale `.all(except:)` from an earlier build is rewritten to `.all()` here. Only the default
+    /// store enforces on this hardware (named stores measured inert). `shield.applications` — the
+    /// per-app blocks — is never touched: they outlive a whole-device lock, and
+    /// `BlockedApplicationsController` owns them. Read-compare-write, because the app calls this on
+    /// every re-evaluation and the extension at every edge, and each write is a cross-process call.
+    /// Returns whether anything was written.
+    @discardableResult
+    static func applyWholeDevice(locked: Bool, store: ManagedSettingsStore? = nil) -> Bool {
+        let store = store ?? ManagedSettingsStore()
+        let applications: ShieldSettings.ActivityCategoryPolicy<Application>? = locked ? .all() : nil
+        let webDomains: ShieldSettings.ActivityCategoryPolicy<WebDomain>? = locked ? .all() : nil
+        var wrote = false
+        if store.shield.applicationCategories != applications {
+            store.shield.applicationCategories = applications
+            wrote = true
+        }
+        if store.shield.webDomainCategories != webDomains {
+            store.shield.webDomainCategories = webDomains
+            wrote = true
+        }
+        return wrote
+    }
+
+    // MARK: Private
+
+    private static func gregorian(in timeZone: TimeZone) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar
+    }
+
+    private static func evaluate(at date: Date, snapshot: DeviceLockPolicySnapshot, calendar: Calendar) -> Bool {
+        if let window = snapshot.manualLock?.enforced, window.contains(date) { return true }
+        guard snapshot.schedules.contains(where: \.isEnforceable) else { return false }
+        let components = calendar.dateComponents([.weekday, .hour, .minute], from: date)
+        guard let weekday = components.weekday, let hour = components.hour, let minute = components.minute else {
+            return false
+        }
+        let index = weekdayIndex(calendarWeekday: weekday)
+        let minuteOfDay = hour * 60 + minute
+        return snapshot.schedules.contains { $0.isActive(weekdayIndex: index, minute: minuteOfDay) }
+    }
+
+    private static func candidateInstants(
+        after start: Date,
+        through end: Date,
+        snapshot: DeviceLockPolicySnapshot,
+        calendar: Calendar
+    ) -> [Date] {
+        var result: [Date] = []
+        if let window = snapshot.manualLock?.enforced {
+            result += [window.lowerBound, window.upperBound]
+        }
+        let minutes = Set(snapshot.schedules.filter(\.isEnforceable).flatMap { [$0.startMinute, $0.endMinute] })
+        if !minutes.isEmpty, var day = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: start)) {
+            let lastDay = end.addingTimeInterval(86_400)
+            // Bounded: 8 days is the longest horizon anyone asks for; the cap only guards a caller bug.
+            var remaining = 400
+            while day <= lastDay, remaining > 0 {
+                let components = calendar.dateComponents([.year, .month, .day], from: day)
+                if let year = components.year, let month = components.month, let dayOfMonth = components.day {
+                    for minute in minutes {
+                        result += localInstants(year: year, month: month, day: dayOfMonth, minute: minute, timeZone: calendar.timeZone)
+                    }
+                }
+                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+                day = next
+                remaining -= 1
+            }
+            var cursor = start
+            while let transition = calendar.timeZone.nextDaylightSavingTimeTransition(after: cursor), transition <= end {
+                result.append(transition)
+                cursor = transition
+            }
+        }
+        return result.filter { $0 > start && $0 <= end }
+    }
+
+    /// Every instant whose local wall time in `timeZone` is `year-month-day minute`: one on an
+    /// ordinary day, two in a DST fall-back hour, none in a spring-forward gap. Solved per UTC
+    /// offset the zone uses around that day, keeping only the self-consistent answers.
+    private static func localInstants(year: Int, month: Int, day: Int, minute: Int, timeZone: TimeZone) -> [Date] {
+        guard let midnight = utcCalendar.date(from: DateComponents(year: year, month: month, day: day)) else { return [] }
+        let wall = midnight.addingTimeInterval(TimeInterval(minute * 60))
+        let offsets = Set([-86_400.0, 0, 86_400].map { timeZone.secondsFromGMT(for: wall.addingTimeInterval($0)) })
+        return offsets.compactMap { offset in
+            let instant = wall.addingTimeInterval(TimeInterval(-offset))
+            return timeZone.secondsFromGMT(for: instant) == offset ? instant : nil
+        }
+    }
+
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        return calendar
+    }()
+}
+
+/// The phone's clocks, injectable so a test can move the wall clock and the monotonic clock
+/// independently — which is exactly what a child changing the date does.
+struct DeviceLockClock {
+    var wallNow: () -> Date
+    var monotonicNanos: () -> UInt64
+    var bootSessionID: () -> String?
+
+    /// `|wall - trusted|` above this is logged as a changed clock. Two minutes: well above the
+    /// offset's own error (half a round trip plus the server's drift), well below any change a
+    /// child would bother making.
+    static let tamperThreshold: TimeInterval = 120
+
+    static var live: DeviceLockClock {
+        DeviceLockClock(
+            wallNow: { Date() },
+            // Darwin's CLOCK_MONOTONIC keeps counting while the phone sleeps and cannot be set.
+            monotonicNanos: { clock_gettime_nsec_np(CLOCK_MONOTONIC) },
+            bootSessionID: { DeviceLockClock.readBootSessionID() }
+        )
+    }
+
+    /// The server's clock carried forward: `anchor.wall + (monotonic now - anchor monotonic) +
+    /// offset` while the phone has not rebooted since the anchor; `wall now + offset` after a reboot
+    /// (the monotonic clock restarted, so only the phone's wall clock is left to carry the offset);
+    /// the plain wall clock when there is no anchor at all.
+    func trustedNow(anchor: DeviceLockClockAnchor?) -> Date {
+        Self.trustedNow(anchor: anchor, wall: wallNow(), monotonicNanos: monotonicNanos(), bootSessionID: bootSessionID())
+    }
+
+    static func trustedNow(anchor: DeviceLockClockAnchor?, wall: Date, monotonicNanos: UInt64, bootSessionID: String?) -> Date {
+        guard let anchor else { return wall }
+        guard isSameBoot(anchor: anchor, monotonicNanos: monotonicNanos, bootSessionID: bootSessionID) else {
+            return wall.addingTimeInterval(anchor.offset)
+        }
+        let elapsed = TimeInterval(monotonicNanos - anchor.monotonicNanos) / 1_000_000_000
+        return anchor.wall.addingTimeInterval(elapsed + anchor.offset)
+    }
+
+    /// A monotonic value below the anchor's is a reboot (the clock restarted from zero). When both
+    /// sides carry a boot-session id it decides outright: a later boot that has simply been up
+    /// longer than the anchor's would otherwise pass the monotonic test and put the clock hours back.
+    static func isSameBoot(anchor: DeviceLockClockAnchor, monotonicNanos: UInt64, bootSessionID: String?) -> Bool {
+        guard monotonicNanos >= anchor.monotonicNanos else { return false }
+        if let recorded = anchor.bootSessionID, let current = bootSessionID {
+            return recorded == current
+        }
+        return true
+    }
+
+    /// The anchor for one successful poll: both clocks at the request's midpoint, and the server's
+    /// time against it. The midpoint halves the round trip's contribution to the offset's error.
+    static func anchor(
+        serverTime: Date?,
+        sentWall: Date,
+        sentMonotonicNanos: UInt64,
+        receivedMonotonicNanos: UInt64,
+        bootSessionID: String?
+    ) -> DeviceLockClockAnchor {
+        let halfTrip = receivedMonotonicNanos >= sentMonotonicNanos ? (receivedMonotonicNanos - sentMonotonicNanos) / 2 : 0
+        let wall = sentWall.addingTimeInterval(TimeInterval(halfTrip) / 1_000_000_000)
+        return DeviceLockClockAnchor(
+            wall: wall,
+            monotonicNanos: sentMonotonicNanos + halfTrip,
+            offset: serverTime.map { $0.timeIntervalSince(wall) } ?? 0,
+            bootSessionID: bootSessionID
+        )
+    }
+
+    static func readBootSessionID() -> String? {
+        var size = 0
+        guard sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0 else { return nil }
+        let value = String(cString: buffer)
+        return value.isEmpty ? nil : value
+    }
+}
+
+/// App Group copy of the policy, written by the app on every successful poll and read by both.
+struct DeviceLockPolicySharedStore {
+    static let snapshotKey = "DEVICE_LOCK_POLICY_V1"
+    /// The instant the extension last evaluated an edge at. The extension may evaluate a few
+    /// seconds AHEAD of the clock (an edge callback that fired early is evaluated at its edge), and
+    /// the app, woken by the extension's notification, must not undo that in the gap.
+    static let edgeEvaluatedAtKey = "DEVICE_LOCK_EDGE_EVALUATED_AT_V1"
+
+    private let userDefaults: UserDefaults?
+
+    init(userDefaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()) {
+        self.userDefaults = userDefaults
+    }
+
+    func load() -> DeviceLockPolicySnapshot? {
+        guard let data = userDefaults?.data(forKey: Self.snapshotKey) else { return nil }
+        return try? JSONDecoder().decode(DeviceLockPolicySnapshot.self, from: data)
+    }
+
+    func save(_ snapshot: DeviceLockPolicySnapshot) {
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        userDefaults?.set(data, forKey: Self.snapshotKey)
+    }
+
+    func clear() {
+        userDefaults?.removeObject(forKey: Self.snapshotKey)
+        userDefaults?.removeObject(forKey: Self.edgeEvaluatedAtKey)
+    }
+
+    func markEdgeEvaluated(at date: Date) {
+        userDefaults?.set(date.timeIntervalSince1970, forKey: Self.edgeEvaluatedAtKey)
+    }
+
+    func lastEdgeEvaluatedAt() -> Date? {
+        guard let raw = userDefaults?.object(forKey: Self.edgeEvaluatedAtKey) as? Double, raw > 0 else { return nil }
+        return Date(timeIntervalSince1970: raw)
+    }
+}
+
+/// `smartoila.lock-edge|<normalized dsn>|<edge epoch minute>` — one one-off activity per edge.
+///
+/// Its own prefix: `DeviceLockScheduleMonitorController.stopCurrentMonitoring` sweeps every
+/// `smartoila.global-lock.schedule*` activity, and a stop on a running activity delivers
+/// `intervalDidEnd`. The minute in the name is what the extension evaluates at, so a callback that
+/// fires a few seconds early still reads the edge it was armed for.
+enum DeviceLockEdgeActivityIdentifier {
+    static let prefix = "smartoila.lock-edge"
     private static let separator = "|"
 
-    static func rawValue(dsn: String) -> String {
-        prefix + separator + normalizedDSN(dsn)
+    static func rawValue(dsn: String, edgeMinute: Int) -> String {
+        prefix + separator + normalize(dsn) + separator + String(edgeMinute)
     }
 
-    /// The canonical DSN form used in BOTH the activity name and the App Group record. A raw DSN is
-    /// `UUID().uuidString` — UPPERCASE — and the activity name lowercases it; storing the raw form
-    /// in the record while reading the lowercased form back out of the activity name is why an
-    /// earlier revision never matched, so the record and every comparison go through this.
-    static func normalize(_ dsn: String) -> String { normalizedDSN(dsn) }
-
-    static func dsn(from rawValue: String) -> String? {
-        let prefixValue = prefix + separator
-        guard rawValue.hasPrefix(prefixValue) else { return nil }
-        return String(rawValue.dropFirst(prefixValue.count)).nilIfEmpty
-    }
-
-    static func isDeadlineActivity(rawValue: String) -> Bool {
+    static func isLockEdgeActivity(rawValue: String) -> Bool {
         rawValue.hasPrefix(prefix + separator)
     }
 
-    private static func normalizedDSN(_ dsn: String) -> String {
+    static func edgeMinute(from rawValue: String) -> Int? {
+        guard isLockEdgeActivity(rawValue: rawValue), let last = rawValue.split(separator: "|").last else { return nil }
+        return Int(last)
+    }
+
+    /// The canonical DSN form (the separator and every other non-identifier character become `_`,
+    /// lowercased): a raw DSN is an UPPERCASE `UUID().uuidString`.
+    static func normalize(_ dsn: String) -> String {
         let allowedScalars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         let sanitized = dsn.unicodeScalars.map { scalar -> Character in
             allowedScalars.contains(scalar) ? Character(scalar) : "_"
@@ -148,188 +516,238 @@ enum DeviceLockDeadlineActivityIdentifier {
     }
 }
 
-/// App Group copy of the armed deadline, plus the extension's "I released it" mark.
+/// Build 24's single "lock-until" activity and its App Group record, kept only to retire them.
 ///
-/// Both processes read and write it. The app writes the record when it arms the activity and
-/// clears it when the server unlocks; the extension reads it to decide whether an `intervalDidEnd`
-/// is the real end (iOS also delivers one when a running activity is restarted) and writes
-/// `releasedAt` after it has cleared the shield, so a relaunched app can tell "the OS is still
-/// shielded" from "the extension already opened the phone".
-struct DeviceLockDeadlineSharedStore {
+/// A phone updated while locked keeps build 24's activity armed until the app next runs. If it
+/// fires in this build before the app has ever polled (no snapshot yet), the old promise still
+/// holds: the lock ends at the recorded end, not later.
+enum DeviceLockLegacyDeadline {
+    static let activityPrefix = "smartoila.lock-until|"
     static let recordKey = "DEVICE_LOCK_DEADLINE_V1"
     static let releasedAtKey = "DEVICE_LOCK_DEADLINE_RELEASED_AT_V1"
-    /// Posted by the extension after a release, so an app that happens to be alive drops its
-    /// cover at once instead of on its next timer tick.
-    static let releasedDarwinNotification = "uz.smartoila.kids.lock-deadline-released"
 
-    private let userDefaults: UserDefaults?
-
-    init(userDefaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()) {
-        self.userDefaults = userDefaults
+    private struct Record: Decodable {
+        let endsAt: Date
     }
 
-    func load() -> DeviceLockDeadlineRecord? {
-        guard let data = userDefaults?.data(forKey: Self.recordKey) else { return nil }
-        return try? JSONDecoder().decode(DeviceLockDeadlineRecord.self, from: data)
+    static func isLegacyActivity(rawValue: String) -> Bool {
+        rawValue.hasPrefix(activityPrefix)
     }
 
-    func save(_ record: DeviceLockDeadlineRecord) {
-        guard let data = try? JSONEncoder().encode(record) else { return }
-        userDefaults?.set(data, forKey: Self.recordKey)
-        // A new arm supersedes any earlier release: the mark belongs to the deadline it released.
-        userDefaults?.removeObject(forKey: Self.releasedAtKey)
+    static func recordedEnd(userDefaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()) -> Date? {
+        guard let data = userDefaults?.data(forKey: recordKey) else { return nil }
+        return (try? JSONDecoder().decode(Record.self, from: data))?.endsAt
     }
 
-    func clear() {
-        userDefaults?.removeObject(forKey: Self.recordKey)
-        userDefaults?.removeObject(forKey: Self.releasedAtKey)
-    }
-
-    func markReleased(at date: Date) {
-        userDefaults?.set(date.timeIntervalSince1970, forKey: Self.releasedAtKey)
-    }
-
-    func releasedAt() -> Date? {
-        guard let raw = userDefaults?.object(forKey: Self.releasedAtKey) as? Double, raw > 0 else { return nil }
-        return Date(timeIntervalSince1970: raw)
-    }
-
-    static func postReleased() {
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(releasedDarwinNotification as CFString),
-            nil,
-            nil,
-            true
-        )
+    static func clear(userDefaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()) {
+        userDefaults?.removeObject(forKey: recordKey)
+        userDefaults?.removeObject(forKey: releasedAtKey)
     }
 }
 
-/// Arms the one-off activity whose end is the lock's end, and releases the shield when it fires.
+/// The DeviceActivity surface the edge monitoring needs. A protocol so tests never touch
+/// `DeviceActivityCenter`.
+protocol DeviceLockEdgeCenter {
+    /// Every armed lock activity (edge or legacy lock-until), with its interval start on the
+    /// phone's clock when the schedule can be read back.
+    func lockActivities() -> [(name: String, start: Date?)]
+    func start(name: String, schedule: DeviceActivitySchedule) throws
+    func stop(names: [String])
+}
+
+struct LiveDeviceLockEdgeCenter: DeviceLockEdgeCenter {
+    func lockActivities() -> [(name: String, start: Date?)] {
+        let center = DeviceActivityCenter()
+        return center.activities.compactMap { activity in
+            let raw = activity.rawValue
+            guard DeviceLockEdgeActivityIdentifier.isLockEdgeActivity(rawValue: raw)
+                    || DeviceLockLegacyDeadline.isLegacyActivity(rawValue: raw) else { return nil }
+            let start = center.schedule(for: activity).flatMap { Calendar.current.date(from: $0.intervalStart) }
+            return (name: raw, start: start)
+        }
+    }
+
+    func start(name: String, schedule: DeviceActivitySchedule) throws {
+        try DeviceActivityCenter().startMonitoring(DeviceActivityName(name), during: schedule)
+    }
+
+    func stop(names: [String]) {
+        guard !names.isEmpty else { return }
+        DeviceActivityCenter().stopMonitoring(names.map { DeviceActivityName($0) })
+    }
+}
+
+/// Arms the edges outside the app: the one mechanism that re-checks the lock when the app is
+/// suspended or dead, which is precisely when a phone that lost the internet needs it.
 ///
-/// Shared by both processes on purpose: the extension's release and the app's launch-time release
-/// must write exactly the same two keys, or the two halves of the lock disagree.
-enum DeviceLockDeadlineMonitoring {
-    typealias StartMonitoring = (DeviceActivityName, DeviceActivitySchedule) throws -> Void
-    typealias StopMonitoring = ([DeviceActivityName]) -> Void
+/// One one-off activity per edge, `[edge, edge + 16 min]`, `repeats: false`, only its START
+/// relied on (the callback measured on hardware, proof 7). Window length stops mattering: a
+/// 14:00–14:05 lock is two activities, `[14:00, 14:16]` and `[14:05, 14:21]`. The extension never
+/// locks or unlocks blindly on a callback: it re-evaluates the rule, so a restart, an early fire or
+/// an edge the parent has since moved all come out right.
+enum DeviceLockEdgeMonitoring {
+    /// How far ahead edges are armed, and how many. 12 + one fallback stays well inside the ~20
+    /// activities an app may hold (usage and app-limit take one each, plus a running edge or two).
+    static let horizon: TimeInterval = 48 * 3_600
+    static let maximumEdges = 12
+    /// Edges closer than this are the in-app timer's; an activity starting within a minute is
+    /// unmeasured (proof 7 armed two minutes ahead).
+    static let minimumLead: TimeInterval = 60
+    /// Apple refuses an interval shorter than 15 minutes.
+    static let intervalLength: TimeInterval = 16 * 60
+    /// An `intervalDidStart` up to this long before its edge is evaluated AT the edge (a callback a
+    /// few seconds early must not read "not yet"). Further off than that it is not the edge's own
+    /// callback — a clock moved forward fires every edge early — and is evaluated at the trusted now.
+    static let earlyCallbackTolerance: TimeInterval = 180
+    /// Posted after every extension evaluation (the name build 24's deadline release used).
+    static let darwinNotification = "uz.smartoila.kids.lock-deadline-released"
 
-    /// Apple refuses a `DeviceActivitySchedule` shorter than 15 minutes.
-    static let minimumIntervalLength: TimeInterval = 15 * 60
-    /// The start is placed a little in the future, the shape proof 7 measured on device (a start
-    /// already in the past is unmeasured). The lock itself is already enforced by the app; the
-    /// activity exists only for its END.
-    static let startLead: TimeInterval = 60
-    /// The extension trusts an `intervalDidEnd` only when the recorded end is (nearly) here: iOS
-    /// delivers the same callback when a running activity is restarted, and that must not open the
-    /// phone. Five seconds covers the minute-granular schedule landing a hair early.
-    static let releaseTolerance: TimeInterval = 5
+    struct Entry: Equatable {
+        let name: String
+        /// The edge rounded UP to its minute, in trusted time: the name's minute, and never before
+        /// the edge itself.
+        let edgeMinute: Int
+        /// Where the activity starts on the PHONE's clock, which is the clock DeviceActivity runs on.
+        let wallStart: Date
+        /// A re-check one minute out, armed when the very next edge is too close to arm.
+        let isFallback: Bool
+    }
 
-    /// The interval to arm for a lock that ends at `endsAt`, as a pure function of the clock.
+    static func ceilingMinute(_ date: Date) -> Int {
+        Int((date.timeIntervalSince1970 / 60).rounded(.up))
+    }
+
+    /// What to arm for `edges` (trusted time), seen from the trusted `now`.
     ///
-    /// The end is never EARLIER than the lock's end; when the lock ends sooner than iOS allows an
-    /// interval to be, the activity ends at the minimum and the extension releases late by that
-    /// much — while the app, when alive, releases on time from its own timer. Documented cost.
-    static func plannedInterval(endsAt: Date, now: Date) -> (start: Date, end: Date) {
-        let start = now.addingTimeInterval(startLead)
-        let end = max(endsAt, start.addingTimeInterval(minimumIntervalLength + startLead))
-        return (start, end)
+    /// Edges less than `minimumLead` away are skipped — but when the VERY NEXT edge is one of them,
+    /// one fallback re-check is armed a minute out, so a phone suspended in that minute still gets
+    /// a re-check. `skew` is trusted minus wall: while it is under the tamper threshold the phone's
+    /// clock is taken as right (no minute-rounding games for a second's drift); past it the edges
+    /// are moved onto the phone's clock so they still fire at the TRUE time. The lead is checked on
+    /// BOTH clocks: DeviceActivity sees the phone's, and a start it already sees as past is lazy
+    /// (measured, proof 6), so an edge a phone running a little fast already shows as "now" counts
+    /// as too close too.
+    static func plan(dsn: String, edges: [Date], now: Date, skew: TimeInterval) -> [Entry] {
+        let armingSkew = abs(skew) > DeviceLockClock.tamperThreshold ? skew : 0
+        let wallNow = now.addingTimeInterval(-skew)
+        func wallStart(_ minute: Int) -> Date {
+            Date(timeIntervalSince1970: TimeInterval(minute) * 60).addingTimeInterval(-armingSkew)
+        }
+        func isArmable(_ edge: Date) -> Bool {
+            edge.timeIntervalSince(now) >= minimumLead
+                && wallStart(ceilingMinute(edge)).timeIntervalSince(wallNow) >= minimumLead
+        }
+        let upcoming = edges.filter { $0 > now }.sorted()
+        var entries: [Entry] = []
+        var names = Set<String>()
+        func add(minute: Int, isFallback: Bool) {
+            let name = DeviceLockEdgeActivityIdentifier.rawValue(dsn: dsn, edgeMinute: minute)
+            guard names.insert(name).inserted else { return }
+            entries.append(Entry(name: name, edgeMinute: minute, wallStart: wallStart(minute), isFallback: isFallback))
+        }
+        if let next = upcoming.first, !isArmable(next) {
+            // The first whole minute a lead ahead on both clocks.
+            let earliest = max(now, wallNow.addingTimeInterval(armingSkew)).addingTimeInterval(minimumLead)
+            add(minute: ceilingMinute(earliest), isFallback: true)
+        }
+        var armedEdges = 0
+        for edge in upcoming where isArmable(edge) {
+            guard armedEdges < maximumEdges else { break }
+            add(minute: ceilingMinute(edge), isFallback: false)
+            armedEdges += 1
+        }
+        return entries.sorted { $0.edgeMinute < $1.edgeMinute }
     }
 
-    /// A deadline that moved by less than this is not re-armed. A `startMonitoring` on the running
-    /// activity makes iOS deliver `intervalDidEnd` + `intervalDidStart` (measured 2026-09-16), so
-    /// every re-arm is one spurious end for the extension to recognise and ignore — and an end
-    /// derived from the server's minute-precision `deviceLocalTime` can jitter by a minute from
-    /// one poll to the next. Two minutes late, in the app-is-dead case only, is the cost.
-    static let rearmTolerance: TimeInterval = 120
-
-    /// Re-arm only when the deadline actually moved (see `rearmTolerance`).
-    static func shouldArm(existing: DeviceLockDeadlineRecord?, dsn: String, endsAt: Date) -> Bool {
-        guard let existing, existing.dsn == dsn else { return true }
-        return abs(existing.endsAt.timeIntervalSince(endsAt)) > rearmTolerance
-    }
-
-    /// Whether an `intervalDidEnd` for the deadline activity is the real end.
-    static func isReleaseDue(record: DeviceLockDeadlineRecord?, dsn: String, now: Date) -> Bool {
-        guard let record, record.dsn == dsn else { return false }
-        return now.timeIntervalSince(record.endsAt) >= -releaseTolerance
-    }
-
-    static func schedule(endsAt: Date, now: Date, calendar: Calendar = .current) -> DeviceActivitySchedule {
-        let interval = plannedInterval(endsAt: endsAt, now: now)
+    static func schedule(for entry: Entry, calendar: Calendar = .current) -> DeviceActivitySchedule {
         let units: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
         return DeviceActivitySchedule(
-            intervalStart: calendar.dateComponents(units, from: interval.start),
-            intervalEnd: calendar.dateComponents(units, from: interval.end),
+            intervalStart: calendar.dateComponents(units, from: entry.wallStart),
+            intervalEnd: calendar.dateComponents(units, from: entry.wallStart.addingTimeInterval(intervalLength)),
             repeats: false
         )
     }
 
-    /// Arm (or leave armed) the activity for `dsn` ending at `endsAt`. Returns true when a new
-    /// activity was started.
-    @discardableResult
-    static func arm(
-        dsn rawDSN: String,
-        endsAt: Date,
-        now: Date = Date(),
-        store: DeviceLockDeadlineSharedStore = DeviceLockDeadlineSharedStore(),
-        start: StartMonitoring? = nil
-    ) throws -> Bool {
-        // Normalize to the exact form the activity name carries, so the record the extension reads
-        // back (keyed on the DSN it parses OUT of the activity name) always matches.
-        let dsn = DeviceLockDeadlineActivityIdentifier.normalize(rawDSN)
-        guard shouldArm(existing: store.load(), dsn: dsn, endsAt: endsAt) else { return false }
-        let center = DeviceActivityCenter()
-        let startMonitoring = start ?? { name, schedule in
-            try center.startMonitoring(name, during: schedule)
-        }
-        let activity = DeviceActivityName(DeviceLockDeadlineActivityIdentifier.rawValue(dsn: dsn))
-        // The record is written FIRST: if the start throws, the record says what was intended and
-        // the next arm retries it; if the callback fires before the write, the extension would
-        // find no record and (correctly) refuse to release.
-        store.save(DeviceLockDeadlineRecord(dsn: dsn, endsAt: endsAt, armedAt: now))
-        do {
-            try startMonitoring(activity, schedule(endsAt: endsAt, now: now))
-        } catch {
-            store.clear()
-            throw error
-        }
-        log.notice(
-            "lock_deadline armed dsn_present=1 ends_at=\(Int(endsAt.timeIntervalSince1970), privacy: .public) in_s=\(Int(endsAt.timeIntervalSince(now)), privacy: .public)"
-        )
-        return true
+    /// When an `intervalDidStart` for `activityName` is evaluated: `max(now, edge)` while the edge is
+    /// within `earlyCallbackTolerance` ahead, else `now` (see there).
+    static func evaluationTime(now: Date, activityName: String) -> Date {
+        guard let minute = DeviceLockEdgeActivityIdentifier.edgeMinute(from: activityName) else { return now }
+        let edge = Date(timeIntervalSince1970: TimeInterval(minute) * 60)
+        guard edge > now, edge.timeIntervalSince(now) <= earlyCallbackTolerance else { return now }
+        return edge
     }
 
-    /// Stop the activity and forget the deadline — the server unlocked, or the pairing ended.
+    struct ArmResult: Equatable {
+        var started: [String] = []
+        var stopped: [String] = []
+        var failures = 0
+    }
+
+    /// Bring the armed set to `entries`, touching only what differs.
     ///
-    /// Called on every unlocked poll, so without `force` it talks to `DeviceActivityCenter` only
-    /// when a record says something is armed. `force` is for unpair and DSN changes, where the
-    /// App Group may already have been wiped from under the record.
-    static func stop(
-        dsn rawDSN: String,
-        force: Bool = false,
-        store: DeviceLockDeadlineSharedStore = DeviceLockDeadlineSharedStore(),
-        stop: StopMonitoring? = nil
-    ) {
-        let dsn = DeviceLockDeadlineActivityIdentifier.normalize(rawDSN)
-        let hadRecord = store.load() != nil
-        guard hadRecord || force else { return }
-        store.clear()
-        let activity = DeviceActivityName(DeviceLockDeadlineActivityIdentifier.rawValue(dsn: dsn))
-        if let stop {
-            stop([activity])
-        } else {
-            DeviceActivityCenter().stopMonitoring([activity])
+    /// An already-armed entry starting within a minute of where it should is left alone (a restart
+    /// is a spurious callback pair). Undesired activities are stopped only when they have not
+    /// started yet or are long over: stopping a RUNNING one delivers an `intervalDidEnd` for
+    /// nothing, and it ends by itself sixteen minutes after its edge. Build 24's lock-until is
+    /// always stopped.
+    @discardableResult
+    static func arm(_ entries: [Entry], center: DeviceLockEdgeCenter, wallNow: Date, calendar: Calendar = .current) -> ArmResult {
+        var result = ArmResult()
+        let armed = center.lockActivities()
+        let desired = Set(entries.map(\.name))
+        var toStop: [String] = []
+        for activity in armed {
+            if DeviceLockLegacyDeadline.isLegacyActivity(rawValue: activity.name) {
+                toStop.append(activity.name)
+                continue
+            }
+            guard !desired.contains(activity.name) else { continue }
+            guard let start = activity.start else {
+                toStop.append(activity.name)
+                continue
+            }
+            if start > wallNow || start.addingTimeInterval(intervalLength) < wallNow {
+                toStop.append(activity.name)
+            }
         }
-        if hadRecord { log.notice("lock_deadline stopped") }
+        var toStart: [Entry] = []
+        for entry in entries {
+            if let existing = armed.first(where: { $0.name == entry.name }) {
+                if let start = existing.start, abs(start.timeIntervalSince(entry.wallStart)) < 60 { continue }
+                toStop.append(entry.name)
+            }
+            toStart.append(entry)
+        }
+        if !toStop.isEmpty {
+            center.stop(names: toStop)
+            result.stopped = toStop
+        }
+        for entry in toStart {
+            do {
+                try center.start(name: entry.name, schedule: schedule(for: entry, calendar: calendar))
+                result.started.append(entry.name)
+            } catch {
+                result.failures += 1
+                log.error("lock_edge arm_failed edge_minute=\(entry.edgeMinute, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+        }
+        return result
     }
 
-    /// Open the phone: the two keys the whole-device lock owns on the DEFAULT store, and only
-    /// those. `shield.applications` carries the per-app blocks, which outlive a whole-device lock;
-    /// `clearAllSettings()` would drop them and the app's change guard would never put them back.
-    static func releaseGlobalShield(store: ManagedSettingsStore? = nil) {
-        let store = store ?? ManagedSettingsStore()
-        store.shield.applicationCategories = nil
-        store.shield.webDomainCategories = nil
+    /// Unpair: nothing of the old family's may fire on this phone.
+    static func stopAll(center: DeviceLockEdgeCenter) {
+        let names = center.lockActivities().map(\.name)
+        center.stop(names: names)
+    }
+
+    static func postDidEvaluate() {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(darwinNotification as CFString),
+            nil,
+            nil,
+            true
+        )
     }
 
     static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")

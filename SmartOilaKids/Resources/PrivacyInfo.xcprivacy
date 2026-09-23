@@ -111,7 +111,14 @@
 			     .connecting window on a MONOTONIC clock (the wall clock belongs to the child).
 			     35F9.1 = measure elapsed time between events that occurred within the app, which
 			     is exactly that and nothing more: the value never leaves the device.
-			     Omitting this is ITMS-91053 at upload, not a review finding. -->
+			     Omitting this is ITMS-91053 at upload, not a review finding.
+			     The whole-device lock's clock (DeviceLockClock, in the app AND the schedule-monitor
+			     extension) reads clock_gettime_nsec_np(CLOCK_MONOTONIC) and sysctl
+			     kern.bootsessionuuid for the same kind of purpose (elapsed time since the last
+			     server answer, never sent anywhere). Neither is on Apple's required-reason list
+			     (that list names systemUptime and mach_absolute_time), which is why the extension,
+			     which has no manifest of its own, needs none for it. -->
+
 			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>

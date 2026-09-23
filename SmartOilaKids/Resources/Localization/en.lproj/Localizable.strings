@@ -37,7 +37,6 @@
 "lock.schedule" = "Schedule: %@";
 "lock.until" = "Until %@";
 "lock.offline_note" = "Unlocks by itself at %@, even without internet.";
-"lock.local_time" = "Device time: %@";
 
 
 
@@ -370,11 +369,7 @@
 /* Screen Time — app picker and the always-allowed set */
 "common.save" = "Save";
 "screentime.picker.restricted.title" = "Choose apps";
-"screentime.picker.allowed.title" = "Always allowed";
 "screentime.picker.restricted.hint" = "Pick the apps these rules apply to. Apple only lets this choice be made here, on this phone — a parent cannot pick them from the web.";
-"screentime.picker.allowed.hint" = "These apps keep working even when the phone is locked. Include Phone and Messages so your child can always call you.";
-"settings2.always_allowed" = "Always allowed apps";
-"settings2.always_allowed_sub" = "Apps that keep working while the phone is locked";
 "settings2.restricted_apps" = "Apps to block & track";
 "settings2.restricted_apps_sub" = "One-time setup: choose the apps a parent can block and see time for";
 "settings2.restricted_apps_count" = "%d ready, %d still need a name";

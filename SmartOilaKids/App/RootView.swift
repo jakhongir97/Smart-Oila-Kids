@@ -3,7 +3,6 @@ import SwiftUI
 struct RootView: View {
     @Environment(\.scenePhase) var scenePhase
     @EnvironmentObject var sessionStore: SessionStore
-    @StateObject var lockCoordinator = DeviceLockCoordinator.shared
     @StateObject var oilaTelemetry = OilaTelemetryService.shared
     @StateObject var audioStream = DeviceAudioStreamManager.shared
     @State var lastSessionDSN: String?
@@ -108,10 +107,6 @@ struct RootView: View {
         // no interactive dismissal). BolajonHomeView dismisses its SOS cover the moment
         // the lock engages, so this cover is never stuck behind another presentation.
         .fullScreenCover(isPresented: deviceLockCoverPresented) {
-            // Both were hardcoded nil, so the child saw a bare "locked" card even though the
-            // lock-state payload carries `deviceLocalTime` and the schedule window, and the overlay
-            // already knows how to render them. They come from the telemetry service now, which
-            // mirrors the last applied GET /device/lock/state.
             // The banner rides ABOVE the lock takeover, not behind it.
             //
             // A full-screen cover is presented over the whole window, so the disclosure sitting in
@@ -122,13 +117,11 @@ struct RootView: View {
             // saying so. Same view, same state, drawn where it can actually be seen.
             disclosing {
                 DeviceLockOverlay(
-                    localTime: oilaTelemetry.deviceLocalTime,
                     scheduleRange: oilaTelemetry.scheduleRangeText,
-                    // The SERVER end the parent set, never the rolling `lockDeadline` (= min(end,
-                    // confirmedAt + 8 h)): the 8 h ceiling moves forward every 30 s poll, so showing
-                    // it would promise the child an unlock time that keeps sliding. When the backend
-                    // sends no end (today), this is nil and the cover shows no "until" line — the 8 h
-                    // ceiling is a silent safety backstop, not a promise to display.
+                    // The end of the whole locked EPISODE, worked out on the phone from the saved
+                    // window and schedules (`DeviceLockPolicy.episodeEnd`) — the moment the phone
+                    // really opens by itself, internet or not. No "device time" line any more: it
+                    // was the server's `deviceLocalTime` from the last poll, frozen once offline.
                     endsAt: oilaTelemetry.lockEndsAt
                 )
             }
