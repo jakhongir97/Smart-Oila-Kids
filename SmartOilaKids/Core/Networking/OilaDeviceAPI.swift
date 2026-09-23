@@ -809,9 +809,9 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 // revoke is already dead, so minting a fresh one to announce its revocation is work
                 // with no possible outcome.
                 allowRefresh: false,
-                // This answer wipes the phone, so a 2xx only counts when the envelope says
-                // `"success": true` in so many words — a proxy page or an empty body is not a yes.
-                requireExplicitSuccess: true
+                // This answer wipes the phone, so a 2xx only counts when it is a real JSON envelope
+                // that does not say `"success": false` — a captive portal or an empty body is not a yes.
+                requireJSONEnvelope: true
             )
             outcome = .revoked
         } catch let error as OilaAPIError {
@@ -841,7 +841,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
 
     /// Maps an unpair response onto the outcome vocabulary.
     ///
-    /// Only TWO answers mean the link is cut: a 2xx with an explicit success envelope (mapped by the
+    /// Only TWO answers mean the link is cut: a 2xx carrying a JSON envelope (mapped by the
     /// caller) and a 401 whose errorCode is `DEVICE_UNPAIRED` — on this route that is what a retry
     /// after a dropped 200 lands on, and "retrying instead of doing the local reset strands the
     /// handset". Every other 401 is `UNAUTHORIZED` (a bad token), which says nothing about the
@@ -1457,7 +1457,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
         body: Any? = nil,
         authorized: Bool,
         allowRefresh: Bool = true,
-        requireExplicitSuccess: Bool = false
+        requireJSONEnvelope: Bool = false
     ) async throws -> Any {
         let bodyData = try body.map { try JSONSerialization.data(withJSONObject: $0) }
         return try await send(
@@ -1468,7 +1468,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
             contentType: body == nil ? nil : "application/json",
             authorized: authorized,
             allowRefresh: allowRefresh,
-            requireExplicitSuccess: requireExplicitSuccess
+            requireJSONEnvelope: requireJSONEnvelope
         )
     }
 
@@ -1484,7 +1484,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
         contentType: String?,
         authorized: Bool,
         allowRefresh: Bool = true,
-        requireExplicitSuccess: Bool = false
+        requireJSONEnvelope: Bool = false
     ) async throws -> Any {
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
@@ -1531,8 +1531,16 @@ final class OilaDeviceClient: OilaDeviceServicing {
 
         if (200 ... 299).contains(http.statusCode) {
             // A missing envelope reads as success everywhere except where the caller opted out:
-            // `requireExplicitSuccess` is for answers that destroy state (the unpair).
-            let success = (json?["success"] as? Bool) ?? !requireExplicitSuccess
+            // `requireJSONEnvelope` is for answers that destroy state (the unpair). There a 2xx only
+            // counts when the body IS a JSON object that does not say `"success": false` — a captive
+            // portal's HTML page or an empty body is not a yes, while a real envelope that happens to
+            // omit the key is not refused (the live spec gives this 200 no schema).
+            let success: Bool
+            if requireJSONEnvelope {
+                success = json != nil && (json?["success"] as? Bool) != false
+            } else {
+                success = (json?["success"] as? Bool) ?? true
+            }
             if success {
                 return json?["data"] ?? [:]
             }
@@ -1566,7 +1574,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 path: path, method: method, query: query,
                 bodyData: bodyData, contentType: contentType,
                 authorized: authorized, allowRefresh: false,
-                requireExplicitSuccess: requireExplicitSuccess
+                requireJSONEnvelope: requireJSONEnvelope
             )
         }
 

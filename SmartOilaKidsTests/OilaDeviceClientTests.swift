@@ -420,10 +420,10 @@ final class OilaDeviceClientTests: XCTestCase {
         }
     }
 
-    /// The unpair answer wipes the phone, so a 2xx without an explicit `"success": true` — a
-    /// captive portal, a proxy page, an empty body — must not count as the server saying yes.
-    func testATwoHundredWithoutAnExplicitSuccessEnvelopeIsNotARevoke() async {
-        for body in ["", "<html>captive portal</html>", #"{"data":{}}"#, #"{"success":false}"#] {
+    /// The unpair answer wipes the phone, so a 2xx that is not a JSON envelope — a captive portal's
+    /// login page, an empty body — or one that says `"success": false` must not count as a yes.
+    func testATwoHundredThatIsNotAJSONEnvelopeIsNotARevoke() async {
+        for body in ["", "<html>captive portal</html>", #"{"success":false}"#] {
             TestHTTPURLProtocol.reset()
             let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
             TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, body) }
@@ -432,6 +432,17 @@ final class OilaDeviceClientTests: XCTestCase {
 
             XCTAssertNotEqual(outcome, .revoked, "body \(body.debugDescription) is not a confirmed unpair")
         }
+    }
+
+    /// …while a real JSON envelope that simply omits `success` is not refused: the live spec gives
+    /// this 200 no schema, and refusing it would make the phone impossible to disconnect.
+    func testAJSONEnvelopeWithoutASuccessKeyStillCountsAsARevoke() async {
+        let client = makeClient(tokens: InMemoryTokenStore(access: "DEVICE_JWT"))
+        TestHTTPURLProtocol.requestHandler = { [self] request in ok(request, #"{"data":{}}"#) }
+
+        let outcome = await client.unpairDevice(pin: "1234")
+
+        XCTAssertEqual(outcome, .revoked)
     }
 
     /// A child in a basement pressing Disconnect. The link is certainly still up server-side, and
