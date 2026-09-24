@@ -4,6 +4,9 @@ import SwiftUI
 
 final class SessionStore: ObservableObject {
     static let profileNameDefaultsKey = "PROFILE_NAME"
+    /// Public so `DeviceAudioStreamManager` can tell whether B1–B11 has finished without holding a
+    /// reference to the store: onboarding owns the live-consent question while it runs.
+    static let onboardingCompletedDefaultsKey = "BOLAJON_ONBOARDING_COMPLETED"
 
     private enum Keys {
         static let dsn = "DSN"
@@ -13,7 +16,7 @@ final class SessionStore: ObservableObject {
         static let appTheme = "APP_THEME"
         static let appLanguage = "APP_LANGUAGE"
         static let setupCompleted = "BOLAJON_SETUP_COMPLETED"
-        static let onboardingCompleted = "BOLAJON_ONBOARDING_COMPLETED"
+        static let onboardingCompleted = SessionStore.onboardingCompletedDefaultsKey
         static let oilaPaired = "BOLAJON_OILA_PAIRED"
         static let pairedAt = "BOLAJON_PAIRED_AT"
         static let routingMigrated = "BOLAJON_ROUTING_MIGRATED"
@@ -306,14 +309,17 @@ final class SessionStore: ObservableObject {
         //    work against a test store with no singleton behind it. But they were not enough on
         //    their own: they go around `DeviceAudioStreamManager`, which keeps the consent QUESTION
         //    in memory. `clearSession`'s only manager call is `stopByChild()`, and `stop()` clears
-        //    `pendingCommand` while leaving `needsConsent` alone — and RootView's sheet binding is
-        //    gated on `needsConsent` with no pairing check at all. So a consent sheet raised for the
-        //    previous family survived the unpair, sat modally over the pairing screen, and whoever
+        //    `pendingCommand` while leaving `needsConsent` alone — and RootView's sheet binding was
+        //    gated on `needsConsent` with no pairing check at all (since build 28 it also requires
+        //    finished onboarding, which this unpair resets — a second guard, not a replacement for
+        //    this one). So a consent sheet raised for the previous family survived the unpair, sat
+        //    modally over the pairing screen, and whoever
         //    tapped "Allow" ran `grantConsentWithoutStarting` and wrote both keys straight back
         //    AFTER this purge. Re-pair to child B and the first listen opened their microphone with
         //    no sheet — exactly the leak this step exists to close, reached through the sheet
         //    instead of through the onboarding mirror. `revokeConsent()` clears the keys, the
-        //    pending question and anything running under it.
+        //    pending question, any "Hozir emas" cooldown (so the next family is asked afresh) and
+        //    anything running under it.
         userDefaults.removeObject(forKey: "OILA_AUDIO_CONSENT_GRANTED")
         userDefaults.removeObject(forKey: "OILA_VIDEO_CONSENT_GRANTED")
         Task { @MainActor in DeviceAudioStreamManager.shared.revokeConsent() }

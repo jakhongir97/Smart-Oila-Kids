@@ -584,6 +584,19 @@ final class SmartOilaKidsAppDelegateTests: XCTestCase {
         XCTAssertEqual(items.first?.dsn, "child-app-remote")
         XCTAssertFalse(items.first?.isRead ?? true)
     }
+
+    /// Build 28 (owner: "no extra ask"). With the app ON screen: the listen request is started, not
+    /// announced — a banner there is a second ask for something already happening — and the
+    /// presence banner goes to Notification Centre only, because the bottom bar is the disclosure on
+    /// screen and a banner every 30 s reads as an alert. Every other local notification is unchanged.
+    func testForegroundPresentationSuppressesListenRequestAndQuietsPresence() {
+        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.listenRequest), [])
+        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.livePresence), [.list])
+        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.chatMessage),
+                       [.banner, .sound, .badge])
+        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.integrityPrefix + "x"),
+                       [.banner, .sound, .badge])
+    }
 }
 
 final class PermissionRequirementTests: XCTestCase {
@@ -3015,10 +3028,23 @@ final class StreamCommandParsingTests: XCTestCase {
     /// every assertion below would pass vacuously against a method that returned at its first guard,
     /// so the manager exposes an injection seam. (`setenv` does not work here: `ProcessInfo`
     /// snapshots the environment at process start.)
+    ///
+    /// Build 28 moved the sheet behind three more gates — on screen, onboarding finished, no recent
+    /// "Hozir emas" — so the manager is also pinned on screen and past onboarding here; otherwise
+    /// every "the sheet still appears" assertion below would fail for a reason it does not name.
+    /// The hardware seams are stubbed so a consented request that does spawn `start()` stops at the
+    /// microphone gate instead of reaching the real permission APIs or the network.
     @MainActor
     private func makeEnabledManager(audio: Bool, video: Bool) -> DeviceAudioStreamManager {
         let manager = DeviceAudioStreamManager(defaults: consentDefaults(audio: audio, video: video))
         manager.isFeatureEnabled = { true }
+        manager.isForeground = { true }
+        manager.isOnboardingComplete = { true }
+        manager.presenceBannerWouldRender = { true }
+        manager.requestMicPermission = { false }
+        manager.requestCameraPermission = { .denied }
+        manager.osPermissionDenied = { _ in false }
+        manager.postListenRequestBanner = { _, _, _ in }
         return manager
     }
 
@@ -3277,6 +3303,8 @@ final class StreamCommandParsingTests: XCTestCase {
         let defaults = consentDefaults(audio: true, video: true)
         let manager = DeviceAudioStreamManager(defaults: defaults)
         manager.isFeatureEnabled = { true }
+        manager.isForeground = { true }
+        manager.isOnboardingComplete = { true }
         XCTAssertEqual(manager.grantedConsent, .video)
 
         manager.revokeConsent()
@@ -3552,7 +3580,12 @@ private final class FakeMediaPublisher: LiveMediaPublishing, @unchecked Sendable
         await beforeConnectReturns?()
     }
 
+    /// In-place renewals applied — how a test sees that a renewal (and the lease re-arm right after
+    /// it) actually ran.
+    private(set) var applyCount = 0
+
     func applyMode(_ mode: StreamMode, cameraPosition: AVCaptureDevice.Position?) async throws {
+        applyCount += 1
         connectedMode = mode
     }
 
@@ -3577,6 +3610,8 @@ final class LiveSessionLifecycleTests: XCTestCase {
 
     override func tearDown() async throws {
         defaults.removePersistentDomain(forName: suiteName)
+        // A park writes the SHARED store (`.standard`); leave nothing for the next test to consume.
+        await PendingStreamRequestStore.shared.clear()
     }
 
     /// A manager wired to fakes, with consent already granted for `mode`.
@@ -3631,6 +3666,8 @@ final class LiveSessionLifecycleTests: XCTestCase {
         if mode == .video { defaults.set(true, forKey: "OILA_VIDEO_CONSENT_GRANTED") }
         let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
         manager.isFeatureEnabled = { true }
+        manager.isOnboardingComplete = { true }
+        manager.postListenRequestBanner = { _, _, _ in }
         manager.makePublisher = { publisher }
         manager.isForeground = { foreground }
         manager.presenceBannerWouldRender = { presenceBannerWouldRender }
@@ -3823,6 +3860,7 @@ final class LiveSessionConsentRaceTests: XCTestCase {
     private func makeManager(_ publisher: FakeMediaPublisher) -> DeviceAudioStreamManager {
         let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
         manager.isFeatureEnabled = { true }
+        manager.isOnboardingComplete = { true }
         manager.makePublisher = { publisher }
         manager.isForeground = { true }
         manager.presenceBannerWouldRender = { true }
@@ -3862,6 +3900,633 @@ final class LiveSessionConsentRaceTests: XCTestCase {
     }
 }
 
+// MARK: - Asking for live consent only when it has to be asked (build 28)
+//
+// Owner, 2026-09-25: "We already ask for audio and video permission in onboarding, but when the
+// parent first taps listen/watch, Bolajon360 asks again with a custom alert. If the child already
+// gave full access, no extra ask." The investigation found four root causes and several faults
+// around them; each test below names the one it pins. The rule they share: consent is an in-app yes
+// from this child plus the iOS grant — never the iOS grant alone — and the sheet is asked only on
+// screen, after onboarding, for a mode never agreed to, and not again inside the decline cooldown.
+
+@MainActor
+final class LiveConsentAskTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+    private let onScreen = OSAllocatedUnfairLock(initialState: true)
+    private let onboarded = OSAllocatedUnfairLock(initialState: true)
+    private let clock = OSAllocatedUnfairLock(initialState: TimeInterval(1_000))
+    /// One request banner the manager asked to post.
+    private struct Post: Equatable, Sendable {
+        let mode: StreamMode
+        let consented: Bool
+        let withSound: Bool
+    }
+    private let posts = OSAllocatedUnfairLock(initialState: [Post]())
+    /// Released in tearDown so a wedged permission ask cannot outlive its test.
+    private let release = OSAllocatedUnfairLock(initialState: false)
+
+    override func setUp() async throws {
+        suiteName = "LiveConsentAskTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+        onScreen.withLock { $0 = true }
+        onboarded.withLock { $0 = true }
+        clock.withLock { $0 = 1_000 }
+        posts.withLock { $0 = [] }
+        release.withLock { $0 = false }
+        await PendingStreamRequestStore.shared.clear()
+    }
+
+    override func tearDown() async throws {
+        release.withLock { $0 = true }
+        defaults.removePersistentDomain(forName: suiteName)
+        await PendingStreamRequestStore.shared.clear()
+    }
+
+    private func makeManager(
+        audio: Bool = false,
+        video: Bool = false,
+        publisher: FakeMediaPublisher = FakeMediaPublisher()
+    ) -> DeviceAudioStreamManager {
+        if audio { defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED") }
+        if video { defaults.set(true, forKey: "OILA_VIDEO_CONSENT_GRANTED") }
+        let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
+        let onScreen = self.onScreen, onboarded = self.onboarded, clock = self.clock, posts = self.posts
+        manager.isFeatureEnabled = { true }
+        manager.isForeground = { onScreen.withLock { $0 } }
+        manager.isOnboardingComplete = { onboarded.withLock { $0 } }
+        manager.monotonicNow = { clock.withLock { $0 } }
+        manager.postListenRequestBanner = { mode, consented, sound in
+            posts.withLock { $0.append(Post(mode: mode, consented: consented, withSound: sound)) }
+        }
+        manager.makePublisher = { publisher }
+        manager.presenceBannerWouldRender = { true }
+        manager.requestMicPermission = { true }
+        manager.requestCameraPermission = { .granted }
+        manager.osPermissionDenied = { _ in false }
+        manager.openAppSettings = {}
+        return manager
+    }
+
+    private var allPosts: [Post] { posts.withLock { $0 } }
+    private var postCount: Int { allPosts.count }
+
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0 ..< 100 where !condition() {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    /// Computed, so every use carries a fresh receipt time and a full lease.
+    private static var watch: StreamCommand {
+        StreamCommand(mode: .video, cameraPosition: .front, maxDurationSeconds: 120, expiresAt: nil)
+    }
+
+    // MARK: Root cause #1 — the off-screen banner
+
+    /// The parent web re-sends `stream.start` every ~4 s while it waits; each retry used to re-post
+    /// the banner WITH SOUND, so one request chimed over and over on a pocketed phone.
+    func testAParkedRequestPostsItsBannerOnceNotOnEveryRetry() async {
+        let manager = makeManager(audio: true)
+        onScreen.withLock { $0 = false }
+
+        manager.requestStart(command: .debugAudio)
+        manager.requestStart(command: .debugAudio)
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertEqual(manager.state, .awaitingChildTap)
+        XCTAssertEqual(allPosts, [Post(mode: .audio, consented: true, withSound: true)],
+                       "one request, one banner — and that one chimes")
+    }
+
+    /// A change the child should see (video instead of audio) replaces the banner, quietly; a request
+    /// that went quiet for longer than the acceptance window is over, so the next one chimes again,
+    /// and so does the first request after a stop.
+    func testTheBannerIsReplacedQuietlyAndAnnouncedAgainOnlyForANewRequest() async {
+        let manager = makeManager(audio: true, video: true)
+        onScreen.withLock { $0 = false }
+
+        manager.requestStart(command: .debugAudio)
+        manager.requestStart(command: Self.watch)
+        manager.requestStart(command: Self.watch)
+        XCTAssertEqual(allPosts, [Post(mode: .audio, consented: true, withSound: true),
+                                  Post(mode: .video, consented: true, withSound: false)])
+
+        clock.withLock { $0 += PendingStreamRequestStore.acceptanceWindow + 1 }
+        manager.requestStart(command: Self.watch)
+        XCTAssertEqual(postCount, 3)
+        XCTAssertEqual(allPosts.last?.withSound, true, "a request after a long silence is a new request")
+
+        await manager.stop()
+        manager.requestStart(command: Self.watch)
+        XCTAssertEqual(postCount, 4)
+        XCTAssertEqual(allPosts.last?.withSound, true, "the first request after a stop is announced")
+    }
+
+    /// With consent on file the tap starts the session and nothing else is asked, so the banner says
+    /// so instead of reading like a question.
+    func testTheParkedBannerSaysItStartsByItselfWhenConsented() async {
+        let manager = makeManager(audio: true, video: true)
+        onScreen.withLock { $0 = false }
+
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(allPosts.first, Post(mode: .audio, consented: true, withSound: true))
+        await manager.stop()
+        manager.requestStart(command: Self.watch)
+        XCTAssertEqual(allPosts.last, Post(mode: .video, consented: true, withSound: true))
+
+        XCTAssertEqual(DeviceAudioStreamManager.listenRequestBodyKey(mode: .audio, consented: true), "audio2.request.body")
+        XCTAssertEqual(DeviceAudioStreamManager.listenRequestBodyKey(mode: .video, consented: true), "audio2.request.video.body")
+        XCTAssertEqual(DeviceAudioStreamManager.listenRequestBodyKey(mode: .audio, consented: false), "audio2.request.answer_body")
+        XCTAssertEqual(DeviceAudioStreamManager.listenRequestBodyKey(mode: .video, consented: false), "audio2.request.answer_body")
+    }
+
+    /// The banner exists only because iOS forbids a background capture start. On screen there is
+    /// nothing to announce: the session just starts.
+    func testAParkedBannerIsNeverPostedWhileOnScreen() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+
+        manager.requestStart(command: .debugAudio)
+        await waitUntil { manager.isLive }
+
+        XCTAssertEqual(postCount, 0)
+        XCTAssertEqual(publisher.connectCount, 1)
+        XCTAssertFalse(manager.needsConsent)
+    }
+
+    /// The whole promise of the off-screen path: one tap on the banner, then nothing else is asked.
+    func testAParkedConsentedRequestStartsOnOpenWithNoQuestion() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(manager.state, .awaitingChildTap)
+        for _ in 0 ..< 100 {
+            if await PendingStreamRequestStore.shared.hasPending() { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        onScreen.withLock { $0 = true }
+        manager.consumePendingListenRequest()
+        await waitUntil { manager.isLive }
+
+        XCTAssertTrue(manager.isLive, "the tap starts the session")
+        XCTAssertFalse(manager.needsConsent, "and asks nothing: the child already agreed")
+        XCTAssertEqual(publisher.connectCount, 1)
+    }
+
+    /// The banner must read as an incoming request, never as a permission question, in every
+    /// language the child can pick.
+    func testRequestBannerCopyIsNotAPermissionQuestion() {
+        defer { L10n.setLanguage(AppLanguage.defaultForDevice.rawValue) }
+        let keys = ["audio2.request.title", "audio2.request.video.title", "audio2.request.body",
+                    "audio2.request.video.body", "audio2.request.answer_body"]
+        for language in ["en", "uz", "ru", "uz-cyrl"] {
+            L10n.setLanguage(language)
+            for key in keys {
+                let text = L10n.tr(key)
+                XCTAssertNotEqual(text, key, "\(language) \(key) is not localized")
+                XCTAssertFalse(text.contains("?"), "\(language) \(key) reads as a question: \(text)")
+                for word in ["ruxsat", "рухсат", "allow", "permission", "разреш"] {
+                    XCTAssertFalse(text.lowercased().contains(word), "\(language) \(key) asks for permission: \(text)")
+                }
+            }
+        }
+    }
+
+    // MARK: Root cause #1 — a watch the camera was never agreed to
+
+    /// Audio agreed to, camera not (the camera step skipped, or answered before the iOS grant
+    /// landed). Off screen the banner must not promise that video "starts by itself" — it invites an
+    /// answer — and the camera question is asked once, on screen; one yes there starts the watch.
+    func testAWatchWithoutCameraConsentIsAskedOnScreenThenStartsOnTheYes() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        onScreen.withLock { $0 = false }
+
+        manager.requestStart(command: Self.watch)
+
+        XCTAssertEqual(allPosts, [Post(mode: .video, consented: false, withSound: true)])
+        XCTAssertFalse(manager.needsConsent, "no sheet off screen")
+        for _ in 0 ..< 100 {
+            if await PendingStreamRequestStore.shared.hasPending() { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        onScreen.withLock { $0 = true }
+        manager.consumePendingListenRequest()
+        await waitUntil { manager.needsConsent }
+        XCTAssertEqual(manager.consentMode, .video, "the question names the camera")
+
+        manager.grantConsentAndStart()
+        await waitUntil { manager.isLive }
+
+        XCTAssertTrue(manager.isLive)
+        XCTAssertEqual(manager.activeMode, .video)
+        XCTAssertEqual(publisher.connectedMode, .video)
+        XCTAssertEqual(manager.grantedConsent, .video)
+    }
+
+    // MARK: Root cause #2 — the onboarding window
+
+    /// Onboarding's own media steps ask this question. A sheet over the flow asked it twice (and
+    /// fought the flow's app-picker sheet), and a listen that landed then opened nothing useful.
+    func testAListenDuringOnboardingRaisesNoSheetAndStartsNothing() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        onboarded.withLock { $0 = false }
+
+        manager.requestStart(command: .debugAudio)      // consented, on screen
+        manager.requestStart(command: Self.watch)       // unconsented, on screen
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)      // consented, off screen
+        manager.requestStart(command: Self.watch)       // unconsented, off screen
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(manager.state, .idle, "nothing parks either")
+        XCTAssertEqual(postCount, 0)
+        XCTAssertEqual(publisher.connectCount, 0)
+    }
+
+    /// The second half of root cause #2: a yes given in onboarding (or Settings) never cleared a
+    /// sheet that was already pending, so it surfaced anyway — the same question twice.
+    func testTheOnboardingGrantAnswersAQuestionAlreadyPending() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent, "precondition: a question is pending")
+
+        manager.grantOnboardingMediaConsent(microphone: true, camera: false)
+
+        XCTAssertFalse(manager.needsConsent, "the answer was given; the sheet must go")
+        await waitUntil { manager.isLive }
+        XCTAssertTrue(manager.isLive, "and the request it was holding goes ahead")
+        XCTAssertEqual(publisher.connectCount, 1)
+    }
+
+    func testTheOnboardingGrantSettlesAStaleQuestionWithoutStartingIt() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+        let stale = StreamCommand(mode: .audio, cameraPosition: nil, maxDurationSeconds: 120, expiresAt: nil,
+                                  receivedAt: Date().addingTimeInterval(-3600))
+        manager.requestStart(command: stale)
+        XCTAssertTrue(manager.needsConsent)
+
+        manager.grantOnboardingMediaConsent(microphone: true, camera: false)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(manager.grantedConsent, .audio)
+        XCTAssertEqual(publisher.connectCount, 0, "a lease that ran out while it waited opens nothing")
+        XCTAssertEqual(manager.state, .idle)
+    }
+
+    func testAnAudioGrantDoesNotAnswerAPendingVideoQuestion() {
+        let manager = makeManager()
+        manager.requestStart(command: Self.watch)
+        XCTAssertEqual(manager.consentMode, .video)
+
+        manager.grantMediaConsent(microphone: true, camera: false, source: .settings)
+
+        XCTAssertTrue(manager.needsConsent, "the camera was not agreed to")
+        XCTAssertEqual(manager.consentMode, .video)
+    }
+
+    func testConsentSheetShouldShowRequiresFinishedOnboarding() {
+        XCTAssertTrue(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
+                                                      lockTakingOver: false, onboardingCompleted: true))
+        XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
+                                                       lockTakingOver: false, onboardingCompleted: false),
+                       "never over onboarding")
+        XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
+                                                       lockTakingOver: true, onboardingCompleted: true),
+                       "the lock takeover wins")
+        XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: false, needsConsent: true,
+                                                       lockTakingOver: false, onboardingCompleted: true))
+        XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: false,
+                                                       lockTakingOver: false, onboardingCompleted: true))
+    }
+
+    // MARK: Root cause #3 — a yes given in Settings
+
+    /// A child who switched the microphone on from the Settings row — next to our own explanation —
+    /// had answered the question; the first listen still met the sheet.
+    func testASettingsGrantMeansTheFirstListenDoesNotAsk() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+        let grant = MediaConsentAnswer.grant(microphoneAnswer: true, cameraAnswer: nil,
+                                             microphoneGranted: true, cameraGranted: true, hasAudioConsent: false)
+
+        manager.grantMediaConsent(microphone: grant.microphone, camera: grant.camera, source: .settings)
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(manager.grantedConsent, .audio, "an unanswered camera row grants no video")
+        await waitUntil { manager.isLive }
+        XCTAssertEqual(publisher.connectCount, 1)
+    }
+
+    /// The camera row adds video only on top of a microphone consent already on file; alone it is
+    /// nothing (a video session needs the microphone too).
+    func testTheCameraRowCannotGrantVideoWithoutAudioConsent() {
+        let manager = makeManager()
+        let alone = MediaConsentAnswer.grant(microphoneAnswer: nil, cameraAnswer: true,
+                                             microphoneGranted: true, cameraGranted: true, hasAudioConsent: false)
+        manager.grantMediaConsent(microphone: alone.microphone, camera: alone.camera, source: .settings)
+        XCTAssertNil(manager.grantedConsent, "the iOS microphone grant is not the child's answer")
+
+        manager.grantMediaConsent(microphone: true, camera: false, source: .settings)
+        let added = MediaConsentAnswer.grant(microphoneAnswer: nil, cameraAnswer: true,
+                                             microphoneGranted: true, cameraGranted: true,
+                                             hasAudioConsent: manager.grantedConsent != nil)
+        manager.grantMediaConsent(microphone: added.microphone, camera: added.camera, source: .settings)
+        XCTAssertEqual(manager.grantedConsent, .video)
+    }
+
+    func testMediaConsentAnswerTable() {
+        for micAnswer in [nil, false, true] as [Bool?] {
+            for cameraAnswer in [nil, false, true] as [Bool?] {
+                for micGranted in [false, true] {
+                    for cameraGranted in [false, true] {
+                        for hasAudio in [false, true] {
+                            let grant = MediaConsentAnswer.grant(
+                                microphoneAnswer: micAnswer, cameraAnswer: cameraAnswer,
+                                microphoneGranted: micGranted, cameraGranted: cameraGranted,
+                                hasAudioConsent: hasAudio)
+                            let label = "\(String(describing: micAnswer)) \(String(describing: cameraAnswer)) \(micGranted) \(cameraGranted) \(hasAudio)"
+                            XCTAssertEqual(grant.microphone, (micAnswer == true && micGranted) || hasAudio, label)
+                            XCTAssertEqual(grant.camera, cameraAnswer == true && cameraGranted, label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testConsentCardStates() {
+        XCTAssertEqual(MediaConsentCardState.make(featureEnabled: false, granted: .video), .hidden)
+        XCTAssertEqual(MediaConsentCardState.make(featureEnabled: false, granted: nil), .hidden)
+        XCTAssertEqual(MediaConsentCardState.make(featureEnabled: true, granted: nil), .offer,
+                       "nothing on file is an offer, not silence")
+        XCTAssertEqual(MediaConsentCardState.make(featureEnabled: true, granted: .audio), .grantedAudio)
+        XCTAssertEqual(MediaConsentCardState.make(featureEnabled: true, granted: .video), .grantedVideo)
+    }
+
+    // MARK: Root cause #4 and cross-child safety
+
+    /// The iOS grant survives an unpair, so it can be a previous family's. It is never consent.
+    func testAnOSGrantAloneIsNeverConsent() {
+        let manager = makeManager()      // onboarded, no flags; mic and camera seams both grant
+
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertTrue(manager.needsConsent)
+        XCTAssertNil(manager.grantedConsent)
+    }
+
+    /// An install onboarded before build 17 has the iOS grants and no flag, and nothing backfills it
+    /// (a backfill could only be read from the OS grants). It is asked ONCE, on screen — and then
+    /// never again.
+    func testAPreBuild17InstallIsAskedOnceAndThenNeverAgain() async {
+        let manager = makeManager()
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+
+        manager.grantConsentAndStart()
+        await waitUntil { manager.isLive }
+        await manager.stop()
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(MediaConsentCardState.make(featureEnabled: true, granted: nil), .offer,
+                       "and until then Settings offers the same question ahead of time")
+    }
+
+    /// Unpair wipes whatever wrote the consent — Settings included — and the next pairing is asked
+    /// again once its onboarding is done. Also pins that the manager's default onboarding reading is
+    /// the key `SessionStore` writes.
+    func testUnpairWipesASettingsGrantedConsent() {
+        let groupSuiteName = "LiveConsentAskGroup.\(UUID().uuidString)"
+        defer { UserDefaults().removePersistentDomain(forName: groupSuiteName) }
+        let store = SessionStore(userDefaults: defaults, secureTokens: SecureTokenStoreStub(access: nil),
+                                 deviceTokens: SecureTokenStoreStub(access: nil), appGroupIdentifier: groupSuiteName)
+        store.setOnboardingCompleted(true)
+        let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
+        manager.isFeatureEnabled = { true }
+        manager.isForeground = { true }
+        manager.postListenRequestBanner = { _, _, _ in }
+        XCTAssertTrue(manager.isOnboardingComplete())
+
+        manager.grantMediaConsent(microphone: true, camera: true, source: .settings)
+        XCTAssertEqual(manager.grantedConsent, .video)
+
+        store.clearSession()
+        manager.refreshConsentState()
+
+        XCTAssertNil(manager.grantedConsent)
+        XCTAssertFalse(manager.isOnboardingComplete(), "the new pairing replays onboarding")
+        store.setOnboardingCompleted(true)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent, "the next family is asked")
+    }
+
+    // MARK: BUG-A — an unconsented request off screen
+
+    /// With no consent and the phone in a pocket, the sheet used to be armed silently — no banner, no
+    /// park — and met the child hours later over whatever they opened. Now the request parks like any
+    /// other, the banner invites an answer, and the question is asked on screen.
+    func testAnUnconsentedBackgroundRequestParksInsteadOfArmingAnOffScreenSheet() async {
+        let manager = makeManager()
+        onScreen.withLock { $0 = false }
+
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertFalse(manager.needsConsent, "no sheet off screen")
+        XCTAssertEqual(manager.state, .awaitingChildTap)
+        XCTAssertEqual(allPosts, [Post(mode: .audio, consented: false, withSound: true)],
+                       "the banner invites an answer (its body is `audio2.request.answer_body`)")
+        for _ in 0 ..< 100 {
+            if await PendingStreamRequestStore.shared.hasPending() { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        onScreen.withLock { $0 = true }
+        manager.consumePendingListenRequest()
+        await waitUntil { manager.needsConsent }
+
+        XCTAssertTrue(manager.needsConsent, "asked once the child is looking")
+        XCTAssertEqual(manager.state, .idle)
+    }
+
+    /// `start()` is reachable directly too; its hardware-side gate must not raise a sheet off screen.
+    func testTheStartBackDoorCannotRaiseASheetOffScreen() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+        onScreen.withLock { $0 = false }
+
+        await manager.start(command: .debugAudio)
+
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(publisher.connectCount, 0)
+    }
+
+    // MARK: BUG-B — "Hozir emas" and the lease it starved
+
+    func testNotNowSticksThroughTheParentsRetries() {
+        let manager = makeManager()
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+        manager.declineConsent()
+
+        manager.requestStart(command: .debugAudio)
+        XCTAssertFalse(manager.needsConsent, "the parent's retry must not re-ask at once")
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(postCount, 0, "and nothing chimes for a request the child just refused")
+        XCTAssertNotEqual(manager.state, .awaitingChildTap)
+
+        onScreen.withLock { $0 = true }
+        let cooldown = DeviceAudioStreamManager.consentDeclineCooldown
+        clock.withLock { $0 += cooldown - 1 }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertFalse(manager.needsConsent)
+
+        clock.withLock { $0 += 2 }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent, "a later request is asked again: nothing was stored")
+    }
+
+    /// Refusing the camera is not refusing to be heard; refusing the microphone refuses both.
+    func testDecliningVideoDoesNotSilenceAudio() {
+        let manager = makeManager()
+        manager.requestStart(command: Self.watch)
+        manager.declineConsent()
+
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+        XCTAssertEqual(manager.consentMode, .audio)
+
+        manager.declineConsent()
+        manager.requestStart(command: Self.watch)
+        XCTAssertFalse(manager.needsConsent, "video needs the microphone the child just refused")
+    }
+
+    /// An audio session the child allowed, and a parent who asks to switch to video without camera
+    /// consent: the renewal used to stop at the consent gate, so the audio lease was never extended
+    /// and the session the child DID allow died ~120 s later.
+    func testAVideoUpgradeWithoutCameraConsentStillRenewsTheAudioLease() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        await manager.start(command: .debugAudio)
+        XCTAssertTrue(manager.isLive)
+
+        manager.requestStart(command: Self.watch)
+        await waitUntil { publisher.applyCount == 1 }
+
+        XCTAssertEqual(publisher.applyCount, 1, "the renewal ran (and re-armed the lease behind it)")
+        XCTAssertEqual(manager.videoUpgradeFailure, "camera_consent_missing")
+        XCTAssertEqual(manager.activeMode, .audio)
+        XCTAssertTrue(manager.isLive)
+        XCTAssertTrue(manager.needsConsent, "the video question is asked alongside, on screen")
+        XCTAssertEqual(manager.consentMode, .video)
+
+        // Off screen the renewal still runs; the question waits.
+        manager.declineConsent()
+        let cooldown = DeviceAudioStreamManager.consentDeclineCooldown
+        clock.withLock { $0 += cooldown + 1 }
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: Self.watch)
+        await waitUntil { publisher.applyCount == 2 }
+        XCTAssertEqual(publisher.applyCount, 2)
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(postCount, 0, "a live session is renewed, never parked")
+    }
+
+    /// A consented renewal while live and off screen: applied at once, nothing asked or posted.
+    func testALiveRenewalWithAudioConsentAsksNothingOnOrOffScreen() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        await manager.start(command: .debugAudio)
+        onScreen.withLock { $0 = false }
+
+        manager.requestStart(command: .debugAudio)
+        await waitUntil { publisher.applyCount == 1 }
+
+        XCTAssertEqual(publisher.applyCount, 1)
+        XCTAssertTrue(manager.isLive)
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(postCount, 0)
+    }
+
+    /// Withdrawing (or unpairing) starts the question over — an old "Hozir emas" must not keep the
+    /// promised re-ask from happening.
+    func testRevokeResetsTheCooldown() {
+        let manager = makeManager()
+        manager.requestStart(command: .debugAudio)
+        manager.declineConsent()
+
+        manager.revokeConsent()
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertTrue(manager.needsConsent)
+    }
+
+    // MARK: BUG-H — a retry during an in-flight connect
+
+    /// A parent retry landing while a connect is in flight and the app has just left the screen used
+    /// to PARK it: `.awaitingChildTap` made the in-flight start give up at its next
+    /// `state == .connecting` guard, and a needless banner was posted for a session about to go live.
+    func testARetryDuringAnInFlightConnectDoesNotParkIt() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        let release = self.release
+        let asked = OSAllocatedUnfairLock(initialState: false)
+        manager.requestMicPermission = {
+            asked.withLock { $0 = true }
+            while !release.withLock({ $0 }) { try? await Task.sleep(nanoseconds: 10_000_000) }
+            return true
+        }
+        manager.requestStart(command: .debugAudio)
+        await waitUntil { asked.withLock { $0 } }
+        XCTAssertEqual(manager.state, .connecting)
+
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)
+
+        XCTAssertEqual(manager.state, .connecting, "the in-flight attempt absorbs the retry")
+        XCTAssertEqual(postCount, 0)
+
+        release.withLock { $0 = true }
+        await waitUntil { manager.isLive }
+        XCTAssertTrue(manager.isLive, "and still goes live (audio, disclosed by the presence banner)")
+        XCTAssertEqual(publisher.connectCount, 1)
+    }
+
+    // MARK: BUG-C — "Allow" on a switch iOS has turned off
+
+    /// No system prompt can follow a denied permission, so "Ruxsat berish" used to fail silently at
+    /// the permission gate. The yes is recorded and the child is taken to Settings.
+    func testAllowOnADeniedMicrophoneOpensSettings() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+        let opened = OSAllocatedUnfairLock(initialState: 0)
+        manager.osPermissionDenied = { _ in true }
+        manager.openAppSettings = { opened.withLock { $0 += 1 } }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+
+        manager.grantConsentAndStart()
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(opened.withLock { $0 }, 1)
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(manager.grantedConsent, .audio, "the child's yes is kept")
+        XCTAssertEqual(publisher.connectCount, 0, "nothing starts against a switched-off microphone")
+    }
+}
+
 /// The wake observers are the seam a `stream.start` push crosses to reach the microphone. They were
 /// the gate that dropped 100% of real commands before the addressing fix, and nothing tested that a
 /// posted notification reaches the manager at all.
@@ -3871,6 +4536,7 @@ final class StreamWakeObserverTests: XCTestCase {
         defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED")
         let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
         manager.isFeatureEnabled = { true }
+        manager.isOnboardingComplete = { true }
         manager.makePublisher = { publisher }
         manager.isForeground = { true }
         manager.presenceBannerWouldRender = { true }
@@ -3963,6 +4629,7 @@ final class LiveSessionReclaimTests: XCTestCase {
         defaults.set(true, forKey: "OILA_AUDIO_CONSENT_GRANTED")
         let manager = DeviceAudioStreamManager(stream: FakeStreamTokenSource(), defaults: defaults)
         manager.isFeatureEnabled = { true }
+        manager.isOnboardingComplete = { true }
         manager.makePublisher = { publisher }
         manager.isForeground = { true }
         manager.presenceBannerWouldRender = { true }

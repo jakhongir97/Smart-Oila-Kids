@@ -321,6 +321,21 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         }
     }
 
+    /// How one of our own notifications is shown while the app is ON screen.
+    ///  • The listen request: not at all. It exists to bring the app forward, and the app is forward.
+    ///  • The live-session presence banner: Notification Centre only. On screen the bottom bar is the
+    ///    disclosure, and a banner dropping over the app every `presenceRepostInterval` reads like an
+    ///    alert. It is re-posted as a banner the moment the app leaves the screen
+    ///    (`DeviceAudioStreamManager.handleAppDidEnterBackground`).
+    ///  • Everything else: as before.
+    static func presentationOptions(forLocal identifier: String) -> UNNotificationPresentationOptions {
+        switch identifier {
+        case LocalNotificationID.listenRequest: return []
+        case LocalNotificationID.livePresence: return [.list]
+        default: return [.banner, .sound, .badge]
+        }
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -330,8 +345,15 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // `dsn` + `event` userInfo — the very shape the router decodes — so routing them here fed
         // this app's output straight back into its input, duplicating every such event in the
         // inbox and in the badge count. Present them; do not act on them.
-        guard !LocalNotificationID.isLocallyScheduled(notification.request.identifier) else {
-            completionHandler([.banner, .sound, .badge])
+        let identifier = notification.request.identifier
+        guard !LocalNotificationID.isLocallyScheduled(identifier) else {
+            // A listen request that lands while the app is ON screen (posted in the background a
+            // moment before the child opened the app) is started, not announced — the banner would
+            // be the "asks again" the child is already past.
+            if identifier == LocalNotificationID.listenRequest {
+                Task { @MainActor in DeviceAudioStreamManager.shared.consumePendingListenRequest() }
+            }
+            completionHandler(Self.presentationOptions(forLocal: identifier))
             return
         }
         PushCommandRouter.handle(

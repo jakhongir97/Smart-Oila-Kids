@@ -178,6 +178,11 @@ private extension RootView {
 
     /// Presents the one-time live-audio consent sheet when a listen request arrives before the
     /// child has ever consented. Dismissing counts as "not now" (declineConsent).
+    ///
+    /// Never over onboarding (build 28): its microphone and camera steps ask this very question, and
+    /// a second sheet would also fight the flow's own app-picker sheet for the one presentation slot.
+    /// `DeviceAudioStreamManager.askConsent` already refuses to raise it then; this is the second
+    /// guard, and it also covers an unpair (onboarding resets) while a question is pending.
     var audioConsentPresented: Binding<Bool> {
         Binding(
             // The lock takeover WINS. Both presentations are chained on this same view, and SwiftUI
@@ -192,8 +197,29 @@ private extension RootView {
             // (subject to the stale-lease check `grantConsentAndStart` already applies). Declining on
             // the child's behalf because their parent locked the phone would be the wrong answer to
             // a question nobody asked them.
-            get: { AppRuntime.audioStreamingEnabled && audioStream.needsConsent && !deviceLockIsTakingOver },
-            set: { if !$0, !deviceLockIsTakingOver { audioStream.declineConsent() } }
+            get: {
+                Self.consentSheetShouldShow(
+                    streamingEnabled: AppRuntime.audioStreamingEnabled,
+                    needsConsent: audioStream.needsConsent,
+                    lockTakingOver: deviceLockIsTakingOver,
+                    onboardingCompleted: sessionStore.onboardingCompleted
+                )
+            },
+            // Only a dismissal the CHILD made is a "Hozir emas". A sheet hidden because the lock took
+            // over, or because onboarding restarted, was not answered by anyone.
+            set: { if !$0, !deviceLockIsTakingOver, sessionStore.onboardingCompleted { audioStream.declineConsent() } }
         )
+    }
+}
+
+extension RootView {
+    /// Pure form of the sheet's `get`, so the rule is pinned by tests.
+    static func consentSheetShouldShow(
+        streamingEnabled: Bool,
+        needsConsent: Bool,
+        lockTakingOver: Bool,
+        onboardingCompleted: Bool
+    ) -> Bool {
+        streamingEnabled && needsConsent && !lockTakingOver && onboardingCompleted
     }
 }
