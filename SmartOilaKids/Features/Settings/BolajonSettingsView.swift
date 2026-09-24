@@ -324,9 +324,14 @@ private struct LanguagePickerSheet: View {
 
 struct SettingsPermissionsScreen: View {
     @StateObject private var manager = LocationPermissionManager()
-    /// Drives the live-session consent card: it only exists while a grant does.
+    /// Drives the live-session consent card (`MediaConsentCardState`).
     @ObservedObject private var streaming = DeviceAudioStreamManager.shared
     @State private var isConfirmingConsentRevoke = false
+    /// What the child answered ON THIS SCREEN — nil until they tap "Ruxsat berish" on the card or on
+    /// the microphone / camera row. Same rule as onboarding (`MediaConsentAnswer`): only an answer
+    /// plus the iOS grant records consent, never the iOS grant alone.
+    @State private var microphoneAnswer: Bool?
+    @State private var cameraAnswer: Bool?
 
     // Shared with the B11 onboarding summary so both screens cover the same set + status.
     private var states: [BolajonPermissionState] { BolajonPermissionChecklist.states(from: manager) }
@@ -355,12 +360,19 @@ struct SettingsPermissionsScreen: View {
             // manager is a long-lived singleton, so re-read rather than trust the last mirror.
             streaming.refreshConsentState()
         }
+        // The iOS prompt (or a Settings round trip) resolves after the tap, so the grant arrives here.
+        .onChange(of: manager.microphonePermission) { _ in mirrorSettingsConsent() }
+        .onChange(of: manager.cameraAuthorizationStatus) { _ in mirrorSettingsConsent() }
         .confirmationDialog(
             L10n.tr("audio2.consent.revoke_confirm"),
             isPresented: $isConfirmingConsentRevoke,
             titleVisibility: .visible
         ) {
             Button(L10n.tr("audio2.consent.revoke_cta"), role: .destructive) {
+                // The answers go with the grant: a later status change must not replay this visit's
+                // "yes" and quietly re-create what the child just withdrew.
+                microphoneAnswer = nil
+                cameraAnswer = nil
                 streaming.revokeConsent()
                 AppHaptics.selection()
             }
@@ -368,49 +380,136 @@ struct SettingsPermissionsScreen: View {
         }
     }
 
-    /// Withdraw the one-time "you may listen / watch" grant.
+    /// Record what the child answered on this screen, exactly as the onboarding mirror does. Grant-only
+    /// (`grantMediaConsent`), so replaying it on every status change is safe.
     ///
-    /// The grant is what lets a parent's request open the microphone without asking again, and
-    /// until now nothing in the app could take it back: the Stop button ended a session and left
-    /// the standing permission in place. A grant a child cannot withdraw is not consent. Shown
-    /// only when one exists, so the screen says nothing about live audio on a build where the
-    /// feature is off or on a device where nobody has ever agreed.
+    /// Build 28 (owner, 2026-09-25: "if the child already gave full access, no extra ask"): the row's
+    /// button used to call only the iOS request, so a child who switched the microphone on here —
+    /// next to our own explanation of what it is for — still met the consent sheet on the first
+    /// listen. The tap is their answer now. `hasAudioConsent` lets the camera row add video to a
+    /// microphone consent already on file; on its own the camera row grants nothing.
+    private func mirrorSettingsConsent() {
+        let grant = MediaConsentAnswer.grant(
+            microphoneAnswer: microphoneAnswer,
+            cameraAnswer: cameraAnswer,
+            microphoneGranted: manager.microphonePermission == .granted,
+            cameraGranted: manager.cameraAuthorizationStatus == .authorized,
+            hasAudioConsent: streaming.grantedConsent != nil
+        )
+        streaming.grantMediaConsent(microphone: grant.microphone, camera: grant.camera, source: .settings)
+    }
+
+    /// The child's explicit yes to live audio (`.microphone`) or video (`.camera`) on this screen:
+    /// recorded first, then iOS is asked. The direct mirror covers a grant iOS already holds — the
+    /// status then never changes, so `onChange` alone would miss it.
+    private func agreeToLiveCheck(_ requirement: PermissionRequirement) {
+        switch requirement {
+        case .microphone: microphoneAnswer = true
+        case .camera: cameraAnswer = true
+        default: return
+        }
+        mirrorSettingsConsent()
+        manager.performAction(for: requirement)
+        AppHaptics.selection()
+    }
+
+    /// The live-check consent, in all three of its states (`MediaConsentCardState`).
+    ///
+    /// Withdraw: the grant is what lets a parent's request open the microphone without asking again,
+    /// and a grant a child cannot withdraw is not consent.
+    ///
+    /// Offer (build 28): with nothing on file the card used to be absent, so a child who had tapped
+    /// "Hozir emas", an install onboarded before build 17, or a child who turned the microphone on in
+    /// the iOS Settings app had no way to answer except the sheet on the parent's next request. The
+    /// card now carries the same consent text and an explicit "Ruxsat berish".
+    ///
+    /// Hidden only when live audio/video is not in this build.
     @ViewBuilder
     private var consentCard: some View {
-        if let granted = streaming.grantedConsent {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 14) {
-                    iconBadge(granted == .video ? "video.fill" : "mic.fill", tint: AppColors.glyphPurple)
-                    Text(L10n.tr(granted == .video ? "audio2.consent.granted_video" : "audio2.consent.granted_audio"))
-                        .font(AppTypography.heading(16))
-                        .foregroundStyle(AppColors.inkPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                }
-                Text(L10n.tr("audio2.consent.granted_sub"))
-                    .font(AppTypography.bodyText(13))
-                    .foregroundStyle(AppColors.inkSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    isConfirmingConsentRevoke = true
-                } label: {
-                    Text(L10n.tr("audio2.consent.revoke_cta"))
+        switch MediaConsentCardState.make(featureEnabled: AppRuntime.audioStreamingEnabled,
+                                          granted: streaming.grantedConsent) {
+        case .hidden:
+            EmptyView()
+        case .offer:
+            consentCardBody(icon: "mic.slash.fill",
+                            titleKey: "audio2.consent.offer_title",
+                            bodyKey: "audio2.consent.body") {
+                Button { agreeToLiveCheck(.microphone) } label: {
+                    Text(L10n.tr("audio2.consent.allow"))
                         .font(AppTypography.buttonLabel(15))
-                        .foregroundStyle(AppColors.sosCoral)
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
-                        .background(
-                            Capsule().stroke(AppColors.sosCoral.opacity(0.7), lineWidth: 1.5)
-                        )
+                        .background(Capsule().fill(AppColors.ctaOrange))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
-                    .fill(AppColors.cardWhite)
-            )
+        case .grantedAudio:
+            consentCardBody(icon: "mic.fill",
+                            titleKey: "audio2.consent.granted_audio",
+                            bodyKey: "audio2.consent.granted_sub") {
+                Button { agreeToLiveCheck(.camera) } label: {
+                    Text(L10n.tr("audio2.consent.add_video"))
+                        .font(AppTypography.buttonLabel(15))
+                        .foregroundStyle(AppColors.glyphPurple)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(Capsule().stroke(AppColors.glyphPurple.opacity(0.6), lineWidth: 1.5))
+                }
+                .buttonStyle(.plain)
+                withdrawButton
+            }
+        case .grantedVideo:
+            consentCardBody(icon: "video.fill",
+                            titleKey: "audio2.consent.granted_video",
+                            bodyKey: "audio2.consent.granted_sub") {
+                withdrawButton
+            }
         }
+    }
+
+    private func consentCardBody<Actions: View>(
+        icon: String,
+        titleKey: String,
+        bodyKey: String,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                iconBadge(icon, tint: AppColors.glyphPurple)
+                Text(L10n.tr(titleKey))
+                    .font(AppTypography.heading(16))
+                    .foregroundStyle(AppColors.inkPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+            }
+            Text(L10n.tr(bodyKey))
+                .font(AppTypography.bodyText(13))
+                .foregroundStyle(AppColors.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            actions()
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
+                .fill(AppColors.cardWhite)
+        )
+    }
+
+    private var withdrawButton: some View {
+        Button {
+            isConfirmingConsentRevoke = true
+        } label: {
+            Text(L10n.tr("audio2.consent.revoke_cta"))
+                .font(AppTypography.buttonLabel(15))
+                .foregroundStyle(AppColors.sosCoral)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .background(
+                    Capsule().stroke(AppColors.sosCoral.opacity(0.7), lineWidth: 1.5)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -482,9 +581,16 @@ struct SettingsPermissionsScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button {
-                if let requirement = state.requirement { manager.performAction(for: requirement) }
+                guard let requirement = state.requirement else { return }
+                // Microphone and camera are the live check: the tap is the child's consent as well
+                // as the iOS request, and the button says so ("Ruxsat berish", not "Yoqish").
+                if Self.isLiveCheckRow(requirement) {
+                    agreeToLiveCheck(requirement)
+                } else {
+                    manager.performAction(for: requirement)
+                }
             } label: {
-                Text(L10n.tr("settings2.enable"))
+                Text(L10n.tr(state.requirement.map(Self.isLiveCheckRow) == true ? "audio2.consent.allow" : "settings2.enable"))
                     .font(AppTypography.buttonLabel(15))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -502,6 +608,10 @@ struct SettingsPermissionsScreen: View {
             RoundedRectangle(cornerRadius: BolajonMetrics.cardRadius, style: .continuous)
                 .stroke(AppColors.glyphOrange.opacity(0.7), lineWidth: 1.5)
         )
+    }
+
+    private static func isLiveCheckRow(_ requirement: PermissionRequirement) -> Bool {
+        requirement == .microphone || requirement == .camera
     }
 
     private func iconBadge(_ symbol: String, tint: Color) -> some View {
