@@ -451,8 +451,21 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var lastPendingFixesPersistAt: Date?
     /// Centre of the region currently armed as a relaunch trigger, or nil when none is.
     private var relaunchRegionCentre: CLLocationCoordinate2D?
-    /// Undelivered panic alerts awaiting retry. See `enqueueUndeliveredSOS`.
+    /// Undelivered panic alerts: every press from the moment it is made until the server has it.
+    /// See `deliverSOSDurably`.
     private var pendingSOS: [OilaPendingSOS] = []
+    /// The in-flight marks: the outbox entries some sender in THIS process is POSTing right now (a
+    /// press's own attempts, or the flush), each with the send doing it. Nothing else may POST an
+    /// entry while it is marked; a second press of it waits for the send's answer instead. In memory
+    /// only, deliberately: a new process starts with none, so an entry whose sender died with the old
+    /// process (suspended mid-POST, then killed) is replayed by the next launch.
+    private var sosSends: [UUID: Task<Error?, Never>] = [:]
+    /// Whether this process has read the persisted outbox yet. The first write must come after it,
+    /// or it would replace the previous launch's undelivered alerts. See `writeAheadSOS`.
+    private var didRestorePendingSOS = false
+    /// The press's retry backoff: attempt n waits n times this before attempt n + 1. `var` only so a
+    /// test can shorten it.
+    var sosRetryDelayNanoseconds: UInt64 = 800_000_000
     /// Guards `flushPendingSOS` against overlapping runs — see the note there.
     private var isFlushingSOS = false
     private var sosFlushRequestedAgain = false
@@ -943,13 +956,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     // MARK: - SOS outbox
 
-    /// Durably queue an SOS whose in-flight attempts all failed.
-    ///
-    /// The child has pressed the panic button and been told it failed; the app must keep trying.
-    /// Bounded, because an SOS that is hours stale is worse than none — `maxQueuedSOS` most-recent
-    /// entries survive, and anything older than `sosMaxAge` is dropped on restore rather than
-    /// delivered as a phantom emergency.
-    /// How close together two undelivered SOS attempts must be to count as ONE emergency.
+    /// How close together two presses must be to count as ONE emergency while the first is still
+    /// undelivered.
     ///
     /// A child who presses SOS, sees "couldn't send", and presses again is not reporting a second
     /// emergency — they are reporting the same one, harder. Every tap used to append another entry,
@@ -958,40 +966,142 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// from a genuine second press at the moment it matters most.
     nonisolated static let sosDuplicateWindow: TimeInterval = 120
 
-    func enqueueUndeliveredSOS(_ context: OilaSOSContext) {
-        let now = Date()
+    /// Deliver the SOS the child just pressed so that no way the process can end loses it. Nil when
+    /// the server has it; otherwise the last error, and the alert is still in the outbox, which the
+    /// flush retries for as long as the app lives, across relaunches (`hasUndeliveredSOS`).
+    ///
+    /// WRITE-AHEAD. The press is in the persisted outbox BEFORE its first POST. It used to be written
+    /// only after all three attempts had failed, so a process that ended in between — suspended
+    /// mid-request once the child locked or pocketed the phone, then killed — lost the alert without
+    /// a trace. Now the next launch replays it (`restorePendingSOS`).
+    ///
+    /// While the press's own attempts run, the entry is marked in flight (`sosSends`), so the flush in
+    /// this same process (the 30 s tick, a restored connection) leaves it alone instead of alerting
+    /// the parent twice. The attempts are the ones the two SOS sheets used to run themselves — up to
+    /// three, with a short backoff — and each request holds background time
+    /// (`OilaDeviceClient.sendSOS`). Delivered, the entry is removed; failed, the mark is cleared and
+    /// the entry stays for the flush.
+    ///
+    /// A press within `sosDuplicateWindow` of a still-undelivered entry is the same emergency: it
+    /// updates that entry (newer location and battery) instead of stacking a second alert. If that
+    /// entry is on the wire right now — the flush replaying it, or the other sheet's press — this
+    /// press waits for that answer instead of POSTing beside it, and tries itself only if it failed.
+    ///
+    /// Bounded, because an SOS that is hours stale is worse than none — `maxQueuedSOS` most-recent
+    /// entries survive, and anything older than `sosMaxAge` is dropped rather than delivered as a
+    /// phantom emergency.
+    ///
+    /// No `requiresRePair` handling, as in the sheets before: this is the panic path, and a transient
+    /// 401 must never end a pairing mid-emergency. Session invalidation stays with the flush and the
+    /// confirmation probes.
+    func deliverSOSDurably(_ context: OilaSOSContext) async -> Error? {
+        let id = writeAheadSOS(context)
+        var failure: Error?
+        while let running = sosSends[id] {
+            failure = await running.value
+            if failure == nil { return nil }
+        }
+        // Gone, undelivered, while this press waited: unpaired meanwhile (`stop()` empties the
+        // outbox), so there is no pairing left to send it for.
+        guard pendingSOS.contains(where: { $0.id == id }) else {
+            return failure ?? CancellationError()
+        }
+        return await sendSOSEntry(id) { [self] in await attemptSOS(context) }
+    }
+
+    /// True while at least one SOS is still undelivered, a press whose attempts are still running
+    /// included. Lets the UI keep saying "still trying" instead of a bare failure.
+    var hasUndeliveredSOS: Bool { !pendingSOS.isEmpty }
+
+    /// Put a press into the persisted outbox (see `deliverSOSDurably`) and return the id of the entry
+    /// that now carries it: a new one, or the still-undelivered entry of the same emergency.
+    private func writeAheadSOS(_ context: OilaSOSContext, now: Date = Date()) -> UUID {
+        // A press before this launch's `start()` must not overwrite the previous launch's outbox.
+        if !didRestorePendingSOS { restorePendingSOS() }
+        let id: UUID
         // Collapse onto the newest pending entry when it is from the same emergency, keeping the NEW
         // context: a retry usually carries a fresher location and battery reading, which is exactly
-        // what the parent wants, and the queue position stays where the first press put it.
+        // what the parent wants. The id and `queuedAt` stay the first press's — the queue position,
+        // the moment help was first asked for, and (the id) whatever may be sending it right now.
         if let last = pendingSOS.indices.last,
            now.timeIntervalSince(pendingSOS[last].queuedAt) < Self.sosDuplicateWindow {
-            pendingSOS[last] = OilaPendingSOS(context: context, queuedAt: pendingSOS[last].queuedAt)
+            pendingSOS[last].context = context
+            id = pendingSOS[last].id
         } else {
-            pendingSOS.append(OilaPendingSOS(context: context, queuedAt: now))
+            let entry = OilaPendingSOS(context: context, queuedAt: now)
+            pendingSOS.append(entry)
+            id = entry.id
         }
         if pendingSOS.count > maxQueuedSOS {
             pendingSOS.removeFirst(pendingSOS.count - maxQueuedSOS)
         }
         persistPendingSOS()
-        // Don't wait up to `flushInterval` for the timer — an emergency retries now.
-        Task { await flushPendingSOS() }
+        return id
     }
 
-    /// True while at least one SOS is still undelivered. Lets the UI keep saying "still trying"
-    /// instead of a bare failure.
-    var hasUndeliveredSOS: Bool { !pendingSOS.isEmpty }
+    /// Runs `send` as THE send of outbox entry `id` in this process: marked in flight for its whole
+    /// length and, when it delivers, removed from the persisted outbox. Both happen inside the task,
+    /// before anyone waiting on it (`deliverSOSDurably`) hears the answer, so a waiter never finds the
+    /// mark of a send that has ended, nor the entry of one that delivered.
+    private func sendSOSEntry(_ id: UUID, _ send: @escaping @MainActor () async -> Error?) async -> Error? {
+        let task = Task { @MainActor [self] () -> Error? in
+            let failure = await send()
+            sosSends[id] = nil
+            if failure == nil {
+                pendingSOS.removeAll { $0.id == id }
+                persistPendingSOS()
+            }
+            return failure
+        }
+        // Marked before the task body can run: the body runs on this actor, which is not given up
+        // until the await below.
+        sosSends[id] = task
+        return await task.value
+    }
 
-    private func flushPendingSOS() async {
+    /// A press's own attempts: up to three sends with a short backoff. Nil when delivered, else the
+    /// last error.
+    private func attemptSOS(_ context: OilaSOSContext) async -> Error? {
+        let maxAttempts = 3
+        var lastError: Error?
+        for attempt in 1 ... maxAttempts {
+            guard let error = await postSOS(context) else { return nil }
+            lastError = error
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * sosRetryDelayNanoseconds)
+            }
+        }
+        return lastError
+    }
+
+    /// One `POST /device/sos`. Nil when delivered, else the error. The client holds background time
+    /// for the request (`OilaDeviceClient.sendSOS`).
+    private func postSOS(_ context: OilaSOSContext) async -> Error? {
+        do {
+            try await service.sendSOS(
+                lat: context.lat,
+                lng: context.lng,
+                accuracy: context.accuracy,
+                batteryLevel: context.batteryPercent.map(Double.init)
+            )
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    /// Replay the outbox. Internal rather than private only so tests can land the 30 s tick.
+    func flushPendingSOS() async {
         guard isRunning, !pendingSOS.isEmpty else { return }
-        // RE-ENTRANCY GUARD. The queue is drained only AFTER the awaits below, so an enqueue-driven
-        // flush still inside `sendSOS` could be overlapped by the 30s timer tick — both read the
-        // same `pendingSOS`, and both POSTed it. The parent got the same panic alert twice, which
-        // in an emergency feature is a real cost: it makes a duplicate indistinguishable from the
-        // child pressing SOS a second time.
+        // RE-ENTRANCY GUARD. A flush still inside `sendSOS` could be overlapped by the 30s timer
+        // tick — both read the same `pendingSOS`, and both POSTed it. The parent got the same panic
+        // alert twice, which in an emergency feature is a real cost: it makes a duplicate
+        // indistinguishable from the child pressing SOS a second time. (The in-flight marks now keep
+        // any second sender off an entry as well; this still keeps the flush to one run at a time.)
         //
-        // A re-run flag rather than a bare early return: a genuinely NEW SOS enqueued while a flush
-        // is in flight must not wait out the next 30s tick, so the loop repeats instead of dropping
-        // the request.
+        // A re-run flag rather than a bare early return: a flush asked for while one is in flight
+        // (connectivity just came back) must not wait out the next 30s tick, so the loop repeats
+        // instead of dropping the request.
         guard !isFlushingSOS else {
             sosFlushRequestedAgain = true
             return
@@ -1007,41 +1117,39 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private func flushPendingSOSOnce() async {
         guard isRunning, !pendingSOS.isEmpty else { return }
         let batch = pendingSOS
-        var delivered = Set<UUID>()
 
         for entry in batch {
-            guard Date().timeIntervalSince(entry.queuedAt) <= sosMaxAge else {
-                delivered.insert(entry.id) // too stale to be useful — drop it
+            // In flight: a press's own attempts are sending it right now (`deliverSOSDurably`), and a
+            // POST beside them would alert the parent twice. If they fail they clear the mark, and a
+            // later flush sends it.
+            guard sosSends[entry.id] == nil,
+                  // Re-read, not the snapshot: an earlier send in this loop was an await, and meanwhile
+                  // the entry may have been delivered by its press, updated by a second press, or
+                  // dropped by `stop()`.
+                  let current = pendingSOS.first(where: { $0.id == entry.id }) else { continue }
+            guard Date().timeIntervalSince(current.queuedAt) <= sosMaxAge else {
+                pendingSOS.removeAll { $0.id == entry.id } // too stale to be useful — drop it
+                persistPendingSOS()
                 continue
             }
             // Re-judged at every attempt: a position that was fresh at the press is not fresh an hour
             // into an outage, and the fix CoreLocation holds NOW (GPS needs no network) replaces it
             // when it is fresh. See `sosReplayContext`.
-            let context = Self.sosReplayContext(entry, currentFix: heldLocation())
-            do {
-                try await service.sendSOS(
-                    lat: context.lat,
-                    lng: context.lng,
-                    accuracy: context.accuracy,
-                    batteryLevel: context.batteryPercent.map(Double.init)
-                )
-                delivered.insert(entry.id)
-            } catch let error as OilaAPIError where error.requiresRePair {
+            let context = Self.sosReplayContext(current, currentFix: heldLocation())
+            guard let failure = await sendSOSEntry(entry.id, { [self] in await postSOS(context) }) else {
+                continue // delivered, and already out of the outbox
+            }
+            if let error = failure as? OilaAPIError, error.requiresRePair {
                 // Don't spin: let the confirmation probe decide whether the pairing is really gone.
                 handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
-                break
-            } catch {
+            } else {
                 // Still offline — or a 401 that is not DEVICE_UNPAIRED, which is a token problem and
                 // not a reason to give up on an emergency. Keep the whole remaining queue for the
                 // next flush. Counted, but the SOS outbox itself never backs off.
-                recordCredentialRefusal(error)
-                break
+                recordCredentialRefusal(failure)
             }
+            break
         }
-
-        guard !delivered.isEmpty else { return }
-        pendingSOS.removeAll { delivered.contains($0.id) }
-        persistPendingSOS()
     }
 
     /// The fix CoreLocation is holding right now, or the test seam's. Read once per use.
@@ -1059,6 +1167,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     private func restorePendingSOS() {
+        didRestorePendingSOS = true
+        // Nothing restored is in flight. The marks (`sosSends`) are never persisted, so in a new
+        // process an entry whose press ended mid-attempt — it was written before the first POST — is
+        // sendable again, and the next flush replays it. (A restore later in the same process, a
+        // `start()` after `stop()`, leaves the marks of sends still running where they are.)
         guard let data = UserDefaults.standard.data(forKey: Self.pendingSOSKey),
               let restored = try? JSONDecoder().decode([OilaPendingSOS].self, from: data) else {
             pendingSOS.removeAll()
@@ -2685,7 +2798,8 @@ struct OilaSOSContext: Codable, Equatable {
     var locationAt: Date? = nil
 }
 
-/// One undelivered panic alert, persisted so it survives a process kill. `queuedAt` is the moment
+/// One undelivered panic alert, persisted so it survives a process kill — from before its first POST
+/// (`OilaTelemetryService.deliverSOSDurably`) until the server has it. `queuedAt` is the moment
 /// the CHILD pressed the button, not the moment of the retry — the parent needs to know when help
 /// was asked for, and it is what `sosMaxAge` is measured against.
 struct OilaPendingSOS: Codable, Equatable {
@@ -2707,8 +2821,10 @@ struct OilaReportedVisit: Codable, Equatable {
 @MainActor
 protocol SOSTelemetryProviding {
     func currentSOSContext() -> OilaSOSContext
-    /// Durably queue an SOS that could not be delivered, for retry across relaunches.
-    func enqueueUndeliveredSOS(_ context: OilaSOSContext)
+    /// Deliver a pressed SOS through the durable outbox: persisted before the first POST, removed
+    /// once delivered, left for the retrying flush when the press's own attempts all fail. Nil when
+    /// delivered, else the last error. See `OilaTelemetryService.deliverSOSDurably`.
+    func deliverSOSDurably(_ context: OilaSOSContext) async -> Error?
     /// Whether an SOS is still queued for delivery. On the protocol so the UI can tell the child
     /// "still trying" instead of "couldn't send" — the concrete property existed with zero readers.
     var hasUndeliveredSOS: Bool { get }

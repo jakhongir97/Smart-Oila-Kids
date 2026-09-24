@@ -2,61 +2,52 @@ import XCTest
 import UIKit
 @testable import SmartOilaKids
 
-/// Covers the Bolajon360 Home SOS path: `sendSOS()` must attach the latest known location +
-/// battery from telemetry, and still succeed when location/battery are unavailable.
+/// Covers the Bolajon360 Home SOS path: `sendSOS()` must hand the latest known location + battery
+/// from telemetry to the durable outbox (`deliverSOSDurably`, whose POST and retries are covered in
+/// `TelemetryPairingLossTests`), and still succeed when location/battery are unavailable.
 @MainActor
 final class BolajonHomeViewModelTests: XCTestCase {
     func testSendSOSAttachesLatestLocationAndBatteryFromTelemetry() async {
         let service = SOSServiceSpy()
-        let telemetry = StubSOSTelemetry(
-            context: OilaSOSContext(lat: 41.311081, lng: 69.240562, accuracy: 12.5, batteryPercent: 76)
-        )
+        let context = OilaSOSContext(lat: 41.311081, lng: 69.240562, accuracy: 12.5, batteryPercent: 76)
+        let telemetry = StubSOSTelemetry(context: context)
         let viewModel = BolajonHomeViewModel(service: service, telemetry: telemetry)
 
         await viewModel.sendSOS()
 
-        XCTAssertEqual(service.sosCalls.count, 1)
-        let call = service.sosCalls[0]
-        XCTAssertEqual(call.lat, 41.311081)
-        XCTAssertEqual(call.lng, 69.240562)
-        XCTAssertEqual(call.accuracy, 12.5)
-        XCTAssertEqual(call.batteryLevel, 76)   // 0–100 percent as a Double, matching /device/status
+        XCTAssertEqual(telemetry.deliveries, [context], "the press goes to the durable outbox, as captured")
+        XCTAssertTrue(service.sosCalls.isEmpty, "the sheet no longer POSTs beside the outbox")
         XCTAssertTrue(viewModel.sosSent)
     }
 
     func testSendSOSStillSendsWhenLocationAndBatteryUnavailable() async {
         let service = SOSServiceSpy()
-        let telemetry = StubSOSTelemetry(
-            context: OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)
-        )
+        let context = OilaSOSContext(lat: nil, lng: nil, accuracy: nil, batteryPercent: nil)
+        let telemetry = StubSOSTelemetry(context: context)
         let viewModel = BolajonHomeViewModel(service: service, telemetry: telemetry)
 
         await viewModel.sendSOS()
 
-        XCTAssertEqual(service.sosCalls.count, 1)
-        let call = service.sosCalls[0]
-        XCTAssertNil(call.lat)
-        XCTAssertNil(call.lng)
-        XCTAssertNil(call.accuracy)
-        XCTAssertNil(call.batteryLevel)
+        XCTAssertEqual(telemetry.deliveries, [context])
         XCTAssertTrue(viewModel.sosSent)
     }
 
     func testSendSOSDoesNotMarkSentWhenServiceFails() async {
         let service = SOSServiceSpy()
-        service.sendSOSError = NetworkError.invalidURL
         let telemetry = StubSOSTelemetry(
             context: OilaSOSContext(lat: 1, lng: 2, accuracy: 3, batteryPercent: 50)
         )
+        telemetry.deliveryFailure = NetworkError.invalidURL
         let viewModel = BolajonHomeViewModel(service: service, telemetry: telemetry)
 
         await viewModel.sendSOS()
 
-        // A panic button retries transient failures before giving up (3 attempts), then surfaces
-        // an explicit failure state — it must never fail silently.
-        XCTAssertEqual(service.sosCalls.count, 3)
+        // The outbox's own attempts all failed: an explicit failure state — never a silent one —
+        // that says the alert is still queued and being tried.
+        XCTAssertEqual(telemetry.deliveries.count, 1)
         XCTAssertFalse(viewModel.sosSent)
         XCTAssertTrue(viewModel.sosFailed)
+        XCTAssertTrue(viewModel.sosQueued)
         XCTAssertNotNil(viewModel.errorMessage)
     }
 
@@ -69,8 +60,8 @@ final class BolajonHomeViewModelTests: XCTestCase {
         defer { SOSDelivery.sheetDeadline = 20 }
         let service = SOSServiceSpy()
         let gate = SOSGate()
-        service.sendSOSGate = { await gate.wait() }
         let telemetry = StubSOSTelemetry(context: OilaSOSContext(lat: 1, lng: 2, accuracy: 3, batteryPercent: 50))
+        telemetry.deliveryGate = { await gate.wait() }
         let viewModel = BolajonHomeViewModel(service: service, telemetry: telemetry)
 
         let firstPress = Task { await viewModel.sendSOS() }
@@ -82,14 +73,15 @@ final class BolajonHomeViewModelTests: XCTestCase {
         viewModel.resetSOS()          // the child closes the sheet…
         await viewModel.sendSOS()     // …opens it again and presses
         XCTAssertTrue(viewModel.sosQueued)
-        XCTAssertEqual(service.sosCalls.count, 1, "the press joined the running delivery")
+        XCTAssertEqual(telemetry.deliveries.count, 1, "the press joined the running delivery")
 
         gate.open()                   // the server finally answers 200
         await firstPress.value
         XCTAssertTrue(viewModel.sosSent, "the reopened sheet shows the delivery's outcome")
         XCTAssertFalse(viewModel.sosQueued)
-        XCTAssertEqual(service.sosCalls.count, 1)
-        XCTAssertTrue(telemetry.enqueued.isEmpty, "a delivered SOS is not queued again")
+        XCTAssertEqual(telemetry.deliveries.count, 1)
+        XCTAssertFalse(telemetry.hasUndeliveredSOS, "a delivered SOS is not left queued")
+        XCTAssertTrue(service.sosCalls.isEmpty)
     }
 
     func testScreenTimeCardHiddenWhenNoLocalUsageData() async {
@@ -140,17 +132,29 @@ private final class SOSGate {
 
 private final class StubSOSTelemetry: SOSTelemetryProviding {
     let context: OilaSOSContext
-    /// Contexts handed to the durable outbox after every in-flight attempt failed.
-    private(set) var enqueued: [OilaSOSContext] = []
+    /// Contexts handed to the durable outbox, one per delivery started.
+    private(set) var deliveries: [OilaSOSContext] = []
+    /// What every delivery ends with: nil is delivered.
+    var deliveryFailure: Error?
+    /// Awaited inside `deliverSOSDurably` — a server that holds the answer.
+    var deliveryGate: (() async -> Void)?
+    /// Deliveries in the outbox: written ahead, removed once delivered, like the real one.
+    private var pending = 0
 
     init(context: OilaSOSContext) {
         self.context = context
     }
 
     func currentSOSContext() -> OilaSOSContext { context }
-    func enqueueUndeliveredSOS(_ context: OilaSOSContext) { enqueued.append(context) }
-    /// Mirrors the real outbox: anything handed over is still pending until something delivers it.
-    var hasUndeliveredSOS: Bool { !enqueued.isEmpty }
+    func deliverSOSDurably(_ context: OilaSOSContext) async -> Error? {
+        deliveries.append(context)
+        pending += 1
+        if let deliveryGate { await deliveryGate() }
+        if let deliveryFailure { return deliveryFailure }
+        pending -= 1
+        return nil
+    }
+    var hasUndeliveredSOS: Bool { pending > 0 }
 }
 
 private struct StubScreenTimeUsage: ScreenTimeUsageProviding {
@@ -162,10 +166,8 @@ private struct StubScreenTimeUsage: ScreenTimeUsageProviding {
 private final class SOSServiceSpy: OilaDeviceServicing {
     private struct Unimplemented: Error {}
 
+    /// Every SOS POST made through this spy. The view models no longer make any: the outbox does.
     private(set) var sosCalls: [(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?)] = []
-    var sendSOSError: Error?
-    /// Awaited inside `sendSOS` — a server that holds the answer.
-    var sendSOSGate: (() async -> Void)?
     var fetchTasksError: Error?
     var fetchTasksResult: [OilaDeviceTask] = []
     private(set) var fetchTasksCallCount = 0
@@ -174,8 +176,6 @@ private final class SOSServiceSpy: OilaDeviceServicing {
 
     func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws {
         sosCalls.append((lat, lng, accuracy, batteryLevel))
-        if let sendSOSGate { await sendSOSGate() }
-        if let sendSOSError { throw sendSOSError }
     }
 
     func pair(code: String) async throws -> OilaPairResult { throw Unimplemented() }

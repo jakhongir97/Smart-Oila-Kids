@@ -113,8 +113,9 @@ struct DeviceLockOverlay: View {
 }
 
 /// Self-contained SOS sender for the lock overlay, so the panic button works even while the lock
-/// cover is presented (Home's SOS view model is behind the cover). Mirrors the Home SOS retry
-/// policy: retry transient failures a few times and always surface a clear failure state.
+/// cover is presented (Home's SOS view model is behind the cover). Delivers exactly like Home, through
+/// the telemetry service's durable outbox (`deliverSOSDurably`: persisted before the first POST,
+/// retried a few times, queued if that fails), and always surfaces a clear failure state.
 @MainActor
 final class LockOverlaySOSModel: ObservableObject {
     @Published var showConfirm = false
@@ -125,16 +126,11 @@ final class LockOverlaySOSModel: ObservableObject {
     @Published var queued = false
 
     private let telemetry: SOSTelemetryProviding
-    private let service: OilaDeviceServicing
 
-    init(
-        telemetry: SOSTelemetryProviding? = nil,
-        service: OilaDeviceServicing? = nil
-    ) {
+    init(telemetry: SOSTelemetryProviding? = nil) {
         // Resolve the @MainActor telemetry singleton inside the (MainActor) init rather than as a
         // default argument, which would be evaluated in a nonisolated context.
         self.telemetry = telemetry ?? OilaTelemetryService.shared
-        self.service = service ?? OilaDeviceClient.shared
     }
 
     func present() { showConfirm = true }
@@ -167,10 +163,10 @@ final class LockOverlaySOSModel: ObservableObject {
 
         let context = telemetry.currentSOSContext()
         // Bounded like Home's (see `BolajonHomeViewModel.sendSOS` and `SOSDelivery`): the sheet
-        // stops waiting at the deadline; the delivery is not cancelled and is queued only if it
-        // finally fails.
+        // stops waiting at the deadline; the delivery is not cancelled, and it stays in the outbox
+        // (written there before its first POST) only if it finally fails.
         deliveryOwner = sheetGeneration
-        let running = Task { await self.deliver(context) }
+        let running = Task { await self.telemetry.deliverSOSDurably(context) == nil }
         delivery = running
         let deadline = Task {
             do {
@@ -195,7 +191,6 @@ final class LockOverlaySOSModel: ObservableObject {
         // most safety-critical path in the app — and a transient 401 used to destroy the
         // pairing here rather than deliver the alert. Session invalidation belongs to
         // OilaTelemetryService, which confirms with repeated independent probes.
-        telemetry.enqueueUndeliveredSOS(context)
         guard deliveryOwner == sheetGeneration else { return }
         queued = telemetry.hasUndeliveredSOS
         failed = true
@@ -209,26 +204,6 @@ final class LockOverlaySOSModel: ObservableObject {
         queued = true
     }
 
-    private func deliver(_ context: OilaSOSContext) async -> Bool {
-        let maxAttempts = 3
-        for attempt in 1 ... maxAttempts {
-            do {
-                try await service.sendSOS(
-                    lat: context.lat,
-                    lng: context.lng,
-                    accuracy: context.accuracy,
-                    batteryLevel: context.batteryPercent.map(Double.init)
-                )
-                return true
-            } catch {
-                if attempt < maxAttempts {
-                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 800_000_000)
-                }
-            }
-        }
-        return false
-    }
-
     private var delivery: Task<Bool, Never>?
     private var sheetGeneration = 0
     private var deliveryOwner = 0
@@ -238,8 +213,8 @@ final class LockOverlaySOSModel: ObservableObject {
 /// unbounded, a network that connects but never answers held it for 3 × 30 s request timeouts plus
 /// backoff (~92 s). Past this the sheet can be closed and says "still trying"; the delivery keeps
 /// running untouched (cancelling it would not stop a server that already has the POST, and the
-/// queued copy would alert the parent twice) and goes to the persisted retry queue
-/// (`OilaTelemetryService.enqueueUndeliveredSOS`) only if it finally fails.
+/// queued copy would alert the parent twice), and the alert — in the persisted outbox since before
+/// its first POST (`OilaTelemetryService.deliverSOSDurably`) — stays there only if it finally fails.
 enum SOSDelivery {
     /// `var` only so a test can shorten it.
     static var sheetDeadline: TimeInterval = 20

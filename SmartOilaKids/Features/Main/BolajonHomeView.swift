@@ -1023,21 +1023,23 @@ final class BolajonHomeViewModel: ObservableObject {
         // up, and always surface a clear failure state (never fail silently) so the child knows
         // to retry rather than assuming help is on the way.
         //
-        // This loop used to be the WHOLE delivery guarantee, and it is a weak one: offline, all
-        // three attempts fail in milliseconds (URLError.notConnectedToInternet returns immediately),
-        // so the entire panic path was exhausted in ~2.4s and the alert was dropped forever. Every
-        // routine GPS breadcrumb in this app gets a persisted, restored, retried 200-deep queue --
-        // the one call that matters most had none. So a failed SOS is now ENQUEUED and retried by
-        // the telemetry service for as long as the app lives, across relaunches.
+        // The retry loop here used to be the WHOLE delivery guarantee, and it is a weak one: offline,
+        // all three attempts fail in milliseconds (URLError.notConnectedToInternet returns at once),
+        // so the entire panic path was exhausted in ~2.4s and the alert was dropped forever. Then a
+        // failed SOS was queued and retried by the telemetry service — but only AFTER the attempts
+        // failed, so a process suspended mid-POST and then killed still lost it. The delivery now
+        // belongs to the telemetry service's outbox (`deliverSOSDurably`): the press is persisted
+        // before its first POST, the same three attempts run, and whatever they cannot deliver is
+        // retried for as long as the app lives, across relaunches.
         //
         // The sheet cannot be closed while it waits, so it waits at most `SOSDelivery.sheetDeadline`
         // (on a network that connects but never answers, three 30 s request timeouts plus the
         // backoff held the child on a frozen sheet for ~92 s). The delivery itself is NOT cancelled
         // at the deadline: the server may already have the POST and be slow to answer, and a
         // cancelled request followed by the queued copy would alert the parent twice. It keeps
-        // running exactly as before, and is queued only if it finally fails.
+        // running exactly as before, and stays queued only if it finally fails.
         sosDeliveryOwner = sosSheetGeneration
-        let delivery = Task { await self.deliverSOS(context) }
+        let delivery = Task { await self.telemetry.deliverSOSDurably(context) }
         sosDelivery = delivery
         let deadline = Task {
             do {
@@ -1066,7 +1068,6 @@ final class BolajonHomeViewModel: ObservableObject {
         // and regenerating the DSN) while the SOS itself was never delivered. Session
         // invalidation is now owned solely by OilaTelemetryService, which confirms a 401
         // with repeated independent probes before tearing anything down.
-        telemetry.enqueueUndeliveredSOS(context)
         guard sosDeliveryOwner == sosSheetGeneration else { return }
         sosQueued = telemetry.hasUndeliveredSOS
         sosFailed = true
@@ -1081,29 +1082,6 @@ final class BolajonHomeViewModel: ObservableObject {
         guard sosDeliveryOwner == sosSheetGeneration else { return }
         sosFailed = true
         sosQueued = true
-    }
-
-    /// Up to three sends with a short backoff. Nil when delivered, else the last error.
-    private func deliverSOS(_ context: OilaSOSContext) async -> Error? {
-        let maxAttempts = 3
-        var lastError: Error?
-        for attempt in 1 ... maxAttempts {
-            do {
-                try await service.sendSOS(
-                    lat: context.lat,
-                    lng: context.lng,
-                    accuracy: context.accuracy,
-                    batteryLevel: context.batteryPercent.map(Double.init)
-                )
-                return nil
-            } catch {
-                lastError = error
-                if attempt < maxAttempts {
-                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 800_000_000)
-                }
-            }
-        }
-        return lastError
     }
 
     func resetSOS() {

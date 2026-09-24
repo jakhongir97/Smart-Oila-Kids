@@ -5707,6 +5707,9 @@ final class TelemetryPairingLossTests: XCTestCase {
         private var statusCalls = 0
         private var batches: [[OilaLocationFix]] = []
         private var sos: [OilaSOSContext] = []
+        private var sosOutboxes: [[OilaPendingSOS]] = []
+        private var sosDelivered = 0
+        private var sosScript: (@Sendable (Int) async throws -> Void)?
         private var statuses: [OilaDeviceStatus] = []
 
         init(lockAnswers: [Error], statusError: Error? = nil, locationError: Error? = nil, statusDelay: UInt64 = 0) {
@@ -5720,7 +5723,18 @@ final class TelemetryPairingLossTests: XCTestCase {
         var lockStateCalls: Int { locked { lockCalls } }
         var statusPostCalls: Int { locked { statusCalls } }
         var uploadedBatches: [[OilaLocationFix]] { locked { batches } }
+        /// Every `POST /device/sos` made, answered or not.
         var sentSOS: [OilaSOSContext] { locked { sos } }
+        /// What the persisted outbox held as each of those POSTs went out.
+        var persistedOutboxAtEachSOSPOST: [[OilaPendingSOS]] { locked { sosOutboxes } }
+        /// The POSTs the server answered 200.
+        var deliveredSOSCount: Int { locked { sosDelivered } }
+        /// Scripts `POST /device/sos`: called with the POST's 1-based number, and a throw fails it.
+        /// Unset, every SOS is answered 200 at once.
+        var sosAnswer: (@Sendable (Int) async throws -> Void)? {
+            get { locked { sosScript } }
+            set { locked { sosScript = newValue } }
+        }
         var postedStatuses: [OilaDeviceStatus] { locked { statuses } }
 
         func fetchLockState() async throws -> OilaLockState {
@@ -5740,10 +5754,16 @@ final class TelemetryPairingLossTests: XCTestCase {
             if let locationError { throw locationError }
         }
         func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws {
-            locked {
+            let outbox = UserDefaults.standard.data(forKey: "OILA_PENDING_SOS")
+                .flatMap { try? JSONDecoder().decode([OilaPendingSOS].self, from: $0) } ?? []
+            let (number, answer) = locked { () -> (Int, (@Sendable (Int) async throws -> Void)?) in
                 sos.append(OilaSOSContext(lat: lat, lng: lng, accuracy: accuracy,
                                           batteryPercent: batteryLevel.map { Int($0) }))
+                sosOutboxes.append(outbox)
+                return (sos.count, sosScript)
             }
+            try await answer?(number)
+            locked { sosDelivered += 1 }
         }
         func pair(code: String) async throws -> OilaPairResult { throw Unimplemented() }
         func refreshSession() async throws { throw Unimplemented() }
@@ -5805,6 +5825,49 @@ final class TelemetryPairingLossTests: XCTestCase {
     private func persistedFixes() -> [OilaLocationFix] {
         guard let data = UserDefaults.standard.data(forKey: Self.pendingFixesKey) else { return [] }
         return (try? JSONDecoder().decode([OilaLocationFix].self, from: data)) ?? []
+    }
+
+    private static let pendingSOSKey = "OILA_PENDING_SOS"
+
+    /// The SOS outbox as persisted — what a relaunch would find.
+    private func persistedSOS() -> [OilaPendingSOS] {
+        guard let data = UserDefaults.standard.data(forKey: Self.pendingSOSKey) else { return [] }
+        return (try? JSONDecoder().decode([OilaPendingSOS].self, from: data)) ?? []
+    }
+
+    /// What a previous launch left in the SOS outbox.
+    private func seedPendingSOS(_ entries: [OilaPendingSOS]) throws {
+        UserDefaults.standard.set(try JSONEncoder().encode(entries), forKey: Self.pendingSOSKey)
+    }
+
+    /// Holds every SOS POST that waits on it until `open()`: a server that has the request and has not
+    /// answered yet. Thread-safe, because the stub runs off the main actor.
+    private final class ReleaseGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                if isOpen {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    waiters.append(continuation)
+                    lock.unlock()
+                }
+            }
+        }
+
+        func open() {
+            lock.lock()
+            isOpen = true
+            let released = waiters
+            waiters = []
+            lock.unlock()
+            released.forEach { $0.resume() }
+        }
     }
 
     // MARK: 401s
@@ -5993,17 +6056,21 @@ final class TelemetryPairingLossTests: XCTestCase {
 
     // MARK: SOS outbox
 
-    func testAQueuedSOSWhosePositionHasGoneStaleIsSentWithoutIt() async {
+    func testAQueuedSOSWhosePositionHasGoneStaleIsSentWithoutIt() async throws {
+        try seedPendingSOS([OilaPendingSOS(
+            context: OilaSOSContext(
+                lat: 41.31, lng: 69.24, accuracy: 8, batteryPercent: 40,
+                locationAt: Date().addingTimeInterval(-(OilaTelemetryService.sosLocationMaxAge + 30))
+            ),
+            queuedAt: Date()
+        )])
         let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
         let (service, _, _) = start(stub)
         defer { service.stop() }
         // No fresh fix to fall back on either: the phone holds nothing.
         service.heldLocationOverride = { nil }
 
-        service.enqueueUndeliveredSOS(OilaSOSContext(
-            lat: 41.31, lng: 69.24, accuracy: 8, batteryPercent: 40,
-            locationAt: Date().addingTimeInterval(-(OilaTelemetryService.sosLocationMaxAge + 30))
-        ))
+        await service.flushPendingSOS()
 
         let sent = await waitUntil { !stub.sentSOS.isEmpty }
         XCTAssertTrue(sent, "the alert still goes out")
@@ -6014,9 +6081,16 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertEqual(delivered?.batteryPercent, 40, "with everything that is still true")
     }
 
-    func testAQueuedSOSWhosePositionHasGoneStaleIsSentWithTheFreshFixThePhoneHolds() async {
+    func testAQueuedSOSWhosePositionHasGoneStaleIsSentWithTheFreshFixThePhoneHolds() async throws {
         // The dead-zone press: a 20 s old fix at the press, the network back minutes later. GPS
         // needed no network, so the phone knows where the child is NOW — and that is what goes.
+        try seedPendingSOS([OilaPendingSOS(
+            context: OilaSOSContext(
+                lat: 41.31, lng: 69.24, accuracy: 8, batteryPercent: 40,
+                locationAt: Date().addingTimeInterval(-260)
+            ),
+            queuedAt: Date()
+        )])
         let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
         let (service, _, _) = start(stub)
         defer { service.stop() }
@@ -6027,10 +6101,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         )
         service.heldLocationOverride = { heldNow }
 
-        service.enqueueUndeliveredSOS(OilaSOSContext(
-            lat: 41.31, lng: 69.24, accuracy: 8, batteryPercent: 40,
-            locationAt: Date().addingTimeInterval(-260)
-        ))
+        await service.flushPendingSOS()
 
         let sent = await waitUntil { !stub.sentSOS.isEmpty }
         XCTAssertTrue(sent)
@@ -6039,6 +6110,193 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertEqual(delivered?.lng, 69.2871)
         XCTAssertEqual(delivered?.accuracy, 7)
         XCTAssertEqual(delivered?.batteryPercent, 40, "the battery reading is still the press's")
+    }
+
+    // MARK: SOS write-ahead (BG-2): the press is durable before its first POST
+
+    private func pressContext(lat: Double = 41.311, battery: Int = 55) -> OilaSOSContext {
+        OilaSOSContext(lat: lat, lng: 69.24, accuracy: 9, batteryPercent: battery, locationAt: Date())
+    }
+
+    /// A running service whose launch-time traffic (the first poll, status post and any
+    /// connectivity-driven drain) has settled, so every SOS POST a test counts is its own.
+    private func startSettled(_ stub: Stub) async -> OilaTelemetryService {
+        let (service, _, _) = start(stub)
+        service.heldLocationOverride = { nil }
+        service.sosRetryDelayNanoseconds = 1_000_000
+        _ = await waitUntil { stub.lockStateCalls >= 1 && stub.statusPostCalls >= 1 }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        return service
+    }
+
+    func testAPressIsInThePersistedOutboxBeforeItsFirstPOSTAndLeavesItOnceDelivered() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let service = await startSettled(stub)
+        defer { service.stop() }
+        let press = pressContext()
+
+        let failure = await service.deliverSOSDurably(press)
+
+        XCTAssertNil(failure)
+        XCTAssertEqual(stub.persistedOutboxAtEachSOSPOST.map { $0.map(\.context) }, [[press]],
+                       "persisted BEFORE the POST: a process killed mid-request still has it")
+        XCTAssertEqual(stub.sentSOS.count, 1)
+        XCTAssertEqual(stub.sentSOS.first?.lat, press.lat)
+        XCTAssertEqual(stub.sentSOS.first?.accuracy, press.accuracy)
+        XCTAssertEqual(stub.sentSOS.first?.batteryPercent, 55, "0–100 as a Double on the wire")
+        XCTAssertTrue(persistedSOS().isEmpty, "delivered: out of the outbox, nothing to replay")
+        XCTAssertFalse(service.hasUndeliveredSOS)
+    }
+
+    func testAPressWhoseAttemptsAllFailStaysInTheOutboxForTheFlush() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        stub.sosAnswer = { _ in throw URLError(.notConnectedToInternet) }
+        let service = await startSettled(stub)
+        defer { service.stop() }
+        let press = pressContext()
+
+        let failure = await service.deliverSOSDurably(press)
+
+        XCTAssertNotNil(failure)
+        XCTAssertEqual(stub.sentSOS.count, 3, "the press's own three attempts")
+        XCTAssertTrue(service.hasUndeliveredSOS)
+        XCTAssertEqual(persistedSOS().map(\.context), [press], "still in the outbox for the flush")
+
+        stub.sosAnswer = nil  // the network is back; the next tick lands
+        await service.flushPendingSOS()
+
+        let delivered = await waitUntil { !service.hasUndeliveredSOS }
+        XCTAssertTrue(delivered, "the flush delivered it: the failure cleared the in-flight mark")
+        XCTAssertEqual(stub.deliveredSOSCount, 1)
+        XCTAssertTrue(persistedSOS().isEmpty)
+    }
+
+    func testTheFlushNeverSendsAPressWhoseOwnAttemptIsStillOnTheWire() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let gate = ReleaseGate()
+        stub.sosAnswer = { _ in await gate.wait() }
+        let service = await startSettled(stub)
+        defer { service.stop() }
+
+        let press = Task { await service.deliverSOSDurably(self.pressContext()) }
+        let posted = await waitUntil { stub.sentSOS.count == 1 }
+        XCTAssertTrue(posted)
+        XCTAssertTrue(service.hasUndeliveredSOS, "in the outbox while it sends")
+
+        // The 30 s tick, and a restored connection, land while the server holds the answer. Not
+        // awaited yet: a flush that wrongly POSTed would be held on the same answer.
+        let ticks = Task {
+            await service.flushPendingSOS()
+            await service.flushPendingSOS()
+        }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(stub.sentSOS.count, 1, "no second POST beside the press's: the parent is alerted once")
+
+        gate.open()
+        let failure = await press.value
+        await ticks.value
+        XCTAssertNil(failure)
+        await service.flushPendingSOS()
+        XCTAssertEqual(stub.sentSOS.count, 1, "delivered once, and nothing left to replay")
+        XCTAssertFalse(service.hasUndeliveredSOS)
+        XCTAssertTrue(persistedSOS().isEmpty)
+    }
+
+    func testASecondPressWhileTheFirstIsOnTheWireWaitsForItsAnswerInsteadOfStackingAnAlert() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let gate = ReleaseGate()
+        stub.sosAnswer = { _ in await gate.wait() }
+        let service = await startSettled(stub)
+        defer { service.stop() }
+        let first = pressContext(lat: 41.1, battery: 60)
+        let second = pressContext(lat: 41.2, battery: 59)
+
+        let firstPress = Task { await service.deliverSOSDurably(first) }
+        let posted = await waitUntil { stub.sentSOS.count == 1 }
+        XCTAssertTrue(posted)
+        // The lock cover came up and the child pressed its SOS too.
+        let secondPress = Task { await service.deliverSOSDurably(second) }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(stub.sentSOS.count, 1, "the second press waits for the first's answer")
+        XCTAssertEqual(persistedSOS().map(\.context), [second],
+                       "one emergency, one entry — carrying the newer reading")
+
+        gate.open()
+        let firstResult = await firstPress.value
+        let secondResult = await secondPress.value
+        XCTAssertNil(firstResult)
+        XCTAssertNil(secondResult, "both sheets can say \"sent\"")
+        XCTAssertEqual(stub.sentSOS.count, 1, "one alert")
+        XCTAssertTrue(persistedSOS().isEmpty)
+    }
+
+    func testTryAgainAfterAFailedPressRetriesThatAlertInsteadOfQueueingASecond() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        stub.sosAnswer = { number in
+            if number <= 3 { throw URLError(.notConnectedToInternet) }
+        }
+        let service = await startSettled(stub)
+        defer { service.stop() }
+
+        let failed = await service.deliverSOSDurably(pressContext(lat: 41.1))
+        XCTAssertNotNil(failed)
+        let queuedAt = persistedSOS().first?.queuedAt
+
+        let retried = await service.deliverSOSDurably(pressContext(lat: 41.2))  // "Try again"
+
+        XCTAssertNil(retried)
+        XCTAssertEqual(stub.sentSOS.count, 4)
+        XCTAssertEqual(stub.sentSOS.last?.lat, 41.2, "the retry carries the newer reading")
+        XCTAssertEqual(stub.persistedOutboxAtEachSOSPOST.last?.count, 1, "collapsed onto the queued alert")
+        XCTAssertEqual(stub.persistedOutboxAtEachSOSPOST.last?.first?.queuedAt, queuedAt,
+                       "which keeps the moment help was first asked for")
+        XCTAssertTrue(persistedSOS().isEmpty, "nothing left to replay as a second alert")
+        await service.flushPendingSOS()
+        XCTAssertEqual(stub.deliveredSOSCount, 1)
+    }
+
+    func testAPressCutOffMidPOSTIsReplayedByTheNextLaunch() async {
+        // The first process: the POST goes out, the child pockets the phone, iOS suspends the app
+        // mid-request and later kills it. Nothing after the POST ever runs there.
+        let dying = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let gate = ReleaseGate()
+        dying.sosAnswer = { _ in await gate.wait() }
+        let firstProcess = await startSettled(dying)
+        let press = pressContext()
+        let cutOff = Task { await firstProcess.deliverSOSDurably(press) }
+        let posted = await waitUntil { dying.sentSOS.count == 1 }
+        XCTAssertTrue(posted)
+
+        // The next launch: a new service restores the outbox, with no in-flight mark on anything.
+        let relaunchedStub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let relaunched = await startSettled(relaunchedStub)
+        await relaunched.flushPendingSOS()
+
+        let replayed = await waitUntil { relaunchedStub.deliveredSOSCount == 1 }
+        XCTAssertTrue(replayed, "the alert the killed process was sending is delivered")
+        XCTAssertEqual(relaunchedStub.sentSOS.first?.lat, press.lat)
+        XCTAssertEqual(relaunchedStub.sentSOS.first?.batteryPercent, press.batteryPercent)
+        XCTAssertFalse(relaunched.hasUndeliveredSOS)
+        XCTAssertTrue(persistedSOS().isEmpty)
+
+        relaunched.stop()
+        firstProcess.stop()
+        gate.open()
+        _ = await cutOff.value
+    }
+
+    func testAPressBeforeStartKeepsWhatThePreviousLaunchLeftInTheOutbox() async throws {
+        let earlier = OilaPendingSOS(context: pressContext(lat: 40.0), queuedAt: Date().addingTimeInterval(-600))
+        try seedPendingSOS([earlier])
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let service = OilaTelemetryService(service: stub)  // not started yet
+
+        let failure = await service.deliverSOSDurably(pressContext())
+
+        XCTAssertNil(failure)
+        XCTAssertEqual(persistedSOS().map(\.id), [earlier.id],
+                       "the press was written beside the previous launch's alert, not over it")
     }
 
     // MARK: A refused token: the location drain backs off, the chip eventually says why

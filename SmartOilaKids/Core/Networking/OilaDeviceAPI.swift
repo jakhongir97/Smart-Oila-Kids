@@ -955,8 +955,9 @@ final class OilaDeviceClient: OilaDeviceServicing {
         // What a frightened child does right after pressing SOS is lock the phone or pocket it, and
         // iOS suspends the app within seconds — mid-request, with the alert frozen until the next
         // wake (location does not keep this app running: `appDidSuspend` in the 2026-09-24 syslog).
-        // Background time lets the request finish. Here rather than in the two sheets, so the
-        // outbox's replays (`flushPendingSOS`) get it too.
+        // Background time lets the request finish. Here in the client, so every SOS POST gets it:
+        // the press's own attempts (`OilaTelemetryService.deliverSOSDurably`, which has the alert in
+        // the persisted outbox before this runs) and the outbox's replays (`flushPendingSOS`).
         let keepAlive = await SOSRequestKeepAlive.begin()
         do {
             _ = try await requestJSON(path: "device/sos", method: .post, body: body, authorized: true)
