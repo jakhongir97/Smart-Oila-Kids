@@ -141,15 +141,215 @@ final class ScreenTimeUsageLedgerTests: XCTestCase {
         XCTAssertEqual(ledger.secondsReached(dayKey: "2026-09-15"), ["com.google.ios.youtube": 600], "merge-by-max, never a sum")
     }
 
-    func testTheUploadLockIsExclusiveAndReleasable() throws {
+    // MARK: - The upload lease (build 28: 0xDEAD10CC)
+
+    private func makeLeaseDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenTimeUsageLedgerTests.\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let first = try XCTUnwrap(ScreenTimeUsageUploadLock.tryAcquire(directory: directory))
-        XCTAssertNil(ScreenTimeUsageUploadLock.tryAcquire(directory: directory), "held")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory
+    }
+
+    private func claimed(_ claim: ScreenTimeUsageUploadLock.Claim, file: StaticString = #filePath, line: UInt = #line) -> ScreenTimeUsageUploadLock? {
+        guard case .claimed(let lease) = claim else {
+            XCTFail("expected a claim, got \(claim)", file: file, line: line)
+            return nil
+        }
+        return lease
+    }
+
+    private func isBusy(_ claim: ScreenTimeUsageUploadLock.Claim) -> Bool {
+        if case .busy = claim { return true }
+        return false
+    }
+
+    /// One sender at a time across the two processes: the extension is turned away while the app's
+    /// lease is live, and gets in the moment it is released.
+    func testTheUploadLeaseIsExclusiveAndReleasable() throws {
+        let directory = try makeLeaseDirectory()
+        let app = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory)))
+        let refused = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory)
+        guard case .busy(let holder, let remaining) = refused else { return XCTFail("held: \(refused)") }
+        XCTAssertEqual(holder, "app", "the log says who is sending")
+        XCTAssertGreaterThan(remaining, 25)
+        app.release()
+        XCTAssertNotNil(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory)), "released")
+    }
+
+    /// The point of build 28: holding the lease holds no kernel lock. Build 27 held a `flock` for the
+    /// whole request, and a suspension in the middle of it was a 0xDEAD10CC kill.
+    func testAHeldLeaseHoldsNoFileLock() throws {
+        let directory = try makeLeaseDirectory()
+        let lease = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory)))
+        defer { lease.release() }
+        let descriptor = open(directory.appendingPathComponent(ScreenTimeUsageUploadLock.fileName).path, O_RDWR)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        defer { close(descriptor) }
+        XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0, "nobody holds the file while the lease is out")
+        flock(descriptor, LOCK_UN)
+    }
+
+    /// A holder that is frozen or killed mid-request never releases: its lease runs out by itself,
+    /// on the monotonic clock, and the next sender takes over.
+    func testAnExpiredLeaseIsTakenOver() throws {
+        let directory = try makeLeaseDirectory()
+        var clock: UInt64 = 1_000_000_000_000
+        let first = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })))
+        clock += 12_000_000_000
+        XCTAssertTrue(isBusy(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory, now: { clock })), "12 s of 13: still live")
+        clock += 2_000_000_000
+        let second = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory, now: { clock })), "run out")
         first.release()
-        XCTAssertNotNil(ScreenTimeUsageUploadLock.tryAcquire(directory: directory), "released")
-        XCTAssertNil(ScreenTimeUsageUploadLock.tryAcquire(directory: nil), "no container, no lock")
+        XCTAssertTrue(isBusy(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })),
+                      "a lease that ran out and was taken over is not the old holder's to release")
+        second.release()
+        XCTAssertNotNil(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })))
+    }
+
+    /// `release()` runs from the expiration handler, the request deadline and `deinit` — possibly at
+    /// once, on different threads. It must clear the record once and never someone else's.
+    func testReleasingTwiceFromTwoThreadsIsHarmless() throws {
+        let directory = try makeLeaseDirectory()
+        let lease = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory)))
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in lease.release() }
+        let next = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory)))
+        lease.release()
+        XCTAssertTrue(isBusy(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory)), "the late release left the next lease alone")
+        next.release()
+    }
+
+    /// The rules for "somebody is sending", on the record alone.
+    func testLeaseLivenessRules() {
+        let now: UInt64 = 50_000_000_000
+        func record(owner: String = "ext", pid: Int32 = 7, deadlineIn seconds: Double) -> ScreenTimeUsageUploadLock.Record {
+            .init(owner: owner, processID: pid, token: "t", deadline: UInt64(Double(now) + seconds * 1_000_000_000))
+        }
+        XCTAssertTrue(ScreenTimeUsageUploadLock.isLive(record(deadlineIn: 10), now: now, claimant: .app, processID: 1))
+        XCTAssertFalse(ScreenTimeUsageUploadLock.isLive(record(deadlineIn: 0), now: now, claimant: .app, processID: 1), "run out")
+        XCTAssertFalse(ScreenTimeUsageUploadLock.isLive(record(deadlineIn: 3_600), now: now, claimant: .app, processID: 1),
+                       "further out than any lease: written on a clock that restarted at boot")
+        XCTAssertFalse(ScreenTimeUsageUploadLock.isLive(record(owner: "app", pid: 9, deadlineIn: 10), now: now, claimant: .app, processID: 1),
+                       "an app lease from another pid is a dead run's — there is one app process")
+        XCTAssertTrue(ScreenTimeUsageUploadLock.isLive(record(owner: "app", pid: 1, deadlineIn: 10), now: now, claimant: .app, processID: 1))
+        XCTAssertTrue(ScreenTimeUsageUploadLock.isLive(record(owner: "app", pid: 9, deadlineIn: 10), now: now, claimant: .monitorExtension, processID: 1),
+                       "the extension cannot know the app is gone")
+        XCTAssertTrue(ScreenTimeUsageUploadLock.isLive(record(owner: "ext", pid: 9, deadlineIn: 10), now: now, claimant: .monitorExtension, processID: 1),
+                       "nothing is assumed about how many extension processes there are")
+    }
+
+    func testTheLeaseRecordRoundTripsAndGarbageIsNobody() {
+        let record = ScreenTimeUsageUploadLock.Record(owner: "ext", processID: 412, token: UUID().uuidString, deadline: 123_456_789_000)
+        XCTAssertEqual(ScreenTimeUsageUploadLock.Record(decoding: record.encoded), record)
+        XCTAssertNil(ScreenTimeUsageUploadLock.Record(decoding: Data()), "released")
+        XCTAssertNil(ScreenTimeUsageUploadLock.Record(decoding: Data("not a lease".utf8)))
+    }
+
+    /// Build 27 treated a file it could not open like a held lock and waited out its whole timeout
+    /// for it; an unopenable record is said as such, at once.
+    func testAnUnopenableLeaseIsUnavailableNotBusy() throws {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("no-such-dir-\(UUID().uuidString)")
+        guard case .unavailable(let code) = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: missing) else {
+            return XCTFail("an unopenable record is not a busy one")
+        }
+        XCTAssertEqual(code, ENOENT)
+        XCTAssertNotNil(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: nil)),
+                        "no container at all: nothing to coordinate on, send unguarded")
+    }
+
+    /// The extension's lease must outlast its whole request, or the app could send a newer body while
+    /// the extension's older one is still on the wire.
+    func testTheExtensionLeaseOutlastsItsRequest() {
+        XCTAssertLessThanOrEqual(ScreenTimeUsageExtensionUploader.requestTimeout + ScreenTimeUsageUploadLock.releaseMargin,
+                                 ScreenTimeUsageUploadLock.maximumDuration)
+        XCTAssertLessThan(ScreenTimeUsageExtensionUploader.requestTimeout + ScreenTimeUsageUploadLock.releaseMargin,
+                          ScreenTimeEnforcementCoordinator.usageUploadLeaseWait,
+                          "the app waits out an extension upload instead of skipping it")
+    }
+
+    /// A request that ended with no answer gives its lease back with a tail: everyone stays out for
+    /// the tail (its body may still land), never past the lease's own deadline, and never on a
+    /// record that is no longer this lease's.
+    func testAReleaseAfterNoAnswerKeepsOthersOutForTheTailOnly() throws {
+        let directory = try makeLeaseDirectory()
+        var clock: UInt64 = 1_000_000_000_000
+        let seconds: UInt64 = 1_000_000_000
+
+        let first = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })))
+        clock += 1 * seconds
+        first.release(keepingOthersOutFor: 5, now: { clock })
+        first.release()
+        clock += 4 * seconds
+        let refused = ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory, now: { clock })
+        guard case .busy(let holder, let remaining) = refused else { return XCTFail("inside the tail: \(refused)") }
+        XCTAssertEqual(holder, "ext")
+        XCTAssertEqual(remaining, 1, accuracy: 0.001, "the tail, not the 13 s lease; a later plain release changes nothing")
+        clock += 2 * seconds
+        let second = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory, now: { clock })), "past the tail")
+        second.release()
+
+        // Near its end, a tail never stretches a lease.
+        let third = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })))
+        clock += 10 * seconds
+        third.release(keepingOthersOutFor: 5, now: { clock })
+        clock += 3 * seconds + 1
+        let fourth = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory, now: { clock })), "the 13 s deadline stands")
+
+        fourth.release(keepingOthersOutFor: 0, now: { clock })
+        XCTAssertNotNil(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })), "a zero tail frees at once")
+    }
+
+    /// A tail release after the lease was taken over leaves the new holder's record alone.
+    func testATailReleaseOfARunOutLeaseLeavesTheNextHolderAlone() throws {
+        let directory = try makeLeaseDirectory()
+        var clock: UInt64 = 1_000_000_000_000
+        let first = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })))
+        clock += 14_000_000_000
+        let next = try XCTUnwrap(claimed(ScreenTimeUsageUploadLock.claim(owner: .app, duration: 30, directory: directory, now: { clock })))
+        first.release(keepingOthersOutFor: 5, now: { clock })
+        let refused = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory, now: { clock })
+        guard case .busy(let holder, let remaining) = refused else { return XCTFail("the app's lease: \(refused)") }
+        XCTAssertEqual(holder, "app")
+        XCTAssertEqual(remaining, 30, accuracy: 0.001, "untouched by the old holder's tail")
+        next.release()
+    }
+
+    /// The lease is read on the clock the holders' cancel timers run on (`Task.sleep(nanoseconds:)`,
+    /// `DispatchTime`): uptime. On `CLOCK_MONOTONIC`, which counts through sleep, a lease could run
+    /// out during a sleep while its holder's cancel had not fired.
+    func testTheLeaseIsOnTheCancelTimersClock() {
+        let before = DispatchTime.now().uptimeNanoseconds
+        let lease = ScreenTimeUsageUploadLock.monotonicNow()
+        let after = DispatchTime.now().uptimeNanoseconds
+        let tolerance: UInt64 = 50_000_000
+        XCTAssertGreaterThanOrEqual(lease + tolerance, before)
+        XCTAssertLessThanOrEqual(lease, after + tolerance)
+    }
+
+    /// Which extension outcomes may still land on the server, and so keep the lease closed.
+    func testTheExtensionOutcomeSaysWhetherABodyMayStillLand() {
+        typealias Outcome = ScreenTimeUsageExtensionUploader.Outcome
+        XCTAssertFalse(Outcome.sent(status: 200).mayStillLand)
+        XCTAssertFalse(Outcome.skipped(reason: "no_days").mayStillLand)
+        XCTAssertFalse(Outcome.skipped(reason: "no_credential").mayStillLand)
+        XCTAssertFalse(Outcome.failed("http_500").mayStillLand, "answered")
+        XCTAssertFalse(Outcome.failed("encode oops").mayStillLand, "never sent")
+        XCTAssertTrue(Outcome.failed("timeout").mayStillLand, "the semaphore gave up and cancelled")
+        XCTAssertTrue(Outcome.failed("no_http_response").mayStillLand)
+        XCTAssertTrue(Outcome.failed(String(describing: URLError(.networkConnectionLost))).mayStillLand)
+    }
+
+    /// The extension's one-upload-a-minute limit reads the wall clock; a clock wound back must not
+    /// turn it into hours of skipped uploads.
+    func testTheExtensionRateLimitIgnoresAClockWoundBack() {
+        let last = Date(timeIntervalSince1970: 1_800_000_000)
+        func limited(_ now: Date, _ last: Date?) -> Bool {
+            ScreenTimeUsageExtensionUploader.isRateLimited(now: now, last: last, minimumInterval: 60)
+        }
+        XCTAssertFalse(limited(last, nil), "never sent")
+        XCTAssertTrue(limited(last, last))
+        XCTAssertTrue(limited(last.addingTimeInterval(59), last))
+        XCTAssertFalse(limited(last.addingTimeInterval(60), last))
+        XCTAssertFalse(limited(last.addingTimeInterval(-3_600), last), "the clock was wound back an hour")
     }
 
     func testActivityNamesCarryTheDSNAndAreDistinctFromTheLockSchedule() {

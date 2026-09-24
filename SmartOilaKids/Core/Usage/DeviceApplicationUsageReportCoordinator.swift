@@ -357,13 +357,18 @@ actor DeviceApplicationUsageReportCoordinator {
                 lastError: "-"
             )
 
+            // Actors are re-entrant: `purge()` (a Disconnect) can empty the queue while this one
+            // waits on the request, and `removeFirst()` on the emptied array is a crash. The
+            // answer may only touch THIS batch, in the queue it came from.
+            let generation = purgeGeneration
             do {
                 let response = try await service.reportUsage(
                     dsn: batch.dsn,
                     items: batch.requestItems
                 )
 
-                persistedState.pendingBatches.removeFirst()
+                guard generation == purgeGeneration else { continue }
+                persistedState.pendingBatches.removeAll { $0.id == batch.id }
                 persistedState.lastSuccessfulUploadAt = Date()
                 persistedState.lastPayloadSummary = payloadSummary
                 persistedState.lastResponseSummary = responseSummary(response)
@@ -386,6 +391,7 @@ actor DeviceApplicationUsageReportCoordinator {
 
                 await responseHandler(batch.dsn, response)
             } catch {
+                guard generation == purgeGeneration else { continue }
                 persistedState.lastEndpoint = endpoint
                 persistedState.lastPayloadSummary = payloadSummary
                 persistedState.lastErrorSummary = error.localizedDescription
@@ -393,7 +399,7 @@ actor DeviceApplicationUsageReportCoordinator {
                 if Self.isPermanentReject(error) {
                     // The server will never accept this batch (4xx validation error). Drop it so it
                     // cannot wedge the head of the queue forever, and continue with the rest.
-                    persistedState.pendingBatches.removeFirst()
+                    persistedState.pendingBatches.removeAll { $0.id == batch.id }
                     refundAccountedUsage(for: batch)
                     persistState()
                     updateDiagnostics(
@@ -546,6 +552,7 @@ actor DeviceApplicationUsageReportCoordinator {
     /// attributes it to. Clearing the UserDefaults key alone would not hold: this actor is long-lived,
     /// so its in-memory state survives the disconnect and `persistState()` writes the key back.
     func purge() {
+        purgeGeneration &+= 1
         retryTask?.cancel()
         retryTask = nil
         persistedState = PersistedState()
@@ -623,6 +630,8 @@ actor DeviceApplicationUsageReportCoordinator {
     private var retryTask: Task<Void, Never>?
     private var nextRetryDelay: TimeInterval
     private var isProcessing = false
+    /// Bumped by every `purge()`, so a request that was out across one knows its queue is gone.
+    private var purgeGeneration = 0
 
     private static let storageKey = "DEVICE_APPLICATION_USAGE_REPORT_STATE"
     private let endpointPlaceholder = "-"

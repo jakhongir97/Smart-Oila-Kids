@@ -117,13 +117,18 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         Self.log.notice("schedule_monitor threshold activity=\(activity.rawValue, privacy: .public) event=\(event.rawValue, privacy: .public)")
 
         if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
-            handleUsageThreshold(event: event, activity: activity)
+            let recorded = handleUsageThreshold(event: event, activity: activity)
             // The device-total rung fires every few minutes of REAL use — exactly while a child is
             // using a phone that may have to be locked — and, unlike an edge activity, it does not
             // follow the wall clock or the zone. So every step re-checks the lock on the trusted
             // clock: a child who winds the clock back so the 21:00 edge fires at 08:00 is locked
             // by their own first minutes of use (final review, 2026-09-24).
+            // BEFORE the upload (build 28): iOS delivers these callbacks one at a time, so a lock
+            // decision placed after the network waited behind a whole request on a slow line.
             handleLockEdge(activity: activity, callback: .recheck)
+            if recorded {
+                uploadUsage(reason: "threshold", force: false)
+            }
             return
         }
 
@@ -254,27 +259,29 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
 
 private extension SmartOilaKidsDeviceActivityMonitorExtension {
     /// "This app (or, for `__device_total__`, the whole phone) has been used for N seconds today."
-    /// Record N, arm N + step, tell the server.
+    /// Record N, arm N + step; the caller then re-checks the lock and tells the server.
     ///
-    /// Three writes, and the order matters: the ledger first (so a crash after it still leaves
-    /// the figure), the re-arm second (so the next rung exists before anything slow happens), the
-    /// upload last (network, bounded by a timeout, and the app will retry it anyway).
+    /// Three steps, and the order matters: the ledger first (so a crash after it still leaves the
+    /// figure), the re-arm second (so the next rung exists before anything slow happens), the
+    /// upload last, by the caller, after the lock re-check (network, bounded by a timeout, and the
+    /// app will retry it anyway).
     ///
-    /// None of the three for a rung that cannot be true: more usage than its day has had seconds.
+    /// None of them for a rung that cannot be true: more usage than its day has had seconds.
     /// Recording it would put an impossible figure on the parent's screen, and re-arming above it
-    /// is how one spurious callback turns into a staircase that climbs by itself.
-    func handleUsageThreshold(event: DeviceActivityEvent.Name, activity: DeviceActivityName) {
+    /// is how one spurious callback turns into a staircase that climbs by itself. Returns whether
+    /// the rung was taken — only then is there anything to upload.
+    func handleUsageThreshold(event: DeviceActivityEvent.Name, activity: DeviceActivityName) -> Bool {
         guard let dsn = ScreenTimeUsageActivity.dsn(from: activity.rawValue),
               let parsed = ScreenTimeUsageActivity.parse(eventName: event.rawValue) else {
             Self.log.error("schedule_monitor usage_event_unparsed event=\(event.rawValue, privacy: .public)")
-            return
+            return false
         }
         let bound = ScreenTimeUsageMonitoring.plausibleSecondsBound(dayKey: parsed.dayKey, now: Date())
         guard parsed.thresholdSeconds <= bound else {
             Self.log.error(
                 "schedule_monitor usage_step rejected reason=beyond_elapsed app=\(parsed.bundleId, privacy: .public) seconds=\(parsed.thresholdSeconds, privacy: .public) day=\(parsed.dayKey, privacy: .public) bound=\(bound, privacy: .public)"
             )
-            return
+            return false
         }
         // The DAY comes from the event, never from the clock: a rung crossed at 23:58 may be
         // delivered at 00:01, and it belongs to the day it was armed for.
@@ -283,7 +290,7 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
             "schedule_monitor usage_step app=\(parsed.bundleId, privacy: .public) seconds=\(parsed.thresholdSeconds, privacy: .public) day=\(parsed.dayKey, privacy: .public) changed=\(changed ? 1 : 0, privacy: .public)"
         )
         rearmUsage(dsn: dsn, reason: "threshold")
-        uploadUsage(reason: "threshold", force: false)
+        return true
     }
 
     func rearmUsage(dsn: String, reason: String) {
@@ -300,26 +307,51 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     ///
     /// Two guards, both from the review of 2026-09-16:
     ///  * ONE request on the wire across processes — `ScreenTimeUsageUploadLock`. The app uploads on
-    ///    the Darwin notification `record` just posted, so without the lock the two bodies race and
-    ///    the older one can land last (each day REPLACES the server's copy).
+    ///    the Darwin notification `record` just posted, so without it the two bodies race and the
+    ///    older one can land last (each day REPLACES the server's copy). A lease since build 28:
+    ///    nothing is held while the request is out, so this process can be suspended mid-request
+    ///    without iOS killing it for a held file lock (0xDEAD10CC).
     ///  * At most one extension upload per `minimumInterval` unless `force`: a freshly labelled app
     ///    with hours of usage today climbs the whole staircase in back-to-back callbacks
     ///    (`includesPastActivity`), and that climb only ever happens while the parent is holding the
     ///    app — which uploads on every Darwin notification anyway.
     func uploadUsage(reason: String, force: Bool) {
         let now = Date()
-        if !force, let last = usageLedger.lastExtensionUploadAt(), now.timeIntervalSince(last) < Self.minimumUploadInterval {
+        if !force, ScreenTimeUsageExtensionUploader.isRateLimited(
+            now: now,
+            last: usageLedger.lastExtensionUploadAt(),
+            minimumInterval: Self.minimumUploadInterval
+        ) {
             Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(rate_limited)")
             return
         }
-        guard let lock = ScreenTimeUsageUploadLock.acquire(timeout: 6) else {
-            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_busy)")
+        // Read BEFORE the claim: a keychain read is the slowest step before the request, and time
+        // spent inside the lease before `resume()` is time the request no longer has.
+        let credential = LocationPushSharedCredential.read()
+        let lease: ScreenTimeUsageUploadLock
+        switch Self.claimUploadLease(retrying: force) {
+        case .claimed(let claimed):
+            lease = claimed
+        case .busy(let holder, let remaining):
+            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_busy) holder=\(holder, privacy: .public) remaining_s=\(Int(remaining.rounded(.up)), privacy: .public)")
+            return
+        case .unavailable(let code):
+            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_unavailable errno=\(code, privacy: .public))")
             return
         }
-        defer { lock.release() }
+        // The request is cancelled `requestTimeout` after the CLAIM, not after `resume()`: the lease
+        // runs `requestTimeout` + `releaseMargin` from the claim, on the same (uptime) clock.
+        let cancelBy = DispatchTime.now() + ScreenTimeUsageExtensionUploader.requestTimeout
+        // Read AFTER the claim: whatever the ledger holds now is the newest body anyone can send.
         let days = ScreenTimeUsageReport.days(ledger: usageLedger)
-        let credential = LocationPushSharedCredential.read()
-        let outcome = ScreenTimeUsageExtensionUploader.upload(days: days, credential: credential.payload)
+        let outcome = ScreenTimeUsageExtensionUploader.upload(days: days, credential: credential.payload, deadline: cancelBy)
+        // A request that ended with no answer may still land: the app keeps out for the margin
+        // rather than send a newer body the server could process alongside it.
+        if outcome.mayStillLand {
+            lease.release(keepingOthersOutFor: ScreenTimeUsageUploadLock.releaseMargin)
+        } else {
+            lease.release()
+        }
         if case .sent = outcome {
             usageLedger.setLastExtensionUploadAt(now)
         }
@@ -329,6 +361,24 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     }
 
     static let minimumUploadInterval: TimeInterval = 60
+
+    /// One try. A busy lease is almost always the app, which sends the whole ledger and — having
+    /// heard the notification `record` just posted — sends it once more when its request is done,
+    /// so this step is not lost by skipping. Build 27 slept up to six seconds here inside the
+    /// callback, and iOS delivers the next callback only after this one returns. Only the day's
+    /// final figure (`interval_end`, `retrying`) is worth a short wait: about a second, nothing
+    /// held while waiting.
+    static func claimUploadLease(retrying: Bool) -> ScreenTimeUsageUploadLock.Claim {
+        let duration = ScreenTimeUsageExtensionUploader.requestTimeout + ScreenTimeUsageUploadLock.releaseMargin
+        var claim = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: duration)
+        var retries = retrying ? 10 : 0
+        while retries > 0, case .busy = claim {
+            Thread.sleep(forTimeInterval: 0.1)
+            claim = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: duration)
+            retries -= 1
+        }
+        return claim
+    }
 }
 
 private extension SmartOilaKidsDeviceActivityMonitorExtension {

@@ -711,6 +711,29 @@ protocol OilaDeviceServicing {
 
 // MARK: - Client
 
+/// Background time for one `POST /device/sos` (see `OilaDeviceClient.sendSOS`). Begun and ended on
+/// the main thread, where UIKit also calls the expiration handler, so the three can never overlap.
+@MainActor
+private final class SOSRequestKeepAlive {
+    static func begin() -> SOSRequestKeepAlive {
+        let keepAlive = SOSRequestKeepAlive()
+        keepAlive.identifier = UIApplication.shared.beginBackgroundTask(withName: "oila.sos") {
+            // Out of time: the request runs on until the suspension, and a failure still lands in
+            // the outbox the way it always has.
+            keepAlive.end()
+        }
+        return keepAlive
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
+    }
+
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+}
+
 final class OilaDeviceClient: OilaDeviceServicing {
     static let shared = OilaDeviceClient()
 
@@ -929,7 +952,19 @@ final class OilaDeviceClient: OilaDeviceServicing {
         if let lng { body["lng"] = lng }
         if let accuracy { body["accuracy"] = accuracy }
         if let batteryLevel { body["batteryLevel"] = batteryLevel }
-        _ = try await requestJSON(path: "device/sos", method: .post, body: body, authorized: true)
+        // What a frightened child does right after pressing SOS is lock the phone or pocket it, and
+        // iOS suspends the app within seconds — mid-request, with the alert frozen until the next
+        // wake (location does not keep this app running: `appDidSuspend` in the 2026-09-24 syslog).
+        // Background time lets the request finish. Here rather than in the two sheets, so the
+        // outbox's replays (`flushPendingSOS`) get it too.
+        let keepAlive = await SOSRequestKeepAlive.begin()
+        do {
+            _ = try await requestJSON(path: "device/sos", method: .post, body: body, authorized: true)
+        } catch {
+            await keepAlive.end()
+            throw error
+        }
+        await keepAlive.end()
     }
 
     func fetchActiveTasks() async throws -> [OilaDeviceTask] {

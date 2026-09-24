@@ -258,6 +258,43 @@ final class DeviceApplicationRemovalAttemptCoordinatorTests: XCTestCase {
             ]
         )
     }
+
+    /// A report on the wire when the child completes Disconnect: `purge()` runs on this actor while
+    /// it waits on the request. When the answer comes back the queue is empty, and build 27 called
+    /// `removeFirst()` on it — "Can't remove first element from an empty collection", a crash.
+    func testAPurgeWhileAReportIsOutDoesNotCrashWhenItsAnswerArrives() async {
+        let service = DeviceApplicationRemovalAttemptServiceSpy(suspendFirstCall: true)
+        let defaults = makeIsolatedDefaults()
+        let coordinator = DeviceApplicationRemovalAttemptCoordinator(service: service, userDefaults: defaults)
+
+        let first = Task { await coordinator.enqueue(dsn: "child-1", packageName: "com.example.app", appName: "Example App") }
+        await waitForRemovalAttemptCallCount(service, count: 1)
+        await coordinator.purge()
+        await service.resumeSuspendedCallIfNeeded()
+        _ = await first.result
+
+        let recordedCalls = await service.recordedCalls()
+        XCTAssertEqual(recordedCalls.count, 1)
+        XCTAssertNil(defaults.data(forKey: "DEVICE_APPLICATION_REMOVAL_ATTEMPT_QUEUE"), "nothing of the old pairing written back")
+    }
+
+    /// The same, with the next pairing's report queued behind the purge: the old answer must not
+    /// remove it (build 27 removed the head, i.e. the NEW report, unsent), and it must still go out.
+    func testAPurgeWhileAReportIsOutLeavesTheNextPairingsReportToBeSent() async {
+        let service = DeviceApplicationRemovalAttemptServiceSpy(suspendFirstCall: true)
+        let coordinator = DeviceApplicationRemovalAttemptCoordinator(service: service, userDefaults: makeIsolatedDefaults())
+
+        let first = Task { await coordinator.enqueue(dsn: "child-1", packageName: "com.example.app", appName: "Example App") }
+        await waitForRemovalAttemptCallCount(service, count: 1)
+        await coordinator.purge()
+        await coordinator.enqueue(dsn: "child-2", packageName: "com.example.app", appName: "Example App")
+        await service.resumeSuspendedCallIfNeeded()
+        _ = await first.result
+        await waitForRemovalAttemptCallCount(service, count: 2)
+
+        let recordedCalls = await service.recordedCalls()
+        XCTAssertEqual(recordedCalls.map(\.dsn), ["child-1", "child-2"])
+    }
 }
 
 final class DeviceAppLockSyncCoordinatorTests: XCTestCase {

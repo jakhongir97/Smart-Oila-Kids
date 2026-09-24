@@ -71,6 +71,12 @@ actor DeviceApplicationRemovalAttemptCoordinator {
                 lastError: "-"
             )
 
+            // Actors are re-entrant: while this one waits on the request, `purge()` (a Disconnect)
+            // can empty the queue and the next pairing can refill it. So the answer below may only
+            // touch THIS entry, and only in the queue it came from — `removeFirst()` on the emptied
+            // array was a crash (build 27), and on a refilled one it dropped the next pairing's
+            // report unsent.
+            let generation = purgeGeneration
             do {
                 try await service.reportRemovalAttempt(
                     dsn: entry.dsn,
@@ -78,8 +84,8 @@ actor DeviceApplicationRemovalAttemptCoordinator {
                     appName: entry.appName
                 )
 
-                pendingEntries.removeFirst()
-                pendingFingerprints.remove(Self.fingerprint(for: entry))
+                guard generation == purgeGeneration else { continue }
+                remove(entry)
                 persistQueue()
                 nextRetryDelay = initialRetryDelay
                 updateDiagnostics(
@@ -90,12 +96,14 @@ actor DeviceApplicationRemovalAttemptCoordinator {
                     lastError: "-"
                 )
             } catch {
+                // Purged meanwhile: this entry is gone, and its failure says nothing about the next
+                // pairing's queue — carry on with whatever that holds.
+                guard generation == purgeGeneration else { continue }
                 if Self.isPermanentReject(error) {
                     // The server will never accept this entry (non-auth 4xx), so retrying it would
                     // wedge the head of the queue forever. Drop it and continue with the rest —
                     // same model as DeviceApplicationUsageReportCoordinator.
-                    pendingEntries.removeFirst()
-                    pendingFingerprints.remove(Self.fingerprint(for: entry))
+                    remove(entry)
                     persistQueue()
                     updateDiagnostics(
                         status: "dropped",
@@ -118,6 +126,14 @@ actor DeviceApplicationRemovalAttemptCoordinator {
                 return
             }
         }
+    }
+
+    /// By identity, not position: see `processQueueIfPossible`.
+    private func remove(_ entry: DeviceApplicationRemovalAttemptEntry) {
+        if let index = pendingEntries.firstIndex(of: entry) {
+            pendingEntries.remove(at: index)
+        }
+        pendingFingerprints.remove(Self.fingerprint(for: entry))
     }
 
     private func scheduleRetry() {
@@ -212,6 +228,7 @@ actor DeviceApplicationRemovalAttemptCoordinator {
     /// back. `POST /device/apps/removal-attempt` carries no dsn, so a report queued for the previous
     /// child would then be attributed to the NEXT family's device token, leaking that child's app names.
     func purge() {
+        purgeGeneration &+= 1
         retryTask?.cancel()
         retryTask = nil
         pendingEntries.removeAll()
@@ -239,6 +256,8 @@ actor DeviceApplicationRemovalAttemptCoordinator {
     private var pendingEntries: [DeviceApplicationRemovalAttemptEntry] = []
     private var pendingFingerprints: Set<String> = []
     private var isProcessing = false
+    /// Bumped by every `purge()`, so a request that was out across one knows its queue is gone.
+    private var purgeGeneration = 0
     private var retryTask: Task<Void, Never>?
     private let initialRetryDelay: TimeInterval = 5
     private let maxRetryDelay: TimeInterval = 300
