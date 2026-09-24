@@ -21,8 +21,14 @@ import Foundation
 /// nothing but the read-modify-write of that record: open, lock, read, write, unlock, close, in one
 /// synchronous call with no await, no network and no sleep inside, let go before `claim` or
 /// `release` returns. A process frozen or killed mid-request holds no kernel lock at all; its
-/// record simply runs out at `deadline`. Every holder cancels its own request before its deadline
-/// (`releaseMargin`), so a record that has run out has no body of its own left on the wire.
+/// record simply runs out at `deadline`. Every holder cancels its own request `releaseMargin`
+/// before its deadline, on the same clock the lease is read on (`monotonicNow`).
+///
+/// A cancel does not take back a body already written: the server still finishes a request it has
+/// fully received. So a request that ends with NO answer — cancelled at its deadline or by iOS's
+/// "time is up", or timed out — gives its lease back with `release(keepingOthersOutFor:)`, and the
+/// next sender waits out that margin instead of racing the cancelled body. Only an HTTP answer
+/// proves the body has landed; then `release()` frees the lease at once.
 final class ScreenTimeUsageUploadLock {
     /// A new name, not build 27's `usage-upload.lock`: that file was a bare lock with no record in it.
     static let fileName = "usage-upload.lease"
@@ -44,13 +50,14 @@ final class ScreenTimeUsageUploadLock {
         case unavailable(errno: Int32)
     }
 
-    /// How long before its lease runs out a holder must have cancelled its request. It covers the
-    /// hop from the cancel back to `release()`, and the few milliseconds a cancelled request takes
-    /// to stop.
+    /// How long before its lease runs out a holder must have cancelled its request, and how long a
+    /// request that ended with no answer keeps everyone out after it (`release(keepingOthersOutFor:)`).
+    /// It covers the hop from the cancel back to the release, and a body the server had already
+    /// received when the cancel came.
     static let releaseMargin: TimeInterval = 5
 
     /// The longest lease anyone may ask for. A record claiming more is not a lease: the clock it was
-    /// written on is gone (`CLOCK_MONOTONIC` restarts at boot) or the file is garbage — either way
+    /// written on is gone (`CLOCK_UPTIME_RAW` restarts at boot) or the file is garbage — either way
     /// nobody is sending behind it.
     static let maximumDuration: TimeInterval = 60
 
@@ -63,11 +70,18 @@ final class ScreenTimeUsageUploadLock {
     /// and the container's location does not change under a running process.
     static let sharedDirectory: URL? = defaultDirectory()
 
-    /// The one clock both processes share: system-wide, counting through sleep, and out of the
-    /// child's reach — the wall clock is theirs to move, and a lease read on it could be made to
-    /// last for hours or never to hold.
+    /// The one clock both processes share: system-wide and out of the child's reach — the wall
+    /// clock is theirs to move, and a lease read on it could be made to last for hours or never to
+    /// hold.
+    ///
+    /// UPTIME, which stands still while the phone sleeps — not `CLOCK_MONOTONIC`, which counts
+    /// through sleep. The timers that cancel a holder's request run on uptime (`Task.sleep(
+    /// nanoseconds:)` and `DispatchTime` both read `mach_absolute_time`), so a lease on a clock
+    /// that kept counting through a sleep could run out while its holder's cancel had not yet
+    /// fired, and the other process would send over a body still on the wire. Nothing runs while
+    /// the phone sleeps, so a lease that stands still with its holder loses nothing.
     static func monotonicNow() -> UInt64 {
-        clock_gettime_nsec_np(CLOCK_MONOTONIC)
+        clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
     }
 
     /// Try once to become the sender for `duration` seconds.
@@ -127,10 +141,27 @@ final class ScreenTimeUsageUploadLock {
         return true
     }
 
-    /// Give the lease back. Idempotent, and safe from any thread (the app's request deadline fires
-    /// off the main thread). Clears the record only while it is still this lease's: one that ran
-    /// out may already belong to the next sender.
+    /// Give the lease back after an HTTP answer (or when nothing was sent). Idempotent, and safe
+    /// from any thread. Clears the record only while it is still this lease's: one that ran out may
+    /// already belong to the next sender.
     func release() {
+        finish { _ in .clear }
+    }
+
+    /// Give the lease back after a request that ended with NO answer: its body may still be on the
+    /// wire, or already received and being written, so everyone — this process included — stays
+    /// out for `tail` more seconds (never past the lease's own deadline). Idempotent with
+    /// `release()`: whichever runs first decides.
+    func release(keepingOthersOutFor tail: TimeInterval, now: () -> UInt64 = monotonicNow) {
+        finish { existing in
+            let until = now() &+ UInt64(max(tail, 0) * 1_000_000_000)
+            guard until < existing.deadline else { return .keep }
+            return .store(Record(owner: existing.owner, processID: existing.processID, token: existing.token, deadline: until))
+        }
+    }
+
+    /// The one way a lease ends: once, and only on a record that is still this lease's.
+    private func finish(_ change: (Record) -> Change) {
         stateLock.lock()
         defer { stateLock.unlock() }
         guard !released else { return }
@@ -138,7 +169,8 @@ final class ScreenTimeUsageUploadLock {
         guard let path else { return }
         let token = token
         _ = Self.withRecord(atPath: path) { existing in
-            ((), existing?.token == token ? .clear : .keep)
+            guard let existing, existing.token == token else { return ((), .keep) }
+            return ((), change(existing))
         }
         // A failure here costs nothing lasting: the record runs out at its deadline by itself.
     }
@@ -153,7 +185,7 @@ final class ScreenTimeUsageUploadLock {
         let owner: String
         let processID: Int32
         let token: String
-        /// `CLOCK_MONOTONIC` nanoseconds (`monotonicNow`).
+        /// `CLOCK_UPTIME_RAW` nanoseconds (`monotonicNow`).
         let deadline: UInt64
 
         var encoded: Data {

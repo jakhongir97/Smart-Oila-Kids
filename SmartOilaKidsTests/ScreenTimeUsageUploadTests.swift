@@ -80,11 +80,13 @@ final class ScreenTimeUsageUploadTests: XCTestCase {
         ledger: ScreenTimeUsageLedger,
         background: FakeBackgroundTime,
         directory: URL,
+        lockState: @escaping ScreenTimeEnforcementCoordinator.LockStateAction = { .released },
+        elapsedClock: @escaping () -> UInt64 = { clock_gettime_nsec_np(CLOCK_MONOTONIC) },
         upload: @escaping ScreenTimeEnforcementCoordinator.UploadUsageAction
     ) -> ScreenTimeEnforcementCoordinator {
         let defaults = makeDefaults()
         let coordinator = ScreenTimeEnforcementCoordinator(
-            lockState: { .released },
+            lockState: lockState,
             blockedApplications: BlockedApplicationsController(
                 authorizationStatus: { .denied },
                 apply: { _, _, _ in },
@@ -105,7 +107,8 @@ final class ScreenTimeUsageUploadTests: XCTestCase {
             userDefaults: defaults,
             now: { [now] in now },
             usageUploadLockDirectory: directory,
-            backgroundTime: background.provider
+            backgroundTime: background.provider,
+            elapsedClock: elapsedClock
         )
         coordinators.append(coordinator)
         return coordinator
@@ -121,6 +124,23 @@ final class ScreenTimeUsageUploadTests: XCTestCase {
         lease.release()
         return true
     }
+
+    /// How long another sender is still kept out, or nil when the lease is free.
+    private func leaseClosedFor(in directory: URL) -> TimeInterval? {
+        switch ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 13, directory: directory) {
+        case .claimed(let lease):
+            lease.release()
+            return nil
+        case .busy(_, let remaining):
+            return remaining
+        case .unavailable(let code):
+            XCTFail("the lease file could not be opened: errno \(code)")
+            return nil
+        }
+    }
+
+    /// Long enough for a lease closed for the margin after an unanswered request to reopen.
+    private let pastTheMargin = ScreenTimeUsageUploadLock.releaseMargin + 5
 
     private func eventually(_ what: String, timeout: TimeInterval = 5, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)
@@ -311,7 +331,10 @@ final class ScreenTimeUsageUploadTests: XCTestCase {
 
         XCTAssertEqual(uploads.count, 1, "no coalesced upload after the expiry")
         XCTAssertTrue(background.live.isEmpty)
-        XCTAssertTrue(leaseIsFree(in: directory), "freed by the expiration handler, before the suspension")
+        // Let go by the expiration handler, before the suspension — but the cancelled body may still
+        // land, so the next sender is kept out for the margin, never longer.
+        let closedFor = try XCTUnwrap(leaseClosedFor(in: directory), "a cancelled request's body may still be on the wire")
+        XCTAssertLessThanOrEqual(closedFor, ScreenTimeUsageUploadLock.releaseMargin)
 
         await coordinator.uploadUsageNow(reason: "ledger_changed")
         XCTAssertEqual(uploads.count, 1, "the time is spent: nothing starts in this background run")
@@ -350,5 +373,203 @@ final class ScreenTimeUsageUploadTests: XCTestCase {
         XCTAssertEqual(uploads.last?.first?.items, [.init(packageName: "com.google.ios.youtube", usedSeconds: 900)])
         await eventually("the background time to be given back") { background.live.isEmpty }
         XCTAssertTrue(leaseIsFree(in: directory))
+    }
+
+    // MARK: - Review of 2026-09-25
+
+    /// Only an HTTP answer proves a body has landed (or never will).
+    func testOnlyAnHTTPAnswerCountsAsAnswered() {
+        typealias C = ScreenTimeEnforcementCoordinator
+        func api(_ status: Int) -> OilaAPIError { OilaAPIError(statusCode: status, message: "", errorCode: nil, fieldErrors: []) }
+        XCTAssertTrue(C.usageRequestWasAnswered(api(500)))
+        XCTAssertTrue(C.usageRequestWasAnswered(api(401)))
+        XCTAssertFalse(C.usageRequestWasAnswered(api(-1)), "\"Invalid response\": nothing says the body did not land")
+        XCTAssertFalse(C.usageRequestWasAnswered(URLError(.timedOut)))
+        XCTAssertFalse(C.usageRequestWasAnswered(URLError(.cancelled)), "the deadline's cancel")
+        XCTAssertFalse(C.usageRequestWasAnswered(CancellationError()), "the expiration handler's cancel")
+    }
+
+    /// A request that ends with no answer — here the deadline's cancel — may still land on the
+    /// server: the lease stays closed for the margin, so the other process cannot race a newer body
+    /// against it. Before the fix it was cleared at once.
+    func testARequestWithNoAnswerKeepsTheLeaseClosedForTheMargin() async throws {
+        let directory = try makeLeaseDirectory()
+        let background = FakeBackgroundTime()
+        var uploads = 0
+        let coordinator = makeCoordinator(ledger: makeLedger(), background: background, directory: directory) { _ in
+            uploads += 1
+            throw URLError(.cancelled)
+        }
+
+        coordinator.start(dsn: "child-1")
+        await eventually("the start upload") { uploads == 1 }
+        await eventually("the background time to be given back") { background.live.isEmpty }
+
+        let closedFor = try XCTUnwrap(leaseClosedFor(in: directory), "an unanswered body may still land")
+        XCTAssertGreaterThan(closedFor, 0)
+        XCTAssertLessThanOrEqual(closedFor, ScreenTimeUsageUploadLock.releaseMargin)
+    }
+
+    /// An HTTP answer, even a refusal, means nothing is left on the wire: the lease is free at once.
+    func testARefusedRequestFreesTheLeaseAtOnce() async throws {
+        let directory = try makeLeaseDirectory()
+        let background = FakeBackgroundTime()
+        var uploads = 0
+        let coordinator = makeCoordinator(ledger: makeLedger(), background: background, directory: directory) { _ in
+            uploads += 1
+            throw OilaAPIError(statusCode: 500, message: "boom", errorCode: nil, fieldErrors: [])
+        }
+
+        coordinator.start(dsn: "child-1")
+        await eventually("the start upload") { uploads == 1 }
+        await eventually("the background time to be given back") { background.live.isEmpty }
+
+        XCTAssertNil(leaseClosedFor(in: directory))
+    }
+
+    /// iOS ends the time mid-request, and the app is back in front before the cancelled request's
+    /// continuation has run (a URLSession callback arrives only once the process is resumed). The
+    /// foreground refresh finds the upload still in flight and queues itself; the stale
+    /// continuation must send it, not throw it away. Before the fix it cleared the queued flag.
+    func testAForegroundRefreshQueuedBehindAnExpiredRunIsSent() async throws {
+        let directory = try makeLeaseDirectory()
+        let background = FakeBackgroundTime()
+        let ledger = makeLedger(youtubeSeconds: 600)
+        var uploads: [[ScreenTimeUsageReportDay]] = []
+        var stuck: CheckedContinuation<DeviceApplicationUsageReportResponse, Error>?
+        let coordinator = makeCoordinator(ledger: ledger, background: background, directory: directory) { days in
+            uploads.append(days)
+            if uploads.count == 1 {
+                // Deaf to the cancel, like a request whose answer waits for the resume.
+                return try await withCheckedThrowingContinuation { stuck = $0 }
+            }
+            return Self.accepted
+        }
+
+        coordinator.start(dsn: "child-1")
+        await eventually("the start upload on the wire") { stuck != nil }
+        background.foreground = false
+        background.expire()
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 900, dayKey: today, now: now)
+        background.foreground = true
+        await coordinator.uploadUsageNow(reason: "refresh")
+        XCTAssertEqual(uploads.count, 1, "queued behind the request still in flight")
+
+        stuck?.resume(throwing: URLError(.cancelled))
+        await eventually("the queued refresh", timeout: pastTheMargin) { uploads.count == 2 }
+
+        XCTAssertEqual(uploads.last?.first?.items, [.init(packageName: "com.google.ios.youtube", usedSeconds: 900)])
+        await eventually("the background time to be given back") { background.live.isEmpty }
+        XCTAssertNil(leaseClosedFor(in: directory))
+    }
+
+    /// The spent time binds only the background run that spent it. A later wake — a silent push, a
+    /// location update — comes with a grant of its own, and the app sends again. Before the fix
+    /// nothing was sent from the background until the child next opened the app.
+    func testALaterBackgroundRunSendsAgain() async throws {
+        let directory = try makeLeaseDirectory()
+        let background = FakeBackgroundTime()
+        var clock: UInt64 = 1_000_000_000_000
+        var uploads = 0
+        let coordinator = makeCoordinator(
+            ledger: makeLedger(),
+            background: background,
+            directory: directory,
+            elapsedClock: { clock }
+        ) { _ in
+            uploads += 1
+            return Self.accepted
+        }
+        guard case .claimed(let extensionLease) = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: 30, directory: directory) else {
+            return XCTFail("the extension's lease")
+        }
+
+        coordinator.start(dsn: "child-1")
+        await eventually("the start upload to ask for time") { background.began == 1 }
+        background.foreground = false
+        background.expire()
+        extensionLease.release()
+        await pause(0.6)
+        XCTAssertEqual(uploads, 0)
+
+        clock += 30_000_000_000
+        await coordinator.uploadUsageNow(reason: "ledger_changed")
+        XCTAssertEqual(background.began, 1, "30 s later: still the run whose time is spent")
+
+        clock += 31_000_000_000
+        await coordinator.uploadUsageNow(reason: "ledger_changed")
+        XCTAssertEqual(background.began, 2, "a new wake asks for its own time")
+        XCTAssertEqual(uploads, 1)
+        XCTAssertTrue(background.live.isEmpty)
+        XCTAssertNil(leaseClosedFor(in: directory))
+    }
+
+    /// A foreground visit with nothing new to send still clears the spent time. Before the fix it
+    /// was cleared only past the "nothing new" returns, so the next background change was deferred.
+    func testAForegroundVisitWithNothingNewClearsTheSpentTime() async throws {
+        let directory = try makeLeaseDirectory()
+        let background = FakeBackgroundTime()
+        let ledger = makeLedger(youtubeSeconds: 600)
+        let clock: UInt64 = 1_000_000_000_000
+        var uploads: [[ScreenTimeUsageReportDay]] = []
+        var stuck: CheckedContinuation<DeviceApplicationUsageReportResponse, Error>?
+        let coordinator = makeCoordinator(
+            ledger: ledger,
+            background: background,
+            directory: directory,
+            elapsedClock: { clock }
+        ) { days in
+            uploads.append(days)
+            if uploads.count == 1 {
+                return try await withCheckedThrowingContinuation { stuck = $0 }
+            }
+            return Self.accepted
+        }
+
+        coordinator.start(dsn: "child-1")
+        await eventually("the start upload on the wire") { stuck != nil }
+        background.foreground = false
+        background.expire()
+        // The server had the body after all: nothing is owed.
+        stuck?.resume(returning: Self.accepted)
+        await pause(0.3)
+
+        background.foreground = true
+        await coordinator.uploadUsageNow(reason: "refresh")
+        XCTAssertEqual(uploads.count, 1, "nothing new to send")
+
+        background.foreground = false
+        ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 900, dayKey: today, now: now)
+        await coordinator.uploadUsageNow(reason: "ledger_changed")
+        XCTAssertEqual(background.began, 2, "the visit in front cleared the spent time")
+        XCTAssertEqual(uploads.count, 2)
+    }
+
+    /// The server's answer (its blocks) is applied while the upload still holds its background time:
+    /// the worker job that enforces it begins its own on the main thread, so there is no instant
+    /// with no assertion under a block from the server. Before the fix the time was ended first.
+    func testTheServersAnswerIsAppliedWhileTheUploadStillHoldsBackgroundTime() async throws {
+        let directory = try makeLeaseDirectory()
+        let background = FakeBackgroundTime()
+        var liveAtApply: [Int] = []
+        var uploads = 0
+        let coordinator = makeCoordinator(
+            ledger: makeLedger(),
+            background: background,
+            directory: directory,
+            lockState: {
+                liveAtApply.append(background.live.count)
+                return .released
+            }
+        ) { _ in
+            uploads += 1
+            return Self.accepted
+        }
+
+        coordinator.start(dsn: "child-1")
+        await eventually("the start upload") { uploads == 1 }
+        await eventually("the background time to be given back") { background.live.isEmpty }
+
+        XCTAssertEqual(liveAtApply.last, 1, "applied with the upload's background time still held")
     }
 }

@@ -105,7 +105,7 @@ enum ScreenTimeUsageReport {
 /// location-push extension, so it sends one bare request and reports the status code.
 ///
 /// Synchronous on purpose: a `DeviceActivityMonitor` callback returns and the process may be
-/// suspended at once, so the request is awaited on a semaphore, bounded by `timeout`.
+/// suspended at once, so the request is awaited on a semaphore, bounded by `deadline`.
 enum ScreenTimeUsageExtensionUploader {
     /// The whole request, not only the idle timeout: the semaphore gives up at the same moment and
     /// cancels it. Eight seconds (ten until build 28) because the monitor callback waits on it, and
@@ -118,12 +118,42 @@ enum ScreenTimeUsageExtensionUploader {
         case sent(status: Int)
         case skipped(reason: String)
         case failed(String)
+
+        /// The request ended without an HTTP answer — cancelled at the deadline, timed out, or the
+        /// connection dropped — so its body may still land on the server. The lease is then given
+        /// back with `release(keepingOthersOutFor:)`. An answer of any status, a skip or a body
+        /// that never encoded left nothing on the wire.
+        var mayStillLand: Bool {
+            switch self {
+            case .sent, .skipped:
+                return false
+            case .failed(let why):
+                return !why.hasPrefix(Self.httpFailurePrefix) && !why.hasPrefix(Self.encodeFailurePrefix)
+            }
+        }
+
+        static let httpFailurePrefix = "http_"
+        static let encodeFailurePrefix = "encode "
     }
 
+    /// Whether an extension upload at `now` comes too soon after the last one it sent at `last`.
+    ///
+    /// Only a POSITIVE gap limits. `last` is the wall clock, which the child can wind back — a
+    /// negative gap would otherwise read as "too soon" until the clock passed the stored time
+    /// again, hours of threshold uploads skipped while the suspended app sends nothing either.
+    static func isRateLimited(now: Date, last: Date?, minimumInterval: TimeInterval) -> Bool {
+        guard let last else { return false }
+        let elapsed = now.timeIntervalSince(last)
+        return elapsed >= 0 && elapsed < minimumInterval
+    }
+
+    /// `deadline` is when the request must be cancelled by: taken at the lease claim, so the
+    /// request can never outlive the lease (`requestTimeout` + `releaseMargin`) however long the
+    /// work between the claim and `resume()` took. `DispatchTime` is uptime, the lease's clock.
     static func upload(
         days: [ScreenTimeUsageReportDay],
         credential: LocationPushSharedCredential.Payload?,
-        timeout: TimeInterval = requestTimeout,
+        deadline: DispatchTime = .now() + requestTimeout,
         session: URLSession = .shared
     ) -> Outcome {
         guard !days.isEmpty else { return .skipped(reason: "no_days") }
@@ -133,14 +163,14 @@ enum ScreenTimeUsageExtensionUploader {
 
         var request = URLRequest(url: root.appendingPathComponent("device/apps/usage/daily"))
         request.httpMethod = "PUT"
-        request.timeoutInterval = timeout
+        request.timeoutInterval = requestTimeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: ScreenTimeUsageReport.body(days: days))
         } catch {
-            return .failed("encode \(error)")
+            return .failed(Outcome.encodeFailurePrefix + "\(error)")
         }
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -149,14 +179,14 @@ enum ScreenTimeUsageExtensionUploader {
             if let error {
                 box.set(.failed(String(describing: error)))
             } else if let http = response as? HTTPURLResponse {
-                box.set((200..<300).contains(http.statusCode) ? .sent(status: http.statusCode) : .failed("http_\(http.statusCode)"))
+                box.set((200..<300).contains(http.statusCode) ? .sent(status: http.statusCode) : .failed(Outcome.httpFailurePrefix + "\(http.statusCode)"))
             } else {
                 box.set(.failed("no_http_response"))
             }
             semaphore.signal()
         }
         task.resume()
-        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+        if semaphore.wait(timeout: deadline) == .timedOut {
             task.cancel()
         }
         let outcome = box.get()

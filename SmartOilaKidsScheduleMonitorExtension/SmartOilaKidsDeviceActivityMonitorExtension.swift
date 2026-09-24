@@ -317,10 +317,17 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     ///    app — which uploads on every Darwin notification anyway.
     func uploadUsage(reason: String, force: Bool) {
         let now = Date()
-        if !force, let last = usageLedger.lastExtensionUploadAt(), now.timeIntervalSince(last) < Self.minimumUploadInterval {
+        if !force, ScreenTimeUsageExtensionUploader.isRateLimited(
+            now: now,
+            last: usageLedger.lastExtensionUploadAt(),
+            minimumInterval: Self.minimumUploadInterval
+        ) {
             Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(rate_limited)")
             return
         }
+        // Read BEFORE the claim: a keychain read is the slowest step before the request, and time
+        // spent inside the lease before `resume()` is time the request no longer has.
+        let credential = LocationPushSharedCredential.read()
         let lease: ScreenTimeUsageUploadLock
         switch Self.claimUploadLease(retrying: force) {
         case .claimed(let claimed):
@@ -332,11 +339,19 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
             Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_unavailable errno=\(code, privacy: .public))")
             return
         }
-        defer { lease.release() }
+        // The request is cancelled `requestTimeout` after the CLAIM, not after `resume()`: the lease
+        // runs `requestTimeout` + `releaseMargin` from the claim, on the same (uptime) clock.
+        let cancelBy = DispatchTime.now() + ScreenTimeUsageExtensionUploader.requestTimeout
         // Read AFTER the claim: whatever the ledger holds now is the newest body anyone can send.
         let days = ScreenTimeUsageReport.days(ledger: usageLedger)
-        let credential = LocationPushSharedCredential.read()
-        let outcome = ScreenTimeUsageExtensionUploader.upload(days: days, credential: credential.payload)
+        let outcome = ScreenTimeUsageExtensionUploader.upload(days: days, credential: credential.payload, deadline: cancelBy)
+        // A request that ended with no answer may still land: the app keeps out for the margin
+        // rather than send a newer body the server could process alongside it.
+        if outcome.mayStillLand {
+            lease.release(keepingOthersOutFor: ScreenTimeUsageUploadLock.releaseMargin)
+        } else {
+            lease.release()
+        }
         if case .sent = outcome {
             usageLedger.setLastExtensionUploadAt(now)
         }
