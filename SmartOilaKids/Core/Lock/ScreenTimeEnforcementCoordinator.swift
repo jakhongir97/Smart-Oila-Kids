@@ -151,7 +151,10 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
                 // main thread meanwhile): an arm for a pairing that is gone must neither start the
                 // activity nor write the wiped ledger back.
                 let stillPaired = { ScreenTimeEnforcementCoordinator.activeUsageDSN.get() == dsn }
-                guard stillPaired() else { return 0 }
+                guard stillPaired() else {
+                    Self.log.notice("usage_monitor skipped reason=pairing_ended_before_arm")
+                    return 0
+                }
                 // A cold launch arms before anything has loaded the label store; mirror the one-tap
                 // pick's categories first, or the device total would wait for the next foreground.
                 ScreenTimeRestrictedAppsStore.mirrorStoredCategories()

@@ -251,7 +251,10 @@ enum ScreenTimeUsageMonitoring {
         try startMonitoring(activity, schedule, armed)
         // The app arms from a background lane; if the pairing ended while `startMonitoring` was in
         // the daemon, the unpair wipe has already emptied the App Group and must stay empty.
-        guard shouldContinue?() ?? true else { return events.count }
+        guard shouldContinue?() ?? true else {
+            log.notice("usage_monitor armed_without_ledger reason=pairing_ended_during_arm events=\(events.count, privacy: .public)")
+            return events.count
+        }
         ledger.setArmedDay(dayKey)
         // Today now exists in the ledger even before the first step, so an upload can state a
         // measured zero instead of staying silent.
