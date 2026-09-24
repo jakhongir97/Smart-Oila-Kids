@@ -384,3 +384,23 @@
 "home2.screentime_setup.title" = "Ekran vaqti hisoblanmayapti";
 "home2.screentime_setup.body" = "Ota-ona ekran vaqtini ko'rishi uchun ilovalarni bir marta tanlang: eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing.";
 "home2.screentime_setup.title_partial" = "Butun telefon vaqti hisoblanmayapti";
+
+/* build 28 — onboarding waits for each grant (Ibrohim, 2026-09-25) */
+"perm2.continue" = "Davom etish";
+"perm2.not_now" = "Hozir emas";
+"perm2.open_settings" = "Sozlamalarni ochish";
+"perm2.retry" = "Qayta urinish";
+"perm2.continue_without" = "Busiz davom etish";
+"perm2.granted" = "Ruxsat berilgan";
+"perm2.granted_hint" = "Bu ruxsat telefonda allaqachon yoqilgan — «Davom etish»ni bosing.";
+"perm2.limits.granted_hint" = "Ekran vaqti ruxsati berilgan — u buni ham qamrab oladi. «Davom etish»ni bosing.";
+"perm2.settings_hint" = "Sozlamalarda bu ruxsatni yoqing va ilovaga qayting — keyingi qadam o'zi ochiladi.";
+"perm2.notifications.settings_hint" = "Bildirishnomalar o'chiq. «Sozlamalarni ochish»ni bosing, bildirishnomalarga ruxsat bering va qayting — keyingi qadam o'zi ochiladi.";
+"perm2.location.settings_hint" = "«Sozlamalarni ochish» → Joylashuv («Геопозиция») → «Doim» («Всегда») ni tanlang va qayting — keyingi qadam o'zi ochiladi.";
+"perm2.location.services_off" = "Telefonda joylashuv xizmatlari o'chiq. Sozlamalar → Maxfiylik («Конфиденциальность») → Joylashuv xizmatlari («Службы геолокации») ni yoqing va qayting.";
+"perm2.microphone.settings_hint" = "Mikrofon o'chiq. «Sozlamalarni ochish»ni bosing, Mikrofonni yoqing va qayting — yoki «Hozir emas»ni tanlang.";
+"perm2.camera.settings_hint" = "Kamera o'chiq. «Sozlamalarni ochish»ni bosing, Kamerani yoqing va qayting — yoki «Hozir emas»ni tanlang.";
+"perm2.restricted_hint" = "Bu ruxsat telefonda cheklangan (Ekran vaqti cheklovlari), uni bu yerda yoqib bo'lmaydi. Davom etishingiz mumkin — ota-ona buni saytda ko'radi.";
+"perm2.screentime.denied_hint" = "Ekran vaqti ruxsati berilmadi. «Qayta urinish»ni bosing va ochilgan oynada ruxsat bering.";
+"perm2.screentime.unavailable" = "Bu telefonda Ekran vaqtini yoqib bo'lmaydi. Davom etishingiz mumkin — ota-ona buni saytda ko'radi.";
+"perm2.screentime.failed" = "Ekran vaqtini hozir yoqib bo'lmadi. Qayta urinib ko'ring yoki busiz davom eting — ota-ona buni saytda ko'radi.";

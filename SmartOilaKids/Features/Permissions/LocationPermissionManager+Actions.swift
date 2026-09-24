@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreLocation
 import Foundation
 import UIKit
 import UserNotifications
@@ -136,6 +137,249 @@ extension LocationPermissionManager {
         @unknown default:
             openAppSettings()
         }
+    }
+}
+
+// MARK: - Onboarding: ask and wait for the answer
+
+/// How one onboarding `ask` ended. The step decides what to SHOW from the live status, never from
+/// this; the outcome only says the request is over (the spinner stops) and, for Screen Time, what the
+/// child answered — the one permission whose answer the status does not reveal.
+enum PermissionAskOutcome: Equatable {
+    /// The system prompt was shown and answered, or there was nothing left to ask.
+    case answered
+    /// The prompt can no longer be shown, so the app's Settings pane was opened instead.
+    case openedSettings
+    /// iOS took the request and showed nothing: the once-per-install "Change to Always?" upgrade was
+    /// already spent (it survives an unpair — only OUR marker is cleared), or the grant is Allow Once.
+    case promptNotShown
+    case screenTime(ScreenTimeRequestOutcome)
+}
+
+/// A location request waiting for iOS's answer. See `LocationPermissionManager.ask(_:always:)`.
+struct PendingLocationAsk {
+    let id = UUID()
+    let statusAtRequest: CLAuthorizationStatus
+    let continuation: CheckedContinuation<PermissionAskOutcome, Never>
+    /// The system alert took the screen (`willResignActive`). Until then the request may be one iOS
+    /// silently ignores, which is what the timeout below is for.
+    var sawResignActive = false
+    var timeout: Task<Void, Never>?
+}
+
+extension LocationPermissionManager {
+    /// How long a location request may go without the system alert appearing before it is read as
+    /// "iOS ignored it". The alert takes a few hundred milliseconds to come up; the ignored cases
+    /// never bring one.
+    nonisolated static let locationPromptWait: TimeInterval = 2
+
+    /// The onboarding form of `performAction(for:)`: the same branching on the real status, but it
+    /// RETURNS once iOS has answered — which is what lets a step stay on screen until the permission
+    /// exists (Ibrohim, 2026-09-25: a step moved on after "Don't Allow", so the child never saw that
+    /// anything was missing). `performAction` stays fire-and-forget for C5, whose rows just re-render.
+    ///
+    /// `always` is the background-location step: from While Using it asks for the upgrade once, and
+    /// sends the child to Settings after that, exactly as `requestLocationPermission()` does.
+    func ask(_ requirement: PermissionRequirement, always: Bool = false) async -> PermissionAskOutcome {
+        switch requirement {
+        case .notifications:
+            return await askNotifications()
+        case .location:
+            return await askLocation(always: always)
+        case .usageStats:
+            let outcome = await ScreenTimeAuthorizationManager.shared.requestAuthorization()
+            setScreenTimePermissionStatus(ScreenTimeAuthorizationManager.shared.status)
+            refreshStatuses()
+            return .screenTime(outcome)
+        case .microphone:
+            return await askMicrophone()
+        case .camera:
+            return await askCamera()
+        }
+    }
+
+    /// Ends the pending location ask, once. A stale settle (scheduled for an ask that has already
+    /// been replaced) passes the id it was scheduled for and is ignored.
+    func settlePendingLocationAsk(_ outcome: PermissionAskOutcome, id: UUID? = nil) {
+        guard let pending = pendingLocationAsk else { return }
+        if let id, id != pending.id { return }
+        pendingLocationAsk = nil
+        pending.timeout?.cancel()
+        pending.continuation.resume(returning: outcome)
+    }
+
+    /// From `locationManagerDidChangeAuthorization`: an answer that changed the status settles the
+    /// ask. iOS calls the delegate only on a CHANGE, so "Keep Only While Using" never arrives here —
+    /// the scene hooks below cover it.
+    func locationAuthorizationDidChangeForPendingAsk() {
+        guard let pending = pendingLocationAsk,
+              currentLocationAuthorizationStatus() != pending.statusAtRequest else { return }
+        settlePendingLocationAsk(.answered)
+    }
+
+    /// A system alert deactivates the scene: the request was shown, so no timeout may call it ignored.
+    func pendingLocationAskWillResignActive() {
+        pendingLocationAsk?.sawResignActive = true
+    }
+
+    /// The alert closed. Settled a moment later, not at once: when the answer DID change the status,
+    /// the delegate callback lands just after this notification, and settling first would flash the
+    /// unanswered step for a frame.
+    func pendingLocationAskDidBecomeActive() {
+        guard let pending = pendingLocationAsk, pending.sawResignActive else { return }
+        let id = pending.id
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            self?.settlePendingLocationAsk(.answered, id: id)
+        }
+    }
+
+    private func askNotifications() async -> PermissionAskOutcome {
+        // The live answer, not the published copy: that starts at `.notDetermined` and is filled in
+        // asynchronously, and `requestAuthorization` against a phone that already said no returns
+        // false without a prompt — a button that visibly does nothing.
+        let status = await notificationStatus()
+        setNotificationAuthorizationStatus(status)
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return .answered
+        case .notDetermined:
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+            // Register regardless of the answer — see `requestNotificationPermission()`: the token is
+            // what makes the phone reachable by a SILENT push, which needs no alert authorization.
+            UIApplication.shared.registerForRemoteNotifications()
+            setNotificationAuthorizationStatus(await notificationStatus())
+            refreshStatuses()
+            return .answered
+        case .denied:
+            openNotificationSettings()
+            return .openedSettings
+        @unknown default:
+            openNotificationSettings()
+            return .openedSettings
+        }
+    }
+
+    private func askLocation(always: Bool) async -> PermissionAskOutcome {
+        // Location Services off device-wide reads as `.denied` for every app, and no prompt of ours
+        // can turn the master switch on. Read off the main thread: it is a synchronous XPC call, the
+        // kind the 2026-09-24 freeze work moved off it everywhere else.
+        guard await DeviceDiagnosticsReporter.readLocationServicesEnabled() else {
+            openAppSettings()
+            return .openedSettings
+        }
+        let status = currentLocationAuthorizationStatus()
+        switch status {
+        case .notDetermined:
+            // While Using first, on both steps: iOS offers "Always" only as an upgrade of it.
+            return await awaitLocationAnswer(from: status) { $0.requestWhenInUseLocationAuthorization() }
+        case .authorizedWhenInUse:
+            guard always else { return .answered }
+            // The same once-per-install rule as `requestLocationPermission()`.
+            if UserDefaults.standard.bool(forKey: Self.alwaysPromptIssuedKey) {
+                openAppSettings()
+                return .openedSettings
+            }
+            UserDefaults.standard.set(true, forKey: Self.alwaysPromptIssuedKey)
+            return await awaitLocationAnswer(from: status) { $0.requestAlwaysLocationAuthorization() }
+        case .authorizedAlways:
+            return .answered
+        case .denied, .restricted:
+            openAppSettings()
+            return .openedSettings
+        @unknown default:
+            openAppSettings()
+            return .openedSettings
+        }
+    }
+
+    /// Issues `request` and suspends until the FIRST of: the status changes (delegate), the alert
+    /// closes (resign → become active), or `locationPromptWait` passes with no alert at all.
+    private func awaitLocationAnswer(
+        from status: CLAuthorizationStatus,
+        request: @escaping (LocationPermissionManager) -> Void
+    ) async -> PermissionAskOutcome {
+        // A previous ask never outlives a new one.
+        settlePendingLocationAsk(.answered)
+        return await withCheckedContinuation { continuation in
+            var pending = PendingLocationAsk(statusAtRequest: status, continuation: continuation)
+            let id = pending.id
+            pending.timeout = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.locationPromptWait * 1_000_000_000))
+                guard !Task.isCancelled, let self,
+                      let current = self.pendingLocationAsk, current.id == id,
+                      !current.sawResignActive else { return }
+                self.settlePendingLocationAsk(.promptNotShown, id: id)
+            }
+            pendingLocationAsk = pending
+            request(self)
+        }
+    }
+
+    /// iOS 17+ microphone ask. Same branching as `requestMicrophonePermission()`.
+    private func askMicrophone() async -> PermissionAskOutcome {
+        guard #available(iOS 17.0, *) else {
+            return await askLegacyMicrophone()
+        }
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            break
+        case .undetermined:
+            _ = await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        case .denied:
+            openAppSettings()
+            return .openedSettings
+        @unknown default:
+            openAppSettings()
+            return .openedSettings
+        }
+        refreshStatuses()
+        return .answered
+    }
+
+    /// iOS 16. Deprecated for the same reason as `requestLegacyMicrophonePermission()`.
+    @available(iOS, introduced: 16.0, deprecated: 17.0, message: "Superseded by AVAudioApplication.")
+    private func askLegacyMicrophone() async -> PermissionAskOutcome {
+        let session = AVAudioSession.sharedInstance()
+        switch session.recordPermission {
+        case .granted:
+            break
+        case .undetermined:
+            _ = await withCheckedContinuation { continuation in
+                session.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        case .denied:
+            openAppSettings()
+            return .openedSettings
+        @unknown default:
+            openAppSettings()
+            return .openedSettings
+        }
+        refreshStatuses()
+        return .answered
+    }
+
+    private func askCamera() async -> PermissionAskOutcome {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            break
+        case .notDetermined:
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+        case .denied, .restricted:
+            openAppSettings()
+            return .openedSettings
+        @unknown default:
+            openAppSettings()
+            return .openedSettings
+        }
+        refreshStatuses()
+        return .answered
     }
 }
 

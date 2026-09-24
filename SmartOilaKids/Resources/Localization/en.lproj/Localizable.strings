@@ -384,3 +384,23 @@
 "home2.screentime_setup.title" = "Screen time is not being counted";
 "home2.screentime_setup.body" = "For the parent to see screen time, choose apps once: switch on “All Apps & Categories” at the top and press Save.";
 "home2.screentime_setup.title_partial" = "Whole-phone screen time is not counted";
+
+/* build 28 — onboarding waits for each grant (Ibrohim, 2026-09-25) */
+"perm2.continue" = "Continue";
+"perm2.not_now" = "Not now";
+"perm2.open_settings" = "Open Settings";
+"perm2.retry" = "Try again";
+"perm2.continue_without" = "Continue without it";
+"perm2.granted" = "Permission granted";
+"perm2.granted_hint" = "This permission is already on for this phone — tap Continue.";
+"perm2.limits.granted_hint" = "Screen Time access is on — it covers this too. Tap Continue.";
+"perm2.settings_hint" = "Turn this permission on in Settings and come back — the next step opens by itself.";
+"perm2.notifications.settings_hint" = "Notifications are off. Tap “Open Settings”, turn on Allow Notifications and come back — the next step opens by itself.";
+"perm2.location.settings_hint" = "Tap “Open Settings” → Location → choose “Always”, then come back — the next step opens by itself.";
+"perm2.location.services_off" = "Location Services are off on this phone. Turn them on in Settings → Privacy & Security → Location Services, then come back.";
+"perm2.microphone.settings_hint" = "The microphone is off. Tap “Open Settings”, turn on Microphone and come back — or choose “Not now”.";
+"perm2.camera.settings_hint" = "The camera is off. Tap “Open Settings”, turn on Camera and come back — or choose “Not now”.";
+"perm2.restricted_hint" = "This permission is restricted on this phone (Screen Time restrictions), so it can't be turned on here. You can continue — your parent will see this on the website.";
+"perm2.screentime.denied_hint" = "Screen Time access wasn't given. Tap “Try again” and allow it in the window that opens.";
+"perm2.screentime.unavailable" = "Screen Time can't be turned on on this phone. You can continue — your parent will see this on the website.";
+"perm2.screentime.failed" = "Screen Time couldn't be turned on just now. Try again, or continue without it — your parent will see this on the website.";

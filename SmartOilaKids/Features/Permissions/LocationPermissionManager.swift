@@ -16,6 +16,11 @@ final class LocationPermissionManager: NSObject, ObservableObject {
     @Published private(set) var screenTimePermissionStatus: ScreenTimePermissionStatus = .notDetermined
     @Published private(set) var backgroundRefreshStatus: UIBackgroundRefreshStatus = .available
     @Published private(set) var isLowPowerModeEnabled = false
+    /// False until the notification status has been READ once. `notificationAuthorizationStatus`
+    /// starts at `.notDetermined` and is filled in asynchronously (`refreshStatuses`), so for the
+    /// first moment of every screen it claims "never asked" on a phone that answered long ago — the
+    /// onboarding step shows a neutral spinner instead of that guess (see `BolajonStepGate`).
+    @Published private(set) var hasReadNotificationStatus = false
 
     override init() {
         super.init()
@@ -45,6 +50,7 @@ final class LocationPermissionManager: NSObject, ObservableObject {
 
     func setNotificationAuthorizationStatus(_ value: UNAuthorizationStatus) {
         notificationAuthorizationStatus = value
+        if !hasReadNotificationStatus { hasReadNotificationStatus = true }
     }
 
     func setMicrophonePermission(_ value: AVAudioSession.RecordPermission) {
@@ -105,6 +111,10 @@ final class LocationPermissionManager: NSObject, ObservableObject {
             isLowPowerModeEnabled: isLowPowerModeEnabled
         )
     }
+
+    /// The one onboarding location ask awaiting its answer — see `ask(_:always:)`. Stored here only
+    /// because an extension cannot add stored properties.
+    var pendingLocationAsk: PendingLocationAsk?
 
     private let locationManager = CLLocationManager()
     private var observers: [NSObjectProtocol] = []

@@ -8,6 +8,25 @@ enum ScreenTimePermissionStatus: String, Equatable {
     case unavailable
 }
 
+/// What ONE `requestAuthorization()` call ended in.
+///
+/// The published `status` cannot carry this. A child who dismisses Apple's sheet leaves the status
+/// exactly where it was (`.notDetermined` or `.denied`), so the onboarding step — which must stay put
+/// until the grant exists (Ibrohim, 2026-09-25: "ruxsat bermasam ham o'tib ketyapti") — could not
+/// tell "said no, ask again" from "this phone can never say yes". Those two need opposite screens:
+/// the first keeps the step, the second must let the child continue, or a phone with Screen Time
+/// restricted by MDM or with no passcode would be stuck in onboarding for good.
+enum ScreenTimeRequestOutcome: Equatable {
+    case granted
+    /// The child dismissed the sheet ("Don't Allow"). Asking again shows it again.
+    case canceled
+    /// Nothing the child can do on this phone fixes it: restricted, unavailable, a Family Sharing
+    /// child account, no passcode. The same set `markedUnavailable` records.
+    case unavailable
+    /// Transient or unexpected (conflict, network, invalid argument, a non-FamilyControls error).
+    case failed
+}
+
 @MainActor
 final class ScreenTimeAuthorizationManager: ObservableObject {
     static let shared = ScreenTimeAuthorizationManager()
@@ -71,14 +90,19 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
         }
     }
 
-    func requestAuthorization() async {
+    /// Asks for the `.individual` grant and says how it ended. Discardable because the Settings and
+    /// enforcement callers only need the side effects (`status`, `lastErrorText`); the onboarding step
+    /// is the one caller that has to know the answer (see `ScreenTimeRequestOutcome`).
+    @discardableResult
+    func requestAuthorization() async -> ScreenTimeRequestOutcome {
         guard AppRuntime.screenTimeFeaturesEnabled else {
             lastErrorText = nil
             refreshStatus()
-            return
+            return .unavailable
         }
 
         lastErrorText = nil
+        let outcome: ScreenTimeRequestOutcome
 
         do {
             if #available(iOS 16.0, *) {
@@ -93,12 +117,42 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
                 }
             }
             markedUnavailable = false
+            // A call that returns without throwing is not proof of a grant: read the answer itself,
+            // so a sheet that closed without one can never be reported as "granted" and let the
+            // onboarding step past a permission this phone does not hold.
+            outcome = AuthorizationCenter.shared.authorizationStatus == .approved ? .granted : .canceled
         } catch {
             markedUnavailable = Self.shouldMarkUnavailable(error)
             lastErrorText = Self.errorText(for: error)
+            outcome = Self.outcome(for: error)
         }
 
         refreshStatus()
+        return outcome
+    }
+
+    /// Pure, so the classification is pinned by a test. `.authorizationCanceled` is the child's
+    /// answer; the `shouldMarkUnavailable` set is the phone's; everything else may pass on a retry.
+    nonisolated static func outcome(for error: Error) -> ScreenTimeRequestOutcome {
+        guard let familyControlsError = error as? FamilyControlsError else {
+            return .failed
+        }
+
+        switch familyControlsError {
+        case .authorizationCanceled:
+            return .canceled
+        case .restricted,
+             .unavailable,
+             .invalidAccountType,
+             .authenticationMethodUnavailable:
+            return .unavailable
+        case .invalidArgument,
+             .authorizationConflict,
+             .networkError:
+            return .failed
+        @unknown default:
+            return .failed
+        }
     }
 
     func revokeAuthorization() async {
@@ -181,25 +235,10 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
     private var markedUnavailable = false
     private var persistedStatus: ScreenTimePermissionStatus?
 
+    /// One classification, two readers: the persisted "unavailable" mark and the onboarding outcome
+    /// must never disagree about which errors the child cannot fix.
     private static func shouldMarkUnavailable(_ error: Error) -> Bool {
-        guard let familyControlsError = error as? FamilyControlsError else {
-            return false
-        }
-
-        switch familyControlsError {
-        case .restricted,
-             .unavailable,
-             .invalidAccountType,
-             .authenticationMethodUnavailable:
-            return true
-        case .invalidArgument,
-             .authorizationConflict,
-             .authorizationCanceled,
-             .networkError:
-            return false
-        @unknown default:
-            return false
-        }
+        outcome(for: error) == .unavailable
     }
 
     private static func errorText(for error: Error) -> String {

@@ -5,6 +5,7 @@ import UIKit
 extension LocationPermissionManager: @preconcurrency CLLocationManagerDelegate {
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         refreshStatuses()
+        locationAuthorizationDidChangeForPendingAsk()
     }
 }
 
@@ -19,6 +20,7 @@ extension LocationPermissionManager {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshStatuses()
+                self?.pendingLocationAskDidBecomeActive()
             }
         }
 
@@ -28,6 +30,7 @@ extension LocationPermissionManager {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
+                self?.pendingLocationAskWillResignActive()
                 self?.refreshStatuses()
             }
         }
