@@ -199,12 +199,14 @@ struct BolajonHomeView: View {
 
     /// Ask for location once per launch when the child has never actually answered iOS's prompt.
     ///
-    /// Both location steps in onboarding ship a visible decline, and nothing anywhere asked again —
-    /// so a child could finish setup with location fully unanswered and the product's core feature
-    /// silently off for the life of the pairing, with the parent seeing an empty map rather than a
-    /// reason. This costs nothing when the child HAS answered: from any status other than
-    /// `.notDetermined` iOS shows no prompt, which is why the check is on the status and not on a
-    /// counter. The header chip covers the denied case, which no prompt can reopen.
+    /// Until build 28 both location steps in onboarding shipped a visible decline, and nothing
+    /// anywhere asked again — so a child could finish setup with location fully unanswered and the
+    /// product's core feature silently off for the life of the pairing, with the parent seeing an
+    /// empty map rather than a reason. Onboarding now waits for the grant, but phones onboarded
+    /// before that never meet it again, so this stays. It costs nothing when the child HAS answered:
+    /// from any status other than `.notDetermined` iOS shows no prompt, which is why the check is on
+    /// the status and not on a counter. The header chip covers the denied case, which no prompt can
+    /// reopen.
     private func reaskForLocationIfNeverAnswered() {
         guard !didReaskForLocation, sessionStore.oilaPaired, !lockState.isLocked else { return }
         guard permissionManager.locationAuthorizationStatus == .notDetermined else { return }

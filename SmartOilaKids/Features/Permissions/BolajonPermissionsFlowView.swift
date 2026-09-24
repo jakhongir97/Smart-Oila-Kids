@@ -37,7 +37,7 @@ struct BolajonPermissionStep: Identifiable {
         case camera             // optional — the child's own yes
         case summary
 
-        /// The OS permission this step asks for; nil for the two steps that ask for nothing.
+        /// The OS permission this step asks for; nil for the steps that ask for none.
         var requirement: PermissionRequirement? {
             switch self {
             case .notifications: return .notifications
@@ -85,8 +85,8 @@ struct BolajonPermissionStep: Identifiable {
     /// Onboarding steps, feature-gated: a step ships only while something in the build can consume
     /// the grant it asks for, otherwise the child taps an "Enable" button that can never turn
     /// anything on (App Store Guideline 5.1.1).
-    ///  • `.usage` / `.appLimits` need `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` — without it no
-    ///    FamilyControls entitlement/prompt ships, so there is nothing to grant.
+    ///  • `.usage` / `.appLimits` / `.appSelection` need `SMARTOILA_SCREEN_TIME_FEATURES_ENABLED` —
+    ///    without it no FamilyControls entitlement/prompt ships, so there is nothing to grant or pick.
     ///  • `.microphone` / `.camera` need `SMARTOILA_MEDIA_FEATURES_ENABLED`, the same flag that
     ///    gates their rows in `BolajonPermissionChecklist`, so the flow and the checklist can never
     ///    disagree about which permissions this build is asking for.
