@@ -404,3 +404,12 @@
 "perm2.screentime.denied_hint" = "Ekran vaqti ruxsati berilmadi. «Qayta urinish»ni bosing va ochilgan oynada ruxsat bering.";
 "perm2.screentime.unavailable" = "Bu telefonda Ekran vaqtini yoqib bo'lmaydi. Davom etishingiz mumkin — ota-ona buni saytda ko'radi.";
 "perm2.screentime.failed" = "Ekran vaqtini hozir yoqib bo'lmadi. Qayta urinib ko'ring yoki busiz davom eting — ota-ona buni saytda ko'radi.";
+
+/* build 28 — the one-time app pick inside onboarding */
+"perm2.apps.title" = "Telefondagi ilovalarni tanlang";
+"perm2.apps.body" = "Ota-ona saytda har bir ilovaning vaqtini ko'rishi va uni bloklay olishi uchun ro'yxatni bir marta tanlang: ochilgan oynada eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing.";
+"perm2.apps.done" = "Ilovalar tanlangan";
+"perm2.apps.done_hint" = "Telefondagi ilovalar allaqachon tanlangan — «Davom etish»ni bosing.";
+"perm2.apps.need_all" = "Eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasi yoqilmadi. Yana bosing va uni yoqing — yoki keyinroq ilovaning asosiy oynasidan tanlang.";
+"perm2.apps.unavailable" = "Ekran vaqti ruxsati yo'q, shuning uchun ilovalarni hozir tanlab bo'lmaydi. Davom etishingiz mumkin.";
+"perm2.later" = "Keyinroq";

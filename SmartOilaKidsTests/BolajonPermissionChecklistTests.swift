@@ -128,11 +128,12 @@ final class BolajonPermissionChecklistTests: XCTestCase {
     // MARK: - Onboarding step list
 
     /// Shipping config (Info.plist: Screen Time on, media on). Ibrohim's order (2026-09-25):
-    /// location right after notifications, Screen Time next, live audio/video LAST ("oxirida").
+    /// location right after notifications, Screen Time next — with the one-time app pick right after
+    /// its grant — and live audio/video LAST ("oxirida").
     func testShippingOnboardingStepOrder() {
         XCTAssertEqual(BolajonPermissionStep.all(screenTimeEnabled: true, mediaEnabled: true).map(\.id), [
             "intro", "notifications", "location", "backgroundLocation",
-            "usage", "appLimits", "microphone", "camera", "summary"
+            "usage", "appLimits", "appSelection", "microphone", "camera", "summary"
         ])
         XCTAssertEqual(BolajonPermissionStep.all(screenTimeEnabled: false, mediaEnabled: true).map(\.id), [
             "intro", "notifications", "location", "backgroundLocation",
@@ -162,7 +163,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
             let permissionSteps = steps.filter { $0.kind != .intro && $0.kind != .summary }
             let mandatory = permissionSteps.filter(\.isMandatory).map(\.id)
             let expected = screenTime
-                ? ["notifications", "location", "backgroundLocation", "usage", "appLimits"]
+                ? ["notifications", "location", "backgroundLocation", "usage", "appLimits", "appSelection"]
                 : ["notifications", "location", "backgroundLocation"]
             XCTAssertEqual(mandatory, expected)
             XCTAssertEqual(BolajonPermissionStep.mandatoryPermissionCount(in: steps), expected.count)
@@ -181,7 +182,9 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         let allowKeys: Set<String> = ["perm2.allow.cta", "perm2.always.cta", "perm2.settings.cta_yes", "perm2.notifications.cta"]
         for step in BolajonPermissionStep.all(screenTimeEnabled: true, mediaEnabled: true)
         where step.kind != .intro && step.kind != .summary {
-            XCTAssertEqual(step.primaryKey, "perm2.continue", "step \(step.id)")
+            // The app pick asks for no permission — its button opens Apple's picker and says so.
+            XCTAssertEqual(step.primaryKey, step.kind == .appSelection ? "screentime.restricted.pick" : "perm2.continue",
+                           "step \(step.id)")
             XCTAssertFalse(allowKeys.contains(step.primaryKey))
             for phase in Self.everyPhase {
                 let actions = BolajonStepGate.actions(for: step, phase: phase)
@@ -303,7 +306,8 @@ final class BolajonPermissionChecklistTests: XCTestCase {
 
     // MARK: - Gate: phase → buttons
 
-    /// Mandatory steps never offer a way past a missing grant the child can fix.
+    /// Mandatory steps never offer a way past a missing grant the child can fix. (The app pick has
+    /// its own rule — see `testTheAppPickOffersLaterOnlyAfterAMissedRound`.)
     func testMandatoryStepsNeverDecline() {
         for kind in [Kind.notifications, .location, .backgroundLocation, .usage, .appLimits] {
             for phase in Self.everyPhase {
@@ -395,6 +399,54 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         for key in keys {
             XCTAssertNotEqual(L10n.tr(key), key, "raw key would reach the screen: \(key)")
         }
+    }
+
+    // MARK: - The app pick (R6b)
+
+    func testTheAppPickCompletesOnlyWithTheWholePhoneCategories() {
+        func pick(_ screenTime: ScreenTimePermissionStatus, has: Bool = false, missed: Bool = false) -> BolajonStepPhase {
+            phase(.appSelection, screenTime: screenTime,
+                  context: BolajonStepContext(hasAppPick: has, appPickMissed: missed))
+        }
+        XCTAssertEqual(pick(.granted), .notAsked)
+        XCTAssertEqual(pick(.granted, has: true), .granted)
+        XCTAssertEqual(pick(.granted, missed: true), .canReprompt)
+        XCTAssertEqual(pick(.granted, has: true, missed: true), .granted, "a later good round wins")
+        XCTAssertEqual(pick(.denied), .unavailable, "Apple's picker hands out nothing without the grant")
+        XCTAssertEqual(pick(.unavailable, has: true), .unavailable)
+    }
+
+    /// Mandatory — no way past on the first round — but an Apple picker that comes back empty must
+    /// not strand the child: after a missed round "Keyinroq" appears, and Home's card is the backstop.
+    func testTheAppPickOffersLaterOnlyAfterAMissedRound() {
+        let first = BolajonStepGate.actions(for: step(.appSelection), phase: .notAsked)
+        XCTAssertEqual(first.primary, .pickApps)
+        XCTAssertEqual(first.primaryKey, "screentime.restricted.pick")
+        XCTAssertNil(first.secondary)
+
+        let missed = BolajonStepGate.actions(for: step(.appSelection), phase: .canReprompt)
+        XCTAssertEqual(missed.primary, .pickApps)
+        XCTAssertEqual(missed.secondary, .init(action: .advance, key: "perm2.later"))
+        XCTAssertEqual(missed.hint, .init(key: "perm2.apps.need_all", tone: .warning))
+
+        let done = BolajonStepGate.actions(for: step(.appSelection), phase: .granted)
+        XCTAssertEqual(done.primary, .advance)
+        XCTAssertEqual(done.badgeKey, "perm2.apps.done")
+
+        XCTAssertEqual(BolajonStepGate.actions(for: step(.appSelection), phase: .unavailable).primary, .advance)
+    }
+
+    func testTheAppPickIsSkippedWithoutScreenTime() {
+        let steps = BolajonPermissionStep.all(screenTimeEnabled: true, mediaEnabled: true)
+        let limits = steps.firstIndex { $0.kind == .appLimits }!
+        let pick = steps.firstIndex { $0.kind == .appSelection }!
+        XCTAssertEqual(pick, limits + 1)
+        XCTAssertEqual(BolajonPermissionStep.nextIndex(after: limits, in: steps, screenTimeGranted: true), pick)
+        XCTAssertEqual(steps[BolajonPermissionStep.nextIndex(after: limits, in: steps, screenTimeGranted: false)!].kind,
+                       .microphone)
+        XCTAssertEqual(BolajonPermissionStep.nextIndex(after: 0, in: steps, screenTimeGranted: false), 1)
+        XCTAssertNil(BolajonPermissionStep.nextIndex(after: steps.count - 1, in: steps, screenTimeGranted: true))
+        XCTAssertFalse(BolajonPermissionStep.all(screenTimeEnabled: false, mediaEnabled: true).contains { $0.kind == .appSelection })
     }
 
     // MARK: - Screen Time answers

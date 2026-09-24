@@ -500,11 +500,13 @@ struct ScreenTimeAppLabelSheet: View {
 /// are what the device-total rung measures (`ScreenTimeUsageTotalCategoryStore`), so this card stays
 /// until the stored selection HAS categories — which is exactly when the whole phone is counted.
 ///
-/// WHY HOME, not a permissions-flow step: a phone that is already paired never sees onboarding
-/// again, and Ibrohim's phone is one of those. Home reaches both — a fresh pairing lands here right
-/// after onboarding, with the parent still holding the phone. And not a checklist row: the
-/// checklist drives the header chip's "permissions off" count, and a missing pick is not a missing
-/// permission.
+/// WHY HOME AS WELL AS ONBOARDING. Since build 28 onboarding asks for the pick itself, right after
+/// the Screen Time grant (`BolajonPermissionStep.Kind.appSelection`) — the unpair wipe removes the
+/// selection, so every re-pair needs it again. This card stays as the backstop: a phone that is
+/// already paired never sees onboarding again, a child can leave the pick for "Keyinroq" after a
+/// round Apple's picker came back empty from, and Screen Time granted later from Settings has no
+/// onboarding step to meet. And not a checklist row: the checklist drives the header chip's
+/// "permissions off" count, and a missing pick is not a missing permission.
 ///
 /// WHAT IT ASKS: one tap, Apple's own picker, one switch, Save. No naming, no typing, no switch of
 /// ours (product rule 2026-09-21). The picker's header already says which switch.

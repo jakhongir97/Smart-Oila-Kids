@@ -1,3 +1,4 @@
+import FamilyControls
 import SwiftUI
 
 // Bolajon360 permissions onboarding: a guided lavender/peach flow that replaces the legacy
@@ -31,6 +32,7 @@ struct BolajonPermissionStep: Identifiable {
         case backgroundLocation // mandatory ("Always")
         case usage              // mandatory (Screen Time)
         case appLimits          // mandatory (shares the Screen Time grant)
+        case appSelection       // the one-time "All Apps & Categories" pick — not an OS permission
         case microphone         // optional — the child's own yes
         case camera             // optional — the child's own yes
         case summary
@@ -43,7 +45,7 @@ struct BolajonPermissionStep: Identifiable {
             case .usage, .appLimits: return .usageStats
             case .microphone: return .microphone
             case .camera: return .camera
-            case .intro, .summary: return nil
+            case .intro, .appSelection, .summary: return nil
             }
         }
     }
@@ -69,6 +71,17 @@ struct BolajonPermissionStep: Identifiable {
         steps.filter { $0.isMandatory && $0.kind != .intro && $0.kind != .summary }.count
     }
 
+    /// The step after `index`. The app pick is skipped while Screen Time is not granted: Apple's
+    /// picker hands out nothing without the grant, so the step could only ever say "unavailable".
+    /// Pure, so the rule is pinned by a test.
+    static func nextIndex(after index: Int, in steps: [BolajonPermissionStep], screenTimeGranted: Bool) -> Int? {
+        var next = index + 1
+        while next < steps.count, steps[next].kind == .appSelection, !screenTimeGranted {
+            next += 1
+        }
+        return next < steps.count ? next : nil
+    }
+
     /// Onboarding steps, feature-gated: a step ships only while something in the build can consume
     /// the grant it asks for, otherwise the child taps an "Enable" button that can never turn
     /// anything on (App Store Guideline 5.1.1).
@@ -88,7 +101,7 @@ struct BolajonPermissionStep: Identifiable {
     static func all(screenTimeEnabled: Bool, mediaEnabled: Bool) -> [BolajonPermissionStep] {
         var steps = allSteps
         if !screenTimeEnabled {
-            steps.removeAll { $0.kind == .usage || $0.kind == .appLimits }
+            steps.removeAll { $0.kind == .usage || $0.kind == .appLimits || $0.kind == .appSelection }
         }
         if !mediaEnabled {
             steps.removeAll { $0.kind == .microphone || $0.kind == .camera }
@@ -143,6 +156,21 @@ struct BolajonPermissionStep: Identifiable {
               titleKey: "perm2.usage.title", bodyKey: "perm2.usage.body", primaryKey: "perm2.continue", isMandatory: true),
         .init(kind: .appLimits, icon: "square.stack.3d.up.fill", intent: .lavender,
               titleKey: "perm2.limits.title", bodyKey: "perm2.limits.body", primaryKey: "perm2.continue", isMandatory: true),
+        // The one-tap "All Apps & Categories" pick, right after the grant it needs. iOS measures and
+        // blocks nothing without a `FamilyActivityPicker` selection (Apple's wall), and the unpair
+        // wipe removes the selection with the rest of the App Group — so after every re-pair, Home
+        // showed "Ekran vaqti hisoblanmayapti" beside a figure the phone had stopped updating and
+        // the parent's web put all time under one "ios.other" row (Ibrohim, 2026-09-25). Asking here,
+        // with the parent still holding the phone, is the moment it gets done.
+        //
+        // Not an OS permission, so it has no checklist row (see `ScreenTimeSetupCard`). Mandatory in
+        // colour and in that it opens with no way past — but a round that comes back without the
+        // switch on offers "Keyinroq": Apple's picker can come back empty right after a first grant,
+        // and a glitch there must not strand the child. Home's `ScreenTimeSetupCard` is the backstop.
+        // Skipped while Screen Time is not granted (`nextIndex`). No typing, no switch of ours — the
+        // product rule of 2026-09-21.
+        .init(kind: .appSelection, icon: "square.grid.2x2.fill", intent: .lavender,
+              titleKey: "perm2.apps.title", bodyKey: "perm2.apps.body", primaryKey: "screentime.restricted.pick", isMandatory: true),
         // There is deliberately no battery ("Energiya tejashdan chiqarish") or auto-start step here
         // any more. Neither is an iOS permission: iOS exposes no per-app battery-saver exemption in
         // the app's own Settings pane, and it has no equivalent of Android's RECEIVE_BOOT_COMPLETED
@@ -186,7 +214,8 @@ enum BolajonStepPhase: Equatable {
     case requesting
     /// The permission exists. R3: shown as "✓ Ruxsat berilgan", never skipped silently.
     case granted
-    /// Screen Time's sheet was dismissed this run; it can be shown again.
+    /// Screen Time's sheet was dismissed this run, or the app pick came back without the
+    /// whole-phone switch; either can be shown again.
     case canReprompt
     /// iOS will not show the dialog again; only Settings can change it.
     case needsSettings(SettingsReason)
@@ -218,6 +247,10 @@ struct BolajonStepContext: Equatable {
     /// Screen Time's answer in THIS run (after the quick-cancel rule, see
     /// `BolajonOnboardingModel.effectiveScreenTimeOutcome`).
     var screenTimeOutcome: ScreenTimeRequestOutcome? = nil
+    /// The stored pick has category tokens — the whole phone is counted (`ScreenTimeSetupCard`).
+    var hasAppPick = false
+    /// A picker round came back in this run without them.
+    var appPickMissed = false
 }
 
 /// The buttons and the line of help one step shows. Keys, not strings, so the table is testable.
@@ -230,6 +263,8 @@ struct BolajonStepActions: Equatable {
         case advance
         /// "Hozir emas" — optional steps only; recorded as the child's "no".
         case decline
+        /// Apple's app picker (the app-pick step).
+        case pickApps
     }
 
     enum Tone: Equatable { case success, warning }
@@ -261,7 +296,7 @@ enum BolajonStepGate {
     /// from a delegate callback behind the alert) resolves the step the moment it lands.
     static func isGranted(_ kind: Kind, in snapshot: PermissionStatusSnapshot) -> Bool {
         switch kind {
-        case .intro, .summary:
+        case .intro, .appSelection, .summary:
             return false
         case .notifications:
             return [.authorized, .provisional, .ephemeral].contains(snapshot.notificationAuthorizationStatus)
@@ -281,11 +316,17 @@ enum BolajonStepGate {
     }
 
     static func phase(for kind: Kind, snapshot: PermissionStatusSnapshot, context: BolajonStepContext) -> BolajonStepPhase {
+        if kind == .appSelection {
+            // Apple's picker yields nothing without the grant; normally the step is skipped then.
+            guard snapshot.screenTimePermissionStatus == .granted else { return .unavailable }
+            if context.hasAppPick { return .granted }
+            return context.appPickMissed ? .canReprompt : .notAsked
+        }
         if isGranted(kind, in: snapshot) { return .granted }
         if context.inFlight { return .requesting }
 
         switch kind {
-        case .intro, .summary:
+        case .intro, .appSelection, .summary:
             return .notAsked
         case .notifications:
             // The published status starts at `.notDetermined` before it has been read; showing
@@ -332,6 +373,9 @@ enum BolajonStepGate {
         if step.kind == .intro || step.kind == .summary {
             return BolajonStepActions(primary: .advance, primaryKey: step.primaryKey)
         }
+        if step.kind == .appSelection {
+            return appSelectionActions(step, phase: phase)
+        }
         // Optional steps only. A mandatory step never gets a way past a missing grant — except the
         // `.unavailable` / `.failed` ones below, where the phone, not the child, is the obstacle.
         let skip = step.showsDecline ? BolajonStepActions.Secondary(action: .decline, key: step.declineKey) : nil
@@ -372,8 +416,29 @@ enum BolajonStepGate {
         "perm2.granted_hint", "perm2.limits.granted_hint", "perm2.screentime.denied_hint",
         "perm2.notifications.settings_hint", "perm2.location.settings_hint", "perm2.location.services_off",
         "perm2.microphone.settings_hint", "perm2.camera.settings_hint", "perm2.settings_hint",
-        "perm2.screentime.unavailable", "perm2.restricted_hint", "perm2.screentime.failed"
+        "perm2.screentime.unavailable", "perm2.restricted_hint", "perm2.screentime.failed",
+        "perm2.apps.done_hint", "perm2.apps.need_all", "perm2.apps.unavailable"
     ]
+
+    /// The app pick. One tap opens Apple's picker; the step completes itself when the pick has the
+    /// whole-phone categories. "Keyinroq" appears only after a round that came back without them.
+    private static func appSelectionActions(_ step: BolajonPermissionStep, phase: BolajonStepPhase) -> BolajonStepActions {
+        switch phase {
+        case .granted:
+            return BolajonStepActions(primary: .advance, primaryKey: "perm2.continue",
+                                      hint: .init(key: "perm2.apps.done_hint", tone: .success),
+                                      badgeKey: "perm2.apps.done")
+        case .canReprompt:
+            return BolajonStepActions(primary: .pickApps, primaryKey: step.primaryKey,
+                                      secondary: .init(action: .advance, key: "perm2.later"),
+                                      hint: .init(key: "perm2.apps.need_all", tone: .warning))
+        case .unavailable:
+            return BolajonStepActions(primary: .advance, primaryKey: "perm2.continue",
+                                      hint: .init(key: "perm2.apps.unavailable", tone: .warning))
+        case .notAsked, .requesting, .needsSettings, .failed:
+            return BolajonStepActions(primary: .pickApps, primaryKey: step.primaryKey)
+        }
+    }
 
     private static func isScreenTime(_ kind: Kind) -> Bool { kind == .usage || kind == .appLimits }
 
@@ -389,7 +454,7 @@ enum BolajonStepGate {
             case .microphone: return "perm2.microphone.settings_hint"
             case .camera: return "perm2.camera.settings_hint"
             case .notifications: return "perm2.notifications.settings_hint"
-            case .intro, .usage, .appLimits, .summary: return "perm2.settings_hint"
+            case .intro, .usage, .appLimits, .appSelection, .summary: return "perm2.settings_hint"
             }
         }
     }
@@ -411,6 +476,7 @@ final class BolajonOnboardingModel: ObservableObject {
     @Published private(set) var attempted: Set<Kind> = []
     @Published private(set) var screenTimeOutcome: ScreenTimeRequestOutcome?
     @Published private(set) var locationServicesEnabled: Bool?
+    @Published private(set) var appPickMissed = false
     private var quickScreenTimeCancels = 0
 
     /// A "cancel" faster than this came back without a human answering anything.
@@ -423,6 +489,12 @@ final class BolajonOnboardingModel: ObservableObject {
 
     func markAttempted(_ kind: Kind) {
         attempted.insert(kind)
+    }
+
+    /// One picker round is over. Without the whole-phone categories it counts as missed, which is
+    /// what unlocks "Keyinroq" (see `BolajonStepGate.appSelectionActions`).
+    func finishAppPick(hasCategories: Bool) {
+        if !hasCategories, !appPickMissed { appPickMissed = true }
     }
 
     func finish(_ kind: Kind, outcome: PermissionAskOutcome, elapsed: TimeInterval) {
@@ -463,7 +535,10 @@ final class BolajonOnboardingModel: ObservableObject {
             notificationStatusKnown: manager.hasReadNotificationStatus,
             locationServicesEnabled: locationServicesEnabled,
             alwaysPromptIssued: UserDefaults.standard.bool(forKey: LocationPermissionManager.alwaysPromptIssuedKey),
-            screenTimeOutcome: screenTimeOutcome
+            screenTimeOutcome: screenTimeOutcome,
+            // Read here, observed by the views (`restrictedApps`), so a pick re-renders the step.
+            hasAppPick: kind == .appSelection && !ScreenTimeRestrictedAppsStore.shared.selection.categoryTokens.isEmpty,
+            appPickMissed: appPickMissed
         )
     }
 
@@ -500,6 +575,13 @@ struct BolajonPermissionsFlowView: View {
     /// The top step and its phase as last seen — what tells "the grant landed while the child was on
     /// this step" apart from "the child went Back to a step that was granted earlier".
     @State private var observedTop: TopState?
+    /// Observed so a pick made in the app-pick step re-evaluates `topState` (and auto-advances).
+    @ObservedObject private var restrictedApps = ScreenTimeRestrictedAppsStore.shared
+    @State private var isAppPickerPresented = false
+    @State private var appPickerDraft = FamilyActivitySelection()
+    /// The picker's answer, applied once the sheet has gone — the pattern `ScreenTimeSetupCard` uses,
+    /// so the step never re-renders under a sheet that is still on screen.
+    @State private var pendingAppSelection: FamilyActivitySelection?
 
     private let steps = BolajonPermissionStep.all
 
@@ -544,6 +626,13 @@ struct BolajonPermissionsFlowView: View {
         .onChange(of: manager.microphonePermission) { _ in mirrorMediaConsent() }
         .onChange(of: manager.cameraAuthorizationStatus) { _ in mirrorMediaConsent() }
         .onChange(of: topState) { autoAdvanceIfJustGranted($0) }
+        .sheet(isPresented: $isAppPickerPresented, onDismiss: applyPickedApps) {
+            ScreenTimeAppPickerView(
+                purpose: .restricted,
+                selection: $appPickerDraft,
+                onDone: { pendingAppSelection = $0 }
+            )
+        }
         // Returning from Settings: the manager re-reads every permission on its own
         // (`didBecomeActive`); Location Services is the one device-wide switch it does not read.
         .onChange(of: scenePhase) { phase in
@@ -635,6 +724,11 @@ struct BolajonPermissionsFlowView: View {
         case .decline:
             recordMediaAnswer(false, for: step.kind)
             advance(from: index)
+        case .pickApps:
+            guard topStepIndex == index, !isAppPickerPresented else { return }
+            model.markAttempted(step.kind)
+            appPickerDraft = restrictedApps.selection
+            isAppPickerPresented = true
         case .request, .openSettings:
             // One request per step at a time, and only from the step on top — a double tap, or a tap
             // on a step being popped, must not stack a second system dialog.
@@ -682,10 +776,25 @@ struct BolajonPermissionsFlowView: View {
     /// Push the next step (or the summary). Only from the step on top: the auto-advance above and a
     /// "Davom etish" tap can race, and a second push would skip a step the child never saw.
     private func advance(from index: Int) {
-        guard topStepIndex == index else { return }
-        let next = index + 1
-        guard next < steps.count else { return }
+        guard topStepIndex == index,
+              let next = BolajonPermissionStep.nextIndex(
+                  after: index, in: steps,
+                  screenTimeGranted: manager.screenTimePermissionStatus == .granted
+              ) else { return }
         path.append(steps[next].kind == .summary ? .summary : .step(next))
+    }
+
+    /// The picker closed. Saving it is what arms usage, publishes the app list and uploads — the
+    /// enforcement lane already runs during onboarding (it starts on the pairing, not on Home).
+    /// A pick with the whole-phone categories completes the step through `autoAdvanceIfJustGranted`;
+    /// anything else — Cancel, or single apps ticked — is a missed round.
+    private func applyPickedApps() {
+        let picked = pendingAppSelection
+        pendingAppSelection = nil
+        if let picked {
+            restrictedApps.updateSelection(picked)
+        }
+        model.finishAppPick(hasCategories: !restrictedApps.selection.categoryTokens.isEmpty)
     }
 
     private static func initialPath() -> [PermRoute] {
@@ -719,6 +828,8 @@ private struct PermissionStepView: View {
     // `PermissionSummaryView` observes the manager.
     @ObservedObject var manager: LocationPermissionManager
     @ObservedObject var model: BolajonOnboardingModel
+    /// Only for the app-pick step's "done" state; see `BolajonOnboardingModel.context`.
+    @ObservedObject var restrictedApps = ScreenTimeRestrictedAppsStore.shared
     let onAction: (BolajonStepActions.Action) -> Void
 
     private var isIntro: Bool { step.kind == .intro }

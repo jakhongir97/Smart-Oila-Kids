@@ -404,3 +404,12 @@
 "perm2.screentime.denied_hint" = "Screen Time access wasn't given. Tap “Try again” and allow it in the window that opens.";
 "perm2.screentime.unavailable" = "Screen Time can't be turned on on this phone. You can continue — your parent will see this on the website.";
 "perm2.screentime.failed" = "Screen Time couldn't be turned on just now. Try again, or continue without it — your parent will see this on the website.";
+
+/* build 28 — the one-time app pick inside onboarding */
+"perm2.apps.title" = "Choose the apps on this phone";
+"perm2.apps.body" = "So your parent can see each app's time on the website and block it, choose the list once: in the window that opens, switch on “All Apps & Categories” at the top and press Save.";
+"perm2.apps.done" = "Apps chosen";
+"perm2.apps.done_hint" = "This phone's apps are already chosen — tap Continue.";
+"perm2.apps.need_all" = "The “All Apps & Categories” switch at the top wasn't turned on. Tap again and switch it on — or do it later from the app's main screen.";
+"perm2.apps.unavailable" = "Screen Time access is off, so apps can't be chosen now. You can continue.";
+"perm2.later" = "Later";
