@@ -197,17 +197,16 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
         let wrote = DeviceLockPolicy.applyWholeDevice(locked: locked)
         lockPolicyStore.markEdgeEvaluated(at: evaluationTime)
-        let edges = DeviceLockPolicy.edges(
-            after: evaluationTime, horizon: DeviceLockEdgeMonitoring.horizon, snapshot: snapshot, calendar: calendar
+        // The app's own planning path: the next edge is armed even when it is days away (a Friday
+        // afternoon's next flip can be Monday morning), so the chain never runs out.
+        let outlook = DeviceLockEdgeMonitoring.outlook(
+            snapshot: snapshot, evaluationTime: evaluationTime, trustedNow: trustedNow, wallNow: wallNow, calendar: calendar
         )
-        let entries = DeviceLockEdgeMonitoring.plan(
-            dsn: snapshot.dsn, edges: edges, now: trustedNow, skew: trustedNow.timeIntervalSince(wallNow)
-        )
-        let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: wallNow)
+        let result = DeviceLockEdgeMonitoring.arm(outlook.entries, center: LiveDeviceLockEdgeCenter(), wallNow: wallNow)
         DeviceLockEdgeMonitoring.postDidEvaluate()
-        let nextIn = edges.first.map { Int($0.timeIntervalSince(trustedNow)) } ?? -1
+        let nextIn = outlook.edges.first.map { Int($0.timeIntervalSince(trustedNow)) } ?? -1
         Self.log.notice(
-            "schedule_monitor lock_edge callback=\(callback.rawValue, privacy: .public) activity=\(raw, privacy: .public) locked=\(locked ? 1 : 0, privacy: .public) wrote=\(wrote ? 1 : 0, privacy: .public) eval_ahead_s=\(Int(evaluationTime.timeIntervalSince(trustedNow)), privacy: .public) skew_s=\(Int(trustedNow.timeIntervalSince(wallNow)), privacy: .public) next_edge_in_s=\(nextIn, privacy: .public) armed=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public)"
+            "schedule_monitor lock_edge callback=\(callback.rawValue, privacy: .public) activity=\(raw, privacy: .public) locked=\(locked ? 1 : 0, privacy: .public) wrote=\(wrote ? 1 : 0, privacy: .public) eval_ahead_s=\(Int(evaluationTime.timeIntervalSince(trustedNow)), privacy: .public) skew_s=\(Int(trustedNow.timeIntervalSince(wallNow)), privacy: .public) next_edge_in_s=\(nextIn, privacy: .public) armed=\(outlook.entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public)"
         )
     }
 }

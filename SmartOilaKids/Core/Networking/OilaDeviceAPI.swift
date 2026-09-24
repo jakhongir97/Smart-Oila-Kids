@@ -409,7 +409,8 @@ enum OilaManualLockField: Equatable {
 /// 2026-09-23 the whole-device half is DATA, not a verdict: `manualLock` (a window with a start and
 /// an end, a future one included), `schedules` (every schedule) and `serverTime`. The phone decides
 /// from those by its own clock (`DeviceLockPolicy`), so it locks and opens on time with no internet;
-/// `isLocked` is "kept for old child builds" and read only when none of the three keys is present.
+/// `isLocked` is "kept for old child builds" and read only when neither `manualLock` nor
+/// `serverTime` is present (`carriesLockPolicy`).
 struct OilaLockState {
     /// The server's own verdict. Only the fallback for an old backend (see `carriesLockPolicy`) and
     /// a diagnostics cross-check; nil = the 200 response shape was not recognized at all.
@@ -474,11 +475,14 @@ struct OilaLockState {
         self.serverTime = serverTime
     }
 
-    /// Whether the payload carries the lock POLICY (the 2026-09-23 contract). When it carries none
-    /// of `serverTime`, `schedules` and `manualLock`, it is an old backend and only `isLocked` can
-    /// be read (`isDeviceLocked`).
+    /// Whether the payload carries the lock POLICY (the 2026-09-23 contract). Decided by the keys
+    /// only that contract has — `manualLock` (null or a window) and `serverTime`, both required in
+    /// `LockStateResponseDto`. `schedules` is NOT one of them: the old backend already sent
+    /// `schedules: []` (its only live sample did), and counting it made an old backend's parental
+    /// lock (`isLocked: true`, no window) a snapshot that never locks. When neither key is present
+    /// only `isLocked` can be read (`isDeviceLocked`).
     var carriesLockPolicy: Bool {
-        manualLock != .absent || schedules != nil || serverTime != nil
+        manualLock != .absent || serverTime != nil
     }
 
     /// The OLD backend's whole-device verdict, resolved. Read only when the payload carries no lock

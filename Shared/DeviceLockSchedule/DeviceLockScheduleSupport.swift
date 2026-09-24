@@ -202,6 +202,11 @@ struct DeviceLockPolicySnapshot: Codable, Equatable {
     /// Built from an old-backend payload that carried only `isLocked` (see
     /// `OilaTelemetryService.lockPolicySnapshot`), or from build 24's saved lock on upgrade.
     let isLegacy: Bool
+    /// True when `manualLock.endsAt` is only the phone's own 8 h ceiling on a legacy lock, not an
+    /// end anyone set. It still ends the lock offline, but the cover does not promise it: against
+    /// an old backend it is renewed by every poll, so a shown time would slide forward every 30 s
+    /// (build 25 showed only the server's own end, for the same reason). nil in older saves.
+    var manualEndIsCeiling: Bool? = nil
 }
 
 /// The pure rule. No state, no clock of its own: `now` and the calendar are always passed in, so a
@@ -414,21 +419,50 @@ struct DeviceLockClock {
         return true
     }
 
+    /// The longest round trip whose midpoint is trusted. The received time is read when the code
+    /// after `await fetchLockState()` runs, and iOS can suspend the app between the server's answer
+    /// and that line for hours: the measured "round trip" is then the suspension, and its midpoint
+    /// would put the offset off by half of it for the whole offline period after.
+    static let maximumRoundTrip: TimeInterval = 10
+
     /// The anchor for one successful poll: both clocks at the request's midpoint, and the server's
     /// time against it. The midpoint halves the round trip's contribution to the offset's error.
+    ///
+    /// A round trip over `maximumRoundTrip` says only that the server's time was read somewhere
+    /// between sending and receiving, so the true time at sending lies in `[serverTime - trip,
+    /// serverTime]`. The phone's own estimate at sending (`previous` carried forward, or the wall
+    /// clock) is kept when it lies in that range — `previous` itself, unchanged, while the phone
+    /// has not rebooted — and otherwise moved to the nearest end of it.
     static func anchor(
         serverTime: Date?,
         sentWall: Date,
         sentMonotonicNanos: UInt64,
         receivedMonotonicNanos: UInt64,
-        bootSessionID: String?
+        bootSessionID: String?,
+        previous: DeviceLockClockAnchor? = nil
     ) -> DeviceLockClockAnchor {
-        let halfTrip = receivedMonotonicNanos >= sentMonotonicNanos ? (receivedMonotonicNanos - sentMonotonicNanos) / 2 : 0
-        let wall = sentWall.addingTimeInterval(TimeInterval(halfTrip) / 1_000_000_000)
+        let trip = receivedMonotonicNanos >= sentMonotonicNanos ? receivedMonotonicNanos - sentMonotonicNanos : 0
+        let tripSeconds = TimeInterval(trip) / 1_000_000_000
+        guard tripSeconds > maximumRoundTrip else {
+            let halfTrip = trip / 2
+            let wall = sentWall.addingTimeInterval(TimeInterval(halfTrip) / 1_000_000_000)
+            return DeviceLockClockAnchor(
+                wall: wall,
+                monotonicNanos: sentMonotonicNanos + halfTrip,
+                offset: serverTime.map { $0.timeIntervalSince(wall) } ?? 0,
+                bootSessionID: bootSessionID
+            )
+        }
+        let prior = trustedNow(anchor: previous, wall: sentWall, monotonicNanos: sentMonotonicNanos, bootSessionID: bootSessionID)
+        let atSend = serverTime.map { min(max(prior, $0.addingTimeInterval(-tripSeconds)), $0) } ?? prior
+        if atSend == prior, let previous,
+           isSameBoot(anchor: previous, monotonicNanos: sentMonotonicNanos, bootSessionID: bootSessionID) {
+            return previous
+        }
         return DeviceLockClockAnchor(
-            wall: wall,
-            monotonicNanos: sentMonotonicNanos + halfTrip,
-            offset: serverTime.map { $0.timeIntervalSince(wall) } ?? 0,
+            wall: sentWall,
+            monotonicNanos: sentMonotonicNanos,
+            offset: atSend.timeIntervalSince(sentWall),
             bootSessionID: bootSessionID
         )
     }
@@ -588,11 +622,22 @@ struct LiveDeviceLockEdgeCenter: DeviceLockEdgeCenter {
 enum DeviceLockEdgeMonitoring {
     /// How far ahead edges are armed, and how many. 12 + one fallback stays well inside the ~20
     /// activities an app may hold (usage and app-limit take one each, plus a running edge or two).
+    /// Beyond the horizon only the very next edge is armed, and only when none is inside it
+    /// (`armable`): the chain must never run out.
     static let horizon: TimeInterval = 48 * 3_600
     static let maximumEdges = 12
     /// Edges closer than this are the in-app timer's; an activity starting within a minute is
     /// unmeasured (proof 7 armed two minutes ahead).
     static let minimumLead: TimeInterval = 60
+    /// An armed activity the plan no longer wants is still left alone while it starts within this
+    /// on the phone's clock. `plan` hands an edge under `minimumLead` away to the fallback, but the
+    /// activity already armed for it is the precisely timed one, and stopping it (the fallback is
+    /// up to two minutes late) gains nothing: the extension re-evaluates, never flips blindly.
+    /// Rounded up to its minute on a phone up to the tamper threshold slow, such an edge still
+    /// starts up to this far ahead. It also covers an `intervalDidStart` delivered up to
+    /// `earlyCallbackTolerance` early, whose own activity must not be stopped by its own re-arm —
+    /// that stop delivers an `intervalDidEnd` evaluated before the edge.
+    static let imminentStart: TimeInterval = minimumLead + 60 + DeviceLockClock.tamperThreshold
     /// Apple refuses an interval shorter than 15 minutes.
     static let intervalLength: TimeInterval = 16 * 60
     /// An `intervalDidStart` up to this long before its edge is evaluated AT the edge (a callback a
@@ -615,6 +660,46 @@ enum DeviceLockEdgeMonitoring {
 
     static func ceilingMinute(_ date: Date) -> Int {
         Int((date.timeIntervalSince1970 / 60).rounded(.up))
+    }
+
+    /// The edges worth arming out of `edges` (ascending, all after `from`): every one within
+    /// `horizon` — and when none is, still the first one, however far ahead.
+    ///
+    /// With the app dead only a lock-edge callback re-arms, so a plan with nothing in it ends the
+    /// chain for good. A Mon–Fri 08:00–13:00 school schedule evaluated at Friday 13:00 has no flip
+    /// for 67 h, and a 48 h cut alone left Monday's lock to the app happening to run in time. A
+    /// one-off activity may start days ahead; only its interval length is limited.
+    static func armable(_ edges: [Date], from: Date) -> [Date] {
+        let near = edges.filter { $0.timeIntervalSince(from) <= horizon }
+        return near.isEmpty ? Array(edges.prefix(1)) : near
+    }
+
+    /// What one evaluation sees ahead and arms for it.
+    struct Outlook: Equatable {
+        /// Every flip in `(evaluationTime, evaluationTime + DeviceLockPolicy.episodeSearchHorizon]`.
+        /// While locked the first one is where the episode ends.
+        let edges: [Date]
+        let entries: [Entry]
+    }
+
+    /// The one planning path, shared by the app and the extension so the two can never arm
+    /// differently: the edges after `evaluationTime` in the episode search horizon, and the entries
+    /// for the `armable` ones, seen from the trusted `now` on the phone's clock.
+    static func outlook(
+        snapshot: DeviceLockPolicySnapshot,
+        evaluationTime: Date,
+        trustedNow: Date,
+        wallNow: Date,
+        calendar: Calendar
+    ) -> Outlook {
+        let edges = DeviceLockPolicy.edges(
+            after: evaluationTime, horizon: DeviceLockPolicy.episodeSearchHorizon, snapshot: snapshot, calendar: calendar
+        )
+        let entries = plan(
+            dsn: snapshot.dsn, edges: armable(edges, from: evaluationTime),
+            now: trustedNow, skew: trustedNow.timeIntervalSince(wallNow)
+        )
+        return Outlook(edges: edges, entries: entries)
     }
 
     /// What to arm for `edges` (trusted time), seen from the trusted `now`.
@@ -686,10 +771,11 @@ enum DeviceLockEdgeMonitoring {
     /// Bring the armed set to `entries`, touching only what differs.
     ///
     /// An already-armed entry starting within a minute of where it should is left alone (a restart
-    /// is a spurious callback pair). Undesired activities are stopped only when they have not
-    /// started yet or are long over: stopping a RUNNING one delivers an `intervalDidEnd` for
-    /// nothing, and it ends by itself sixteen minutes after its edge. Build 24's lock-until is
-    /// always stopped.
+    /// is a spurious callback pair). Undesired activities are stopped only when they start more
+    /// than `imminentStart` ahead or are long over: stopping a RUNNING one delivers an
+    /// `intervalDidEnd` for nothing, and it ends by itself sixteen minutes after its edge; an
+    /// imminent one is the edge's precisely timed re-check (see `imminentStart`). Build 24's
+    /// lock-until is always stopped.
     @discardableResult
     static func arm(_ entries: [Entry], center: DeviceLockEdgeCenter, wallNow: Date, calendar: Calendar = .current) -> ArmResult {
         var result = ArmResult()
@@ -706,7 +792,8 @@ enum DeviceLockEdgeMonitoring {
                 toStop.append(activity.name)
                 continue
             }
-            if start > wallNow || start.addingTimeInterval(intervalLength) < wallNow {
+            let ahead = start.timeIntervalSince(wallNow)
+            if ahead > imminentStart || -ahead > intervalLength {
                 toStop.append(activity.name)
             }
         }
