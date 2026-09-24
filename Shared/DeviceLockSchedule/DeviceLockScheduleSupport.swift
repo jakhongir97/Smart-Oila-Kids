@@ -252,9 +252,14 @@ enum DeviceLockPolicy {
 
     /// The device zone's UTC offset, from the lock-state payload's `deviceLocalTime` ("HH:mm in the
     /// device timezone") and `serverTime` (the same instant in UTC). Rounded to the nearest 15
-    /// minutes, which absorbs the payload's minute boundary and covers every real zone (±14 h).
-    /// nil when either is missing or malformed.
-    static func scheduleZoneSeconds(deviceLocalTime: String?, serverTime: Date?) -> Int? {
+    /// minutes, which absorbs the payload's minute boundary.
+    ///
+    /// "HH:mm" carries no date, so an offset and the same offset ±24 h read alike, and real zones
+    /// span 26 hours (−12 … +14): −10 and +14, −11 and +13 are indistinguishable from the clock
+    /// alone. Where both are real, the one nearer the phone's own offset wins (`phoneSecondsFromGMT`,
+    /// the phone's zone at `serverTime`); with no hint the wrap is (−12 h, +14 h]. nil when either
+    /// input is missing or malformed.
+    static func scheduleZoneSeconds(deviceLocalTime: String?, serverTime: Date?, phoneSecondsFromGMT: Int? = nil) -> Int? {
         guard let deviceLocalTime, let serverTime else { return nil }
         let parts = deviceLocalTime.split(separator: ":")
         guard parts.count >= 2, let hour = Int(parts[0]), let minute = Int(parts[1]),
@@ -264,12 +269,29 @@ enum DeviceLockPolicy {
         let serverParts = utc.dateComponents([.hour, .minute, .second], from: serverTime)
         let serverMinutes = Double((serverParts.hour ?? 0) * 60 + (serverParts.minute ?? 0))
             + Double(serverParts.second ?? 0) / 60
-        var delta = Double(hour * 60 + minute) - serverMinutes
-        // Into (-12 h, +14 h], the range real zones live in.
-        while delta <= -12 * 60 { delta += 1_440 }
-        while delta > 14 * 60 { delta -= 1_440 }
-        let quarters = (delta / 15).rounded()
-        return Int(quarters) * 15 * 60
+        let localMinutes = Double(hour * 60 + minute)
+        let raw: Double = localMinutes - serverMinutes
+        let lowest: Double = -12 * 60
+        let highest: Double = 14 * 60
+        var candidates: [Double] = []
+        for shifted in [raw - 1_440, raw, raw + 1_440] {
+            let quarter: Double = (shifted / 15).rounded() * 15
+            if quarter >= lowest && quarter <= highest { candidates.append(quarter) }
+        }
+        guard !candidates.isEmpty else { return nil }
+        var chosen: Double = candidates[0]
+        if let hint = phoneSecondsFromGMT, candidates.count > 1 {
+            let phone = Double(hint) / 60
+            for candidate in candidates where abs(candidate - phone) < abs(chosen - phone) {
+                chosen = candidate
+            }
+        } else {
+            // No hint: prefer the (−12 h, +14 h] reading, i.e. the largest candidate above −12 h.
+            for candidate in candidates where candidate > lowest && (chosen <= lowest || candidate > chosen) {
+                chosen = candidate
+            }
+        }
+        return Int(chosen) * 60
     }
 
     /// Monday = 0 … Sunday = 6, from `Calendar`'s Sunday = 1 … Saturday = 7.

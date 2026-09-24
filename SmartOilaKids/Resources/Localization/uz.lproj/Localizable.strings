@@ -347,7 +347,7 @@
 "screentime.restricted.not_authorized" = "Ekran vaqti ruxsati o'chiq. Avval ruxsatlar bosqichida yoqing.";
 "screentime.restricted.summary" = "%d bog'langan · %d belgilash kerak";
 "screentime.restricted.usage_unsupported" = "Bu iOS versiyasida bloklash ishlaydi, lekin ilova bo'yicha vaqt uchun iOS 17.4 yoki yangiroq kerak.";
-"screentime.restricted.too_many" = "Apple ko'pi bilan %d ta ilovaga ruxsat beradi. Faqat birinchi %d tasi bloklanadi va hisoblanadi — ortiqchasini olib tashlang.";
+"screentime.restricted.too_many" = "Apple ko'pi bilan %d ta ilovaga ruxsat beradi. Faqat birinchi %d tasining vaqti hisoblanadi — ortiqchasini olib tashlang.";
 "screentime.restricted.guided_cta" = "Belgilash";
 "screentime.restricted.guided_nothing" = "%@ belgilanmadi. Qayta bosib Apple ro'yxatida o'sha ilovani belgilang.";
 "screentime.restricted.guided_ambiguous" = "Birdaniga %2$d ta ilova belgilandi, shuning uchun %1$@ ni ajratib bo'lmadi. Hech narsa saqlanmadi — qayta bosib faqat o'sha bittasini belgilang.";

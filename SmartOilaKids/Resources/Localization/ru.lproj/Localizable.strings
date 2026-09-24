@@ -347,7 +347,7 @@
 "screentime.restricted.not_authorized" = "Доступ к Экранному времени выключен. Сначала включите его в шаге разрешений.";
 "screentime.restricted.summary" = "%d связано · %d нужно связать";
 "screentime.restricted.usage_unsupported" = "На этой версии iOS блокировка работает, но время по приложениям требует iOS 17.4 или новее.";
-"screentime.restricted.too_many" = "Apple разрешает не более %d приложений. Блокируются и учитываются только первые %d — уберите лишние.";
+"screentime.restricted.too_many" = "Apple разрешает не более %d приложений. Время учитывается только у первых %d — уберите лишние.";
 "screentime.restricted.guided_cta" = "Связать";
 "screentime.restricted.guided_nothing" = "%@ не отмечено. Нажмите ещё раз и отметьте это приложение в списке Apple.";
 "screentime.restricted.guided_ambiguous" = "Отмечено сразу %2$d приложения, поэтому %1$@ не удалось определить. Ничего не сохранено — нажмите ещё раз и отметьте только его.";

@@ -347,7 +347,7 @@
 "screentime.restricted.not_authorized" = "Screen Time access is off. Turn it on in the permissions step first.";
 "screentime.restricted.summary" = "%d linked · %d need linking";
 "screentime.restricted.usage_unsupported" = "On this iOS version blocking works, but per-app time needs iOS 17.4 or newer.";
-"screentime.restricted.too_many" = "Apple allows at most %d apps. Only the first %d are blocked and timed — remove some.";
+"screentime.restricted.too_many" = "Apple allows at most %d apps. Only the first %d are timed — remove some.";
 "screentime.restricted.guided_cta" = "Link";
 "screentime.restricted.guided_nothing" = "%@ was not ticked. Tap again and tick that app in Apple's list.";
 "screentime.restricted.guided_ambiguous" = "%2$d apps were ticked at once, so %1$@ could not be told apart. Nothing was saved — tap again and tick only that one.";

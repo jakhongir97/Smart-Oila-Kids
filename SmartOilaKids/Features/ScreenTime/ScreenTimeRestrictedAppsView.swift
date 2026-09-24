@@ -126,11 +126,12 @@ struct ScreenTimeRestrictedAppsView: View {
                         .foregroundStyle(pending.web.isEmpty ? AppColors.inkSecondary : AppColors.sosCoral)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 2)
-                    // 49, not 50: one of the fifty event slots is kept for the phone's total (build 26).
+                    // Two caps, stated apart: Apple blocks at most 50 apps; the phone TIMES at most 49,
+                    // because one of the fifty event slots is kept for the phone's total (build 26).
                     // Both `%d`s get an argument — the string has two, and one was passed before.
                     if store.labelledCount > ScreenTimeUsageMonitoring.maximumApplicationEvents {
                         Text(L10n.tr("screentime.restricted.too_many",
-                                     ScreenTimeUsageMonitoring.maximumApplicationEvents,
+                                     AppCatalogue.maximumBlockedApplications,
                                      ScreenTimeUsageMonitoring.maximumApplicationEvents))
                             .font(AppTypography.bodyText(13))
                             .foregroundStyle(AppColors.sosCoral)
@@ -173,6 +174,13 @@ struct ScreenTimeRestrictedAppsView: View {
                         .padding(.top, 6)
                 }
             }
+        }
+        // Both sheets yield to the lock: a sheet already up keeps the root's lock cover from
+        // presenting (the rule every presentation on the Home stack follows).
+        .onChange(of: telemetry.isLocked) { locked in
+            guard locked else { return }
+            isPickerPresented = false
+            labelling = nil
         }
         .sheet(isPresented: $isPickerPresented) {
             ScreenTimeAppPickerView(

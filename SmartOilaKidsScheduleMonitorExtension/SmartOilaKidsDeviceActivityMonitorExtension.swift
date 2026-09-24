@@ -212,9 +212,16 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         let clock = DeviceLockClock.live
         let wallNow = clock.wallNow()
         let trustedNow = clock.trustedNow(anchor: snapshot.clock)
-        let evaluationTime = callback == .intervalStart
+        var evaluationTime = callback == .intervalStart
             ? DeviceLockEdgeMonitoring.evaluationTime(now: trustedNow, activityName: raw)
             : trustedNow
+        // A re-check must not undo an edge this extension just evaluated a little EARLY (a callback
+        // that fired before its minute is evaluated at the edge): the same guard the app applies.
+        let stamped = lockPolicyStore.lastEdgeEvaluatedAt()
+        if callback == .recheck, let stamped, stamped > trustedNow,
+           stamped.timeIntervalSince(trustedNow) <= DeviceLockEdgeMonitoring.earlyCallbackTolerance {
+            evaluationTime = stamped
+        }
         let calendar = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: DeviceLockPolicy.phoneCalendar())
         let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
         let wrote = DeviceLockPolicy.applyWholeDevice(locked: locked)
@@ -228,7 +235,13 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         let changedSomething = wrote || !result.started.isEmpty || !result.stopped.isEmpty || result.failures > 0
         // A quiet re-check that changed nothing tells nobody: the app would only re-decide the same.
         guard callback != .recheck || changedSomething else { return }
-        lockPolicyStore.markEdgeEvaluated(at: evaluationTime)
+        // Never move the stamp backwards while it is still ahead of now: that would hand the app
+        // (which honours it) an earlier, wrong answer in the same gap.
+        if let stamped, stamped > trustedNow, evaluationTime < stamped {
+            // keep the later stamp
+        } else {
+            lockPolicyStore.markEdgeEvaluated(at: evaluationTime)
+        }
         DeviceLockEdgeMonitoring.postDidEvaluate()
         let nextIn = outlook.edges.first.map { Int($0.timeIntervalSince(trustedNow)) } ?? -1
         Self.log.notice(

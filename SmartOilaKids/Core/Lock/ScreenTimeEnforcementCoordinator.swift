@@ -73,7 +73,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     /// first launch of that build publishes once instead of waiting out a 24 h stamp written by the
     /// previous build. 2 = build 26: `ios.other` joins the list. `PUT /device/apps/sync` is a FULL
     /// replace, so a list without the row the usage report sums would read as "uninstalled".
-    nonisolated static let catalogueSyncVersion = 2
+    /// 3 = the row's name is the fixed "Boshqa ilovalar" (a phone on an earlier build-26 cut had
+    /// published it in its own app language).
+    nonisolated static let catalogueSyncVersion = 3
     nonisolated static let catalogueSyncVersionKey = "SCREEN_TIME_CATALOGUE_SYNC_VERSION"
 
     /// Deliberately a log line and not only a diagnostics field: when a parent says "I pressed
@@ -1030,7 +1032,8 @@ extension ScreenTimeEnforcementCoordinator {
         let clock = DeviceLockClock.live
         let wall = clock.wallNow()
         let trusted = clock.trustedNow(anchor: snapshot?.clock)
-        let calendar = DeviceLockPolicy.phoneCalendar()
+        // The calendar the app and the extension actually enforce with (the device zone).
+        let calendar = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: DeviceLockPolicy.phoneCalendar())
         let locked = DeviceLockPolicy.isLocked(at: trusted, snapshot: snapshot, calendar: calendar)
         let edges = DeviceLockPolicy.edges(
             after: trusted, horizon: DeviceLockEdgeMonitoring.horizon, snapshot: snapshot, calendar: calendar
@@ -1042,7 +1045,7 @@ extension ScreenTimeEnforcementCoordinator {
         } ?? "-"
         let lines = [
             "monitor_proof9 snapshot=\(snapshot == nil ? 0 : 1) legacy=\(snapshot?.isLegacy == true ? 1 : 0) manual=\(manual) schedules=\(snapshot?.schedules.count ?? 0)",
-            "monitor_proof9 clock offset_s=\(Int(snapshot?.clock?.offset ?? 0)) skew_s=\(Int(trusted.timeIntervalSince(wall)))",
+            "monitor_proof9 clock offset_s=\(Int(snapshot?.clock?.offset ?? 0)) skew_s=\(Int(trusted.timeIntervalSince(wall))) schedule_zone_s=\(snapshot?.scheduleZoneSecondsFromGMT.map(String.init) ?? "-") rule_zone=\(calendar.timeZone.identifier)",
             "monitor_proof9 locked=\(locked ? 1 : 0) categories_set=\(categoriesSet ? 1 : 0) next_edges_s=\(edges.prefix(4).map { String(Int($0.timeIntervalSince(trusted))) }.joined(separator: ","))",
             "monitor_proof9 armed=\(armed.count) " + armed.map { activity in
                 "\(activity.name)@\(activity.start.map { String(Int($0.timeIntervalSince(wall))) } ?? "?")s"

@@ -6439,6 +6439,20 @@ final class OilaLockPolicyParsingTests: XCTestCase {
         XCTAssertEqual(offset("04:14", "2026-09-23T23:13:59Z"), 5 * 3_600, "the payload's minute boundary rounds away")
         XCTAssertEqual(offset("09:30", "2026-09-22T14:30:00Z"), -5 * 3_600, "a zone west of UTC")
         XCTAssertEqual(offset("19:35", "2026-09-22T14:05:00Z"), 5 * 3_600 + 1_800, "a half-hour zone")
+        // −10 and +14 read alike from "HH:mm": 19:00 at 05:00:30Z is Honolulu or Kiritimati. The
+        // phone's own offset decides; with no hint the (−12 h, +14 h] reading is kept.
+        let ambiguous = LockFixture.utc("2026-09-22T05:00:30Z")
+        XCTAssertEqual(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "19:00", serverTime: ambiguous,
+                                                            phoneSecondsFromGMT: -10 * 3_600), -10 * 3_600)
+        XCTAssertEqual(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "19:00", serverTime: ambiguous,
+                                                            phoneSecondsFromGMT: 14 * 3_600), 14 * 3_600)
+        XCTAssertEqual(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "19:00", serverTime: ambiguous), 14 * 3_600)
+        // Auckland in summer (+13) against Pago Pago (−11): 18:00 at 05:00Z.
+        XCTAssertEqual(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "18:00", serverTime: LockFixture.utc("2026-12-01T05:00:00Z"),
+                                                            phoneSecondsFromGMT: 13 * 3_600), 13 * 3_600)
+        // An unambiguous zone ignores a wrong hint (the child moved the phone's zone).
+        XCTAssertEqual(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "19:05", serverTime: LockFixture.utc("2026-09-22T14:05:00Z"),
+                                                            phoneSecondsFromGMT: -5 * 3_600), 5 * 3_600)
         XCTAssertNil(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "7pm", serverTime: Date()))
         XCTAssertNil(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "19:05", serverTime: nil))
         XCTAssertNil(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: nil, serverTime: Date()))

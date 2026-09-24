@@ -1623,9 +1623,13 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             // so a parent's early unlock (or a cleared future window) would wait that long to be
             // heard while the next edge fired from the stale snapshot. Back online is the moment
             // to ask — once, coalesced, with the ladder reset (final review, 2026-09-24).
-            consecutiveLockFailures = 0
-            lastLockPollAt = nil
-            refreshLockNow()
+            // Only a reconnect after FAILED polls: a first resolution at launch or a Wi-Fi↔cellular
+            // hand-over would otherwise double the launch poll and wipe a server-down backoff.
+            if consecutiveLockFailures > 0 {
+                consecutiveLockFailures = 0
+                lastLockPollAt = nil
+                refreshLockNow()
+            }
         }
     }
 
@@ -1976,7 +1980,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 // The held window's end is the phone's own ceiling, renewed by every poll.
                 manualEndIsCeiling: manual != nil && state.manualLock == .unreadable ? true : nil,
                 scheduleZoneSecondsFromGMT: DeviceLockPolicy.scheduleZoneSeconds(
-                    deviceLocalTime: state.deviceLocalTime, serverTime: state.serverTime
+                    deviceLocalTime: state.deviceLocalTime, serverTime: state.serverTime,
+                    phoneSecondsFromGMT: state.serverTime.map { TimeZone.current.secondsFromGMT(for: $0) }
                 )
             )
         }
