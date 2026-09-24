@@ -510,7 +510,15 @@ final class LiveKitMediaPublisher: LiveMediaPublishing {
     private let room = Room()
     /// `Room` keeps its delegates in a weak table (`MulticastDelegate` → `NSHashTable.weakObjects()`),
     /// so the observer has to be owned here or the room would silently drop it and stop reporting.
-    private lazy var roomObserver = RoomEndObserver { [weak self] in self?.onEnded?() }
+    ///
+    /// The room calls it on LiveKit's own delegate queue, while the manager writes `onEnded` (to nil,
+    /// on every stop) on the main actor — and at a parent hang-up the two land together: the push
+    /// that stops the session and the room closing. A closure property read on one thread while
+    /// another releases it is a use-after-free, so it is read on the main thread only. A late or
+    /// repeated call is harmless (`handleSessionEndedByRoom` ignores a session already torn down).
+    private lazy var roomObserver = RoomEndObserver { [weak self] in
+        DispatchQueue.main.async { self?.onEnded?() }
+    }
 
     init() {
         // Without this delegate `onEnded` only ever fired from the LOCAL `disconnect()` below, so a
@@ -595,7 +603,7 @@ final class LiveKitMediaPublisher: LiveMediaPublishing {
 /// object rather than a conformance on the publisher because `RoomDelegate` is an `@objc`/`Sendable`
 /// protocol; keeping it here leaves the publisher a plain Swift class. LiveKit documents that these
 /// callbacks are NOT guaranteed to arrive on the main thread, hence `@unchecked Sendable` and the
-/// main-actor hop on the manager side.
+/// hop to the main thread in the closure the publisher hands it (see `roomObserver`).
 private final class RoomEndObserver: NSObject, RoomDelegate, @unchecked Sendable {
     private let onEnded: () -> Void
 
