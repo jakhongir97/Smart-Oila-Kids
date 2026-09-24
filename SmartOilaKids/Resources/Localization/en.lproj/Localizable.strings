@@ -383,4 +383,4 @@
 /* build 26 — USAGE */
 "home2.screentime_setup.title" = "Screen time is not being counted";
 "home2.screentime_setup.body" = "For the parent to see screen time, choose apps once: switch on “All Apps & Categories” at the top and press Save.";
-"screentime.other_apps.name" = "Other apps";
+"home2.screentime_setup.title_partial" = "Whole-phone screen time is not counted";

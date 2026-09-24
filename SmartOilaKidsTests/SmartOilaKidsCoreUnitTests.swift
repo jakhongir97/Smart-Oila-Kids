@@ -6410,6 +6410,24 @@ final class OilaLockPolicyParsingTests: XCTestCase {
         XCTAssertNil(OilaTelemetryService.lockPolicySnapshot(from: OilaLockState(isLocked: nil, raw: ["x": 1]), dsn: "child", anchor: anchor))
     }
 
+    // MARK: The daily heartbeat (build 26)
+
+    /// Its prefix must never match the edge sweep (`arm` stops every UNWANTED lock-edge activity).
+    func testTheHeartbeatIsNotAnEdgeAndRunsTheWholeDayEveryDay() {
+        let name = DeviceLockHeartbeat.activityName(dsn: "8D905F9F-770B-4D36")
+        XCTAssertTrue(DeviceLockHeartbeat.isHeartbeatActivity(rawValue: name))
+        XCTAssertFalse(DeviceLockEdgeActivityIdentifier.isLockEdgeActivity(rawValue: name))
+        XCTAssertNil(DeviceLockEdgeActivityIdentifier.edgeMinute(from: name))
+        XCTAssertFalse(DeviceLockLegacyDeadline.isLegacyActivity(rawValue: name))
+        XCTAssertEqual(name, "smartoila.lock-heartbeat|8d905f9f-770b-4d36")
+        let schedule = DeviceLockHeartbeat.schedule
+        XCTAssertTrue(schedule.repeats)
+        XCTAssertEqual(schedule.intervalStart.hour, 0)
+        XCTAssertEqual(schedule.intervalStart.minute, 0)
+        XCTAssertEqual(schedule.intervalEnd.hour, 23)
+        XCTAssertEqual(schedule.intervalEnd.minute, 59)
+    }
+
     // MARK: Schedules are read in the server's device zone (build 26, closes a zone-change bypass)
 
     func testTheDeviceZoneIsDerivedFromTheServersOwnClockAndLocalTime() {
@@ -6446,6 +6464,19 @@ final class OilaLockPolicyParsingTests: XCTestCase {
         let rule = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: newYork)
         XCTAssertTrue(DeviceLockPolicy.isLocked(at: fourAMTashkent, snapshot: snapshot, calendar: rule))
         XCTAssertFalse(DeviceLockPolicy.isLocked(at: noonTashkent, snapshot: snapshot, calendar: rule))
+        // A phone that IS in the device zone keeps its own zone (and so its DST rules).
+        let berlinSummer = LockFixture.utc("2026-09-22T12:00:00Z")
+        var berlinSnapshot = LockFixture.snapshot(schedules: [LockFixture.schedule(22 * 60, 7 * 60)])
+        berlinSnapshot = DeviceLockPolicySnapshot(
+            dsn: berlinSnapshot.dsn, manualLock: nil, schedules: berlinSnapshot.schedules, serverTime: berlinSummer,
+            receivedAt: berlinSummer, clock: nil, isLegacy: false, scheduleZoneSecondsFromGMT: 2 * 3_600
+        )
+        let berlinRule = DeviceLockPolicy.ruleCalendar(for: berlinSnapshot, phone: LockFixture.berlin)
+        XCTAssertEqual(berlinRule.timeZone.identifier, "Europe/Berlin", "same offset at the snapshot: the phone's zone")
+        // After the October change (+01:00) the 22:00 lock still starts at 22:00 local, not 23:00.
+        XCTAssertTrue(DeviceLockPolicy.isLocked(at: LockFixture.utc("2026-10-28T21:30:00Z"), snapshot: berlinSnapshot, calendar: berlinRule))
+        XCTAssertFalse(DeviceLockPolicy.isLocked(at: LockFixture.utc("2026-10-28T20:30:00Z"), snapshot: berlinSnapshot, calendar: berlinRule),
+                       "21:30 local in winter time is before the lock; a stale fixed +02:00 would read it as 22:30")
         // Without the device zone the phone's zone decides — the old behaviour, kept for old saves.
         snapshot.scheduleZoneSecondsFromGMT = nil
         let phoneRule = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: newYork)

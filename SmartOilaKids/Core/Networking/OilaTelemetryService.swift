@@ -1619,6 +1619,13 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             // otherwise sit unregistered until somebody opened the app, which on a child's phone can
             // be days — and an unregistered token means every parent command is delivered nowhere.
             Task { @MainActor in await FCMPushRegistrar.shared.flushPendingTokenRegistration() }
+            // And the lock: the offline failures climbed the poll backoff to as much as 10 minutes,
+            // so a parent's early unlock (or a cleared future window) would wait that long to be
+            // heard while the next edge fired from the stale snapshot. Back online is the moment
+            // to ask — once, coalesced, with the ladder reset (final review, 2026-09-24).
+            consecutiveLockFailures = 0
+            lastLockPollAt = nil
+            refreshLockNow()
         }
     }
 
@@ -2149,12 +2156,21 @@ struct OilaLockRuntime {
             armEdges: { entries in
                 guard OilaLockRuntime.screenTimeAuthorized() else { return nil }
                 let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: Date())
+                // While there is anything to arm, the daily heartbeat keeps the chain alive through a
+                // phone that is off across every armed edge (see `DeviceLockHeartbeat`).
+                var heartbeatStarted = false
+                if !entries.isEmpty, let dsn = UserDefaults.standard.string(forKey: "DSN")?.trimmedNonEmpty {
+                    heartbeatStarted = DeviceLockHeartbeat.ensureArmed(dsn: dsn)
+                }
                 OilaTelemetryService.lockLog.notice(
-                    "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public)"
+                    "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public) heartbeat_started=\(heartbeatStarted ? 1 : 0, privacy: .public)"
                 )
                 return result
             },
-            stopAllEdges: { DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter()) },
+            stopAllEdges: {
+                DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter())
+                DeviceLockHeartbeat.stopAll()
+            },
             legacyDefaults: .standard,
             retireLegacyDeadline: {
                 let center = LiveDeviceLockEdgeCenter()

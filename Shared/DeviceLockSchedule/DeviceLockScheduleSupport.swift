@@ -234,9 +234,17 @@ enum DeviceLockPolicy {
 
     /// The calendar the rule reads SCHEDULES with: Gregorian in the server's device zone when the
     /// snapshot knows it, else `phone`'s zone. Manual windows are absolute instants and do not care.
+    ///
+    /// When the phone's own zone had exactly the device zone's offset at the moment the snapshot was
+    /// taken, it IS that zone as far as the rule can tell, and it is used — it knows its DST rules, a
+    /// fixed offset does not (a Berlin phone offline across the October change would otherwise lock an
+    /// hour off). Only when the two disagree — the child switched the phone's zone — does the fixed
+    /// offset rule, which is the case it exists for.
     static func ruleCalendar(for snapshot: DeviceLockPolicySnapshot?, phone: Calendar) -> Calendar {
-        guard let seconds = snapshot?.scheduleZoneSecondsFromGMT,
+        guard let snapshot, let seconds = snapshot.scheduleZoneSecondsFromGMT,
               let zone = TimeZone(secondsFromGMT: seconds) else { return phone }
+        let reference = snapshot.serverTime ?? snapshot.receivedAt
+        if phone.timeZone.secondsFromGMT(for: reference) == seconds { return phone }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
         return calendar
@@ -587,6 +595,60 @@ enum DeviceLockEdgeActivityIdentifier {
             allowedScalars.contains(scalar) ? Character(scalar) : "_"
         }
         return String(sanitized).lowercased()
+    }
+}
+
+/// A daily repeating activity whose only job is to wake the monitor extension, which then re-checks
+/// the lock and re-arms the edges from the saved policy.
+///
+/// The edge activities are one-off and re-arm each other; if the phone is off across every armed
+/// edge (a dead battery over a weekend) or a callback is lost, nothing restarts the chain until the
+/// app runs again. This restarts it within a day at the latest. Its prefix is NOT
+/// `smartoila.lock-edge|`, so `LiveDeviceLockEdgeCenter.lockActivities()` — and with it `arm`'s
+/// stop sweep — never sees it; it is stopped explicitly with the rest of the lock on unpair.
+enum DeviceLockHeartbeat {
+    static let prefix = "smartoila.lock-heartbeat|"
+
+    static func activityName(dsn: String) -> String {
+        prefix + DeviceLockEdgeActivityIdentifier.normalize(dsn)
+    }
+
+    static func isHeartbeatActivity(rawValue: String) -> Bool {
+        rawValue.hasPrefix(prefix)
+    }
+
+    /// The whole local day, every day: `intervalDidStart` at 00:00 and `intervalDidEnd` at 23:59,
+    /// the same shape the usage staircase has run on since 2026-09-16.
+    static var schedule: DeviceActivitySchedule {
+        DeviceActivitySchedule(
+            intervalStart: DateComponents(hour: 0, minute: 0),
+            intervalEnd: DateComponents(hour: 23, minute: 59),
+            repeats: true
+        )
+    }
+
+    /// Starts this pairing's heartbeat unless it is already monitored (a restart would deliver a
+    /// spurious end+start pair), and retires any other pairing's. Returns true when started now.
+    @discardableResult
+    static func ensureArmed(dsn: String, center: DeviceActivityCenter = DeviceActivityCenter()) -> Bool {
+        let name = activityName(dsn: dsn)
+        let heartbeats = center.activities.map(\.rawValue).filter(isHeartbeatActivity(rawValue:))
+        let stale = heartbeats.filter { $0 != name }
+        if !stale.isEmpty { center.stopMonitoring(stale.map { DeviceActivityName($0) }) }
+        guard !heartbeats.contains(name) else { return false }
+        do {
+            try center.startMonitoring(DeviceActivityName(name), during: schedule)
+            return true
+        } catch {
+            DeviceLockEdgeMonitoring.log.error("lock_heartbeat start_failed error=\(String(describing: error), privacy: .public)")
+            return false
+        }
+    }
+
+    static func stopAll(center: DeviceActivityCenter = DeviceActivityCenter()) {
+        let names = center.activities.map(\.rawValue).filter(isHeartbeatActivity(rawValue:))
+        guard !names.isEmpty else { return }
+        center.stopMonitoring(names.map { DeviceActivityName($0) })
     }
 }
 

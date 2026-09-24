@@ -244,6 +244,8 @@ final class UzbekCyrillicTransliterationTests: XCTestCase {
             "App Store": "App Store",
             "Wi-Fi": "Wi-Fi",
             "SOS": "SOS",
+            // Apple's picker switch, as the setup card quotes it (build 26).
+            "“All Apps & Categories” tugmasini yoqing": "“All Apps & Categories” тугмасини ёқинг",
         ]
         for (input, expected) in cases {
             XCTAssertEqual(UzbekCyrillic.transliterate(input), expected, "\(input) must not be transliterated")

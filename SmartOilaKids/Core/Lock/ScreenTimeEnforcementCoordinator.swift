@@ -482,7 +482,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         let entries = Self.mergedSyncEntries(
             probed: InstalledAppProbe.syncEntries(for: installed),
             labelled: labelledEntries(),
-            otherApps: totalMonitoringPossible() ? Self.otherAppsSyncEntry() : nil
+            otherApps: otherAppsMustBeListed() ? Self.otherAppsSyncEntry() : nil
         )
 
         // `SyncAppsDto` declares `minItems: 1`. An empty probe is a real answer ("none of the apps
@@ -531,13 +531,27 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         return result
     }
 
-    /// "Boshqa ilovalar": the row the usage report sums everything unlabelled into. Named in the
-    /// app language, like every other name this phone publishes.
+    /// "Boshqa ilovalar": the row the usage report sums everything unlabelled into.
+    ///
+    /// A FIXED name, not the child app's language: it is shown on the PARENT's web, where it sat in
+    /// whatever language the child phone happened to use ("Бошқа иловалар" from a Cyrillic phone,
+    /// measured 2026-09-24) and was renamed whenever the child switched. Every other name this phone
+    /// publishes is language-neutral (catalogue names, labels the parent chose); this matches them.
+    nonisolated static let otherAppsName = "Boshqa ilovalar"
+
     nonisolated static func otherAppsSyncEntry() -> DeviceAppLockSyncEntry {
-        DeviceAppLockSyncEntry(
-            packageName: ScreenTimeUsageReport.otherPackageName,
-            name: L10n.tr("screentime.other_apps.name")
-        )
+        DeviceAppLockSyncEntry(packageName: ScreenTimeUsageReport.otherPackageName, name: otherAppsName)
+    }
+
+    /// Whether the app-list publish must carry `ios.other`: while the phone CAN measure its total,
+    /// and also while any day the usage report still sends carries an `ios.other` row. The publish is
+    /// a full-set replace, so dropping the row while the report keeps sending it would show the
+    /// parent an "uninstalled" row whose minutes still count (final review, 2026-09-24).
+    func otherAppsMustBeListed() -> Bool {
+        if totalMonitoringPossible() { return true }
+        return ScreenTimeUsageReport.days(ledger: usageLedger, now: now()).contains { day in
+            day.items.contains { $0.packageName == ScreenTimeUsageReport.otherPackageName }
+        }
     }
 
     // MARK: - Private

@@ -383,4 +383,4 @@
 /* build 26 — USAGE */
 "home2.screentime_setup.title" = "Ekran vaqti hisoblanmayapti";
 "home2.screentime_setup.body" = "Ota-ona ekran vaqtini ko'rishi uchun ilovalarni bir marta tanlang: eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing.";
-"screentime.other_apps.name" = "Boshqa ilovalar";
+"home2.screentime_setup.title_partial" = "Butun telefon vaqti hisoblanmayapti";

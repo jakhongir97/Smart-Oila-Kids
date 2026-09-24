@@ -21,10 +21,17 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
             handleLockEdge(activity: activity, callback: .intervalStart)
             return
         }
+        // The daily heartbeat: re-check the lock and restart the edge chain if it ran out.
+        if DeviceLockHeartbeat.isHeartbeatActivity(rawValue: activity.rawValue) {
+            handleLockEdge(activity: activity, callback: .recheck)
+            return
+        }
 
         // A new local day for the usage staircase: every threshold must start again from one
         // step, or the first callback today would fire at yesterday's height.
         if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
+            // This process is awake anyway: re-check the lock first (see `handleUsageThreshold`).
+            handleLockEdge(activity: activity, callback: .recheck)
             let today = ScreenTimeUsageDayFormatter.dayKey(for: Date())
             // Already armed for today — this is the callback our own (re)start provoked, not a
             // new day. Re-arming here would start again, and start again.
@@ -67,6 +74,10 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
             handleLockEdge(activity: activity, callback: .intervalEnd)
             return
         }
+        if DeviceLockHeartbeat.isHeartbeatActivity(rawValue: activity.rawValue) {
+            handleLockEdge(activity: activity, callback: .recheck)
+            return
+        }
 
         if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
             // The day is over; what the ledger holds for it is final. Send it while a process is
@@ -107,6 +118,12 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
 
         if ScreenTimeUsageActivity.isUsageActivity(rawValue: activity.rawValue) {
             handleUsageThreshold(event: event, activity: activity)
+            // The device-total rung fires every few minutes of REAL use — exactly while a child is
+            // using a phone that may have to be locked — and, unlike an edge activity, it does not
+            // follow the wall clock or the zone. So every step re-checks the lock on the trusted
+            // clock: a child who winds the clock back so the 21:00 edge fires at 08:00 is locked
+            // by their own first minutes of use (final review, 2026-09-24).
+            handleLockEdge(activity: activity, callback: .recheck)
             return
         }
 
@@ -155,6 +172,9 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     enum LockEdgeCallback: String {
         case intervalStart = "start"
         case intervalEnd = "end"
+        /// Not an edge: the heartbeat or a usage callback, re-checking at the trusted now. Quiet
+        /// unless it changed something, because a usage step can arrive every few seconds.
+        case recheck
     }
 
     /// A lock edge arrived and the app may not be running: decide the lock by the rule and make the
@@ -184,7 +204,9 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
                 DeviceLockLegacyDeadline.clear()
                 released = true
             }
-            Self.log.notice("schedule_monitor lock_edge callback=\(callback.rawValue, privacy: .public) outcome=no_snapshot legacy_released=\(released ? 1 : 0, privacy: .public)")
+            if callback != .recheck || released {
+                Self.log.notice("schedule_monitor lock_edge callback=\(callback.rawValue, privacy: .public) outcome=no_snapshot legacy_released=\(released ? 1 : 0, privacy: .public)")
+            }
             return
         }
         let clock = DeviceLockClock.live
@@ -196,13 +218,17 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         let calendar = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: DeviceLockPolicy.phoneCalendar())
         let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
         let wrote = DeviceLockPolicy.applyWholeDevice(locked: locked)
-        lockPolicyStore.markEdgeEvaluated(at: evaluationTime)
         // The app's own planning path: the next edge is armed even when it is days away (a Friday
         // afternoon's next flip can be Monday morning), so the chain never runs out.
         let outlook = DeviceLockEdgeMonitoring.outlook(
             snapshot: snapshot, evaluationTime: evaluationTime, trustedNow: trustedNow, wallNow: wallNow, calendar: calendar
         )
         let result = DeviceLockEdgeMonitoring.arm(outlook.entries, center: LiveDeviceLockEdgeCenter(), wallNow: wallNow)
+        if !outlook.entries.isEmpty { DeviceLockHeartbeat.ensureArmed(dsn: snapshot.dsn) }
+        let changedSomething = wrote || !result.started.isEmpty || !result.stopped.isEmpty || result.failures > 0
+        // A quiet re-check that changed nothing tells nobody: the app would only re-decide the same.
+        guard callback != .recheck || changedSomething else { return }
+        lockPolicyStore.markEdgeEvaluated(at: evaluationTime)
         DeviceLockEdgeMonitoring.postDidEvaluate()
         let nextIn = outlook.edges.first.map { Int($0.timeIntervalSince(trustedNow)) } ?? -1
         Self.log.notice(

@@ -111,6 +111,10 @@ enum UzbekCyrillic {
     /// Longest first — the alternation is tried left to right, so "Oila360" has to precede "Oila"
     /// and "iPhone" has to precede "iPad" would-be prefixes.
     private static let protectedTerms = [
+        // Apple's own label on the picker's top switch, quoted so the child can find it on an
+        // English iPhone; transliterated it read "Алл Аппс & Сатегориес" (final review, 2026-09-24).
+        // Longest first: the alternation takes the first term that matches.
+        "All Apps & Categories",
         "Bolajon360", "Smart Oila", "Oila360", "Oila 360",
         "App Store", "Screen Time", "Face ID", "Touch ID", "LiveKit",
         "iPhone", "iPad", "Apple", "Wi-Fi", "WiFi", "iOS", "GPS", "SOS", "PIN", "QR"

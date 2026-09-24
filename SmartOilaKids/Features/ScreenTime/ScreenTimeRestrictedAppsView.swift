@@ -126,8 +126,12 @@ struct ScreenTimeRestrictedAppsView: View {
                         .foregroundStyle(pending.web.isEmpty ? AppColors.inkSecondary : AppColors.sosCoral)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 2)
-                    if store.labelledCount > ScreenTimeUsageMonitoring.maximumEvents {
-                        Text(L10n.tr("screentime.restricted.too_many", ScreenTimeUsageMonitoring.maximumEvents))
+                    // 49, not 50: one of the fifty event slots is kept for the phone's total (build 26).
+                    // Both `%d`s get an argument — the string has two, and one was passed before.
+                    if store.labelledCount > ScreenTimeUsageMonitoring.maximumApplicationEvents {
+                        Text(L10n.tr("screentime.restricted.too_many",
+                                     ScreenTimeUsageMonitoring.maximumApplicationEvents,
+                                     ScreenTimeUsageMonitoring.maximumApplicationEvents))
                             .font(AppTypography.bodyText(13))
                             .foregroundStyle(AppColors.sosCoral)
                             .fixedSize(horizontal: false, vertical: true)
@@ -487,6 +491,9 @@ struct ScreenTimeAppLabelSheet: View {
 struct ScreenTimeSetupCard: View {
     @ObservedObject private var store = ScreenTimeRestrictedAppsStore.shared
     @ObservedObject private var authorization = ScreenTimeAuthorizationManager.shared
+    /// Observed only to close the picker when the lock engages: a sheet already up would keep the
+    /// root's lock cover from presenting (the rule every Home presentation follows).
+    @ObservedObject private var lockState = OilaTelemetryService.shared
 
     @State private var isPickerPresented = false
     @State private var draft = FamilyActivitySelection()
@@ -506,6 +513,12 @@ struct ScreenTimeSetupCard: View {
         featuresEnabled && supported && authorization == .granted && !hasCategoryTokens
     }
 
+    /// The honest title: a phone that already measures some named apps IS counting — only not the
+    /// whole phone — and must not be told "not being counted" under a figure on the same screen.
+    static func titleKey(hasLabelledApps: Bool) -> String {
+        hasLabelledApps ? "home2.screentime_setup.title_partial" : "home2.screentime_setup.title"
+    }
+
     var body: some View {
         if Self.isNeeded(
             featuresEnabled: AppRuntime.screenTimeFeaturesEnabled,
@@ -523,7 +536,7 @@ struct ScreenTimeSetupCard: View {
                                 .foregroundStyle(AppColors.ctaPurple)
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(L10n.tr("home2.screentime_setup.title"))
+                            Text(L10n.tr(Self.titleKey(hasLabelledApps: store.labelledCount > 0)))
                                 .font(AppTypography.bodyStrong(14))
                                 .foregroundStyle(AppColors.inkPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -539,6 +552,9 @@ struct ScreenTimeSetupCard: View {
                         isPickerPresented = true
                     }
                 }
+            }
+            .onChange(of: lockState.isLocked) { locked in
+                if locked { isPickerPresented = false }
             }
             .sheet(isPresented: $isPickerPresented, onDismiss: applyPendingSelection) {
                 ScreenTimeAppPickerView(

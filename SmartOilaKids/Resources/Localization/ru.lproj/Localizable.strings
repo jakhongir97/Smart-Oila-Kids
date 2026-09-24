@@ -383,4 +383,4 @@
 /* build 26 — USAGE */
 "home2.screentime_setup.title" = "Экранное время не считается";
 "home2.screentime_setup.body" = "Чтобы родитель видел экранное время, один раз выберите приложения: включите самый верхний переключатель «Все приложения и категории» (All Apps & Categories) и нажмите «Сохранить».";
-"screentime.other_apps.name" = "Другие приложения";
+"home2.screentime_setup.title_partial" = "Время всего телефона не считается";

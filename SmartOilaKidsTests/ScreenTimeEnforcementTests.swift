@@ -680,7 +680,7 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         XCTAssertEqual(armed.first, "child-1")
         XCTAssertEqual(applied.last?.1, ["com.google.ios.youtube"], "the response's lockedPackages are enforced")
         XCTAssertEqual(synced.first?.map(\.packageName), ["ph.telegra.telegraph", "ios.app.deadbeef", "ios.other"])
-        XCTAssertEqual(synced.first?.map(\.name), ["Telegram", "Hay Day", L10n.tr("screentime.other_apps.name")])
+        XCTAssertEqual(synced.first?.map(\.name), ["Telegram", "Hay Day", ScreenTimeEnforcementCoordinator.otherAppsName])
 
         ledger.record(bundleId: "com.google.ios.youtube", secondsReached: 900, dayKey: today, now: now)
         await coordinator.uploadUsageNow(reason: "test")
@@ -776,7 +776,7 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         await coordinator.refreshNow()
 
         XCTAssertEqual(synced.first, [
-            DeviceAppLockSyncEntry(packageName: "ios.other", name: L10n.tr("screentime.other_apps.name"))
+            DeviceAppLockSyncEntry(packageName: "ios.other", name: ScreenTimeEnforcementCoordinator.otherAppsName)
         ])
         XCTAssertNotNil(defaults.object(forKey: ScreenTimeEnforcementCoordinator.lastCatalogueSyncKey))
         coordinator.stop()
@@ -821,6 +821,46 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(uploads.first, [ScreenTimeUsageReportDay(date: today, items: [.init(packageName: "ios.other", usedSeconds: 900)])])
         coordinator.stop()
+    }
+
+    /// The pick was changed to fewer apps (categories cleared) while today's ledger already holds a
+    /// device total. The usage report keeps sending `ios.other` for that day, so the full-replace
+    /// app list must keep carrying it — or the parent sees an "uninstalled" row whose minutes count.
+    func testTheAppListKeepsOtherAppsWhileTheReportStillSendsIt() async {
+        let defaults = makeDefaults()
+        let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        ledger.record(bundleId: ScreenTimeUsageLedger.deviceTotalKey, secondsReached: 1_200,
+                      dayKey: ScreenTimeUsageDayFormatter.dayKey(for: now), now: now)
+        var synced: [[DeviceAppLockSyncEntry]] = []
+        let coordinator = makeUsageCoordinator(
+            defaults: defaults, ledger: ledger, synced: { synced.append($0) }, totalMonitoringPossible: { false }, now: now
+        )
+
+        coordinator.start(dsn: "child-1")
+        await coordinator.refreshNow()
+
+        XCTAssertEqual(synced.first?.map(\.packageName), ["ios.other"])
+        coordinator.stop()
+    }
+
+    /// …and with nothing measured and no categories there is nothing to list.
+    func testNoOtherAppsRowWithoutATotalOrAnythingReported() {
+        let coordinator = makeUsageCoordinator(defaults: makeDefaults(), totalMonitoringPossible: { false })
+        XCTAssertFalse(coordinator.otherAppsMustBeListed())
+    }
+
+    /// The row's name reaches the PARENT's web, so it must not follow the child app's language.
+    func testTheOtherAppsNameIsTheSameInEveryAppLanguage() {
+        XCTAssertEqual(ScreenTimeEnforcementCoordinator.otherAppsSyncEntry().name, "Boshqa ilovalar")
+        XCTAssertEqual(ScreenTimeEnforcementCoordinator.otherAppsSyncEntry().packageName, "ios.other")
+    }
+
+    /// A phone that already measures named apps is counting — only not the whole phone.
+    func testTheSetupCardDoesNotSayNothingIsCountedWhenNamedAppsAre() {
+        XCTAssertEqual(ScreenTimeSetupCard.titleKey(hasLabelledApps: false), "home2.screentime_setup.title")
+        XCTAssertEqual(ScreenTimeSetupCard.titleKey(hasLabelledApps: true), "home2.screentime_setup.title_partial")
+        XCTAssertNotEqual(L10n.tr("home2.screentime_setup.title_partial"), "home2.screentime_setup.title_partial")
     }
 
     /// `ios.other` is not an app: no token stands for it. A parent who blocks or limits "other apps"

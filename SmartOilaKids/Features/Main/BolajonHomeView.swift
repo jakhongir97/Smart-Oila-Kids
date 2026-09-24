@@ -362,10 +362,10 @@ struct BolajonHomeView: View {
                         Text(L10n.tr("home2.screentime.title"))
                             .font(AppTypography.bodyStrong(14))
                             .foregroundStyle(AppColors.inkPrimary)
-                        // The subtitle has to match where the number came from: "in tracked apps"
-                        // is only true of the local Screen Time report, not of the server's
-                        // device-wide total.
-                        Text(L10n.tr(viewModel.screenTimeSource == .local
+                        // The subtitle has to match where the number came from: "in tracked apps" is
+                        // only true of a local figure WITHOUT the device total; the server's figure
+                        // and a local one that carries the total are the whole phone.
+                        Text(L10n.tr(viewModel.screenTimeSource == .local && !viewModel.trackedUsageCoversWholePhone
                                      ? "home2.screentime.tracked_subtitle"
                                      : "home2.screentime.device_subtitle"))
                             .font(AppTypography.caption(12))
@@ -737,6 +737,8 @@ final class BolajonHomeViewModel: ObservableObject {
     /// here said no such endpoint existed. One does — it appeared in the ingestion spec after that
     /// was written.)
     @Published private(set) var trackedUsageSeconds: Int?
+    /// Whether `trackedUsageSeconds` is the whole phone (the device total is in it) — see the caption.
+    @Published private(set) var trackedUsageCoversWholePhone = false
 
     /// `GET /device/tasks/summary` → `totalPoints`. See `starTotal`.
     @Published private(set) var serverStarTotal: Int?
@@ -937,6 +939,7 @@ final class BolajonHomeViewModel: ObservableObject {
     /// Re-reads today's local screen-time usage (safe to call on appear / foreground).
     func refreshScreenTimeUsage() {
         trackedUsageSeconds = screenTimeUsage.todayTrackedUsageSeconds()
+        trackedUsageCoversWholePhone = screenTimeUsage.todayCoversWholePhone()
     }
 
     func complete(_ task: OilaDeviceTask) async {
@@ -1047,6 +1050,15 @@ protocol ScreenTimeUsageProviding {
     /// (Screen Time not authorized, no apps configured, or no report written yet).
     @MainActor
     func todayTrackedUsageSeconds() -> Int?
+    /// Whether today's local figure covers the whole phone (the device-total rung is in it), so the
+    /// card's caption can say "on this phone" instead of "in tracked apps".
+    @MainActor
+    func todayCoversWholePhone() -> Bool
+}
+
+extension ScreenTimeUsageProviding {
+    @MainActor
+    func todayCoversWholePhone() -> Bool { false }
 }
 
 /// Today's figure from the monitor extension's ledger — labelled apps plus "other apps", exactly
@@ -1060,6 +1072,12 @@ struct LocalScreenTimeUsageProvider: ScreenTimeUsageProviding {
     func todayTrackedUsageSeconds() -> Int? {
         guard ScreenTimeAuthorizationManager.shared.status == .granted else { return nil }
         return ScreenTimeUsageReport.todaySeconds(ledger: ScreenTimeUsageLedger())
+    }
+
+    func todayCoversWholePhone() -> Bool {
+        let ledger = ScreenTimeUsageLedger()
+        return ledger.day(ScreenTimeUsageDayFormatter.dayKey(for: Date()))?
+            .seconds[ScreenTimeUsageLedger.deviceTotalKey] != nil
     }
 }
 
