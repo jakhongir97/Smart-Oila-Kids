@@ -173,18 +173,18 @@
 "perm2.intro.title" = "Let's set up Bolajon360";
 "perm2.intro.body" = "A few permissions are needed to keep your child safe. Let's set them up one by one, clearly.";
 "perm2.intro.cta" = "Start";
-"perm2.notifications.title" = "Want your child's phone under your watch?";
-"perm2.notifications.body" = "Bolajon360 needs notifications to show it's active. Without them the app won't work correctly.";
+"perm2.notifications.title" = "Notifications keep you in touch";
+"perm2.notifications.body" = "Notifications show you when your parent sends a message or starts a check.";
 "perm2.notifications.cta" = "Enable notifications";
 "perm2.microphone.title" = "Want to be able to hear live sound?";
 "perm2.camera.title" = "Want to be able to see live video?";
-"perm2.location.title" = "Want to know where your child is?";
+"perm2.location.title" = "See where your child is on the map";
 "perm2.location.body" = "You'll see the location on the map in real time and can set safe zones.";
-"perm2.bglocation.title" = "Update location even when the app is closed?";
-"perm2.bglocation.body" = "For continuous tracking, choose 'Always Allow' on the next screen.";
-"perm2.usage.title" = "Curious which app your child uses most?";
+"perm2.bglocation.title" = "Location updates even when the app is closed";
+"perm2.bglocation.body" = "So your parent sees where you are even when the app is closed, iOS will next ask whether to share location “Always”.";
+"perm2.usage.title" = "See which apps are used most";
 "perm2.usage.body" = "You'll see how much time each app takes and can set time limits.";
-"perm2.limits.title" = "Want to be able to restrict apps?";
+"perm2.limits.title" = "Restrict apps when needed";
 "perm2.limits.body" = "You'll be able to block apps at any time.";
 "perm2.summary.title" = "Done! Protection is on";
 "perm2.summary.body" = "Bolajon360 is now ready to protect your child. You can change settings any time.";
@@ -395,22 +395,22 @@
 "perm2.granted_hint" = "This permission is already on for this phone — tap Continue.";
 "perm2.limits.granted_hint" = "Screen Time access is on — it covers this too. Tap Continue.";
 "perm2.settings_hint" = "Turn this permission on in Settings and come back — the next step opens by itself.";
-"perm2.notifications.settings_hint" = "Notifications are off. Tap “Open Settings”, turn on Allow Notifications and come back — the next step opens by itself.";
-"perm2.location.settings_hint" = "Tap “Open Settings” → Location → choose “Always”, then come back — the next step opens by itself.";
-"perm2.location.services_off" = "Location Services are off on this phone. Turn them on in Settings → Privacy & Security → Location Services, then come back.";
-"perm2.microphone.settings_hint" = "The microphone is off. Tap “Open Settings”, turn on Microphone and come back — or choose “Not now”.";
-"perm2.camera.settings_hint" = "The camera is off. Tap “Open Settings”, turn on Camera and come back — or choose “Not now”.";
-"perm2.restricted_hint" = "This permission is restricted on this phone (Screen Time restrictions), so it can't be turned on here. You can continue — your parent will see this on the website.";
-"perm2.screentime.denied_hint" = "Screen Time access wasn't given. Tap “Try again” and allow it in the window that opens.";
-"perm2.screentime.unavailable" = "Screen Time can't be turned on on this phone. You can continue — your parent will see this on the website.";
-"perm2.screentime.failed" = "Screen Time couldn't be turned on just now. Try again, or continue without it — your parent will see this on the website.";
+"perm2.notifications.settings_hint" = "Notifications are off. Tap “Open Settings”, turn on “Allow Notifications” and come back — the next step opens by itself. Or continue without them: you won't get your parent's alerts, and your parent will see this on the site.";
+"perm2.location.settings_hint" = "Tap “Open Settings” → “Location” → choose “Always”, then come back — the next step opens by itself.";
+"perm2.location.services_off" = "Location Services are off on this phone. Tap “Open Settings”, go back to the main Settings screen → “Privacy & Security” → “Location Services”, turn it on and come back.";
+"perm2.microphone.settings_hint" = "The microphone is off. Tap “Open Settings”, turn on “Microphone” and come back — or choose “Not now”.";
+"perm2.camera.settings_hint" = "The camera is off. Tap “Open Settings”, turn on “Camera” and come back — or choose “Not now”.";
+"perm2.restricted_hint" = "This permission is restricted on this phone (Screen Time restrictions), so it can't be turned on here. You can continue — your parent will see this on the site.";
+"perm2.screentime.denied_hint" = "Screen Time access wasn't given. Tap “Try again” to see the request again.";
+"perm2.screentime.unavailable" = "Screen Time can't be enabled on this phone. You can continue — your parent will see this on the site.";
+"perm2.screentime.failed" = "Screen Time couldn't be turned on again. Try once more, or continue without it — your parent will see this on the site.";
 
 /* build 28 — the one-time app pick inside onboarding */
 "perm2.apps.title" = "Choose the apps on this phone";
-"perm2.apps.body" = "So your parent can see each app's time on the website and block it, choose the list once: in the window that opens, switch on “All Apps & Categories” at the top and press Save.";
+"perm2.apps.body" = "So your parent can see each app's time on the site and block it, choose the list once: in the window that opens, switch on “All Apps & Categories” at the top and press Save.";
 "perm2.apps.done" = "Apps chosen";
 "perm2.apps.done_hint" = "This phone's apps are already chosen — tap Continue.";
-"perm2.apps.need_all" = "The “All Apps & Categories” switch at the top wasn't turned on. Tap again and switch it on — or do it later from the app's main screen.";
+"perm2.apps.need_all" = "The “All Apps & Categories” switch at the top wasn't turned on. Tap “Choose apps” again and switch it on — or do it later from the app's main screen.";
 "perm2.apps.unavailable" = "Screen Time access is off, so apps can't be chosen now. You can continue.";
 "perm2.later" = "Later";
 
@@ -419,7 +419,16 @@
 
 /* build 28 — Home nudge for detected apps no icon is linked to */
 "screentime.nudge.title" = "Apps not linked: %d";
-"screentime.nudge.body" = "An unlinked app's time doesn't show separately on the website (it goes into “Boshqa ilovalar”), and it can't be blocked. Link each one once — just tap its icon in the list, nothing to type.";
+"screentime.nudge.body" = "Their time shows on the site only under “Boshqa ilovalar”, and they can't be blocked. Tap each one's icon once — nothing to type.";
 
 /* build 28 — neutral chip until the first answer */
 "home2.link_connecting" = "Connecting…";
+
+/* build 28 review — consent wording, a way past a locked Settings switch, retry-first Screen Time */
+"perm2.media.agree" = "I agree";
+"perm2.microphone.consent_hint" = "The microphone is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live audio check — you'll always see an indicator and can stop it. Otherwise choose “Not now”.";
+"perm2.camera.consent_hint" = "The camera is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live video check — you'll always see an indicator and nothing is recorded. Otherwise choose “Not now”.";
+"perm2.location.settings_unchanged" = "Nothing changed in Settings. Tap “Open Settings” to try again — or, if the setting can't be changed on this phone, continue without it. Your parent will see this on the site.";
+"perm2.screentime.failed_retry" = "Screen Time couldn't be turned on just now. Check the internet connection and tap “Try again”.";
+"perm2.bglocation.body_settings" = "For continuous tracking, Bolajon360's location access must be set to “Always”.";
+"home2.screentime_setup.body_resume" = "The figure above may be out of date: iOS only counts chosen apps. Switch on “All Apps & Categories” at the top and press Save.";

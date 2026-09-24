@@ -299,6 +299,14 @@ final class UzbekCyrillicTransliterationTests: XCTestCase {
             "SOS": "SOS",
             // Apple's picker switch, as the setup card quotes it (build 26).
             "“All Apps & Categories” tugmasini yoqing": "“All Apps & Categories” тугмасини ёқинг",
+            // The iOS Settings labels the permission hints quote (build 28). Longer terms win over
+            // the shorter ones inside them.
+            "“Allow Notifications” tugmasini yoqing": "“Allow Notifications” тугмасини ёқинг",
+            "“Location Services” («Службы геолокации»)ni yoqing": "“Location Services” («Службы геолокации»)ни ёқинг",
+            "“Location” → “Always”ni tanlang": "“Location” → “Always”ни танланг",
+            "“Privacy & Security”": "“Privacy & Security”",
+            "“Microphone” tugmasini": "“Microphone” тугмасини",
+            "“Camera” tugmasini": "“Camera” тугмасини",
         ]
         for (input, expected) in cases {
             XCTAssertEqual(UzbekCyrillic.transliterate(input), expected, "\(input) must not be transliterated")

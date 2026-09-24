@@ -115,6 +115,11 @@ enum UzbekCyrillic {
         // English iPhone; transliterated it read "Алл Аппс & Сатегориес" (final review, 2026-09-24).
         // Longest first: the alternation takes the first term that matches.
         "All Apps & Categories",
+        // iOS Settings labels the permission hints quote the same way (build 28): Uzbek has no iOS
+        // UI, so the English label is what a child on an English iPhone has to find. Longer terms
+        // before the ones they contain ("Location Services" before "Location").
+        "Allow Notifications", "Privacy & Security", "Location Services",
+        "Microphone", "Location", "Always", "Camera",
         "Bolajon360", "Smart Oila", "Oila360", "Oila 360",
         "App Store", "Screen Time", "Face ID", "Touch ID", "LiveKit",
         "iPhone", "iPad", "Apple", "Wi-Fi", "WiFi", "iOS", "GPS", "SOS", "PIN", "QR"

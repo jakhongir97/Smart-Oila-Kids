@@ -173,18 +173,18 @@
 "perm2.intro.title" = "Bolajon360 ilovasini sozlaymiz";
 "perm2.intro.body" = "Farzandingiz xavfsizligi uchun bir nechta ruxsat kerak bo'ladi. Keling, birma-bir, tushunarli qilib sozlaymiz.";
 "perm2.intro.cta" = "Boshlash";
-"perm2.notifications.title" = "Farzandingiz telefoni nazoratingizda bo'lsinmi?";
-"perm2.notifications.body" = "Bolajon360 doimo faol ekanini bildirish uchun bildirishnomalarga ruxsat kerak. Busiz ilova to'g'ri ishlamaydi.";
+"perm2.notifications.title" = "Bildirishnomalar aloqada bo'lishga yordam beradi";
+"perm2.notifications.body" = "Bildirishnomalar ota-onangiz xabar yuborganini yoki tekshiruv boshlaganini ko'rsatadi.";
 "perm2.notifications.cta" = "Bildirishnomalarni yoqish";
 "perm2.microphone.title" = "Jonli ovozni eshitishni xohlaysizmi?";
 "perm2.camera.title" = "Jonli videoni ko'rishni xohlaysizmi?";
-"perm2.location.title" = "Farzandingiz qayerda yurganini bilishni xohlaysizmi?";
+"perm2.location.title" = "Farzandingiz qayerdaligini xaritada ko'ring";
 "perm2.location.body" = "Xaritada real vaqtda joylashuvni ko'rasiz va xavfsiz hududlar belgilay olasiz.";
-"perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuvni yangilab tursinmi?";
-"perm2.bglocation.body" = "Doimiy kuzatuv uchun keyingi oynada «Doim ruxsat»ni tanlang.";
-"perm2.usage.title" = "Farzandingiz qaysi ilovani ko'p ishlatyapti, qiziqmi?";
+"perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuv yangilanadi";
+"perm2.bglocation.body" = "Ota-onangiz ilova yopiq bo'lsa ham qayerdaligingizni ko'rishi uchun iOS keyin “Always” («Всегда») ruxsatini so'raydi.";
+"perm2.usage.title" = "Qaysi ilova ko'p ishlatilishini ko'ring";
 "perm2.usage.body" = "Har bir ilovaga qancha vaqt sarflanganini ko'rasiz va vaqt chegarasini qo'yasiz.";
-"perm2.limits.title" = "Ilovalarni cheklash imkoniyatini xohlaysizmi?";
+"perm2.limits.title" = "Kerak bo'lsa, ilovalarni cheklang";
 "perm2.limits.body" = "Ilovalarni istalgan vaqtda bloklay olasiz.";
 "perm2.summary.title" = "Tayyor! Himoya yoqildi";
 "perm2.summary.body" = "Bolajon360 endi farzandingizni himoya qilishga tayyor. Xohlagan payt sozlamalardan o'zgartirishingiz mumkin.";
@@ -395,22 +395,22 @@
 "perm2.granted_hint" = "Bu ruxsat telefonda allaqachon yoqilgan — «Davom etish»ni bosing.";
 "perm2.limits.granted_hint" = "Ekran vaqti ruxsati berilgan — u buni ham qamrab oladi. «Davom etish»ni bosing.";
 "perm2.settings_hint" = "Sozlamalarda bu ruxsatni yoqing va ilovaga qayting — keyingi qadam o'zi ochiladi.";
-"perm2.notifications.settings_hint" = "Bildirishnomalar o'chiq. «Sozlamalarni ochish»ni bosing, bildirishnomalarga ruxsat bering va qayting — keyingi qadam o'zi ochiladi.";
-"perm2.location.settings_hint" = "«Sozlamalarni ochish» → Joylashuv («Геопозиция») → «Doim» («Всегда») ni tanlang va qayting — keyingi qadam o'zi ochiladi.";
-"perm2.location.services_off" = "Telefonda joylashuv xizmatlari o'chiq. Sozlamalar → Maxfiylik («Конфиденциальность») → Joylashuv xizmatlari («Службы геолокации») ni yoqing va qayting.";
-"perm2.microphone.settings_hint" = "Mikrofon o'chiq. «Sozlamalarni ochish»ni bosing, Mikrofonni yoqing va qayting — yoki «Hozir emas»ni tanlang.";
-"perm2.camera.settings_hint" = "Kamera o'chiq. «Sozlamalarni ochish»ni bosing, Kamerani yoqing va qayting — yoki «Hozir emas»ni tanlang.";
+"perm2.notifications.settings_hint" = "Bildirishnomalar o'chiq. «Sozlamalarni ochish»ni bosing, “Allow Notifications” («Допуск уведомлений») tugmasini yoqing va qayting — keyingi qadam o'zi ochiladi. Yoki busiz davom eting: ota-onangizdan xabarlar kelmaydi, ota-ona buni saytda ko'radi.";
+"perm2.location.settings_hint" = "«Sozlamalarni ochish»ni bosing → “Location” («Геопозиция») → “Always” («Всегда»)ni tanlang va qayting — keyingi qadam o'zi ochiladi.";
+"perm2.location.services_off" = "Telefonda joylashuv xizmatlari o'chiq. «Sozlamalarni ochish»ni bosing, Sozlamalarning bosh oynasiga qayting → “Privacy & Security” («Конфиденциальность и безопасность») → “Location Services” («Службы геолокации»)ni yoqing va ilovaga qayting.";
+"perm2.microphone.settings_hint" = "Mikrofon o'chiq. «Sozlamalarni ochish»ni bosing, “Microphone” («Микрофон») tugmasini yoqing va qayting — yoki «Hozir emas»ni tanlang.";
+"perm2.camera.settings_hint" = "Kamera o'chiq. «Sozlamalarni ochish»ni bosing, “Camera” («Камера») tugmasini yoqing va qayting — yoki «Hozir emas»ni tanlang.";
 "perm2.restricted_hint" = "Bu ruxsat telefonda cheklangan (Ekran vaqti cheklovlari), uni bu yerda yoqib bo'lmaydi. Davom etishingiz mumkin — ota-ona buni saytda ko'radi.";
-"perm2.screentime.denied_hint" = "Ekran vaqti ruxsati berilmadi. «Qayta urinish»ni bosing va ochilgan oynada ruxsat bering.";
+"perm2.screentime.denied_hint" = "Ekran vaqti ruxsati berilmadi. So'rovni qayta ochish uchun «Qayta urinish»ni bosing.";
 "perm2.screentime.unavailable" = "Bu telefonda Ekran vaqtini yoqib bo'lmaydi. Davom etishingiz mumkin — ota-ona buni saytda ko'radi.";
-"perm2.screentime.failed" = "Ekran vaqtini hozir yoqib bo'lmadi. Qayta urinib ko'ring yoki busiz davom eting — ota-ona buni saytda ko'radi.";
+"perm2.screentime.failed" = "Ekran vaqtini yana yoqib bo'lmadi. Yana bir bor urinib ko'ring yoki busiz davom eting — ota-ona buni saytda ko'radi.";
 
 /* build 28 — the one-time app pick inside onboarding */
 "perm2.apps.title" = "Telefondagi ilovalarni tanlang";
 "perm2.apps.body" = "Ota-ona saytda har bir ilovaning vaqtini ko'rishi va uni bloklay olishi uchun ro'yxatni bir marta tanlang: ochilgan oynada eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing.";
 "perm2.apps.done" = "Ilovalar tanlangan";
 "perm2.apps.done_hint" = "Telefondagi ilovalar allaqachon tanlangan — «Davom etish»ni bosing.";
-"perm2.apps.need_all" = "Eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasi yoqilmadi. Yana bosing va uni yoqing — yoki keyinroq ilovaning asosiy oynasidan tanlang.";
+"perm2.apps.need_all" = "Eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasi yoqilmadi. «Ilovalarni tanlash»ni yana bosing va uni yoqing — yoki keyinroq ilovaning asosiy oynasidan tanlang.";
 "perm2.apps.unavailable" = "Ekran vaqti ruxsati yo'q, shuning uchun ilovalarni hozir tanlab bo'lmaydi. Davom etishingiz mumkin.";
 "perm2.later" = "Keyinroq";
 
@@ -419,7 +419,16 @@
 
 /* build 28 — Home nudge for detected apps no icon is linked to */
 "screentime.nudge.title" = "%d ta ilova belgilanmagan";
-"screentime.nudge.body" = "Belgilanmagan ilovaning vaqti saytda alohida ko'rinmaydi («Boshqa ilovalar» ichiga tushadi) va uni bloklab bo'lmaydi. Har birini bir marta belgilang — ro'yxatda belgisini bosish kifoya, nom yozish shart emas.";
+"screentime.nudge.body" = "Ularning vaqti saytda faqat «Boshqa ilovalar» ichida ko'rinadi va ularni bloklab bo'lmaydi. Har birining belgisini bir marta bosing — nom yozish shart emas.";
 
 /* build 28 — neutral chip until the first answer */
 "home2.link_connecting" = "Ulanmoqda…";
+
+/* build 28 review — consent wording, a way past a locked Settings switch, retry-first Screen Time */
+"perm2.media.agree" = "Roziman";
+"perm2.microphone.consent_hint" = "Mikrofon bu telefonda allaqachon yoqilgan. Ota-onangiz jonli ovozni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — mikrofon yoniqligi doim ekranda ko'rinadi va uni to'xtatish mumkin. Aks holda «Hozir emas»ni tanlang.";
+"perm2.camera.consent_hint" = "Kamera bu telefonda allaqachon yoqilgan. Ota-onangiz jonli videoni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — kamera yoniqligi doim ekranda ko'rinadi, hech narsa yozib olinmaydi. Aks holda «Hozir emas»ni tanlang.";
+"perm2.location.settings_unchanged" = "Sozlamalarda hech narsa o'zgarmadi. Qayta urinish uchun «Sozlamalarni ochish»ni bosing — yoki bu telefonda sozlamani o'zgartirib bo'lmasa, busiz davom eting. Ota-ona buni saytda ko'radi.";
+"perm2.screentime.failed_retry" = "Ekran vaqtini hozir yoqib bo'lmadi. Internetni tekshiring va «Qayta urinish»ni bosing.";
+"perm2.bglocation.body_settings" = "Doimiy kuzatuv uchun Bolajon360 joylashuv ruxsati “Always” («Всегда») bo'lishi kerak.";
+"home2.screentime_setup.body_resume" = "Yuqoridagi vaqt eskirgan bo'lishi mumkin: iOS faqat tanlangan ilovalar vaqtini hisoblaydi. Eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasini yoqing va Saqlash bosing.";

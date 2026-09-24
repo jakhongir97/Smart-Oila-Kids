@@ -208,7 +208,7 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         .notAsked, .requesting, .granted, .canReprompt,
         .needsSettings(.notificationsOff), .needsSettings(.appPermissionOff),
         .needsSettings(.locationServicesOff), .needsSettings(.alwaysNotChosen),
-        .unavailable, .failed
+        .unavailable, .failed(canContinue: false), .failed(canContinue: true)
     ]
 
     private func step(_ kind: Kind) -> BolajonPermissionStep {
@@ -296,7 +296,9 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         }
         XCTAssertEqual(st(.canceled), .canReprompt)
         XCTAssertEqual(st(.canceled, status: .denied), .canReprompt)
-        XCTAssertEqual(st(.failed), .failed)
+        XCTAssertEqual(st(.failed), .failed(canContinue: false), "the first failure is retry-only")
+        XCTAssertEqual(phase(.usage, context: BolajonStepContext(screenTimeOutcome: .failed, screenTimeCanContinue: true)),
+                       .failed(canContinue: true))
         XCTAssertEqual(st(.unavailable), .unavailable)
         XCTAssertEqual(st(nil, status: .unavailable), .unavailable)
         // A `.denied` left by an earlier install is still promptable for `.individual`: ask.
@@ -307,23 +309,83 @@ final class BolajonPermissionChecklistTests: XCTestCase {
     // MARK: - Gate: phase → buttons
 
     /// Mandatory steps never offer a way past a missing grant the child can fix. (The app pick has
-    /// its own rule — see `testTheAppPickOffersLaterOnlyAfterAMissedRound`.)
+    /// its own rule — see `testTheAppPickOffersLaterOnlyAfterAMissedRound` — and notifications
+    /// theirs, Guideline 4.5.4: `testNotificationsCanBeContinuedWithoutOnlyAfterADecline`.)
     func testMandatoryStepsNeverDecline() {
         for kind in [Kind.notifications, .location, .backgroundLocation, .usage, .appLimits] {
             for phase in Self.everyPhase {
                 let actions = BolajonStepGate.actions(for: step(kind), phase: phase)
                 XCTAssertNotEqual(actions.primary, .decline, "\(kind) \(phase)")
                 XCTAssertNotEqual(actions.secondary?.action, .decline, "\(kind) \(phase)")
-                if [.notAsked, .requesting, .canReprompt].contains(phase) || { if case .needsSettings = phase { return true }; return false }() {
+                let isSettings: Bool = { if case .needsSettings = phase { return true }; return false }()
+                if [.notAsked, .requesting, .canReprompt, .failed(canContinue: false)].contains(phase) || isSettings {
                     XCTAssertNotEqual(actions.primary, .advance, "\(kind) \(phase) must not move on without the grant")
-                    XCTAssertNil(actions.secondary, "\(kind) \(phase)")
+                    if !(kind == .notifications && isSettings) {
+                        XCTAssertNil(actions.secondary, "\(kind) \(phase)")
+                    }
                 }
             }
         }
     }
 
-    /// Consent to live audio/video stays voluntary in every state — including when the OS grant
-    /// already exists, because that grant can be a previous family's.
+    /// Guideline 4.5.4 ("Push Notifications must not be required for the app to function"): the
+    /// first answer still keeps the child on the step (R1) — "Don't Allow" leads to Settings first —
+    /// and continuing without them is the deliberate second choice.
+    func testNotificationsCanBeContinuedWithoutOnlyAfterADecline() {
+        let first = BolajonStepGate.actions(for: step(.notifications), phase: .notAsked)
+        XCTAssertEqual(first.primary, .request)
+        XCTAssertNil(first.secondary)
+
+        let declined = BolajonStepGate.actions(for: step(.notifications), phase: .needsSettings(.notificationsOff))
+        XCTAssertEqual(declined.primary, .openSettings)
+        XCTAssertEqual(declined.primaryKey, "perm2.open_settings")
+        XCTAssertEqual(declined.secondary, .init(action: .advance, key: "perm2.continue_without"))
+        XCTAssertTrue(step(.notifications).isMandatory, "still purple in the progress bar")
+    }
+
+    /// A switch locked by Apple's own Screen Time ("Don't Allow Changes") or an MDM profile leaves the
+    /// status at While Using / Denied, not `.restricted`, so Settings cannot fix it. A plain "Don't
+    /// Allow" still never skips; a trip to Settings that changed nothing does offer a way past.
+    func testLocationStepsOfferAWayPastOnlyAfterSettingsChangedNothing() {
+        for kind in [Kind.location, .backgroundLocation] {
+            for reason in [BolajonStepPhase.SettingsReason.appPermissionOff, .alwaysNotChosen, .locationServicesOff] {
+                let fresh = BolajonStepGate.actions(for: step(kind), phase: .needsSettings(reason))
+                XCTAssertNil(fresh.secondary, "\(kind) \(reason): no skip before Settings was tried")
+
+                let tried = BolajonStepGate.actions(for: step(kind), phase: .needsSettings(reason),
+                                                    context: BolajonStepContext(returnedFromSettingsUnchanged: true))
+                XCTAssertEqual(tried.primary, .openSettings, "Settings stays first")
+                XCTAssertEqual(tried.secondary, .init(action: .advance, key: "perm2.continue_without"))
+                XCTAssertEqual(tried.hint, .init(key: "perm2.location.settings_unchanged", tone: .warning))
+            }
+        }
+        // Screen Time has no Settings pane; its way past is `.failed(canContinue:)`, not this.
+        let usage = BolajonStepGate.actions(for: step(.usage), phase: .canReprompt,
+                                            context: BolajonStepContext(returnedFromSettingsUnchanged: true))
+        XCTAssertNil(usage.secondary)
+    }
+
+    /// The Always step's body describes the system alert about to appear — wrong once iOS will not
+    /// show it again.
+    func testTheAlwaysBodyFollowsTheSettingsState() {
+        XCTAssertEqual(BolajonStepGate.bodyKey(for: step(.backgroundLocation), phase: .notAsked), "perm2.bglocation.body")
+        XCTAssertEqual(BolajonStepGate.bodyKey(for: step(.backgroundLocation), phase: .needsSettings(.alwaysNotChosen)),
+                       "perm2.bglocation.body_settings")
+        XCTAssertEqual(BolajonStepGate.bodyKey(for: step(.location), phase: .needsSettings(.appPermissionOff)),
+                       "perm2.location.body")
+        XCTAssertNotEqual(L10n.tr("perm2.bglocation.body_settings"), "perm2.bglocation.body_settings")
+    }
+
+    /// An upgrade iOS ignored in this run (Allow Once, or spent before the marker) goes to Settings
+    /// for the rest of the run instead of another silent 2 s spinner.
+    func testAnIgnoredAlwaysUpgradeGoesToSettings() {
+        XCTAssertEqual(phase(.backgroundLocation, location: .authorizedWhenInUse,
+                             context: BolajonStepContext(alwaysPromptIgnored: true)),
+                       .needsSettings(.alwaysNotChosen))
+    }
+
+    /// Consent to live audio/video stays voluntary in every state the child has not answered yet —
+    /// including when the OS grant already exists, because that grant can be a previous family's.
     func testMediaStepsAlwaysKeepHozirEmas() {
         for kind in [Kind.microphone, .camera] {
             for phase in [BolajonStepPhase.notAsked, .granted, .needsSettings(.appPermissionOff)] {
@@ -332,6 +394,37 @@ final class BolajonPermissionChecklistTests: XCTestCase {
             }
             XCTAssertEqual(BolajonStepGate.actions(for: step(kind), phase: .unavailable).primary, .decline,
                            "an unavailable media step records no consent")
+        }
+    }
+
+    /// No system dialog follows a granted media step, so its button IS the agreement and must say so:
+    /// "Davom etish" there recorded standing consent to live audio/video from a tap the hint called a
+    /// formality (re-pair: the iOS grants survive the unpair).
+    func testAGrantedMediaStepAsksForExplicitAgreement() {
+        for (kind, hint) in [(Kind.microphone, "perm2.microphone.consent_hint"), (.camera, "perm2.camera.consent_hint")] {
+            let actions = BolajonStepGate.actions(for: step(kind), phase: .granted)
+            XCTAssertEqual(actions.primary, .advance)
+            XCTAssertEqual(actions.primaryKey, "perm2.media.agree")
+            XCTAssertEqual(actions.secondary, .init(action: .decline, key: "perm2.not_now"))
+            XCTAssertEqual(actions.hint, .init(key: hint, tone: .success))
+            XCTAssertEqual(actions.badgeKey, "perm2.granted")
+        }
+        XCTAssertEqual(BolajonStepGate.actions(for: step(.location), phase: .granted).primaryKey, "perm2.continue",
+                       "not a consent step: plain Continue")
+    }
+
+    /// Consent is grant-only (`grantOnboardingMediaConsent`), so once the child has said yes in this
+    /// run a "Hozir emas" on the same step would be shown and not honoured. It is not offered.
+    func testAMediaStepAlreadyAgreedToOffersNoHozirEmas() {
+        let agreed = BolajonStepContext(agreedInThisRun: true)
+        for kind in [Kind.microphone, .camera] {
+            let actions = BolajonStepGate.actions(for: step(kind), phase: .granted, context: agreed)
+            XCTAssertEqual(actions.primary, .advance)
+            XCTAssertEqual(actions.primaryKey, "perm2.continue")
+            XCTAssertNil(actions.secondary, "\(kind)")
+            // Not granted yet ("Don't Allow"): the child's "no" is still honoured by the grant rule.
+            XCTAssertEqual(BolajonStepGate.actions(for: step(kind), phase: .needsSettings(.appPermissionOff), context: agreed).secondary,
+                           .init(action: .decline, key: "perm2.not_now"))
         }
     }
 
@@ -365,9 +458,15 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(unavailable.primary, .advance)
         XCTAssertEqual(unavailable.hint?.key, "perm2.screentime.unavailable")
 
-        let failed = BolajonStepGate.actions(for: step(.appLimits), phase: .failed)
-        XCTAssertEqual(failed.primary, .request, "a retry comes first")
+        let firstFailure = BolajonStepGate.actions(for: step(.appLimits), phase: .failed(canContinue: false))
+        XCTAssertEqual(firstFailure.primary, .request, "a retry comes first")
+        XCTAssertNil(firstFailure.secondary, "one network error is not a way past the gate")
+        XCTAssertEqual(firstFailure.hint?.key, "perm2.screentime.failed_retry")
+
+        let failed = BolajonStepGate.actions(for: step(.appLimits), phase: .failed(canContinue: true))
+        XCTAssertEqual(failed.primary, .request)
         XCTAssertEqual(failed.secondary, .init(action: .advance, key: "perm2.continue_without"))
+        XCTAssertEqual(failed.hint?.key, "perm2.screentime.failed")
 
         let canceled = BolajonStepGate.actions(for: step(.usage), phase: .canReprompt)
         XCTAssertEqual(canceled.primary, .request)
@@ -386,7 +485,8 @@ final class BolajonPermissionChecklistTests: XCTestCase {
             keys.insert(step.primaryKey)
             keys.insert(step.declineKey)
             for phase in Self.everyPhase {
-                let actions = BolajonStepGate.actions(for: step, phase: phase)
+                for context in [BolajonStepContext(), BolajonStepContext(returnedFromSettingsUnchanged: true, agreedInThisRun: true)] {
+                let actions = BolajonStepGate.actions(for: step, phase: phase, context: context)
                 keys.insert(actions.primaryKey)
                 if let secondary = actions.secondary { keys.insert(secondary.key) }
                 if let hint = actions.hint {
@@ -394,6 +494,8 @@ final class BolajonPermissionChecklistTests: XCTestCase {
                     XCTAssertTrue(BolajonStepGate.allHintKeys.contains(hint.key), "\(hint.key) missing from allHintKeys")
                 }
                 if let badge = actions.badgeKey { keys.insert(badge) }
+                }
+                keys.insert(BolajonStepGate.bodyKey(for: step, phase: phase))
             }
         }
         for key in keys {
@@ -462,19 +564,117 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(ScreenTimeAuthorizationManager.outcome(for: URLError(.timedOut)), .failed)
     }
 
-    /// FamilyControls has no Settings pane: a sheet that stops appearing must not wall the child in.
-    func testTwoCancelsFasterThanAPersonCanReadBecomeAFailure() {
+    /// FamilyControls has no Settings pane: a Screen Time step that stopped working must not wall the
+    /// child in — decided by whether a sheet actually appeared, not by how fast the answer came.
+    func testScreenTimeVerdictFollowsWhetherASheetAppeared() {
         typealias Model = BolajonOnboardingModel
-        let slow = Model.effectiveScreenTimeOutcome(.canceled, elapsed: 3, quickCancelsBefore: 1)
-        XCTAssertEqual(slow.outcome, .canceled, "a real \"Don't Allow\" is asked again")
-        XCTAssertEqual(slow.quickCancels, 0)
+        // A person saw the sheet and said no: ask again, however fast — and forever.
+        let human = Model.screenTimeVerdict(.canceled, sawAlert: true, strikesBefore: 1)
+        XCTAssertEqual(human.outcome, .canceled)
+        XCTAssertEqual(human.strikes, 0, "a sheet that appears proves FamilyControls works")
+        XCTAssertFalse(human.canContinue)
 
-        let firstQuick = Model.effectiveScreenTimeOutcome(.canceled, elapsed: 0.1, quickCancelsBefore: 0)
-        XCTAssertEqual(firstQuick.outcome, .canceled)
-        let secondQuick = Model.effectiveScreenTimeOutcome(.canceled, elapsed: 0.1, quickCancelsBefore: firstQuick.quickCancels)
-        XCTAssertEqual(secondQuick.outcome, .failed)
+        // No sheet at all, twice: the valve — however slow each refusal was.
+        let silent1 = Model.screenTimeVerdict(.canceled, sawAlert: false, strikesBefore: 0)
+        XCTAssertEqual(silent1.outcome, .canceled)
+        XCTAssertFalse(silent1.canContinue)
+        let silent2 = Model.screenTimeVerdict(.canceled, sawAlert: false, strikesBefore: silent1.strikes)
+        XCTAssertEqual(silent2.outcome, .failed)
+        XCTAssertTrue(silent2.canContinue)
 
-        XCTAssertEqual(Model.effectiveScreenTimeOutcome(.granted, elapsed: 0.1, quickCancelsBefore: 1).outcome, .granted)
-        XCTAssertEqual(Model.effectiveScreenTimeOutcome(.unavailable, elapsed: 0.1, quickCancelsBefore: 1).quickCancels, 0)
+        // An error: retry first, the valve on the second in a row (Airplane Mode is no way past).
+        let error1 = Model.screenTimeVerdict(.failed, sawAlert: false, strikesBefore: 0)
+        XCTAssertEqual(error1.outcome, .failed)
+        XCTAssertFalse(error1.canContinue)
+        XCTAssertTrue(Model.screenTimeVerdict(.failed, sawAlert: true, strikesBefore: error1.strikes).canContinue)
+
+        XCTAssertEqual(Model.screenTimeVerdict(.granted, sawAlert: false, strikesBefore: 3),
+                       .init(outcome: .granted, strikes: 0))
+        XCTAssertEqual(Model.screenTimeVerdict(.unavailable, sawAlert: false, strikesBefore: 1).strikes, 0)
+    }
+
+    // MARK: - Run state
+
+    @MainActor
+    func testAnAnswerSettlesOnlyTheRequestItWasFor() {
+        let model = BolajonOnboardingModel()
+        let old = model.begin(.usage)
+        let current = model.begin(.usage)
+        model.finish(.usage, token: old, outcome: .screenTime(.canceled, sawAlert: true))
+        XCTAssertTrue(model.inFlight.contains(.usage), "a stale answer settles nothing")
+        XCTAssertNil(model.screenTimeOutcome)
+        model.finish(.usage, token: current, outcome: .screenTime(.canceled, sawAlert: true))
+        XCTAssertFalse(model.inFlight.contains(.usage))
+        XCTAssertEqual(model.screenTimeOutcome, .canceled)
+    }
+
+    @MainActor
+    func testTheWatchdogEndsARequestThatNeverReturns() async {
+        let model = BolajonOnboardingModel()
+        let token = model.begin(.usage)
+        model.armWatchdog(for: .usage, token: token, after: 0.05, isAppActive: { true })
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertFalse(model.inFlight.contains(.usage), "no disabled spinner forever")
+        XCTAssertEqual(model.screenTimeOutcome, .failed)
+        XCTAssertFalse(model.screenTimeCanContinue, "one timeout is a strike, not yet the valve")
+
+        // A second hung request opens the valve.
+        let again = model.begin(.usage)
+        model.armWatchdog(for: .usage, token: again, after: 0.05, isAppActive: { true })
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertTrue(model.screenTimeCanContinue)
+
+        // While a system alert is up (app inactive) it waits.
+        let location = model.begin(.location)
+        model.armWatchdog(for: .location, token: location, after: 0.05, isAppActive: { false })
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(model.inFlight.contains(.location), "the child may still be reading the alert")
+    }
+
+    @MainActor
+    func testASettingsRoundTripIsRecordedOnlyWhenTheChildComesBack() {
+        let model = BolajonOnboardingModel()
+        let token = model.begin(.backgroundLocation)
+        model.finish(.backgroundLocation, token: token, outcome: .openedSettings)
+        XCTAssertFalse(model.settingsReturned.contains(.backgroundLocation), "still on the way there")
+        model.sceneDidBecomeActive()
+        XCTAssertFalse(model.settingsReturned.contains(.backgroundLocation), "no trip without the background")
+        model.sceneDidEnterBackground()
+        model.sceneDidBecomeActive()
+        XCTAssertTrue(model.settingsReturned.contains(.backgroundLocation))
+        XCTAssertFalse(model.settingsReturned.contains(.location))
+
+        // An ignored Always upgrade holds for the run, and a return from the background gives it
+        // one more attempt (a change in Settings may have made it promptable).
+        let upgrade = model.begin(.backgroundLocation)
+        model.finish(.backgroundLocation, token: upgrade, outcome: .promptNotShown)
+        XCTAssertTrue(model.alwaysPromptIgnored)
+        model.sceneDidEnterBackground()
+        model.sceneDidBecomeActive()
+        XCTAssertFalse(model.alwaysPromptIgnored)
+    }
+
+    @MainActor
+    func testMediaAnswersAreTheChildsOwnAndFeedTheContext() {
+        let model = BolajonOnboardingModel()
+        model.recordMediaAnswer(true, for: .microphone)
+        model.recordMediaAnswer(true, for: .location)
+        XCTAssertEqual(model.mediaAnswers, [.microphone: true], "only media steps carry an answer")
+        model.recordMediaAnswer(false, for: .microphone)
+        XCTAssertEqual(model.mediaAnswers[.microphone], false)
+    }
+
+    /// A request that returned without an error reads its status for a moment, not once — the
+    /// status lags a real grant.
+    @MainActor
+    func testAScreenTimeGrantThatLandsLateStillCountsAsGranted() async {
+        var reads = 0
+        let late = await ScreenTimeAuthorizationManager.awaitApproval(within: 2) {
+            reads += 1
+            return reads >= 3 ? .approved : .notDetermined
+        }
+        XCTAssertTrue(late)
+        let never = await ScreenTimeAuthorizationManager.awaitApproval(within: 0.2) { .notDetermined }
+        XCTAssertFalse(never)
     }
 }

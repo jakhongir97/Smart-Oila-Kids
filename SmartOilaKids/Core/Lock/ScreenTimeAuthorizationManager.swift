@@ -119,8 +119,11 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
             markedUnavailable = false
             // A call that returns without throwing is not proof of a grant: read the answer itself,
             // so a sheet that closed without one can never be reported as "granted" and let the
-            // onboarding step past a permission this phone does not hold.
-            outcome = AuthorizationCenter.shared.authorizationStatus == .approved ? .granted : .canceled
+            // onboarding step past a permission this phone does not hold. Read it for a moment, not
+            // once: this status is known to lag (it answered `.notDetermined` for about a second on
+            // an approved phone, 2026-09-16), and a single read straight after a real grant told the
+            // child "not given — try again".
+            outcome = await Self.awaitApproval() ? .granted : .canceled
         } catch {
             markedUnavailable = Self.shouldMarkUnavailable(error)
             lastErrorText = Self.errorText(for: error)
@@ -129,6 +132,24 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
 
         refreshStatus()
         return outcome
+    }
+
+    /// How long a request that returned without an error may take to read as `.approved`.
+    nonisolated static let approvalSettleWindow: TimeInterval = 2
+
+    /// True as soon as `authorizationStatus` reads `.approved`, polled for `approvalSettleWindow`.
+    /// `read` is a seam for tests.
+    static func awaitApproval(
+        within window: TimeInterval = approvalSettleWindow,
+        read: () -> AuthorizationStatus = { AuthorizationCenter.shared.authorizationStatus }
+    ) async -> Bool {
+        let step: UInt64 = 150_000_000
+        let deadline = Date().addingTimeInterval(window)
+        while true {
+            if read() == .approved { return true }
+            guard Date() < deadline else { return false }
+            try? await Task.sleep(nanoseconds: step)
+        }
     }
 
     /// Pure, so the classification is pinned by a test. `.authorizationCanceled` is the child's

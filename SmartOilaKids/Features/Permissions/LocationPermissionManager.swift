@@ -1,5 +1,6 @@
 import AVFAudio
 import AVFoundation
+import Combine
 import CoreLocation
 import Foundation
 import UIKit
@@ -27,6 +28,17 @@ final class LocationPermissionManager: NSObject, ObservableObject {
         locationManager.delegate = self
         registerObservers()
         refreshStatuses()
+        // Screen Time's answer can land after the read that asked for it (its status lags — see
+        // `ScreenTimeAuthorizationManager.awaitApproval`); follow it, so the onboarding step and the
+        // checklist turn green when it does rather than at the next foreground.
+        screenTimeStatusSubscription = ScreenTimeAuthorizationManager.shared.$status
+            .removeDuplicates()
+            .sink { [weak self] status in
+                Task { @MainActor [weak self] in
+                    guard let self, self.screenTimePermissionStatus != status else { return }
+                    self.setScreenTimePermissionStatus(status)
+                }
+            }
     }
 
     deinit {
@@ -112,10 +124,15 @@ final class LocationPermissionManager: NSObject, ObservableObject {
         )
     }
 
+    /// Scene deactivations since launch (`willResignActive`). A system alert takes the screen this
+    /// way, so an ask that saw the count move was shown to a person — see `ask(_:always:)`.
+    var resignActiveCount = 0
+
     /// The one onboarding location ask awaiting its answer — see `ask(_:always:)`. Stored here only
     /// because an extension cannot add stored properties.
     var pendingLocationAsk: PendingLocationAsk?
 
     private let locationManager = CLLocationManager()
     private var observers: [NSObjectProtocol] = []
+    private var screenTimeStatusSubscription: AnyCancellable?
 }

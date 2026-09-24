@@ -324,11 +324,13 @@ final class SessionStore: ObservableObject {
         //    Keyed device-globally in `UserDefaults.standard`, which is the same store
         //    `DeviceApplicationRemovalAttemptCoordinator` persists to in production.
         userDefaults.removeObject(forKey: "DEVICE_APPLICATION_REMOVAL_ATTEMPT_QUEUE")
-        //    Also the marker recording that iOS's one-time Always-location upgrade prompt has been
-        //    issued. It gates the C5 "Enable" button between prompting and opening Settings, and a
-        //    handed-down phone should get the prompt again rather than being sent straight to
-        //    Settings for a decision the previous family made.
-        userDefaults.removeObject(forKey: LocationPermissionManager.alwaysPromptIssuedKey)
+        //    NOT the marker recording that iOS's one-time Always-location upgrade alert has been
+        //    shown (`LocationPermissionManager.alwaysPromptIssuedKey`). It used to be cleared here
+        //    so a handed-down phone would "get the prompt again" — but the once-per-install rule is
+        //    iOS's, and an unpair does not reset it. Clearing our record of it only made the re-pair
+        //    onboarding (Ibrohim's own scenario) ask for an upgrade iOS would not show: a 2 s
+        //    spinner, no dialog, then Settings anyway. Kept, the Always step opens on Settings at
+        //    once. Only deleting the app resets both.
         // 6. Same leak, same reasoning, for the queued app-usage batches: they carry the previous
         //    child's package names and seconds, and `POST /device/apps/usage` carries no dsn either.
         userDefaults.removeObject(forKey: "DEVICE_APPLICATION_USAGE_REPORT_STATE")

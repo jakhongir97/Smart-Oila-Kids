@@ -585,6 +585,9 @@ struct BolajonPrimaryButton: View {
             )
         }
         .buttonStyle(.plain)
+        // While loading the label is only a spinner; VoiceOver keeps the button's name, and the
+        // disabled trait already says it is busy.
+        .accessibilityLabel(Text(title))
         .disabled(disabled || isLoading)
         .animation(.easeInOut(duration: 0.15), value: isLoading)
     }

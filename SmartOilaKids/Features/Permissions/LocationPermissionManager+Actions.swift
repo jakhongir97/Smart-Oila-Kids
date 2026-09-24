@@ -151,9 +151,11 @@ enum PermissionAskOutcome: Equatable {
     /// The prompt can no longer be shown, so the app's Settings pane was opened instead.
     case openedSettings
     /// iOS took the request and showed nothing: the once-per-install "Change to Always?" upgrade was
-    /// already spent (it survives an unpair — only OUR marker is cleared), or the grant is Allow Once.
+    /// already spent before our marker recorded it, or the grant is Allow Once.
     case promptNotShown
-    case screenTime(ScreenTimeRequestOutcome)
+    /// `sawAlert`: the app was deactivated while the request was out — Apple's sheet (then Face ID)
+    /// took the screen, so a person answered. See `BolajonOnboardingModel.screenTimeVerdict`.
+    case screenTime(ScreenTimeRequestOutcome, sawAlert: Bool)
 }
 
 /// A location request waiting for iOS's answer. See `LocationPermissionManager.ask(_:always:)`.
@@ -187,10 +189,11 @@ extension LocationPermissionManager {
         case .location:
             return await askLocation(always: always)
         case .usageStats:
+            let deactivationsBefore = resignActiveCount
             let outcome = await ScreenTimeAuthorizationManager.shared.requestAuthorization()
             setScreenTimePermissionStatus(ScreenTimeAuthorizationManager.shared.status)
             refreshStatuses()
-            return .screenTime(outcome)
+            return .screenTime(outcome, sawAlert: resignActiveCount != deactivationsBefore)
         case .microphone:
             return await askMicrophone()
         case .camera:
@@ -280,8 +283,15 @@ extension LocationPermissionManager {
                 openAppSettings()
                 return .openedSettings
             }
-            UserDefaults.standard.set(true, forKey: Self.alwaysPromptIssuedKey)
-            return await awaitLocationAnswer(from: status) { $0.requestAlwaysLocationAuthorization() }
+            let outcome = await awaitLocationAnswer(from: status) { $0.requestAlwaysLocationAuthorization() }
+            // The marker records an alert that was SEEN. Written before the request, an upgrade iOS
+            // ignored (Allow Once) spent it for good, and every later attempt went to Settings
+            // without iOS ever having asked. An ignored request is the run's business instead
+            // (`BolajonOnboardingModel.alwaysPromptIgnored`).
+            if outcome == .answered {
+                UserDefaults.standard.set(true, forKey: Self.alwaysPromptIssuedKey)
+            }
+            return outcome
         case .authorizedAlways:
             return .answered
         case .denied, .restricted:

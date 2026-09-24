@@ -1,5 +1,6 @@
 import FamilyControls
 import SwiftUI
+import UIKit
 
 // Bolajon360 permissions onboarding: a guided lavender/peach flow that replaces the legacy
 // location-only GeoPermissionView cover. Built additively on the existing
@@ -11,7 +12,10 @@ import SwiftUI
 // and advanced at once, so "Don't Allow" and our own "No, not needed" both walked straight past the
 // permission, and a phone whose grants survived the unpair seemed to ask nothing at all. Now:
 //  • the core — notifications, location, Always location, Screen Time — has no skip and stays put
-//    until iOS says yes, sending the child to Settings once iOS will no longer prompt;
+//    until iOS says yes, sending the child to Settings once iOS will no longer prompt. The ways past
+//    are narrow and named in `BolajonStepGate.actions`: notifications after a decline (App Review
+//    4.5.4), location after a Settings visit that changed nothing (a switch locked by Apple's Screen
+//    Time or MDM), Screen Time when the phone cannot grant it or twice fails without a person answering;
 //  • microphone and camera keep an explicit "Hozir emas": live audio/video is something the child
 //    agrees to, not something onboarding extracts (App Review 5.1.1(iv)), and the consent rules
 //    below depend on that answer being theirs;
@@ -113,7 +117,8 @@ struct BolajonPermissionStep: Identifiable {
     // audio/video LAST ("oxirida"). Every primary button reads "Davom etish", never "Allow": the
     // system dialog that follows is where the child allows, and App Review rejects a pre-permission
     // screen whose button pre-empts that choice. `BolajonStepGate` swaps it for "Sozlamalarni
-    // ochish" once iOS will no longer show the dialog.
+    // ochish" once iOS will no longer show the dialog — and, on a media step whose grant already
+    // exists, for "Roziman": no dialog follows there, so the button is the agreement itself.
     private static let allSteps: [BolajonPermissionStep] = [
         .init(kind: .intro, icon: "shield.lefthalf.filled", intent: .lavender,
               titleKey: "perm2.intro.title", bodyKey: "perm2.intro.body", primaryKey: "perm2.intro.cta", isMandatory: true),
@@ -135,8 +140,11 @@ struct BolajonPermissionStep: Identifiable {
         //    (`refusedNoDisclosureChannel`): the presence notification is the only disclosure
         //    channel once the app is off screen, so no grant means no off-screen session at all.
         // Since build 28 the step also WAITS for the grant: declining the OS prompt keeps the child
-        // here with "Sozlamalarni ochish", as the Android child app does. The silent-push token is
-        // registered whatever the answer (`ask`), so declining never cuts the lock/chat channel.
+        // here with "Sozlamalarni ochish", as the Android child app does — and, second, "Busiz davom
+        // etish": Guideline 4.5.4 forbids making push a condition of using the app, and a reviewer who
+        // declines must not meet a wall. The silent-push token is registered whatever the answer
+        // (`ask`), so declining never cuts the lock/chat channel, and `LiveSessionDisclosure` refuses
+        // off-screen sessions without the grant, so continuing without it is safe.
         .init(kind: .notifications, icon: "bell.fill", intent: .lavender,
               titleKey: "perm2.notifications.title", bodyKey: "perm2.notifications.body", primaryKey: "perm2.continue", isMandatory: true),
         // Location is the product: a parent opens the app to see where the child is. Both steps are
@@ -222,8 +230,11 @@ enum BolajonStepPhase: Equatable {
     /// This phone cannot grant it at all (restricted / FamilyControls unavailable). The child may
     /// continue; the parent sees the status on the web.
     case unavailable
-    /// Screen Time failed for a reason a retry may fix — or its sheet stopped appearing.
-    case failed
+    /// Screen Time ended without a person answering: an error a retry may fix, a sheet that never
+    /// appeared, or a request that never came back. `canContinue` once that has happened twice in a
+    /// row (`BolajonOnboardingModel.screenTimeVerdict`) — the first time only "Qayta urinish", so a
+    /// child cannot turn Airplane Mode into a way past the gate.
+    case failed(canContinue: Bool)
 
     enum SettingsReason: Equatable {
         case notificationsOff
@@ -242,15 +253,26 @@ struct BolajonStepContext: Equatable {
     var notificationStatusKnown = true
     /// Location Services, device-wide. Nil until read — treated as on.
     var locationServicesEnabled: Bool? = nil
-    /// `LocationPermissionManager.alwaysPromptIssuedKey`.
+    /// `LocationPermissionManager.alwaysPromptIssuedKey`: iOS's one "Change to Always?" alert has
+    /// been SEEN on this install.
     var alwaysPromptIssued = false
-    /// Screen Time's answer in THIS run (after the quick-cancel rule, see
-    /// `BolajonOnboardingModel.effectiveScreenTimeOutcome`).
+    /// This run asked for the Always upgrade and iOS showed nothing (`.promptNotShown`) — an upgrade
+    /// spent before the marker existed, or an Allow Once grant. Cleared on a return from the
+    /// background, so a change made in Settings earns one more attempt.
+    var alwaysPromptIgnored = false
+    /// Screen Time's answer in THIS run, after `BolajonOnboardingModel.screenTimeVerdict`.
     var screenTimeOutcome: ScreenTimeRequestOutcome? = nil
+    /// Two attempts in a row ended without a person answering — see `BolajonStepPhase.failed`.
+    var screenTimeCanContinue = false
     /// The stored pick has category tokens — the whole phone is counted (`ScreenTimeSetupCard`).
     var hasAppPick = false
     /// A picker round came back in this run without them.
     var appPickMissed = false
+    /// This step sent the child to Settings and they came back without the permission. Only then do
+    /// the location steps offer a way past (see `BolajonStepGate.actions`).
+    var returnedFromSettingsUnchanged = false
+    /// Microphone / camera: the child has already said yes to this step in this run.
+    var agreedInThisRun = false
 }
 
 /// The buttons and the line of help one step shows. Keys, not strings, so the table is testable.
@@ -344,7 +366,8 @@ enum BolajonStepGate {
                 return .notAsked
             case .authorizedWhenInUse:
                 // Only the Always step gets here (While Using already grants `.location`).
-                return context.alwaysPromptIssued ? .needsSettings(.alwaysNotChosen) : .notAsked
+                return context.alwaysPromptIssued || context.alwaysPromptIgnored
+                    ? .needsSettings(.alwaysNotChosen) : .notAsked
             default:
                 return .needsSettings(.appPermissionOff)
             }
@@ -353,7 +376,7 @@ enum BolajonStepGate {
                 return .unavailable
             }
             switch context.screenTimeOutcome {
-            case .failed: return .failed
+            case .failed: return .failed(canContinue: context.screenTimeCanContinue)
             case .canceled: return .canReprompt
             // `.denied` from an earlier install is still promptable for `.individual`: ask.
             case .granted, .unavailable, .none: return .notAsked
@@ -369,16 +392,26 @@ enum BolajonStepGate {
         }
     }
 
-    static func actions(for step: BolajonPermissionStep, phase: BolajonStepPhase) -> BolajonStepActions {
+    /// `context` supplies the two things only this run knows: a Settings round trip that changed
+    /// nothing, and a media step the child has already agreed to. The default is a fresh step.
+    static func actions(
+        for step: BolajonPermissionStep,
+        phase: BolajonStepPhase,
+        context: BolajonStepContext = BolajonStepContext()
+    ) -> BolajonStepActions {
         if step.kind == .intro || step.kind == .summary {
             return BolajonStepActions(primary: .advance, primaryKey: step.primaryKey)
         }
         if step.kind == .appSelection {
             return appSelectionActions(step, phase: phase)
         }
-        // Optional steps only. A mandatory step never gets a way past a missing grant — except the
-        // `.unavailable` / `.failed` ones below, where the phone, not the child, is the obstacle.
+        // Optional steps only. A mandatory step never gets a way past a missing grant the child can
+        // fix — the exceptions are all below and all named: the phone is the obstacle (`.unavailable`,
+        // `.failed(canContinue:)`), notifications (Guideline 4.5.4), or Settings was tried and
+        // changed nothing (a switch locked by Apple's own Screen Time or an MDM profile).
         let skip = step.showsDecline ? BolajonStepActions.Secondary(action: .decline, key: step.declineKey) : nil
+        let continueWithout = BolajonStepActions.Secondary(action: .advance, key: "perm2.continue_without")
+        let isMedia = step.kind == .microphone || step.kind == .camera
 
         switch phase {
         case .notAsked:
@@ -386,10 +419,23 @@ enum BolajonStepGate {
         case .requesting:
             return BolajonStepActions(primary: .request, primaryKey: step.primaryKey, primaryLoading: true)
         case .granted:
-            // Microphone/camera keep "Hozir emas" even here: the OS grant can be a previous family's
-            // (it survives an unpair), so it is never read as THIS child's consent.
+            if isMedia, !context.agreedInThisRun {
+                // The OS grant can be a previous family's (it survives an unpair), so it is never read
+                // as THIS child's consent — and no system dialog follows this screen, so the button is
+                // the agreement itself and says so ("Roziman"). "Davom etish" here recorded standing
+                // consent to live audio/video from a tap the hint called a formality.
+                return BolajonStepActions(
+                    primary: .advance, primaryKey: "perm2.media.agree", secondary: skip,
+                    hint: .init(key: step.kind == .microphone ? "perm2.microphone.consent_hint" : "perm2.camera.consent_hint",
+                                tone: .success),
+                    badgeKey: "perm2.granted"
+                )
+            }
+            // A media step the child has just agreed to offers no "Hozir emas": consent is grant-only
+            // (`grantOnboardingMediaConsent`), so a "no" here would be shown and not honoured.
+            // Withdrawing lives on the Settings consent card.
             return BolajonStepActions(
-                primary: .advance, primaryKey: "perm2.continue", secondary: skip,
+                primary: .advance, primaryKey: "perm2.continue", secondary: isMedia ? nil : skip,
                 hint: .init(key: step.kind == .appLimits ? "perm2.limits.granted_hint" : "perm2.granted_hint", tone: .success),
                 badgeKey: "perm2.granted"
             )
@@ -397,28 +443,51 @@ enum BolajonStepGate {
             return BolajonStepActions(primary: .request, primaryKey: "perm2.retry",
                                       hint: .init(key: "perm2.screentime.denied_hint", tone: .warning))
         case let .needsSettings(reason):
-            return BolajonStepActions(primary: .openSettings, primaryKey: "perm2.open_settings", secondary: skip,
-                                      hint: .init(key: settingsHintKey(for: step.kind, reason: reason), tone: .warning))
+            var hintKey = settingsHintKey(for: step.kind, reason: reason)
+            var secondary = skip
+            if step.kind == .notifications {
+                // Guideline 4.5.4: push must not gate the app. "Don't Allow" still keeps the child
+                // here with Settings first (R1); continuing without is the deliberate second choice.
+                secondary = continueWithout
+            } else if step.isMandatory, context.returnedFromSettingsUnchanged {
+                secondary = continueWithout
+                hintKey = "perm2.location.settings_unchanged"
+            }
+            return BolajonStepActions(primary: .openSettings, primaryKey: "perm2.open_settings", secondary: secondary,
+                                      hint: .init(key: hintKey, tone: .warning))
         case .unavailable:
             // An optional step's "continue" is still the child's "no", so no consent is recorded.
             return BolajonStepActions(primary: step.isMandatory ? .advance : .decline, primaryKey: "perm2.continue",
                                       hint: .init(key: isScreenTime(step.kind) ? "perm2.screentime.unavailable" : "perm2.restricted_hint",
                                                   tone: .warning))
-        case .failed:
+        case let .failed(canContinue):
             return BolajonStepActions(primary: .request, primaryKey: "perm2.retry",
-                                      secondary: .init(action: .advance, key: "perm2.continue_without"),
-                                      hint: .init(key: "perm2.screentime.failed", tone: .warning))
+                                      secondary: canContinue ? continueWithout : nil,
+                                      hint: .init(key: canContinue ? "perm2.screentime.failed" : "perm2.screentime.failed_retry",
+                                                  tone: .warning))
         }
     }
 
     /// Every key `actions` can return, for the "no raw key on screen" test.
     static let allHintKeys = [
         "perm2.granted_hint", "perm2.limits.granted_hint", "perm2.screentime.denied_hint",
+        "perm2.microphone.consent_hint", "perm2.camera.consent_hint",
         "perm2.notifications.settings_hint", "perm2.location.settings_hint", "perm2.location.services_off",
+        "perm2.location.settings_unchanged",
         "perm2.microphone.settings_hint", "perm2.camera.settings_hint", "perm2.settings_hint",
         "perm2.screentime.unavailable", "perm2.restricted_hint", "perm2.screentime.failed",
+        "perm2.screentime.failed_retry",
         "perm2.apps.done_hint", "perm2.apps.need_all", "perm2.apps.unavailable"
     ]
+
+    /// The body under the title. The Always step's own body describes the system alert that is about
+    /// to appear, which is wrong once iOS will not show it again.
+    static func bodyKey(for step: BolajonPermissionStep, phase: BolajonStepPhase) -> String {
+        if step.kind == .backgroundLocation, case .needsSettings = phase {
+            return "perm2.bglocation.body_settings"
+        }
+        return step.bodyKey
+    }
 
     /// The app pick. One tap opens Apple's picker; the step completes itself when the pick has the
     /// whole-phone categories. "Keyinroq" appears only after a round that came back without them.
@@ -475,20 +544,50 @@ final class BolajonOnboardingModel: ObservableObject {
     /// (R3), so the child sees it rather than watching it flick past.
     @Published private(set) var attempted: Set<Kind> = []
     @Published private(set) var screenTimeOutcome: ScreenTimeRequestOutcome?
+    @Published private(set) var screenTimeCanContinue = false
     @Published private(set) var locationServicesEnabled: Bool?
     @Published private(set) var appPickMissed = false
-    private var quickScreenTimeCancels = 0
+    @Published private(set) var alwaysPromptIgnored = false
+    /// What the child said to each media step IN THIS RUN — absent until the step is answered, then
+    /// true for a yes and false for "Hozir emas". Deliberately not derived from the OS status: the
+    /// iOS grants survive an unpair and can belong to a previous family, so the status answers "does
+    /// this phone hold the permission", never "did this child agree". Kept here rather than as view
+    /// state so the pushed step views, which re-render only from what they observe, see it too.
+    @Published private(set) var mediaAnswers: [Kind: Bool] = [:]
+    /// Steps whose request opened Settings, waiting for the child to come back.
+    private var settingsOpened: Set<Kind> = []
+    /// Steps the child came back to from Settings still without the permission.
+    @Published private(set) var settingsReturned: Set<Kind> = []
+    /// Screen Time attempts in a row that ended with no person answering. See `screenTimeVerdict`.
+    private var screenTimeStrikes = 0
+    /// The request each step is waiting on. A new press replaces it, so an older request's answer
+    /// (or its watchdog) can never settle a newer one.
+    private var requestTokens: [Kind: Int] = [:]
+    private var nextToken = 0
+    private var wentToBackground = false
 
-    /// A "cancel" faster than this came back without a human answering anything.
-    nonisolated static let quickCancelThreshold: TimeInterval = 0.8
+    /// How long a request may stay unanswered, with the app on screen and no system alert up, before
+    /// the spinner gives way. Every ask is an XPC round trip that can hang (nothing bounds
+    /// FamilyControls' `requestAuthorization`); without this a mandatory step would be a disabled
+    /// spinner with no way on and nothing to retry. A late answer still lands (`finish`).
+    nonisolated static let requestWatchdog: TimeInterval = 30
 
-    func begin(_ kind: Kind) {
+    @discardableResult
+    func begin(_ kind: Kind) -> Int {
         attempted.insert(kind)
         inFlight.insert(kind)
+        nextToken &+= 1
+        requestTokens[kind] = nextToken
+        return nextToken
     }
 
     func markAttempted(_ kind: Kind) {
         attempted.insert(kind)
+    }
+
+    func recordMediaAnswer(_ yes: Bool, for kind: Kind) {
+        guard kind == .microphone || kind == .camera, mediaAnswers[kind] != yes else { return }
+        mediaAnswers[kind] = yes
     }
 
     /// One picker round is over. Without the whole-phone categories it counts as missed, which is
@@ -497,29 +596,115 @@ final class BolajonOnboardingModel: ObservableObject {
         if !hasCategories, !appPickMissed { appPickMissed = true }
     }
 
-    func finish(_ kind: Kind, outcome: PermissionAskOutcome, elapsed: TimeInterval) {
+    func finish(_ kind: Kind, token: Int, outcome: PermissionAskOutcome) {
+        guard requestTokens[kind] == token else { return }
         inFlight.remove(kind)
-        if case let .screenTime(result) = outcome {
-            let effective = Self.effectiveScreenTimeOutcome(result, elapsed: elapsed, quickCancelsBefore: quickScreenTimeCancels)
-            quickScreenTimeCancels = effective.quickCancels
-            screenTimeOutcome = effective.outcome
+        switch outcome {
+        case let .screenTime(result, sawAlert):
+            applyScreenTime(Self.screenTimeVerdict(result, sawAlert: sawAlert, strikesBefore: screenTimeStrikes))
+        case .promptNotShown where kind == .backgroundLocation:
+            alwaysPromptIgnored = true
+        case .openedSettings:
+            settingsOpened.insert(kind)
+        case .answered, .promptNotShown:
+            break
         }
     }
 
-    /// The safety net under a mandatory Screen Time step. FamilyControls has no Settings pane to
-    /// send a child to, so if its sheet ever stops appearing (a cancel that returns faster than a
-    /// person can read it, twice in a row) the step must not become a wall: it turns into `.failed`,
-    /// which offers "Busiz davom etish". A real "Don't Allow" takes a human's time and stays
-    /// `.canceled`, so the step keeps asking. Pure, so the rule is pinned by a test.
-    nonisolated static func effectiveScreenTimeOutcome(
+    /// The watchdog fired: the request is still out, the app is on screen and no alert is up.
+    func timeOut(_ kind: Kind, token: Int) {
+        guard requestTokens[kind] == token, inFlight.contains(kind) else { return }
+        inFlight.remove(kind)
+        if kind == .usage || kind == .appLimits {
+            // No answer at all is a strike like any other attempt no person answered.
+            applyScreenTime(Self.screenTimeVerdict(.failed, sawAlert: false, strikesBefore: screenTimeStrikes))
+        }
+    }
+
+    private func applyScreenTime(_ verdict: ScreenTimeVerdict) {
+        screenTimeStrikes = verdict.strikes
+        screenTimeOutcome = verdict.outcome
+        if screenTimeCanContinue != verdict.canContinue { screenTimeCanContinue = verdict.canContinue }
+    }
+
+    /// Arms `requestWatchdog` for one request. `isAppActive` is a seam for tests.
+    func armWatchdog(
+        for kind: Kind,
+        token: Int,
+        after delay: TimeInterval = BolajonOnboardingModel.requestWatchdog,
+        isAppActive: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .active }
+    ) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            while let model = self, model.requestTokens[kind] == token, model.inFlight.contains(kind) {
+                // A system alert (or Face ID) is up: the child may still be reading it.
+                guard isAppActive() else {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    continue
+                }
+                model.timeOut(kind, token: token)
+                return
+            }
+        }
+    }
+
+    /// Scene phases from the flow. A return from the background ends every Settings round trip the
+    /// steps started; a step whose permission is still missing then offers its way past (see
+    /// `BolajonStepGate.actions`). It also gives the Always upgrade one more attempt: an Allow Once
+    /// grant changed to While Using in Settings is promptable again.
+    func sceneDidEnterBackground() {
+        wentToBackground = true
+    }
+
+    func sceneDidBecomeActive() {
+        guard wentToBackground else { return }
+        wentToBackground = false
+        if !settingsOpened.isEmpty {
+            settingsReturned.formUnion(settingsOpened)
+            settingsOpened.removeAll()
+        }
+        if alwaysPromptIgnored { alwaysPromptIgnored = false }
+    }
+
+    /// One Screen Time answer, after the rule that keeps a mandatory step from becoming a wall.
+    struct ScreenTimeVerdict: Equatable {
+        let outcome: ScreenTimeRequestOutcome
+        /// Attempts in a row that ended with no person answering.
+        let strikes: Int
+        /// "Busiz davom etish" is offered.
+        var canContinue: Bool { outcome == .failed && strikes >= 2 }
+    }
+
+    /// FamilyControls has no Settings pane to send a child to, so a Screen Time step that has stopped
+    /// working must not become a wall — while a child who simply says no must be asked again.
+    ///
+    /// Told apart by what actually happened on screen, not by timing: `sawAlert` is whether the app
+    /// was deactivated (Apple's sheet, then Face ID) while the request was out. The first version
+    /// timed the cancel instead (under 0.8 s = nobody answered), which failed both ways: an older
+    /// phone refusing slowly without a sheet reset the count every time and stranded the child, and a
+    /// quick double "Don't Allow" was waved through.
+    ///  • granted / unavailable: final, the count resets;
+    ///  • a cancel after a sheet appeared: a person said no — ask again, the count resets;
+    ///  • a cancel with no sheet, an error, or the watchdog: a strike. Two in a row offer "Busiz
+    ///    davom etish"; the first only "Qayta urinish" (a network error must not be a way past).
+    /// If iOS turns out not to deactivate the app for this sheet, a real "Don't Allow" reads as a
+    /// silent cancel and a second one opens the valve — the fail-safe direction. Pure, so pinned.
+    nonisolated static func screenTimeVerdict(
         _ outcome: ScreenTimeRequestOutcome,
-        elapsed: TimeInterval,
-        quickCancelsBefore: Int
-    ) -> (outcome: ScreenTimeRequestOutcome, quickCancels: Int) {
-        guard outcome == .canceled else { return (outcome, 0) }
-        guard elapsed < quickCancelThreshold else { return (.canceled, 0) }
-        let quick = quickCancelsBefore + 1
-        return (quick >= 2 ? .failed : .canceled, quick)
+        sawAlert: Bool,
+        strikesBefore: Int
+    ) -> ScreenTimeVerdict {
+        switch outcome {
+        case .granted, .unavailable:
+            return ScreenTimeVerdict(outcome: outcome, strikes: 0)
+        case .canceled where sawAlert:
+            return ScreenTimeVerdict(outcome: .canceled, strikes: 0)
+        case .canceled:
+            let strikes = strikesBefore + 1
+            return ScreenTimeVerdict(outcome: strikes >= 2 ? .failed : .canceled, strikes: strikes)
+        case .failed:
+            return ScreenTimeVerdict(outcome: .failed, strikes: strikesBefore + 1)
+        }
     }
 
     /// Off the main thread (synchronous XPC). Re-read on every return to the foreground: turning
@@ -535,10 +720,14 @@ final class BolajonOnboardingModel: ObservableObject {
             notificationStatusKnown: manager.hasReadNotificationStatus,
             locationServicesEnabled: locationServicesEnabled,
             alwaysPromptIssued: UserDefaults.standard.bool(forKey: LocationPermissionManager.alwaysPromptIssuedKey),
+            alwaysPromptIgnored: alwaysPromptIgnored,
             screenTimeOutcome: screenTimeOutcome,
+            screenTimeCanContinue: screenTimeCanContinue,
             // Read here, observed by the views (`restrictedApps`), so a pick re-renders the step.
             hasAppPick: kind == .appSelection && !ScreenTimeRestrictedAppsStore.shared.selection.categoryTokens.isEmpty,
-            appPickMissed: appPickMissed
+            appPickMissed: appPickMissed,
+            returnedFromSettingsUnchanged: settingsReturned.contains(kind),
+            agreedInThisRun: mediaAnswers[kind] == true
         )
     }
 
@@ -566,11 +755,10 @@ struct BolajonPermissionsFlowView: View {
     @ObservedObject private var streaming = DeviceAudioStreamManager.shared
     @Environment(\.scenePhase) private var scenePhase
     /// What the child said to each media step IN THIS RUN — nil until the step is answered, then
-    /// true for "Davom etish" and false for "Hozir emas". Deliberately not derived from the OS status:
-    /// the iOS grants survive an unpair and can belong to a previous family, so the status answers
-    /// "does this phone hold the permission", never "did this child agree".
-    @State private var microphoneAnswer: Bool?
-    @State private var cameraAnswer: Bool?
+    /// true for a yes and false for "Hozir emas". Held by the model (`mediaAnswers`, which says why
+    /// it is never derived from the OS status); read through these two names.
+    private var microphoneAnswer: Bool? { model.mediaAnswers[.microphone] }
+    private var cameraAnswer: Bool? { model.mediaAnswers[.camera] }
     @State private var path: [PermRoute]
     /// The top step and its phase as last seen — what tells "the grant landed while the child was on
     /// this step" apart from "the child went Back to a step that was granted earlier".
@@ -635,9 +823,17 @@ struct BolajonPermissionsFlowView: View {
         }
         // Returning from Settings: the manager re-reads every permission on its own
         // (`didBecomeActive`); Location Services is the one device-wide switch it does not read.
+        // The model closes the Settings round trips the steps started (see `sceneDidBecomeActive`).
         .onChange(of: scenePhase) { phase in
-            guard phase == .active else { return }
-            Task { await model.refreshLocationServices() }
+            switch phase {
+            case .background:
+                model.sceneDidEnterBackground()
+            case .active:
+                model.sceneDidBecomeActive()
+                Task { await model.refreshLocationServices() }
+            default:
+                break
+            }
         }
         .task { await model.refreshLocationServices() }
     }
@@ -693,22 +889,21 @@ struct BolajonPermissionsFlowView: View {
         )
     }
 
-    /// The media steps' answer. Every primary press on them — ask, open Settings, or "Davom etish" on
-    /// an already-granted step — is the child's YES, exactly as the old "Allow" button was; "Hozir
-    /// emas" is their NO.
+    /// The media steps' answer. Every primary press on them — ask ("Davom etish" before the system
+    /// dialog), open Settings, or "Roziman" on an already-granted step — is the child's YES, exactly as
+    /// the old "Allow" button was; "Hozir emas" is their NO.
     ///
     /// "Hozir emas" is an ANSWER, and it has to be able to retract. Decline once touched nothing: a
     /// child who declined the camera kept whatever video consent an earlier step had recorded, so
     /// their one explicit refusal was inert and the parent's next watch request opened the camera
     /// anyway. Declining the microphone clears both, because there is no live session of
-    /// either kind without it.
+    /// either kind without it. (A step the child has already said yes to in this run, with the grant
+    /// in place, offers no "Hozir emas" at all — `BolajonStepGate.actions` — because consent is
+    /// grant-only and a "no" there could not be honoured.)
     private func recordMediaAnswer(_ yes: Bool, for kind: BolajonPermissionStep.Kind) {
         switch kind {
-        case .microphone:
-            microphoneAnswer = yes
-            mirrorMediaConsent()
-        case .camera:
-            cameraAnswer = yes
+        case .microphone, .camera:
+            model.recordMediaAnswer(yes, for: kind)
             mirrorMediaConsent()
         default:
             break
@@ -716,6 +911,9 @@ struct BolajonPermissionsFlowView: View {
     }
 
     private func perform(_ action: BolajonStepActions.Action, at index: Int) {
+        // Only the step on top acts — for EVERY action. A tap delivered to a step that is being
+        // popped (or is under a pushed one) must not record a media answer or push a second step.
+        guard topStepIndex == index else { return }
         let step = steps[index]
         switch action {
         case .advance:
@@ -725,17 +923,16 @@ struct BolajonPermissionsFlowView: View {
             recordMediaAnswer(false, for: step.kind)
             advance(from: index)
         case .pickApps:
-            guard topStepIndex == index, !isAppPickerPresented else { return }
+            guard !isAppPickerPresented else { return }
             model.markAttempted(step.kind)
             appPickerDraft = restrictedApps.selection
             isAppPickerPresented = true
         case .request, .openSettings:
-            // One request per step at a time, and only from the step on top — a double tap, or a tap
-            // on a step being popped, must not stack a second system dialog.
-            guard topStepIndex == index, let requirement = step.kind.requirement,
+            // One request per step at a time — a double tap must not stack a second system dialog.
+            guard let requirement = step.kind.requirement,
                   !model.inFlight.contains(step.kind) else { return }
             recordMediaAnswer(true, for: step.kind)
-            model.begin(step.kind)
+            let token = model.begin(step.kind)
             // The background-location step asks for the Always upgrade; everything else about the
             // two location steps is the same request.
             //
@@ -746,12 +943,12 @@ struct BolajonPermissionsFlowView: View {
             // deterministic rather than rare: `clearSession()` replays B1–B11 after every unpair
             // while the iOS authorization survives.
             let always = step.kind == .backgroundLocation
-            let startedAt = Date()
             let manager = self.manager, model = self.model, kind = step.kind
             Task { @MainActor in
                 let outcome = await manager.ask(requirement, always: always)
-                model.finish(kind, outcome: outcome, elapsed: Date().timeIntervalSince(startedAt))
+                model.finish(kind, token: token, outcome: outcome)
             }
+            model.armWatchdog(for: kind, token: token)
         }
     }
 
@@ -833,7 +1030,6 @@ private struct PermissionStepView: View {
     let onAction: (BolajonStepActions.Action) -> Void
 
     private var isIntro: Bool { step.kind == .intro }
-    private var phase: BolajonStepPhase { model.phase(for: step.kind, manager: manager) }
 
     // Uses the shared `BolajonHeroSheet` rather than a hand-rolled copy of it.
     //
@@ -844,8 +1040,9 @@ private struct PermissionStepView: View {
     // clamp, and it never received the scroll fallback, which is what let content run off the
     // bottom of a 375x667pt screen with no way to reach it.
     var body: some View {
-        let phase = self.phase
-        let actions = BolajonStepGate.actions(for: step, phase: phase)
+        let context = model.context(for: step.kind, manager: manager)
+        let phase = BolajonStepGate.phase(for: step.kind, snapshot: manager.statusSnapshot(), context: context)
+        let actions = BolajonStepGate.actions(for: step, phase: phase, context: context)
         BolajonHeroSheet(
             intent: step.intent,
             deepHero: isIntro,
@@ -885,7 +1082,7 @@ private struct PermissionStepView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 4)
-                Text(L10n.tr(step.bodyKey))
+                Text(L10n.tr(BolajonStepGate.bodyKey(for: step, phase: phase)))
                     .font(AppTypography.bodyText(14))
                     .foregroundStyle(AppColors.inkSecondary)
                     .multilineTextAlignment(.center)
@@ -909,6 +1106,13 @@ private struct PermissionStepView: View {
                 .padding(.bottom, 6)
             }
             .animation(.easeInOut(duration: 0.2), value: phase)
+        }
+        // VoiceOver: after "Don't Allow", a return from Settings or a Screen Time cancel the step
+        // changes in place — a new warning, a relabelled button — and focus alone says nothing.
+        // Announce why the child is still here.
+        .onChange(of: actions.hint) { hint in
+            guard let hint, hint.tone == .warning else { return }
+            UIAccessibility.post(notification: .announcement, argument: L10n.tr(hint.key))
         }
     }
 

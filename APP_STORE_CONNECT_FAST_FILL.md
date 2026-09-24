@@ -163,7 +163,8 @@ Review path: 5-digit pairing code
 1. Install and launch the app.
 2. Choose a language, then continue to the pairing screen.
 3. Enter this pairing code on the numeric keypad: [REVIEW_PAIRING_CODE].
-4. The app links to review child [REVIEW_DSN] and opens the main screen.
+4. The app links to review child [REVIEW_DSN].
+5. After linking, a short setup asks for permissions one at a time. Location: choose 'Allow While Using App', then 'Change to Always Allow' (the service shows the parent the child's location while the phone is in a pocket, so While Using alone is not enough; if you keep While Using, the step offers Open Settings -> Location -> Always, and after a visit to Settings it also offers 'Continue without it'). Screen Time: tap Continue in Apple's sheet (needed for the app limits and blocking the parent sets on the website; if the device cannot grant it, the step lets you continue), then the one-time 'All Apps & Categories' app choice. Notifications, Microphone and Camera can be declined ('Continue without it' / 'Not now'); microphone and camera are used only for live checks the child explicitly agreed to, with an on-screen indicator, and nothing is recorded. The app then opens the main screen.
 
 The code above is a QA-scoped, long-lived code bound to one dedicated review child. It can be
 entered repeatedly for the whole review period.

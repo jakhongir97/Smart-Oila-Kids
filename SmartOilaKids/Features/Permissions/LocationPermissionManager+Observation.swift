@@ -30,6 +30,7 @@ extension LocationPermissionManager {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
+                self?.resignActiveCount += 1
                 self?.pendingLocationAskWillResignActive()
                 self?.refreshStatuses()
             }
