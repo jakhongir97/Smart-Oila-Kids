@@ -37,10 +37,17 @@ func homeRouteDestination(_ route: HomeRoute, path: Binding<[HomeRoute]>) -> som
 extension LinkHealth {
     /// Fill hue and dot. Paired with `ink` below, never used as the label colour itself: a label drawn
     /// in the same hue as its own 14% fill measures 1.92:1 (see `AppColors.pillGreenInk`).
-    var tint: Color { isHealthy ? AppColors.successGreen : AppColors.sosCoral }
+    /// `.connecting` is neutral grey — it is neither good news nor an alarm yet.
+    var tint: Color {
+        if isHealthy { return AppColors.successGreen }
+        return self == .connecting ? AppColors.inkTertiary : AppColors.sosCoral
+    }
 
     /// The contrast-checked label colour for `tint.opacity(0.14)`.
-    var ink: Color { isHealthy ? AppColors.pillGreenInk : AppColors.pillCoralInk }
+    var ink: Color {
+        if isHealthy { return AppColors.pillGreenInk }
+        return self == .connecting ? AppColors.inkSecondary : AppColors.pillCoralInk
+    }
 }
 
 struct BolajonHomeView: View {
@@ -65,7 +72,8 @@ struct BolajonHomeView: View {
             hasCredential: lockState.hasCredential,
             offPermissions: BolajonPermissionChecklist.states(from: permissionManager)
                 .filter { $0.availability == .notGranted }.count,
-            lastContactAt: lockState.lastSuccessfulContactAt
+            lastContactAt: lockState.lastSuccessfulContactAt,
+            awaitingContact: lockState.isAwaitingFirstContact
         )
     }
 

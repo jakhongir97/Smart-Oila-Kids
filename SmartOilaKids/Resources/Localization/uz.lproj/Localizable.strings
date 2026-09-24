@@ -420,3 +420,6 @@
 /* build 28 — Home nudge for detected apps no icon is linked to */
 "screentime.nudge.title" = "%d ta ilova belgilanmagan";
 "screentime.nudge.body" = "Belgilanmagan ilovaning vaqti saytda alohida ko'rinmaydi («Boshqa ilovalar» ichiga tushadi) va uni bloklab bo'lmaydi. Har birini bir marta belgilang — ro'yxatda belgisini bosish kifoya, nom yozish shart emas.";
+
+/* build 28 — neutral chip until the first answer */
+"home2.link_connecting" = "Ulanmoqda…";

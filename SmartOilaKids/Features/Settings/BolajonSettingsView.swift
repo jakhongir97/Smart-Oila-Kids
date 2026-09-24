@@ -74,7 +74,8 @@ struct SettingsRootView: View {
         LinkHealth.decide(
             hasCredential: telemetry.hasCredential,
             offPermissions: offPermissionCount,
-            lastContactAt: telemetry.lastSuccessfulContactAt
+            lastContactAt: telemetry.lastSuccessfulContactAt,
+            awaitingContact: telemetry.isAwaitingFirstContact
         )
     }
 
@@ -152,7 +153,8 @@ struct SettingsRootView: View {
                         subtitleLiteral: linkHealth.isHealthy
                             ? L10n.tr("settings2.connection_value")
                             : linkHealth.displayText,
-                        action: linkHealth.isHealthy ? nil : { path.append(.settingsPermissions) })
+                        // Nothing to fix while the first answer is on its way.
+                        action: linkHealth.isHealthy || linkHealth == .connecting ? nil : { path.append(.settingsPermissions) })
                 }
 
                 section(title: "settings2.section_other") {

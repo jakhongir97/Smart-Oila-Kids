@@ -15,6 +15,9 @@ extension RootView {
             .environmentObject(sessionStore)
         } else if !sessionStore.onboardingCompleted {
             BolajonPermissionsFlowView {
+                // BEFORE the flag: Home renders at once, telemetry starts one `onChange` later, and
+                // without this the first frame of Home was a red "Hozir aloqa yo'q" (Ibrohim, build 27).
+                OilaTelemetryService.shared.beginAwaitingContact()
                 sessionStore.setOnboardingCompleted(true)
             }
         } else {
@@ -33,6 +36,7 @@ extension RootView {
             // Debug route completes onboarding for real too, so a debug-launched flow
             // can never present a dead "Yakunlash".
             BolajonPermissionsFlowView {
+                OilaTelemetryService.shared.beginAwaitingContact()
                 sessionStore.setOnboardingCompleted(true)
             }
         case .bolajonHome:

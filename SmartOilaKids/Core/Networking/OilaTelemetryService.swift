@@ -30,6 +30,13 @@ enum LinkHealth: Equatable {
     case degraded(offPermissions: Int)
     /// Nothing has reached the server since this date (or ever, when nil).
     case outOfContact(since: Date?)
+    /// This run is asking the server right now and nothing has answered yet — a fresh pairing, a cold
+    /// launch after a long silence, a return to the foreground. Neutral, not red: onboarding used to
+    /// hand over to Home one beat before telemetry had even started, so the first thing every newly
+    /// paired child saw was a coral "Hozir aloqa yo'q" that turned into "Ulangan" a second later
+    /// (Ibrohim, 2026-09-25). Bounded — see `OilaTelemetryService.isAwaitingFirstContact` — so an
+    /// offline phone still says so within one failed round trip.
+    case connecting
     /// The Keychain holds no device credential. Nothing can be sent and nothing will recover it.
     case noCredential
 
@@ -46,6 +53,8 @@ enum LinkHealth: Equatable {
             return String(format: L10n.tr("settings2.permissions_off_count"), offPermissions)
         case .outOfContact:
             return L10n.tr("home2.link_out_of_contact")
+        case .connecting:
+            return L10n.tr("home2.link_connecting")
         case .noCredential:
             return L10n.tr("home2.link_relink")
         }
@@ -58,14 +67,27 @@ enum LinkHealth: Equatable {
     /// child's screen agreeing with the parent's screen is the whole point.
     static let contactStaleAfter: TimeInterval = 45 * 60
 
+    /// No contact ever, or none within `contactStaleAfter`. A stamp in the future is contact (below).
+    static func isContactStale(lastContactAt: Date?, now: Date = Date()) -> Bool {
+        guard let lastContactAt else { return true }
+        return now.timeIntervalSince(lastContactAt) > contactStaleAfter
+    }
+
     /// Worst-first: a device with no credential is not "degraded", it is off.
+    ///
+    /// `awaitingContact` (`OilaTelemetryService.isAwaitingFirstContact`) only softens the ONE verdict
+    /// it can be wrong about — no contact yet, or none for a while — into `.connecting` while a round
+    /// trip is actually under way. It never hides a missing credential, and it changes nothing for a
+    /// device that has been in touch recently.
     static func decide(
         hasCredential: Bool,
         offPermissions: Int,
         lastContactAt: Date?,
+        awaitingContact: Bool = false,
         now: Date = Date()
     ) -> LinkHealth {
         guard hasCredential else { return .noCredential }
+        if awaitingContact, isContactStale(lastContactAt: lastContactAt, now: now) { return .connecting }
         guard let lastContactAt else { return .outOfContact(since: nil) }
         // A contact timestamp in the FUTURE means the child moved the clock backwards after a real
         // check-in. Treat it as contact, not as staleness: the alternative is a chip a child can turn
@@ -112,6 +134,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// token is not usable either, and "out of contact" reads to a child as a network problem they
     /// should wait out. Any answered call sets it back (`recordSuccessfulContact`).
     @Published private(set) var hasCredential = true
+    /// True from the moment a run starts asking the server until its first answer — or its first
+    /// failure, or `awaitingContactDeadline`, whichever comes first. Drives `LinkHealth.connecting`.
+    /// Ended by a FAILURE too, on purpose: an offline phone must still read "Hozir aloqa yo'q" as
+    /// soon as that is known, not after a grace period that only exists to hide the first second.
+    @Published private(set) var isAwaitingFirstContact = false
     /// The whole-device lock, DECIDED ON THE PHONE (`reevaluateLock`): the saved policy snapshot
     /// (`DeviceLockPolicySnapshot` — manual window + schedules from the last `GET /device/lock/state`)
     /// evaluated by the clock. Drives the lock overlay. Never persisted and never taken from the
@@ -249,6 +276,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var lockRefreshRequestedWhileBusy = false
     /// Consecutive `fetchLockState()` failures, driving the timer's backoff.
     private var consecutiveLockFailures = 0
+    /// Bumped by every `beginAwaitingContact()` and by `stop()`, so a deadline armed for an earlier
+    /// wait cannot end a later one.
+    private var awaitingContactGeneration = 0
     /// Consecutive server answers, on ANY telemetry route (lock poll, status, location, SOS), that
     /// refused the device token (`OilaAPIError.isCredentialRejected`) with no answered call between
     /// them. Drives the location drain's backoff (`flushLocationsOnTimer`). Cleared by
@@ -495,6 +525,29 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lastSuccessfulContactAt = storedContact > 0 ? Date(timeIntervalSince1970: storedContact) : nil
     }
 
+    /// The longest the chip may say "Ulanmoqda…" without an answer either way.
+    nonisolated static let awaitingContactDeadline: TimeInterval = 20
+
+    /// A round trip is about to be attempted and the chip should wait for it rather than guess.
+    /// Called by `start()` and by a return to the foreground after a long silence — and by the
+    /// onboarding's "Yakunlash" BEFORE it hands over to Home, because Home renders a frame before
+    /// the root's `onChange` gets to `start()`.
+    func beginAwaitingContact(deadline: TimeInterval = OilaTelemetryService.awaitingContactDeadline) {
+        awaitingContactGeneration &+= 1
+        let generation = awaitingContactGeneration
+        if !isAwaitingFirstContact { isAwaitingFirstContact = true }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, deadline) * 1_000_000_000))
+            guard let self, self.awaitingContactGeneration == generation else { return }
+            self.endAwaitingContact()
+        }
+    }
+
+    /// The wait is over: an answer (`recordSuccessfulContact`), a failure, the deadline, or `stop()`.
+    private func endAwaitingContact() {
+        if isAwaitingFirstContact { isAwaitingFirstContact = false }
+    }
+
     func start() {
         guard !isRunning else { return }
         isRunning = true
@@ -553,6 +606,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 // The one foreground hook that exists without a scene: an edge that passed while the
                 // process was suspended (its timer could not fire) takes effect here.
                 self?.reevaluateLock(reason: "foreground")
+                // Back after a long silence: the stamp is stale, and the post below is about to
+                // settle it one way or the other. Wait for it instead of flashing red first.
+                if let self, LinkHealth.isContactStale(lastContactAt: self.lastSuccessfulContactAt) {
+                    self.beginAwaitingContact()
+                }
                 await self?.postStatusForEvent()
             }
         }
@@ -646,7 +704,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lockTimer = Timer.scheduledTimer(withTimeInterval: lockInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in await self?.refreshLockOnTimer() }
         }
-        // Initial status + lock snapshot straight away.
+        // Initial status + lock snapshot straight away. The chip waits for the first of them to land.
+        beginAwaitingContact()
         Task { await postStatus() }
         Task { await refreshLock() }
     }
@@ -867,6 +926,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // reached the server.
         lastSuccessfulContactAt = nil
         UserDefaults.standard.removeObject(forKey: Self.lastContactKey)
+        awaitingContactGeneration &+= 1
+        endAwaitingContact()
         hasCredential = true
         consecutiveCredentialRejections = 0
         credentialRefusedSince = nil
@@ -1311,6 +1372,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// got an answer necessarily carried a Bearer.
     private func recordSuccessfulContact() {
         lastSuccessfulContactAt = Date()
+        endAwaitingContact()
         if !hasCredential { hasCredential = true }
         consecutiveCredentialRejections = 0
         credentialRefusedSince = nil
@@ -1679,9 +1741,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             try await service.postDeviceStatus(status)
             recordSuccessfulContact()
         } catch let error as OilaAPIError where error.requiresRePair {
+            endAwaitingContact()
             handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
         } catch {
-            // Ignore transient status-post failures — but count a refused token.
+            // Ignore transient status-post failures — but count a refused token, and stop the chip
+            // waiting: this round trip has answered "no contact".
+            endAwaitingContact()
             recordCredentialRefusal(error)
         }
     }
@@ -1757,10 +1822,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             guard isRunning, sequence == lockRefreshSequence else { return }
             applyLockState(state, timing: timing)
         } catch let error as OilaAPIError where error.requiresRePair {
+            endAwaitingContact()
             handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
         } catch {
             // Keep the saved policy on a transient failure — but stop asking at full rate. The rule
             // itself runs on: this is the offline branch, and offline is exactly where it must act.
+            endAwaitingContact()
             consecutiveLockFailures += 1
             recordCredentialRefusal(error)
             reevaluateLock(reason: "poll_failed")

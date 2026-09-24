@@ -4630,12 +4630,54 @@ final class LinkHealthTests: XCTestCase {
         XCTAssertTrue(LinkHealth.protecting.isHealthy)
         XCTAssertFalse(LinkHealth.degraded(offPermissions: 1).isHealthy)
         XCTAssertFalse(LinkHealth.outOfContact(since: nil).isHealthy)
+        XCTAssertFalse(LinkHealth.connecting.isHealthy, "waiting is not yet good news")
         XCTAssertFalse(LinkHealth.noCredential.isHealthy)
+    }
+
+    /// Ibrohim's build-27 video: "Yakunlash" → Home → a red "Hozir aloqa yo'q" for a second, then
+    /// "Ulangan". While the first round trip is under way the chip waits instead of guessing.
+    func testAFreshRunWaitingForItsFirstAnswerReadsConnecting() {
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0, lastContactAt: nil,
+                              awaitingContact: true, now: now),
+            .connecting
+        )
+        let stale = now.addingTimeInterval(-(LinkHealth.contactStaleAfter + 1))
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 3, lastContactAt: stale,
+                              awaitingContact: true, now: now),
+            .connecting, "a cold launch after a long silence waits for its first post too"
+        )
+    }
+
+    /// The wait only softens the verdict it can be wrong about.
+    func testWaitingNeverHidesAMissingCredentialOrChangesARecentContact() {
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: false, offPermissions: 0, lastContactAt: nil,
+                              awaitingContact: true, now: now),
+            .noCredential
+        )
+        let recent = now.addingTimeInterval(-60)
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0, lastContactAt: recent,
+                              awaitingContact: true, now: now),
+            .protecting
+        )
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 2, lastContactAt: recent,
+                              awaitingContact: true, now: now),
+            .degraded(offPermissions: 2)
+        )
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0, lastContactAt: nil,
+                              awaitingContact: false, now: now),
+            .outOfContact(since: nil), "once the wait is over, silence is reported as silence"
+        )
     }
 
     func testEveryStateResolvesToLocalizedCopyAndNeverARawKey() {
         for state in [LinkHealth.protecting, .degraded(offPermissions: 2),
-                      .outOfContact(since: nil), .noCredential] {
+                      .outOfContact(since: nil), .connecting, .noCredential] {
             let text = state.displayText
             XCTAssertFalse(text.isEmpty)
             XCTAssertFalse(text.contains("home2."), "raw key leaked to the UI: \(text)")
@@ -4882,6 +4924,65 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertEqual(probes.value, 1, "conclusive: ONE probe, not the two a refresh refusal needs")
         XCTAssertEqual(stub.lockStateCalls, 2, "the poll that heard it, then the one probe")
         XCTAssertFalse(service.isRunning, "the pairing's telemetry stops with it")
+    }
+
+    // MARK: The chip's first answer (build 28)
+
+    /// `start()` makes the chip wait (`LinkHealth.connecting`); the first answered call ends it.
+    func testARunAwaitsItsFirstContactUntilAnAnswerLands() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)]) // status posts succeed
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        XCTAssertTrue(service.isAwaitingFirstContact, "set synchronously, before any request")
+        // The test host's Keychain holds no token, so the credential half is pinned to "present" —
+        // what is under test is the contact half.
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0,
+                              lastContactAt: service.lastSuccessfulContactAt,
+                              awaitingContact: service.isAwaitingFirstContact),
+            .connecting
+        )
+        let answered = await waitUntil { service.lastSuccessfulContactAt != nil }
+        XCTAssertTrue(answered)
+        XCTAssertFalse(service.isAwaitingFirstContact)
+    }
+
+    /// An offline phone must still say so as soon as that is known — a failed round trip ends the
+    /// wait at once, it does not sit out the deadline.
+    func testAFailedRoundTripEndsTheWaitAtOnce() async {
+        let offline = URLError(.notConnectedToInternet)
+        let stub = Stub(lockAnswers: [offline], statusError: offline)
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        let ended = await waitUntil(timeout: 3) { !service.isAwaitingFirstContact }
+        XCTAssertTrue(ended)
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: true, offPermissions: 0,
+                              lastContactAt: service.lastSuccessfulContactAt,
+                              awaitingContact: service.isAwaitingFirstContact),
+            .outOfContact(since: nil)
+        )
+    }
+
+    func testTheWaitEndsOnItsDeadlineAndOnStop() async {
+        let service = OilaTelemetryService(service: Stub(lockAnswers: [URLError(.notConnectedToInternet)]))
+        service.beginAwaitingContact(deadline: 0.05)
+        XCTAssertTrue(service.isAwaitingFirstContact)
+        let expired = await waitUntil(timeout: 2) { !service.isAwaitingFirstContact }
+        XCTAssertTrue(expired, "bounded: never a grey chip forever")
+
+        // A later wait is not ended by an earlier wait's deadline…
+        service.beginAwaitingContact(deadline: 0.05)
+        service.beginAwaitingContact(deadline: 60)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(service.isAwaitingFirstContact)
+
+        // …and `stop()` (unpair) ends any wait.
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)], statusError: URLError(.timedOut))
+        let (running, _, _) = start(stub)
+        running.beginAwaitingContact(deadline: 60)
+        running.stop()
+        XCTAssertFalse(running.isAwaitingFirstContact)
     }
 
     func testAProbeAnsweringWithARefusedTokenKeepsThePairing() async {
