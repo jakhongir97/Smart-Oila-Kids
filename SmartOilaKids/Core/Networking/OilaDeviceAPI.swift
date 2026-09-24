@@ -711,10 +711,12 @@ protocol OilaDeviceServicing {
 
 // MARK: - Client
 
-/// Background time for one `POST /device/sos` (see `OilaDeviceClient.sendSOS`). Begun and ended on
-/// the main thread, where UIKit also calls the expiration handler, so the three can never overlap.
+/// Background time for an SOS: one `POST /device/sos` (`OilaDeviceClient.sendSOS`), and one whole
+/// send of an outbox entry, its retries and its removal once delivered included
+/// (`OilaTelemetryService.sendSOSEntry`). Begun and ended on the main thread, where UIKit also calls
+/// the expiration handler, so the three can never overlap.
 @MainActor
-private final class SOSRequestKeepAlive {
+final class SOSRequestKeepAlive {
     static func begin() -> SOSRequestKeepAlive {
         let keepAlive = SOSRequestKeepAlive()
         keepAlive.identifier = UIApplication.shared.beginBackgroundTask(withName: "oila.sos") {
@@ -957,7 +959,10 @@ final class OilaDeviceClient: OilaDeviceServicing {
         // wake (location does not keep this app running: `appDidSuspend` in the 2026-09-24 syslog).
         // Background time lets the request finish. Here in the client, so every SOS POST gets it:
         // the press's own attempts (`OilaTelemetryService.deliverSOSDurably`, which has the alert in
-        // the persisted outbox before this runs) and the outbox's replays (`flushPendingSOS`).
+        // the persisted outbox before this runs) and the outbox's replays (`flushPendingSOS`). It
+        // ends before control returns to the caller, so the telemetry service holds its own around
+        // the whole send as well (`sendSOSEntry`): the backoff between attempts, and the removal of
+        // a delivered alert from the outbox.
         let keepAlive = await SOSRequestKeepAlive.begin()
         do {
             _ = try await requestJSON(path: "device/sos", method: .post, body: body, authorized: true)

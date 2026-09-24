@@ -460,6 +460,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// only, deliberately: a new process starts with none, so an entry whose sender died with the old
     /// process (suspended mid-POST, then killed) is replayed by the next launch.
     private var sosSends: [UUID: Task<Error?, Never>] = [:]
+    /// Marked entries a flush has passed over (see `flushPendingSOSOnce`). A send that then fails
+    /// re-runs the flush once, straight away: the retry that flush was asked for (the network just
+    /// came back) must not wait out the next 30 s tick, or the next wake.
+    private var sosSkippedWhileInFlight = Set<UUID>()
     /// Whether this process has read the persisted outbox yet. The first write must come after it,
     /// or it would replace the previous launch's undelivered alerts. See `writeAheadSOS`.
     private var didRestorePendingSOS = false
@@ -496,6 +500,13 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// Injection seam for the fix CoreLocation is holding (`CLLocationManager.location`, which is not
     /// otherwise injectable). nil reads the real manager. Only the SOS outbox replay reads it.
     var heldLocationOverride: (() -> CLLocation?)?
+    /// Background time for one whole SOS send (`sendSOSEntry`): begins it and returns the call that
+    /// ends it. Injection seam so a test can see when it ends: after a delivered alert has left the
+    /// persisted outbox, never before.
+    var sosSendKeepAlive: @MainActor () -> @MainActor () -> Void = {
+        let keepAlive = SOSRequestKeepAlive.begin()
+        return { keepAlive.end() }
+    }
 
     init(service: OilaDeviceServicing = OilaDeviceClient.shared, lockRuntime: OilaLockRuntime? = nil) {
         self.service = service
@@ -937,6 +948,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // The outbox is child-scoped: a queued SOS must never be delivered against a NEW pairing.
         pendingSOS.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.pendingSOSKey)
+        sosSkippedWhileInFlight.removeAll()
         // Contact history belongs to the pairing that made it. Leaving it behind would let a fresh
         // pairing inherit the previous child's "last seen" and render as healthy before it has ever
         // reached the server.
@@ -978,9 +990,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// While the press's own attempts run, the entry is marked in flight (`sosSends`), so the flush in
     /// this same process (the 30 s tick, a restored connection) leaves it alone instead of alerting
     /// the parent twice. The attempts are the ones the two SOS sheets used to run themselves — up to
-    /// three, with a short backoff — and each request holds background time
-    /// (`OilaDeviceClient.sendSOS`). Delivered, the entry is removed; failed, the mark is cleared and
-    /// the entry stays for the flush.
+    /// three, with a short backoff — and the whole send holds background time (`sendSOSEntry`): each
+    /// request, the backoff between them, and the outbox write after. Delivered, the entry is
+    /// removed; failed, the mark is cleared and the entry stays for the flush, which runs again at
+    /// once if it passed over this entry while it was marked.
     ///
     /// A press within `sosDuplicateWindow` of a still-undelivered entry is the same emergency: it
     /// updates that entry (newer location and battery) instead of stacking a second alert. If that
@@ -1043,13 +1056,32 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// length and, when it delivers, removed from the persisted outbox. Both happen inside the task,
     /// before anyone waiting on it (`deliverSOSDurably`) hears the answer, so a waiter never finds the
     /// mark of a send that has ended, nor the entry of one that delivered.
+    ///
+    /// Under background time from start to finish. The client's own, per request, ends before
+    /// control is back here, and two stretches in between used to run without any: the backoff
+    /// between a press's attempts, where a suspended app left the next attempt for some later wake,
+    /// and the removal of a delivered alert. Suspended and then killed before that removal, the
+    /// process left behind an alert the server already had, and the next launch replayed it: a
+    /// second "SOS" on the parent's phone, hours after the first, with the position at replay time.
     private func sendSOSEntry(_ id: UUID, _ send: @escaping @MainActor () async -> Error?) async -> Error? {
         let task = Task { @MainActor [self] () -> Error? in
+            let endKeepAlive = sosSendKeepAlive()
+            defer { endKeepAlive() }
             let failure = await send()
             sosSends[id] = nil
+            let flushPassedItOver = sosSkippedWhileInFlight.remove(id) != nil
             if failure == nil {
                 pendingSOS.removeAll { $0.id == id }
                 persistPendingSOS()
+            } else if flushPassedItOver, isRunning {
+                // A flush was asked for while this send had the entry (the network came back while
+                // the last attempt still hung on the old path) and let it be. Run it again now, once;
+                // under background time of its own, begun before this send's ends.
+                let endRetryKeepAlive = sosSendKeepAlive()
+                Task { @MainActor [self] in
+                    await flushPendingSOS()
+                    endRetryKeepAlive()
+                }
             }
             return failure
         }
@@ -1120,13 +1152,16 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
         for entry in batch {
             // In flight: a press's own attempts are sending it right now (`deliverSOSDurably`), and a
-            // POST beside them would alert the parent twice. If they fail they clear the mark, and a
-            // later flush sends it.
-            guard sosSends[entry.id] == nil,
-                  // Re-read, not the snapshot: an earlier send in this loop was an await, and meanwhile
-                  // the entry may have been delivered by its press, updated by a second press, or
-                  // dropped by `stop()`.
-                  let current = pendingSOS.first(where: { $0.id == entry.id }) else { continue }
+            // POST beside them would alert the parent twice. If they fail they clear the mark and,
+            // because this flush passed the entry over, run the flush again (`sendSOSEntry`).
+            if sosSends[entry.id] != nil {
+                sosSkippedWhileInFlight.insert(entry.id)
+                continue
+            }
+            // Re-read, not the snapshot: an earlier send in this loop was an await, and meanwhile the
+            // entry may have been delivered by its press, updated by a second press, or dropped by
+            // `stop()`.
+            guard let current = pendingSOS.first(where: { $0.id == entry.id }) else { continue }
             guard Date().timeIntervalSince(current.queuedAt) <= sosMaxAge else {
                 pendingSOS.removeAll { $0.id == entry.id } // too stale to be useful — drop it
                 persistPendingSOS()

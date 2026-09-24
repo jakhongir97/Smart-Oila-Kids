@@ -6161,6 +6161,9 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertEqual(stub.sentSOS.count, 3, "the press's own three attempts")
         XCTAssertTrue(service.hasUndeliveredSOS)
         XCTAssertEqual(persistedSOS().map(\.context), [press], "still in the outbox for the flush")
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(stub.sentSOS.count, 3,
+                       "no flush passed it over, so none runs again at once: the retry is the tick's")
 
         stub.sosAnswer = nil  // the network is back; the next tick lands
         await service.flushPendingSOS()
@@ -6297,6 +6300,88 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertNil(failure)
         XCTAssertEqual(persistedSOS().map(\.id), [earlier.id],
                        "the press was written beside the previous launch's alert, not over it")
+    }
+
+    /// What happened, in order, across the keep-alive seam (main actor) and the stub (off it).
+    private final class EventLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [String] = []
+        func append(_ event: String) { lock.lock(); entries.append(event); lock.unlock() }
+        var events: [String] { lock.lock(); defer { lock.unlock() }; return entries }
+        func count(_ event: String) -> Int { events.filter { $0 == event }.count }
+    }
+
+    func testEverySOSSendHoldsBackgroundTimeThroughItsBackoffAndUntilTheOutboxIsWritten() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let log = EventLog()
+        stub.sosAnswer = { number in
+            log.append("POST")
+            if number <= 3 { throw URLError(.notConnectedToInternet) }
+        }
+        let service = await startSettled(stub)
+        defer { service.stop() }
+        service.sosSendKeepAlive = { [self] in
+            log.append("begin")
+            return { log.append("end, outbox \(self.persistedSOS().count)") }
+        }
+
+        // A press whose three attempts fail: ONE stretch of background time spans them. The client's
+        // per-request time ends with each request, and the app used to be suspendable in the backoff.
+        let failed = await service.deliverSOSDurably(pressContext())
+        XCTAssertNotNil(failed)
+        XCTAssertEqual(log.events, ["begin", "POST", "POST", "POST", "end, outbox 1"],
+                       "the backoff between attempts is covered, not only each request")
+
+        // The flush replays it. Delivered, it is out of the persisted outbox BEFORE the time is given
+        // back: a process suspended and killed in between used to replay an alert the server had.
+        await service.flushPendingSOS()
+        XCTAssertEqual(Array(log.events.dropFirst(5)), ["begin", "POST", "end, outbox 0"])
+
+        // A press delivered at once: the same.
+        let delivered = await service.deliverSOSDurably(pressContext())
+        XCTAssertNil(delivered)
+        XCTAssertEqual(Array(log.events.dropFirst(8)), ["begin", "POST", "end, outbox 0"])
+    }
+
+    func testAFlushThatPassedOverAPressOnTheWireRunsAgainAsSoonAsThatPressFails() async {
+        // The network comes back while the press's LAST attempt still hangs on the old path. The
+        // restored-path flush must leave that entry alone, and then must not leave it for the next
+        // 30 s tick (or, backgrounded, the next wake) once that attempt fails.
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let gate = ReleaseGate()
+        stub.sosAnswer = { number in
+            switch number {
+            case 1, 2: throw URLError(.notConnectedToInternet)
+            case 3: await gate.wait(); throw URLError(.networkConnectionLost)
+            default: return
+            }
+        }
+        let service = await startSettled(stub)
+        defer { service.stop() }
+        let log = EventLog()
+        service.sosSendKeepAlive = {
+            log.append("begin")
+            return { log.append("end") }
+        }
+
+        let press = Task { await service.deliverSOSDurably(self.pressContext()) }
+        let lastAttemptOnTheWire = await waitUntil { stub.sentSOS.count == 3 }
+        XCTAssertTrue(lastAttemptOnTheWire)
+        await service.flushPendingSOS()  // connectivity restored
+        XCTAssertEqual(stub.sentSOS.count, 3, "passed over: no POST beside the press's")
+
+        gate.open()
+        let failure = await press.value
+        XCTAssertNotNil(failure)
+
+        let delivered = await waitUntil(timeout: 2) { !service.hasUndeliveredSOS }
+        XCTAssertTrue(delivered, "the flush that passed it over runs again now, not at the next tick")
+        XCTAssertEqual(stub.sentSOS.count, 4, "once")
+        XCTAssertEqual(stub.deliveredSOSCount, 1)
+        XCTAssertTrue(persistedSOS().isEmpty)
+        let balanced = await waitUntil(timeout: 2) { log.count("end") == log.count("begin") }
+        XCTAssertTrue(balanced, "every stretch of background time is given back, the re-run's included")
+        XCTAssertEqual(log.count("begin"), 3, "the press, the re-run flush, and its send")
     }
 
     // MARK: A refused token: the location drain backs off, the chip eventually says why
