@@ -194,8 +194,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var isObservingExtensionLockEdge = false
     /// Clock / time-zone change observers, registered in `start()`.
     private var lockClockObservers: [NSObjectProtocol] = []
-    /// The edge activities last handed to `lockRuntime.armEdges`, so a re-evaluation every 30 s
-    /// talks to `DeviceActivityCenter` only when the plan changed.
+    /// The edge activities (and the zone they were armed in) last armed IN FULL by
+    /// `lockRuntime.armEdges`, so a re-evaluation every 30 s talks to `DeviceActivityCenter` only
+    /// when the plan changed. Dropped whenever the armed set may have changed behind this process
+    /// (the extension re-armed, the clock or zone moved) or a start failed.
     private var lastArmedEdgeSignature: [String]?
     /// Whether the last `lock_clock` line said the clock was moved; logged on change only.
     private var lastLoggedClockTamper: Bool?
@@ -583,7 +585,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 if note.name == .NSSystemTimeZoneDidChange { NSTimeZone.resetSystemTimeZone() }
                 let reason = note.name == .NSSystemTimeZoneDidChange ? "time_zone_changed" : "clock_changed"
-                Task { @MainActor [weak self] in self?.reevaluateLock(reason: reason) }
+                Task { @MainActor [weak self] in self?.handleClockOrZoneChange(reason: reason) }
             }
         }
 
@@ -1648,18 +1650,21 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // The extension may have evaluated an edge a few seconds AHEAD of the clock (a callback that
         // fired early is evaluated at its own edge); this process must not undo that in the gap.
         var evaluationTime = trustedNow
-        if let evaluated = lockRuntime.store.lastEdgeEvaluatedAt(), evaluated > trustedNow,
+        let extensionEvaluatedAt = lockRuntime.store.lastEdgeEvaluatedAt()
+        if let evaluated = extensionEvaluatedAt, evaluated > trustedNow,
            evaluated.timeIntervalSince(trustedNow) <= DeviceLockEdgeMonitoring.earlyCallbackTolerance {
             evaluationTime = evaluated
         }
         let calendar = lockRuntime.calendar()
         let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
-        // Edges are the instants the answer FLIPS, so while locked the first one is where the episode
-        // ends: `DeviceLockPolicy.episodeEnd`, computed once for both uses.
-        let edges = DeviceLockPolicy.edges(
-            after: evaluationTime, horizon: DeviceLockPolicy.episodeSearchHorizon, snapshot: snapshot, calendar: calendar
+        // The same planning path as the extension's. Edges are the instants the answer FLIPS, so while
+        // locked the first one is where the episode ends (`DeviceLockPolicy.episodeEnd`) — unless it
+        // is only a legacy lock's own ceiling, which the cover does not promise.
+        let outlook = DeviceLockEdgeMonitoring.outlook(
+            snapshot: snapshot, evaluationTime: evaluationTime, trustedNow: trustedNow, wallNow: wallNow, calendar: calendar
         )
-        let endsAt = locked ? edges.first : nil
+        let edges = outlook.edges
+        let endsAt = locked && snapshot.manualEndIsCeiling != true ? edges.first : nil
 
         lockDecisionKnown = true
         let changed = locked != isLocked
@@ -1669,11 +1674,19 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         armLockEdgeTimer(next: edges.first, trustedNow: trustedNow)
 
         let skew = trustedNow.timeIntervalSince(wallNow)
-        let armable = edges.filter { $0.timeIntervalSince(evaluationTime) <= DeviceLockEdgeMonitoring.horizon }
-        let entries = DeviceLockEdgeMonitoring.plan(dsn: snapshot.dsn, edges: armable, now: trustedNow, skew: skew)
-        let signature = entries.map { "\($0.name)@\(Int($0.wallStart.timeIntervalSince1970 / 60))" }
-        if signature != lastArmedEdgeSignature, lockRuntime.armEdges(entries) {
-            lastArmedEdgeSignature = signature
+        // Besides the entries, what can change the armed set behind this process: the zone (the
+        // activities are zone-less local date components, which iOS re-reads in a new zone while the
+        // plan in absolute time is unchanged — only `arm`'s read-back sees it) and an extension
+        // re-arm since (from the snapshot IT read; its notification is lost while this app is
+        // suspended, its evaluation stamp is not).
+        let signature = [calendar.timeZone.identifier, "\(extensionEvaluatedAt?.timeIntervalSince1970 ?? 0)"]
+            + outlook.entries.map { "\($0.name)@\(Int($0.wallStart.timeIntervalSince1970 / 60))" }
+        if signature != lastArmedEdgeSignature {
+            // Remembered only when every start succeeded: a failed start (too many activities,
+            // FamilyControls not ready yet at launch) is retried by the next evaluation, and the
+            // plan it half-applied is never mistaken for one in place.
+            let result = lockRuntime.armEdges(outlook.entries)
+            lastArmedEdgeSignature = result?.failures == 0 ? signature : nil
         }
         logLockClock(snapshot: snapshot, skew: skew)
 
@@ -1690,9 +1703,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// The monitor extension evaluated an edge and wrote the OS (its Darwin notification). Follow it,
     /// then tell the enforcement side — in that order, so it never re-applies the old answer.
+    ///
+    /// The extension re-armed from the snapshot IT read, which may be the one this process has just
+    /// replaced: its `arm` can have stopped entries of the newer plan that had not started yet. The
+    /// arm cache is therefore dropped, so this evaluation compares the armed set against the plan.
     func handleExtensionLockEdge() {
+        lastArmedEdgeSignature = nil
         reevaluateLock(reason: "extension")
         NotificationCenter.default.post(name: Self.oilaLockExtensionDidEvaluate, object: nil)
+    }
+
+    /// The phone's clock or zone changed. The armed activities are local date components, so the OS
+    /// may now read them at different instants from the ones this process remembers arming: the
+    /// arm cache is dropped and the armed set compared again, then the rule re-decided.
+    func handleClockOrZoneChange(reason: String) {
+        lastArmedEdgeSignature = nil
+        reevaluateLock(reason: reason)
     }
 
     /// One one-shot timer, half a second past the next edge (so the re-check lands on its far side).
@@ -1740,8 +1766,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// A current backend's payload is taken as data (`carriesLockPolicy`). An OLD backend's bare
     /// `isLocked` becomes a window from now to its `lockedUntil`, never more than 8 h — refreshed by
     /// every poll while online, so a longer lock keeps being enforced, and ending by itself offline
-    /// (the 2026-09-16 rule) instead of the permanent lock this build exists to end. A `manualLock`
-    /// that is present but unreadable counts as running only when `manualLockEnabled` says so.
+    /// (the 2026-09-16 rule) instead of the permanent lock this build exists to end; an old
+    /// backend's `schedules: []` does not make it a current one. A `manualLock` that is present but
+    /// unreadable counts as running only when `manualLockEnabled` says so. A window whose end is
+    /// only that 8 h ceiling is marked `manualEndIsCeiling`, so the cover shows no sliding time.
     nonisolated static func lockPolicySnapshot(
         from state: OilaLockState,
         dsn: String,
@@ -1759,7 +1787,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             }
             return DeviceLockPolicySnapshot(
                 dsn: dsn, manualLock: manual, schedules: state.schedules ?? [], serverTime: state.serverTime,
-                receivedAt: anchor.wall, clock: anchor, isLegacy: false
+                receivedAt: anchor.wall, clock: anchor, isLegacy: false,
+                // The held window's end is the phone's own ceiling, renewed by every poll.
+                manualEndIsCeiling: manual != nil && state.manualLock == .unreadable ? true : nil
             )
         }
         guard let legacyLocked = state.isDeviceLocked else { return nil }
@@ -1768,9 +1798,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         let manual = legacyLocked
             ? DeviceLockManualWindow(startsAt: now, endsAt: min(state.lockedUntil ?? heldWindow.endsAt, heldWindow.endsAt))
             : nil
+        // Renewed by every poll, the ceiling is no end to show; a `lockedUntil` inside it is.
+        let endIsCeiling = manual.map { window in state.lockedUntil.map { $0 > window.endsAt } ?? true }
         return DeviceLockPolicySnapshot(
             dsn: dsn, manualLock: manual, schedules: [], serverTime: nil,
-            receivedAt: anchor.wall, clock: anchor, isLegacy: true
+            receivedAt: anchor.wall, clock: anchor, isLegacy: true, manualEndIsCeiling: endIsCeiling
         )
     }
 
@@ -1812,9 +1844,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 let clock = lockRuntime.clock
                 let now = clock.wallNow()
                 let monotonic = clock.monotonicNanos()
+                let legacyEnd = date(Self.legacyLockEndsAtKey)
                 let window = Self.migratedLegacyWindow(
                     wasLocked: defaults.bool(forKey: Self.legacyLockStateKey),
-                    endsAt: date(Self.legacyLockEndsAtKey),
+                    endsAt: legacyEnd,
                     confirmedAt: date(Self.legacyLockConfirmedAtKey),
                     now: now
                 )
@@ -1828,7 +1861,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                         serverTime: nil, sentWall: now, sentMonotonicNanos: monotonic,
                         receivedMonotonicNanos: monotonic, bootSessionID: clock.bootSessionID()
                     ),
-                    isLegacy: true
+                    isLegacy: true,
+                    // Build 24 showed only the server's own end; its 8 h ceiling was never on the cover.
+                    manualEndIsCeiling: window.map { window in legacyEnd.map { $0 > window.endsAt } ?? true }
                 ))
                 let heldFor = window.map { Int($0.endsAt.timeIntervalSince(now)) } ?? 0
                 Self.lockLog.notice("lock_migration from=build24 locked=\(window == nil ? 0 : 1, privacy: .public) held_s=\(heldFor, privacy: .public)")
@@ -1852,12 +1887,21 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             let monotonic = clock.monotonicNanos()
             return LockPollTiming(sentWall: clock.wallNow(), sentMonotonicNanos: monotonic, receivedMonotonicNanos: monotonic)
         }()
+        // A round trip too long to trust (the app suspended between the answer and this line)
+        // keeps the clock the phone already had, within what the server's time still bounds.
+        if timing.receivedMonotonicNanos > timing.sentMonotonicNanos {
+            let tripSeconds = Double(timing.receivedMonotonicNanos - timing.sentMonotonicNanos) / 1_000_000_000
+            if tripSeconds > DeviceLockClock.maximumRoundTrip {
+                Self.lockLog.notice("lock_clock long_round_trip_s=\(Int(tripSeconds), privacy: .public) midpoint_ignored=1")
+            }
+        }
         let anchor = DeviceLockClock.anchor(
             serverTime: state.serverTime,
             sentWall: timing.sentWall,
             sentMonotonicNanos: timing.sentMonotonicNanos,
             receivedMonotonicNanos: timing.receivedMonotonicNanos,
-            bootSessionID: clock.bootSessionID()
+            bootSessionID: clock.bootSessionID(),
+            previous: lockRuntime.store.load()?.clock
         )
         let dsn = DeviceLockEdgeActivityIdentifier.normalize(lockRuntime.pairedDSN() ?? "unpaired")
         if let snapshot = Self.lockPolicySnapshot(from: state, dsn: dsn, anchor: anchor) {
@@ -1899,8 +1943,9 @@ struct OilaLockRuntime {
     var pairedDSN: () -> String?
     /// Writes the two whole-device keys on the default store (only when Screen Time is authorized).
     var applyWholeDevice: (Bool) -> Void
-    /// Arms the edge activities. False when it could not (not authorized), so the plan is retried.
-    var armEdges: ([DeviceLockEdgeMonitoring.Entry]) -> Bool
+    /// Arms the edge activities. nil when it could not try (not authorized); a result with failures
+    /// when a start was refused. Either way the plan is retried by the next evaluation.
+    var armEdges: ([DeviceLockEdgeMonitoring.Entry]) -> DeviceLockEdgeMonitoring.ArmResult?
     var stopAllEdges: () -> Void
     /// Where build 24 kept its lock keys.
     var legacyDefaults: UserDefaults
@@ -1921,12 +1966,12 @@ struct OilaLockRuntime {
                 }
             },
             armEdges: { entries in
-                guard OilaLockRuntime.screenTimeAuthorized() else { return false }
+                guard OilaLockRuntime.screenTimeAuthorized() else { return nil }
                 let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: Date())
                 OilaTelemetryService.lockLog.notice(
                     "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public)"
                 )
-                return true
+                return result
             },
             stopAllEdges: { DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter()) },
             legacyDefaults: .standard,
