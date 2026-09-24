@@ -300,8 +300,10 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     ///
     /// Two guards, both from the review of 2026-09-16:
     ///  * ONE request on the wire across processes — `ScreenTimeUsageUploadLock`. The app uploads on
-    ///    the Darwin notification `record` just posted, so without the lock the two bodies race and
-    ///    the older one can land last (each day REPLACES the server's copy).
+    ///    the Darwin notification `record` just posted, so without it the two bodies race and the
+    ///    older one can land last (each day REPLACES the server's copy). A lease since build 28:
+    ///    nothing is held while the request is out, so this process can be suspended mid-request
+    ///    without iOS killing it for a held file lock (0xDEAD10CC).
     ///  * At most one extension upload per `minimumInterval` unless `force`: a freshly labelled app
     ///    with hours of usage today climbs the whole staircase in back-to-back callbacks
     ///    (`includesPastActivity`), and that climb only ever happens while the parent is holding the
@@ -312,11 +314,19 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
             Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(rate_limited)")
             return
         }
-        guard let lock = ScreenTimeUsageUploadLock.acquire(timeout: 6) else {
-            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_busy)")
+        let lease: ScreenTimeUsageUploadLock
+        switch Self.claimUploadLease(retrying: force) {
+        case .claimed(let claimed):
+            lease = claimed
+        case .busy(let holder, let remaining):
+            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_busy) holder=\(holder, privacy: .public) remaining_s=\(Int(remaining.rounded(.up)), privacy: .public)")
+            return
+        case .unavailable(let code):
+            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(lock_unavailable errno=\(code, privacy: .public))")
             return
         }
-        defer { lock.release() }
+        defer { lease.release() }
+        // Read AFTER the claim: whatever the ledger holds now is the newest body anyone can send.
         let days = ScreenTimeUsageReport.days(ledger: usageLedger)
         let credential = LocationPushSharedCredential.read()
         let outcome = ScreenTimeUsageExtensionUploader.upload(days: days, credential: credential.payload)
@@ -329,6 +339,24 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     }
 
     static let minimumUploadInterval: TimeInterval = 60
+
+    /// One try. A busy lease is almost always the app, which sends the whole ledger and — having
+    /// heard the notification `record` just posted — sends it once more when its request is done,
+    /// so this step is not lost by skipping. Build 27 slept up to six seconds here inside the
+    /// callback, and iOS delivers the next callback only after this one returns. Only the day's
+    /// final figure (`interval_end`, `retrying`) is worth a short wait: about a second, nothing
+    /// held while waiting.
+    static func claimUploadLease(retrying: Bool) -> ScreenTimeUsageUploadLock.Claim {
+        let duration = ScreenTimeUsageExtensionUploader.requestTimeout + ScreenTimeUsageUploadLock.releaseMargin
+        var claim = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: duration)
+        var retries = retrying ? 10 : 0
+        while retries > 0, case .busy = claim {
+            Thread.sleep(forTimeInterval: 0.1)
+            claim = ScreenTimeUsageUploadLock.claim(owner: .monitorExtension, duration: duration)
+            retries -= 1
+        }
+        return claim
+    }
 }
 
 private extension SmartOilaKidsDeviceActivityMonitorExtension {

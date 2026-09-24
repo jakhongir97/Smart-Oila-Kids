@@ -107,6 +107,11 @@ enum ScreenTimeUsageReport {
 /// Synchronous on purpose: a `DeviceActivityMonitor` callback returns and the process may be
 /// suspended at once, so the request is awaited on a semaphore, bounded by `timeout`.
 enum ScreenTimeUsageExtensionUploader {
+    /// The whole request, not only the idle timeout: the semaphore gives up at the same moment and
+    /// cancels it. Eight seconds (ten until build 28) because the monitor callback waits on it, and
+    /// the extension's upload lease (`ScreenTimeUsageUploadLock`) must outlast it.
+    static let requestTimeout: TimeInterval = 8
+
     enum Outcome: Equatable {
         /// 2xx only. A 4xx/5xx is `failed` — the app will resend, and the log must not read
         /// "sent" for a body the server refused.
@@ -118,7 +123,7 @@ enum ScreenTimeUsageExtensionUploader {
     static func upload(
         days: [ScreenTimeUsageReportDay],
         credential: LocationPushSharedCredential.Payload?,
-        timeout: TimeInterval = 10,
+        timeout: TimeInterval = requestTimeout,
         session: URLSession = .shared
     ) -> Outcome {
         guard !days.isEmpty else { return .skipped(reason: "no_days") }

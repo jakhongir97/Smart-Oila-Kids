@@ -62,6 +62,26 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     /// tokens, on iOS 17.4+) — the condition for listing `ios.other` in the app-list publish.
     typealias TotalMonitoringAction = () -> Bool
 
+    /// The app's background time, as one usage upload sees it (`uploadUsageNow`). Injected so a test
+    /// can refuse it, run it short, or end it mid-upload — the three ways build 27 could still be
+    /// suspended in the middle of a request.
+    struct BackgroundTime {
+        /// `beginBackgroundTask(withName:expirationHandler:)`. UIKit calls the handler on the main
+        /// thread, moments before it suspends the app.
+        var begin: @MainActor (_ name: String, _ expiration: @escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier
+        var end: @MainActor (UIBackgroundTaskIdentifier) -> Void
+        /// `backgroundTimeRemaining`: effectively unbounded while the app is in front.
+        var remaining: @MainActor () -> TimeInterval
+        var isForeground: @MainActor () -> Bool
+
+        static let live = BackgroundTime(
+            begin: { name, expiration in UIApplication.shared.beginBackgroundTask(withName: name, expirationHandler: expiration) },
+            end: { UIApplication.shared.endBackgroundTask($0) },
+            remaining: { UIApplication.shared.backgroundTimeRemaining },
+            isForeground: { UIApplication.shared.applicationState == .active }
+        )
+    }
+
     static let shared = ScreenTimeEnforcementCoordinator()
 
     /// How often the installed-app catalogue is re-probed. A probe is ~50 synchronous
@@ -102,7 +122,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         totalMonitoringPossible: TotalMonitoringAction? = nil,
         usageLedger: ScreenTimeUsageLedger = ScreenTimeUsageLedger(),
         userDefaults: UserDefaults = .standard,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        usageUploadLockDirectory: URL? = ScreenTimeUsageUploadLock.sharedDirectory,
+        backgroundTime: BackgroundTime? = nil
     ) {
         self.lockStateAction = lockState ?? {
             let service = OilaTelemetryService.shared
@@ -171,6 +193,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         self.totalMonitoringPossible = totalMonitoringPossible ?? {
             ScreenTimeUsageMonitoring.isSupported && ScreenTimeUsageTotalCategoryStore().hasTokens
         }
+        self.usageUploadLockDirectory = usageUploadLockDirectory
+        self.backgroundTime = backgroundTime ?? .live
         self.usageLedger = usageLedger
         self.userDefaults = userDefaults
         self.now = now
@@ -327,68 +351,125 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
 
     /// Send what the ledger holds. One request in flight at a time (the backend asked for it —
     /// an older report landing after a newer one lowers today's figure and lifts a limit).
+    ///
+    /// This runs mostly while the app is in the BACKGROUND (the ledger's Darwin notification), and
+    /// until build 28 it could be suspended holding the upload lock — 0xDEAD10CC, the background
+    /// crash of builds 25 and 26 (see `ScreenTimeUsageUploadLock`). Build 27 wrapped the request in
+    /// background time but kept three gaps: the lock was taken before the time was asked for, a
+    /// refused request (`.invalid`) went ahead anyway, and an expired upload started a "coalesced"
+    /// one straight away with the time already spent. So, in this order:
+    /// 1. Background time first. Refused, or too little left to send → nothing starts. The next
+    ///    trigger reads the whole ledger again, so nothing is lost by waiting for it.
+    /// 2. Then the cross-process lease — a record, not a held lock — polled here on the main actor,
+    ///    where the expiration handler also runs, so nothing can be claimed after it has let go.
+    /// 3. The body is built AFTER the claim, so the sender sends the newest ledger.
+    /// 4. The request is cancelled at a hard deadline inside the lease, and when iOS ends the time.
+    /// 5. An expired run starts nothing more; the next foreground (`refreshNow`) sends what is owed.
     func uploadUsageNow(reason: String) async {
         guard AppRuntime.screenTimeFeaturesEnabled, let dsn = currentDSN else { return }
         guard !isUploadingUsage else {
             uploadRequestedWhileBusy = true
             return
         }
-        let days = ScreenTimeUsageReport.days(ledger: usageLedger, now: now())
+        // Checked before anything is asked of the system, so a call with nothing new costs nothing.
+        let owed = ScreenTimeUsageReport.days(ledger: usageLedger, now: now())
         // Said out loud: a phone that never armed (nothing picked) sends nothing, and until build 26
         // that silence was exactly what "the web shows 0 minutes" looked like in the log.
-        guard !days.isEmpty else {
+        guard !owed.isEmpty else {
             Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=skipped(no_days)")
             return
         }
         // Nothing changed since the last accepted report: the server already holds this.
-        let signature = Self.usageSignature(days)
-        guard signature != lastUploadedUsageSignature else { return }
-
-        isUploadingUsage = true
-        // The monitor extension sends the same route from its own process; one body on the wire
-        // at a time is the backend's rule (see `ScreenTimeUsageUploadLock`).
-        guard let lock = await ScreenTimeUsageUploadLock.acquire(timeout: 15) else {
-            isUploadingUsage = false
-            uploadRequestedWhileBusy = true
-            Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=lock_busy")
+        guard Self.usageSignature(owed) != lastUploadedUsageSignature else { return }
+        // iOS has already ended this background run's time once. Asking again is how build 27 could
+        // be suspended mid-request, and `backgroundTimeRemaining` is not trusted to say so on its own.
+        if backgroundTime.isForeground() {
+            usageBackgroundTimeSpent = false
+        } else if usageBackgroundTimeSpent {
+            Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=deferred(background_time_spent)")
             return
         }
-        // The lock is a `flock` on a file in the App Group container, and iOS kills a process that
-        // is suspended holding one (0xDEAD10CC — seen 2026-09-24 17:51: this upload runs on the
-        // ledger's Darwin notification, usually while the app is in the background). A background
-        // task keeps the process running until the request is done; if iOS ends that time first,
-        // the lock is released before the suspension instead of being carried into it.
-        // The request is cancelled with it: once the lock is gone the extension may send a newer
-        // body, and this older one must not land after it.
-        var request: Task<DeviceApplicationUsageReportResponse, Error>?
-        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "oila.usage.upload") {
-            request?.cancel()
-            lock.release()
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
-            }
+
+        isUploadingUsage = true
+        let attempt = UsageUploadAttempt(backgroundTime: backgroundTime)
+        // 1.
+        guard attempt.begin(onExpiry: { [weak self] in self?.usageBackgroundTimeSpent = true }) else {
+            isUploadingUsage = false
+            Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=deferred(no_background_time)")
+            return
         }
+        // The safety net for an early return; every path below also ends it explicitly.
+        defer { attempt.end() }
+        let requestDSN = dsn
+        // Every way out before the request: nothing held, nothing on the wire. The flag is left to
+        // `stop()` when the pairing ended during the wait — it belongs to the next pairing now.
+        func giveUp(_ outcome: String) {
+            attempt.end()
+            if currentDSN == requestDSN { isUploadingUsage = false }
+            Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=\(outcome, privacy: .public)")
+        }
+
+        // 2.
+        let budget: TimeInterval
+        switch await claimUsageUploadLease(for: attempt) {
+        case .claimed(let claimedBudget):
+            budget = claimedBudget
+        case .busy(let holder):
+            return giveUp("lock_busy holder=\(holder)")
+        case .unavailable(let code):
+            return giveUp("skipped(lock_unavailable errno=\(code))")
+        case .outOfTime:
+            return giveUp("deferred(background_time_low)")
+        case .expired:
+            uploadRequestedWhileBusy = false
+            return giveUp("deferred(background_time_expired)")
+        }
+        // The handler may have run since the claim (it releases the lease): then nothing is sent.
+        guard !attempt.expired else {
+            uploadRequestedWhileBusy = false
+            return giveUp("deferred(background_time_expired)")
+        }
+        guard currentDSN == requestDSN else { return giveUp("skipped(pairing_ended)") }
+
+        // 3. The ledger may have grown while the lease was busy — usually with the very step whose
+        // notification brought us here, which the extension was sending.
+        let days = ScreenTimeUsageReport.days(ledger: usageLedger, now: now())
+        let signature = Self.usageSignature(days)
+        guard !days.isEmpty, signature != lastUploadedUsageSignature else {
+            return giveUp("skipped(unchanged)")
+        }
+
+        // 4. `URLRequest.timeoutInterval` is an idle timeout, not a total, and a lease that runs out
+        // with this body still on the wire is exactly the reordering the lease exists to prevent.
+        // Detached, so it fires even while the main thread is busy.
         let upload = uploadUsage
         let sending = Task { try await upload(days) }
-        request = sending
-        defer {
-            lock.release()
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
+        attempt.request = sending
+        let deadline = Task.detached {
+            try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
+            if !Task.isCancelled { sending.cancel() }
+        }
+        var accepted: DeviceApplicationUsageReportResponse?
+        do {
+            accepted = try await sending.value
+        } catch {
+            let why = attempt.expired ? "background_time_expired" : String(describing: error)
+            Self.log.error("usage_upload_failed reason=\(reason, privacy: .public) error=\(why, privacy: .public)")
+            if currentDSN == requestDSN {
+                RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(status: "upload_failed", dsn: dsn, lastError: why)
             }
         }
-        let requestDSN = dsn
-        do {
-            let response = try await sending.value
-            // The pairing may have ended while the request was out; its answer is not ours to apply
-            // (`stop()` already reset the flags this function would otherwise clear below).
-            guard currentDSN == requestDSN else {
-                lock.release()
-                return
-            }
+        deadline.cancel()
+        // The lease and the background time are let go BEFORE anything else can start — not by the
+        // `defer` alone, which would run after the coalesced call below returns, so that call would
+        // find the lease still held and give up.
+        attempt.end()
+        // The pairing may have ended while the request was out; its answer is not ours to apply,
+        // and `stop()` already reset the flags this function would otherwise clear below.
+        guard currentDSN == requestDSN else { return }
+        isUploadingUsage = false
+
+        if let response = accepted {
             lastUploadedUsageSignature = signature
             let apps = days.first?.items.count ?? 0
             Self.log.notice("usage_upload reason=\(reason, privacy: .public) days=\(days.count, privacy: .public) today_apps=\(apps, privacy: .public) locked=\(response.lockedPackages.count, privacy: .public)")
@@ -400,19 +481,73 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
                 lastCollectedAt: now()
             )
             applyUsageReportResponse(response)
-        } catch {
-            Self.log.error("usage_upload_failed reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .public)")
-            RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(status: "upload_failed", dsn: dsn, lastError: String(describing: error))
         }
-        // Both released BEFORE the coalesced retry, not by the `defer` alone: a defer runs after
-        // the recursive call returns, so the retry would find the flag up and the lock held, and
-        // give up. (`release()` is idempotent; the defer is the safety net for throws.)
-        lock.release()
-        isUploadingUsage = false
-        guard currentDSN == requestDSN else { return }
+
+        // 5. What arrived during an expired run waits for the next foreground; the ledger keeps it.
+        guard !attempt.expired else {
+            uploadRequestedWhileBusy = false
+            return
+        }
         if uploadRequestedWhileBusy {
             uploadRequestedWhileBusy = false
             await uploadUsageNow(reason: "coalesced")
+        }
+    }
+
+    /// How long a usage upload waits for the other process's lease. The monitor extension holds it
+    /// for at most `ScreenTimeUsageExtensionUploader.requestTimeout` + `releaseMargin`.
+    nonisolated static let usageUploadLeaseWait: TimeInterval = 15
+    nonisolated static let usageUploadLeasePollNanoseconds: UInt64 = 250_000_000
+    /// The longest one usage request may take, in front: the old 30 s idle timeout, bounded.
+    nonisolated static let usageUploadForegroundBudget: TimeInterval = 25
+    /// Less than this and the request is not started — it would be cancelled before a slow
+    /// network answered, and the attempt would only spend background time.
+    nonisolated static let usageUploadMinimumBudget: TimeInterval = 8
+    /// Kept back from `backgroundTimeRemaining`: the cancel, the hop back to the main actor and
+    /// `endBackgroundTask` all have to fit before iOS calls time.
+    nonisolated static let usageUploadBackgroundReserve: TimeInterval = 5
+
+    /// How long the next usage request may take given the background time left, or nil when that is
+    /// too little to start one. Pure, pinned by a test.
+    nonisolated static func usageUploadBudget(backgroundTimeRemaining remaining: TimeInterval) -> TimeInterval? {
+        let budget = min(usageUploadForegroundBudget, remaining - usageUploadBackgroundReserve)
+        return budget >= usageUploadMinimumBudget ? budget : nil
+    }
+
+    private enum UsageLeaseOutcome {
+        /// Claimed; the request may take `budget` seconds.
+        case claimed(budget: TimeInterval)
+        case busy(holder: String)
+        case unavailable(errno: Int32)
+        case outOfTime
+        case expired
+    }
+
+    /// Poll the cross-process lease. Each try is one synchronous read-modify-write of the lease file
+    /// (microseconds); between tries this process holds nothing. The lease is handed to `attempt` in
+    /// the same main-actor turn that claimed it, so the expiration handler always sees it.
+    private func claimUsageUploadLease(for attempt: UsageUploadAttempt) async -> UsageLeaseOutcome {
+        let waitUntil = Date().addingTimeInterval(Self.usageUploadLeaseWait)
+        while true {
+            if attempt.expired { return .expired }
+            // Re-read every try: in the background the wait itself spends the time.
+            guard let budget = Self.usageUploadBudget(backgroundTimeRemaining: backgroundTime.remaining()) else {
+                return .outOfTime
+            }
+            switch ScreenTimeUsageUploadLock.claim(
+                owner: .app,
+                duration: budget + ScreenTimeUsageUploadLock.releaseMargin,
+                directory: usageUploadLockDirectory
+            ) {
+            case .claimed(let lease):
+                attempt.lease = lease
+                return .claimed(budget: budget)
+            case .unavailable(let code):
+                return .unavailable(errno: code)
+            case .busy(let holder, _):
+                guard Date() < waitUntil else { return .busy(holder: holder) }
+            }
+            try? await Task.sleep(nanoseconds: Self.usageUploadLeasePollNanoseconds)
         }
     }
 
@@ -815,6 +950,11 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private let userDefaults: UserDefaults
     private let now: () -> Date
     private var isUploadingUsage = false
+    private let usageUploadLockDirectory: URL?
+    private let backgroundTime: BackgroundTime
+    /// iOS ended a usage upload's background time, and the app has not been in front since. Nothing
+    /// new starts until it is (`uploadUsageNow`).
+    private var usageBackgroundTimeSpent = false
     private var isArmingUsage = false
     private var lastProbe: (at: Date, installed: [AppCatalogueEntry])?
     private var probeIsStale = false
@@ -846,6 +986,50 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
 
 private extension String {
     var nilWhenEmpty: String? { isEmpty ? nil : self }
+}
+
+/// One usage upload's hold on the two things that must be let go of together — the app's background
+/// time and the cross-process lease — and the one place iOS's "time is up" lands.
+///
+/// Main-actor, like the expiration handler UIKit calls: the handler and the upload's own steps then
+/// run one after the other, never at once, so a lease cannot be claimed after the handler has let go
+/// and the request cannot be started after it was cancelled.
+@MainActor
+private final class UsageUploadAttempt {
+    /// iOS ended the background time. Set by the handler; nothing more may start in this run.
+    private(set) var expired = false
+    var lease: ScreenTimeUsageUploadLock?
+    var request: Task<DeviceApplicationUsageReportResponse, Error>?
+
+    init(backgroundTime: ScreenTimeEnforcementCoordinator.BackgroundTime) {
+        self.backgroundTime = backgroundTime
+    }
+
+    /// Ask for time to finish. False when iOS will not give any (`.invalid`): the upload must not
+    /// start, since nothing would then stop it at the suspension.
+    func begin(onExpiry: @escaping @MainActor @Sendable () -> Void) -> Bool {
+        taskID = backgroundTime.begin("oila.usage.upload") { [self] in
+            expired = true
+            request?.cancel()
+            ScreenTimeEnforcementCoordinator.log.notice("usage_upload background_time_expired request_cancelled=\(self.request != nil ? 1 : 0, privacy: .public) lease_released=\(self.lease != nil ? 1 : 0, privacy: .public)")
+            onExpiry()
+            end()
+        }
+        return taskID != .invalid
+    }
+
+    /// Give back the lease and the background time. Idempotent.
+    func end() {
+        lease?.release()
+        lease = nil
+        guard taskID != .invalid else { return }
+        let id = taskID
+        taskID = .invalid
+        backgroundTime.end(id)
+    }
+
+    private let backgroundTime: ScreenTimeEnforcementCoordinator.BackgroundTime
+    private var taskID: UIBackgroundTaskIdentifier = .invalid
 }
 
 #if DEBUG
