@@ -206,8 +206,15 @@ private extension RootView {
                 )
             },
             // Only a dismissal the CHILD made is a "Hozir emas". A sheet hidden because the lock took
-            // over, or because onboarding restarted, was not answered by anyone.
-            set: { if !$0, !deviceLockIsTakingOver, sessionStore.onboardingCompleted { audioStream.declineConsent() } }
+            // over, or because onboarding restarted, was not answered by anyone — and neither was one
+            // that went away because the question was already settled ("Allow", an answer given in
+            // Settings, a withdrawn stale question): `needsConsent` is false by then, and a `false`
+            // written back for it must not become a refusal with a ten-minute cooldown behind it.
+            set: {
+                if !$0, audioStream.needsConsent, !deviceLockIsTakingOver, sessionStore.onboardingCompleted {
+                    audioStream.declineConsent()
+                }
+            }
         )
     }
 }

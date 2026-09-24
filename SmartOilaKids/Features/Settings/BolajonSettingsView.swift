@@ -329,7 +329,8 @@ struct SettingsPermissionsScreen: View {
     @State private var isConfirmingConsentRevoke = false
     /// What the child answered ON THIS SCREEN — nil until they tap "Ruxsat berish" on the card or on
     /// the microphone / camera row. Same rule as onboarding (`MediaConsentAnswer`): only an answer
-    /// plus the iOS grant records consent, never the iOS grant alone.
+    /// plus the iOS grant records consent, never the iOS grant alone — with the one exception of a tap
+    /// that leaves for the iOS Settings app (`MediaConsentAnswer.grantBeforeLeavingForSettings`).
     @State private var microphoneAnswer: Bool?
     @State private var cameraAnswer: Bool?
 
@@ -373,7 +374,9 @@ struct SettingsPermissionsScreen: View {
                 // "yes" and quietly re-create what the child just withdrew.
                 microphoneAnswer = nil
                 cameraAnswer = nil
-                streaming.revokeConsent()
+                // The child's own "no": it starts the "Hozir emas" cooldown, so the parent's retry
+                // loop cannot put the question back on this screen seconds later.
+                streaming.revokeConsent(stampingDecline: true)
                 AppHaptics.selection()
             }
             Button(L10n.tr("common.cancel"), role: .cancel) {}
@@ -409,6 +412,18 @@ struct SettingsPermissionsScreen: View {
         default: return
         }
         mirrorSettingsConsent()
+        // With the switch already OFF, `performAction` sends the child to the iOS Settings app, and
+        // iOS terminates this app when they flip it there — the `@State` answer above would be lost
+        // and the parent's first listen would ask again. Bank the yes before leaving
+        // (`MediaConsentAnswer.grantBeforeLeavingForSettings`).
+        if let banked = MediaConsentAnswer.grantBeforeLeavingForSettings(
+            cameraRow: requirement == .camera,
+            microphoneDenied: manager.microphonePermission == .denied,
+            cameraDenied: [.denied, .restricted].contains(manager.cameraAuthorizationStatus),
+            hasAudioConsent: streaming.grantedConsent != nil
+        ) {
+            streaming.grantMediaConsent(microphone: banked.microphone, camera: banked.camera, source: .settings)
+        }
         manager.performAction(for: requirement)
         AppHaptics.selection()
     }
@@ -448,6 +463,13 @@ struct SettingsPermissionsScreen: View {
             consentCardBody(icon: "mic.fill",
                             titleKey: "audio2.consent.granted_audio",
                             bodyKey: "audio2.consent.granted_sub") {
+                // The button below is a standing CAMERA consent, and with a surviving iOS grant no
+                // system prompt follows it — so the card says what the child is agreeing to first,
+                // in the same words as the video consent sheet.
+                Text(L10n.tr("audio2.consent.video.body"))
+                    .font(AppTypography.bodyText(13))
+                    .foregroundStyle(AppColors.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Button { agreeToLiveCheck(.camera) } label: {
                     Text(L10n.tr("audio2.consent.add_video"))
                         .font(AppTypography.buttonLabel(15))

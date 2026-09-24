@@ -587,15 +587,27 @@ final class SmartOilaKidsAppDelegateTests: XCTestCase {
 
     /// Build 28 (owner: "no extra ask"). With the app ON screen: the listen request is started, not
     /// announced — a banner there is a second ask for something already happening — and the
-    /// presence banner goes to Notification Centre only, because the bottom bar is the disclosure on
-    /// screen and a banner every 30 s reads as an alert. Every other local notification is unchanged.
+    /// presence banner goes to Notification Centre only while the bottom bar is visible, because the
+    /// bar is the disclosure then and a banner every 30 s reads as an alert. Under a modal the bar is
+    /// hidden (the consent sheet raised over a live session, the chat image viewer, …), so the silent
+    /// banner is shown again. Every other local notification is unchanged.
     func testForegroundPresentationSuppressesListenRequestAndQuietsPresence() {
-        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.listenRequest), [])
-        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.livePresence), [.list])
-        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.chatMessage),
-                       [.banner, .sound, .badge])
-        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.integrityPrefix + "x"),
-                       [.banner, .sound, .badge])
+        for covered in [false, true] {
+            XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.listenRequest,
+                                                                         modalCoversRoot: covered), [])
+            XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.chatMessage,
+                                                                         modalCoversRoot: covered),
+                           [.banner, .sound, .badge])
+            XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.integrityPrefix + "x",
+                                                                         modalCoversRoot: covered),
+                           [.banner, .sound, .badge])
+        }
+        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.livePresence,
+                                                                     modalCoversRoot: false), [.list],
+                       "the bottom bar is visible: it is the disclosure")
+        XCTAssertEqual(SmartOilaKidsAppDelegate.presentationOptions(forLocal: LocalNotificationID.livePresence,
+                                                                     modalCoversRoot: true), [.banner, .list],
+                       "a modal hides the bar: the (silent) banner is the disclosure again")
     }
 }
 
@@ -3956,6 +3968,9 @@ final class LiveConsentAskTests: XCTestCase {
         manager.isForeground = { onScreen.withLock { $0 } }
         manager.isOnboardingComplete = { onboarded.withLock { $0 } }
         manager.monotonicNow = { clock.withLock { $0 } }
+        // The consent-ask rules run on the wall clock (it keeps counting while the phone sleeps);
+        // driven from the same test clock so advancing it moves both.
+        manager.wallNow = { Date(timeIntervalSince1970: clock.withLock { $0 }) }
         manager.postListenRequestBanner = { mode, consented, sound in
             posts.withLock { $0.append(Post(mode: mode, consented: consented, withSound: sound)) }
         }
@@ -4321,8 +4336,11 @@ final class LiveConsentAskTests: XCTestCase {
 
         manager.grantMediaConsent(microphone: true, camera: true, source: .settings)
         XCTAssertEqual(manager.grantedConsent, .video)
+        defaults.set(Date(), forKey: MediaConsentDecline.defaultsKey(.video))
 
         store.clearSession()
+        XCTAssertNil(defaults.object(forKey: MediaConsentDecline.defaultsKey(.video)),
+                     "a persisted \"Hozir emas\" goes with the pairing, synchronously")
         manager.refreshConsentState()
 
         XCTAssertNil(manager.grantedConsent)
@@ -4524,6 +4542,233 @@ final class LiveConsentAskTests: XCTestCase {
         XCTAssertFalse(manager.needsConsent)
         XCTAssertEqual(manager.grantedConsent, .audio, "the child's yes is kept")
         XCTAssertEqual(publisher.connectCount, 0, "nothing starts against a switched-off microphone")
+    }
+
+    // MARK: Review of build 28
+
+    /// "Allow" records the question on screen, not the mode of whatever command is queued behind it.
+    /// A consented audio start replaced `pendingCommand` while the VIDEO sheet was up, and "Allow"
+    /// then recorded audio (clearing the camera flag): the child who said yes to video was asked again.
+    func testAllowRecordsTheSheetsModeEvenWhenAnAudioStartReplacedItsCommand() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        let release = self.release
+        let asked = OSAllocatedUnfairLock(initialState: false)
+        manager.requestMicPermission = {
+            asked.withLock { $0 = true }
+            while !release.withLock({ $0 }) { try? await Task.sleep(nanoseconds: 10_000_000) }
+            return true
+        }
+        manager.requestStart(command: Self.watch)
+        XCTAssertEqual(manager.consentMode, .video, "precondition: the camera question is up")
+        manager.requestStart(command: .debugAudio)       // consented: starts, and takes `pendingCommand`
+        await waitUntil { asked.withLock { $0 } }
+        XCTAssertEqual(manager.state, .connecting)
+
+        manager.grantConsentAndStart()
+
+        XCTAssertEqual(manager.grantedConsent, .video, "the child answered the camera question")
+        XCTAssertFalse(manager.needsConsent)
+        release.withLock { $0 = true }
+        await waitUntil { manager.isLive }
+        XCTAssertTrue(manager.isLive)
+    }
+
+    /// A yes to AUDIO must not erase a "Hozir emas" the child gave to the CAMERA.
+    func testAYesToAudioLeavesACameraNotNowStanding() {
+        let manager = makeManager()
+        manager.requestStart(command: Self.watch)
+        XCTAssertEqual(manager.consentMode, .video)
+        manager.declineConsent()
+
+        manager.grantMediaConsent(microphone: true, camera: false, source: .settings)
+        manager.requestStart(command: Self.watch)
+
+        XCTAssertFalse(manager.needsConsent, "the parent's next watch retry must not re-ask the camera")
+        XCTAssertEqual(manager.grantedConsent, .audio)
+    }
+
+    /// The same through the sheet: "Allow" on the MICROPHONE question, after "Hozir emas" to the
+    /// camera, keeps the camera question quiet for the rest of its cooldown.
+    func testAllowOnTheAudioSheetLeavesACameraNotNowStanding() async {
+        let manager = makeManager()
+        manager.requestStart(command: Self.watch)
+        manager.declineConsent()
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(manager.consentMode, .audio)
+        manager.grantConsentAndStart()
+        await waitUntil { manager.isLive }
+
+        manager.requestStart(command: Self.watch)       // live: a renewal; the camera question waits
+
+        XCTAssertFalse(manager.needsConsent)
+        XCTAssertEqual(manager.grantedConsent, .audio)
+    }
+
+    /// …but a yes to audio does lift the camera silence that only a MICROPHONE refusal implied.
+    func testAYesToAudioLiftsTheCameraSilenceAnAudioNotNowImplied() {
+        let manager = makeManager()
+        manager.requestStart(command: .debugAudio)
+        manager.declineConsent()
+        manager.requestStart(command: Self.watch)
+        XCTAssertFalse(manager.needsConsent, "precondition: video needs the microphone the child refused")
+
+        manager.grantMediaConsent(microphone: true, camera: false, source: .settings)
+        manager.requestStart(command: Self.watch)
+
+        XCTAssertTrue(manager.needsConsent, "the camera itself was never refused")
+        XCTAssertEqual(manager.consentMode, .video)
+    }
+
+    /// A `false` written back by the sheet binding as the sheet goes away after "Allow" is not a
+    /// refusal: with nothing pending, `declineConsent()` records nothing.
+    func testADeclineWithNoQuestionPendingRecordsNothing() async {
+        let manager = makeManager()
+        manager.requestStart(command: .debugAudio)
+        manager.grantConsentAndStart()
+        await waitUntil { manager.isLive }
+
+        manager.declineConsent()
+        manager.requestStart(command: Self.watch)
+
+        XCTAssertTrue(manager.needsConsent, "the child agreed: the camera question is still askable")
+        XCTAssertEqual(manager.consentMode, .video)
+    }
+
+    /// iOS routinely terminates a suspended app; the parent's next retry relaunches it. The refusal
+    /// must still hold there — no chiming "open to answer" banner seconds after "Hozir emas".
+    func testNotNowSurvivesARelaunch() {
+        let first = makeManager()
+        first.requestStart(command: .debugAudio)
+        first.declineConsent()
+
+        let relaunched = makeManager()
+        onScreen.withLock { $0 = false }
+        relaunched.requestStart(command: .debugAudio)
+        XCTAssertEqual(postCount, 0)
+        XCTAssertEqual(relaunched.state, .idle)
+        onScreen.withLock { $0 = true }
+        relaunched.requestStart(command: .debugAudio)
+        XCTAssertFalse(relaunched.needsConsent)
+    }
+
+    /// `systemUptime` stops while the phone sleeps. The cooldown and the banner's "same request"
+    /// window are on the wall clock, so a pocketed phone does not stretch them from minutes to hours.
+    func testTheCooldownAndTheBannerWindowKeepCountingWhileThePhoneSleeps() {
+        let manager = makeManager(audio: true)
+        manager.monotonicNow = { 42 }                    // asleep: uptime does not move
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)
+        clock.withLock { $0 += PendingStreamRequestStore.acceptanceWindow + 60 }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(allPosts.map(\.withSound), [true, true], "a request after 6 minutes asleep is a new one")
+
+        defaults.removeObject(forKey: "OILA_AUDIO_CONSENT_GRANTED")
+        let declined = makeManager()
+        declined.monotonicNow = { 42 }
+        onScreen.withLock { $0 = true }
+        declined.requestStart(command: .debugAudio)
+        declined.declineConsent()
+        let cooldown = DeviceAudioStreamManager.consentDeclineCooldown
+        clock.withLock { $0 += cooldown + 1 }
+        declined.requestStart(command: .debugAudio)
+        XCTAssertTrue(declined.needsConsent, "ten minutes on the wall clock, however long the phone slept")
+    }
+
+    /// The question was raised on screen and the child left without answering. The parent's retries
+    /// must not park and chime a new "open to answer" banner for a question already on the screen.
+    func testAQuestionAlreadyOnScreenIsNotReannouncedWhenTheChildLeaves() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(publisher: publisher)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(postCount, 0)
+        XCTAssertNotEqual(manager.state, .awaitingChildTap)
+        XCTAssertTrue(manager.needsConsent, "still waiting on the child's screen")
+
+        onScreen.withLock { $0 = true }
+        manager.consumePendingListenRequest()
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(manager.needsConsent, "a live request is behind it: the question stays")
+        manager.grantConsentAndStart()
+        await waitUntil { manager.isLive }
+        XCTAssertTrue(manager.isLive)
+    }
+
+    /// The parent stopped (or the lease ran out) while the sheet was up. On the next open the
+    /// question with no request behind it is withdrawn — and that is not a decline.
+    func testAQuestionWhoseRequestEndedIsWithdrawnOnTheNextOpen() async {
+        let manager = makeManager()
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+        await manager.stop()
+        XCTAssertTrue(manager.needsConsent, "precondition: stop() leaves the question up")
+
+        manager.consumePendingListenRequest()
+        await waitUntil { !manager.needsConsent }
+
+        XCTAssertFalse(manager.needsConsent, "no request, no question")
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent, "withdrawn, not declined: the next request asks")
+    }
+
+    /// Consent withdrawn while live: `stop()` is still awaiting the disconnect. A request in that
+    /// window must neither raise the sheet over Settings nor park over the connected publisher.
+    func testARequestDuringAWithdrawalIsDroppedNotAskedOrParked() async {
+        let publisher = FakeMediaPublisher()
+        let manager = makeManager(audio: true, publisher: publisher)
+        await manager.start(command: .debugAudio)
+        XCTAssertTrue(manager.isLive)
+
+        // The default (an unpair's) clears any cooldown, so it is not the cooldown that stops the ask.
+        manager.revokeConsent()
+        XCTAssertTrue(manager.isLive, "precondition: the teardown has not run yet")
+        manager.requestStart(command: .debugAudio)
+        XCTAssertFalse(manager.needsConsent)
+        onScreen.withLock { $0 = false }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertEqual(postCount, 0)
+        XCTAssertNotEqual(manager.state, .awaitingChildTap)
+
+        await waitUntil { !manager.isLive }
+        XCTAssertEqual(manager.state, .idle)
+    }
+
+    /// The child's own withdrawal is a "no": the parent's retry loop may not put the question back
+    /// seconds later. After the cooldown the parent does ask again, as the Settings copy says.
+    func testAWithdrawalFromSettingsStartsTheCooldown() async {
+        let manager = makeManager(audio: true, video: true)
+
+        manager.revokeConsent(stampingDecline: true)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        manager.requestStart(command: .debugAudio)
+        manager.requestStart(command: Self.watch)
+        XCTAssertFalse(manager.needsConsent)
+
+        let cooldown = DeviceAudioStreamManager.consentDeclineCooldown
+        clock.withLock { $0 += cooldown + 1 }
+        manager.requestStart(command: .debugAudio)
+        XCTAssertTrue(manager.needsConsent)
+    }
+
+    /// The Settings bank before a round trip to the iOS Settings app (which kills the app).
+    func testTheSettingsTapBanksItsYesOnlyWhenItLeavesForSettings() {
+        func bank(camera: Bool, micDenied: Bool, camDenied: Bool, audio: Bool) -> [Bool]? {
+            MediaConsentAnswer.grantBeforeLeavingForSettings(
+                cameraRow: camera, microphoneDenied: micDenied, cameraDenied: camDenied, hasAudioConsent: audio
+            ).map { [$0.microphone, $0.camera] }
+        }
+        XCTAssertEqual(bank(camera: false, micDenied: true, camDenied: false, audio: false), [true, false])
+        XCTAssertNil(bank(camera: false, micDenied: false, camDenied: true, audio: false),
+                     "a prompt (or a grant already there) follows: the normal mirror records it")
+        XCTAssertEqual(bank(camera: true, micDenied: false, camDenied: true, audio: true), [true, true])
+        XCTAssertNil(bank(camera: true, micDenied: false, camDenied: true, audio: false),
+                     "the camera row adds video only on top of an audio consent")
+        XCTAssertNil(bank(camera: true, micDenied: true, camDenied: false, audio: true))
     }
 }
 

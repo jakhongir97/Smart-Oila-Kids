@@ -322,6 +322,12 @@ final class SessionStore: ObservableObject {
         //    anything running under it.
         userDefaults.removeObject(forKey: "OILA_AUDIO_CONSENT_GRANTED")
         userDefaults.removeObject(forKey: "OILA_VIDEO_CONSENT_GRANTED")
+        //    The "Hozir emas" stamps are persisted too (build 28, `MediaConsentDecline`), so they go
+        //    here as well — synchronously, and against the injected store — not only through the
+        //    singleton's `revokeConsent()`.
+        for key in MediaConsentDecline.allDefaultsKeys {
+            userDefaults.removeObject(forKey: key)
+        }
         Task { @MainActor in DeviceAudioStreamManager.shared.revokeConsent() }
         // 5. Drop any pending removal-attempt reports. The queue survives relaunches by design, but
         //    `POST /device/apps/removal-attempt` carries no dsn — the server attributes the report to

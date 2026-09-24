@@ -320,7 +320,8 @@ enum MediaConsentSource: String {
 /// The ANSWERS-not-statuses rule, pure so it is pinned by tests rather than re-derived at each call
 /// site. A step or row contributes a grant only when the child said yes to it AND iOS holds that
 /// grant; an unanswered one contributes nothing whatever iOS holds (a previous family's grant
-/// survives an unpair).
+/// survives an unpair). One exception, for an answered tap whose iOS switch is off:
+/// `grantBeforeLeavingForSettings`.
 enum MediaConsentAnswer {
     /// - Parameter hasAudioConsent: an audio consent ALREADY on file. Only the Settings screen passes
     ///   true: it lets the camera row add video on top of a microphone consent given earlier (in
@@ -335,6 +336,53 @@ enum MediaConsentAnswer {
     ) -> (microphone: Bool, camera: Bool) {
         (microphone: (microphoneAnswer == true && microphoneGranted) || hasAudioConsent,
          camera: cameraAnswer == true && cameraGranted)
+    }
+
+    /// The ONE exception to "answer + iOS grant", and the same one `grantConsentAndStart` makes for
+    /// the sheet: a Settings "Ruxsat berish" tap that iOS answers by sending the child to the Settings
+    /// app, because the switch is already off and no prompt can follow. iOS TERMINATES the app when a
+    /// privacy switch is flipped there, so the screen's `@State` answer cannot survive the round
+    /// trip — the child came back to "Jonli tekshiruv o'chiq" and the parent's first listen asked
+    /// again, which is the owner's complaint on exactly the children who tapped "Don't Allow" in
+    /// onboarding. The yes is banked before leaving instead. It is still an explicit answer from this
+    /// child in this pairing, and it opens nothing: `start()` keeps requiring the iOS grant.
+    ///
+    /// nil when the tap will not leave the app (the grant then arrives through the normal mirror).
+    /// The camera row adds video only on top of an audio consent already on file, as in `grant`.
+    static func grantBeforeLeavingForSettings(
+        cameraRow: Bool,
+        microphoneDenied: Bool,
+        cameraDenied: Bool,
+        hasAudioConsent: Bool
+    ) -> (microphone: Bool, camera: Bool)? {
+        if cameraRow {
+            guard cameraDenied, hasAudioConsent else { return nil }
+            return (microphone: true, camera: true)
+        }
+        guard microphoneDenied else { return nil }
+        return (microphone: true, camera: false)
+    }
+}
+
+/// Where a "Hozir emas" is remembered, and for how long it counts.
+///
+/// PERSISTED, and on the WALL clock, for two measured-in-the-field reasons (review of build 28):
+///  • `ProcessInfo.systemUptime` stops while the iPhone sleeps, and a locked phone in a pocket is
+///    asleep most of the time — a "10 minute" cooldown on it silently dropped requests an hour later.
+///  • An in-memory stamp dies with the process, and iOS routinely terminates a suspended app; the
+///    parent's next retry then relaunched it with no memory of the refusal and chimed an
+///    "open to answer" banner seconds after the child had said no.
+/// A child winding the clock only shortens their own cooldown (a stamp in the future counts as
+/// expired), which just means they are asked again — never that anything opens.
+enum MediaConsentDecline {
+    static func defaultsKey(_ mode: StreamMode) -> String { "OILA_MEDIA_CONSENT_DECLINED_AT_\(mode.rawValue)" }
+    /// Both stamps, for the raw removal in `SessionStore.purgeChildScopedData` step 4.
+    static var allDefaultsKeys: [String] { [defaultsKey(.audio), defaultsKey(.video)] }
+
+    static func isRecent(declinedAt: Date?, now: Date, cooldown: TimeInterval) -> Bool {
+        guard let declinedAt else { return false }
+        let elapsed = now.timeIntervalSince(declinedAt)
+        return elapsed >= 0 && elapsed < cooldown
     }
 }
 
@@ -898,11 +946,18 @@ final class DeviceAudioStreamManager: ObservableObject {
     var postListenRequestBanner: (StreamMode, _ consented: Bool, _ withSound: Bool) -> Void = {
         DeviceAudioStreamManager.postListenRequestNotification(mode: $0, consented: $1, withSound: $2)
     }
-    /// When the child last tapped "Hozir emas" on the sheet for each mode, on `monotonicNow`.
+    /// The clock the two build-28 consent-ask rules are timed on: the "Hozir emas" cooldown and the
+    /// request banner's "same request" window. The WALL clock, not `monotonicNow`: `systemUptime`
+    /// stops while the phone sleeps, so a pocketed phone stretched both windows from minutes to hours
+    /// (see `MediaConsentDecline`). It is also the clock `PendingStreamRequestStore.acceptanceWindow`
+    /// runs on, so the banner and the parked request it announces now expire together.
+    /// `isStuckConnecting` deliberately stays on `monotonicNow`. Production never overrides this.
+    var wallNow: () -> Date = { Date() }
     /// The parent web re-sends `stream.start` every ~4 s while it waits and renews every ~60 s while
     /// live, so a decline that stored nothing came back within seconds — one refusal met the same
-    /// question over and over, which is pressure in the sense of Guideline 5.1.1(iv).
-    private var consentDeclinedAtUptime: [StreamMode: TimeInterval] = [:]
+    /// question over and over, which is pressure in the sense of Guideline 5.1.1(iv). The stamps live
+    /// in `defaults` under `MediaConsentDecline.defaultsKey(_:)`.
+    ///
     /// How long a "Hozir emas" silences the sheet for that mode. Long enough to outlast the parent's
     /// retry loop and a lease; short enough that a real later request is asked again. Consent is
     /// still never assumed: during the cooldown an unconsented request is simply not started.
@@ -914,13 +969,30 @@ final class DeviceAudioStreamManager: ObservableObject {
         let consented: Bool
     }
     private var parkedBanner: ParkedBanner?
-    /// When the parked request was last (re)sent by the parent, on `monotonicNow`. A request that has
+    /// When the parked request was last (re)sent by the parent, on `wallNow`. A request that has
     /// gone quiet for longer than the acceptance window is over; a new one after that chimes again.
-    private var parkedBannerLastSeenUptime: TimeInterval?
+    private var parkedBannerLastSeenAt: Date?
 
+    /// A "Hozir emas" to this mode inside the cooldown. A VIDEO question is also silenced by a
+    /// decline of AUDIO: a video session needs the microphone as well, so asking about the camera a
+    /// moment after the child refused the microphone is the same question. Derived here rather than
+    /// stamped onto `.video` at decline time, so a later yes to audio lifts it (the child is no
+    /// longer refusing the microphone) while an explicit "Hozir emas" to the camera survives it.
     private func isDeclinedRecently(_ mode: StreamMode) -> Bool {
-        guard let at = consentDeclinedAtUptime[mode] else { return false }
-        return monotonicNow() - at < Self.consentDeclineCooldown
+        let covering: [StreamMode] = mode == .video ? [.video, .audio] : [.audio]
+        let now = wallNow()
+        return covering.contains {
+            MediaConsentDecline.isRecent(declinedAt: defaults.object(forKey: MediaConsentDecline.defaultsKey($0)) as? Date,
+                                         now: now, cooldown: Self.consentDeclineCooldown)
+        }
+    }
+
+    private func stampDecline(_ mode: StreamMode, at date: Date) {
+        defaults.set(date, forKey: MediaConsentDecline.defaultsKey(mode))
+    }
+
+    private func clearDecline(_ mode: StreamMode) {
+        defaults.removeObject(forKey: MediaConsentDecline.defaultsKey(mode))
     }
 
     // MARK: Orchestration seams
@@ -1090,10 +1162,11 @@ final class DeviceAudioStreamManager: ObservableObject {
             )
             if verdict.isAllowed {
                 // The session continues off screen, where the presence banner is now the ONLY
-                // disclosure. While the app was on screen that banner went to Notification Centre
-                // only (`SmartOilaKidsAppDelegate.presentationOptions(forLocal:)` — the bottom bar
-                // was the disclosure there), so without an immediate re-post the first banner the
-                // child could actually see might come up to `presenceRepostInterval` late.
+                // disclosure. While the app was on screen with nothing covering the bottom bar, that
+                // banner went to Notification Centre only (`SmartOilaKidsAppDelegate
+                // .presentationOptions(forLocal:modalCoversRoot:)` — the bar was the disclosure
+                // there), so without an immediate re-post the first banner the child could actually
+                // see might come up to `presenceRepostInterval` late.
                 if self.state == .live {
                     // `try? await` for the same reason as the re-post loop: this is an async context.
                     try? await UNUserNotificationCenter.current().add(
@@ -1256,7 +1329,16 @@ final class DeviceAudioStreamManager: ObservableObject {
         //    Deliberately ABOVE the off-screen park: a renewal is an un-mute of a running engine,
         //    which the background permits and which is the one case that must keep working with the
         //    phone in a pocket.
-        if state == .live, hasConsent(for: .audio) {
+        //
+        //    This step owns EVERY `.live` request. `.live` without audio consent means the consent
+        //    was just withdrawn (Settings, or an unpair) and `stop()` is still awaiting the
+        //    disconnect; falling through used to raise the sheet over Settings a moment after the
+        //    child tapped Withdraw, or — off screen — park over a still-connected publisher.
+        if state == .live {
+            guard hasConsent(for: .audio) else {
+                recordMedia(status: "live", event: Self.event(command.mode, "start_dropped_consent_withdrawn"))
+                return
+            }
             Task { await renew(command: command) }
             if command.mode == .video, !hasConsent(for: .video) { askConsent(for: command) }
             return
@@ -1279,8 +1361,12 @@ final class DeviceAudioStreamManager: ObservableObject {
         //    question. It used to fall through to the off-screen park below, whose `.awaitingChildTap`
         //    made the in-flight `start()` give up at its next `state == .connecting` guard and posted
         //    a banner for a session that was about to go live. A `.connecting` that has outlived the
-        //    watchdog is a corpse: it falls through, and `start()` does the reclaim (bouncing off it
-        //    here would make that reclaim unreachable from the push route, the only route it occurs on).
+        //    watchdog is a corpse and falls through (bouncing off it here would make the reclaim
+        //    unreachable from the push route, the only route it occurs on): ON screen, `start()`
+        //    reclaims it; OFF screen it is parked below like any cold start — that park does not
+        //    reclaim it — and it is invalidated by the generation bump of the attempt `start()`
+        //    makes on the child's tap. (Unchanged from before build 28; the lifecycle of the corpse
+        //    itself belongs to the connect watchdog, not to this consent ordering.)
         if state == .connecting, !isStuckConnecting {
             if consented { pendingCommand = command } else { askConsent(for: command) }
             return
@@ -1294,6 +1380,15 @@ final class DeviceAudioStreamManager: ObservableObject {
         //    not: an unconsented request is asked ON SCREEN once the child opens the app, which is the
         //    only place a question can honestly be put to them.
         guard isForeground() else {
+            // The same question is already on the child's screen: it was raised while the app was
+            // open and the child left without answering. Keep its request fresh behind it, but do
+            // not park or chime — a new "open to answer" banner on every leave-and-retry cycle is
+            // the repeated ask this ordering exists to stop. It is still there on the next open.
+            if needsConsent, consentMode == command.mode {
+                pendingCommand = command
+                recordMedia(status: "consent_required", event: Self.event(command.mode, "start_question_already_pending"))
+                return
+            }
             parkForChildTap(command, consented: consented)
             return
         }
@@ -1348,15 +1443,20 @@ final class DeviceAudioStreamManager: ObservableObject {
     /// the next one is announced afresh.
     private func parkForChildTap(_ command: StreamCommand, consented: Bool) {
         let banner = ParkedBanner(mode: command.mode, consented: consented)
-        let now = monotonicNow()
+        let now = wallNow()
+        // `>= 0`: a clock wound back reads as a new request, which chimes — the direction in which
+        // the child is told, rather than the one in which a request goes unannounced.
         let continuesTheSameRequest = state == .awaitingChildTap
             && parkedBanner != nil
-            && parkedBannerLastSeenUptime.map { now - $0 <= PendingStreamRequestStore.acceptanceWindow } == true
+            && parkedBannerLastSeenAt.map {
+                let quiet = now.timeIntervalSince($0)
+                return quiet >= 0 && quiet <= PendingStreamRequestStore.acceptanceWindow
+            } == true
         if !(continuesTheSameRequest && parkedBanner == banner) {
             postListenRequestBanner(command.mode, consented, !continuesTheSameRequest)
         }
         parkedBanner = banner
-        parkedBannerLastSeenUptime = now
+        parkedBannerLastSeenAt = now
         state = .awaitingChildTap
         Task { await PendingStreamRequestStore.shared.save(command) }
         recordMedia(
@@ -1373,12 +1473,31 @@ final class DeviceAudioStreamManager: ObservableObject {
         Task { [weak self] in
             guard let command = await PendingStreamRequestStore.shared.consume() else {
                 self?.clearListenRequestNotification(resettingState: true)
+                self?.withdrawQuestionWithNoRequestBehindIt()
                 return
             }
             guard let self else { return }
             self.clearListenRequestNotification(resettingState: false)
             self.requestStart(command: command)
         }
+    }
+
+    /// A sheet question outlives its request when the parent's `stream.stop` (or the lease running
+    /// out) clears `pendingCommand` while the sheet is up, or when the command behind it goes stale;
+    /// it then met the child on their next open, hours later, about a request nobody was making.
+    /// Withdrawn here, on the way back on screen. NOT a decline — no cooldown is stamped, nobody
+    /// answered — and the Settings card remains the way to answer ahead of time.
+    ///
+    /// A question over a LIVE session is left alone: it is the camera question for an upgrade the
+    /// parent is still renewing (`start()`'s queued-command capture can take its command), and the
+    /// next renewal would only raise it again.
+    private func withdrawQuestionWithNoRequestBehindIt() {
+        guard needsConsent, state != .live, pendingCommand.map({ $0.isStaleWake }) ?? true else { return }
+        let mode = consentMode
+        needsConsent = false
+        pendingCommand = nil
+        consentMode = .audio
+        recordMedia(status: "idle", event: Self.event(mode, "consent_question_expired"))
     }
 
     /// Withdraw the request banner. `resettingState` returns the manager to `.idle` when the request
@@ -1391,7 +1510,7 @@ final class DeviceAudioStreamManager: ObservableObject {
         center.removeDeliveredNotifications(withIdentifiers: [Self.listenRequestNotificationID])
         // The banner is gone, so the next park is a new request and is announced (see `parkForChildTap`).
         parkedBanner = nil
-        parkedBannerLastSeenUptime = nil
+        parkedBannerLastSeenAt = nil
         if resettingState, state == .awaitingChildTap {
             state = .idle
         }
@@ -1442,7 +1561,14 @@ final class DeviceAudioStreamManager: ObservableObject {
         // ("I allowed it and nothing happened"). Record the yes — it is theirs — and take them to
         // the one place the switch lives. The request itself is dropped: the parent's next retry
         // starts normally once the switch is on.
-        let answeredMode = pendingCommand?.mode ?? consentMode
+        //
+        // What is RECORDED is the question on screen (`consentMode`), never `pendingCommand.mode`:
+        // a consented command can replace `pendingCommand` while the sheet is up (an in-flight
+        // connect absorbing an audio retry, or an on-screen audio start), and "Allow" on the CAMERA
+        // sheet then recorded audio — which also clears the camera flag — so the child who just said
+        // yes to video was asked again on the next watch. The command still decides what STARTS;
+        // `start()`/`renew()` re-check consent for its own mode.
+        let answeredMode = consentMode
         if osPermissionDenied(answeredMode) {
             recordConsent(for: answeredMode)
             needsConsent = false
@@ -1469,14 +1595,14 @@ final class DeviceAudioStreamManager: ObservableObject {
         // The consent itself IS recorded: the child answered the question, and re-asking on the
         // next request would punish them for a stale push.
         guard !command.isStaleWake else {
-            grantConsentWithoutStarting(for: command.mode)
+            grantConsentWithoutStarting(for: answeredMode)
             needsConsent = false
             pendingCommand = nil
             consentMode = .audio
-            recordMedia(status: "idle", event: Self.event(command.mode, "consent_granted_after_lease_expiry"))
+            recordMedia(status: "idle", event: Self.event(answeredMode, "consent_granted_after_lease_expiry"))
             return
         }
-        recordConsent(for: command.mode)
+        recordConsent(for: answeredMode)
         needsConsent = false
         // The grant can arrive mid-session (an audio session the parent asked to upgrade to video):
         // that is a renewal, not a second connect — `start()` would bounce off its re-entrancy guard
@@ -1514,16 +1640,19 @@ final class DeviceAudioStreamManager: ObservableObject {
     }
 
     func declineConsent() {
+        // Only a question actually pending can be declined. Since the cooldown this call has real
+        // effect, and a spurious one — a sheet binding writing `false` as the sheet goes away after
+        // "Allow" — would otherwise record a refusal from a child who had just agreed, and silence
+        // the parent's next watch for ten minutes under a `start_consent_declined` event.
+        guard needsConsent else { return }
         let declinedMode = consentMode
         needsConsent = false
         pendingCommand = nil
-        // "Hozir emas" now sticks for `consentDeclineCooldown` (see `consentDeclinedAtUptime`).
-        // Declining AUDIO silences video too: a video session needs the microphone as well, so asking
-        // about the camera a moment after the child refused the microphone is the same question.
-        // Declining video leaves audio alone — refusing the camera is not refusing to be heard.
-        let now = monotonicNow()
-        consentDeclinedAtUptime[declinedMode] = now
-        if declinedMode == .audio { consentDeclinedAtUptime[.video] = now }
+        // "Hozir emas" now sticks for `consentDeclineCooldown` (see `MediaConsentDecline`).
+        // Declining AUDIO silences video too (`isDeclinedRecently` derives it: a video session needs
+        // the microphone as well). Declining video leaves audio alone — refusing the camera is not
+        // refusing to be heard.
+        stampDecline(declinedMode, at: wallNow())
         // A DECLINED video upgrade must not tear down — or hide the indicator of — the audio session
         // the child already consented to and that is still publishing. `.connecting` counts for the
         // same reason `.live` does: the sheet the child is refusing is not necessarily about the
@@ -1599,8 +1728,11 @@ final class DeviceAudioStreamManager: ObservableObject {
             defaults.removeObject(forKey: videoConsentKey)
         }
         refreshGrantedConsent()
-        // A yes supersedes an earlier "Hozir emas".
-        consentDeclinedAtUptime.removeAll()
+        // A yes supersedes an earlier "Hozir emas" — for the modes it covers, and no further: a yes
+        // to AUDIO must not erase a "Hozir emas" the child gave to the CAMERA, or the parent's next
+        // watch retry, seconds later, would put the camera question straight back.
+        clearDecline(.audio)
+        if mode == .video { clearDecline(.video) }
     }
 
     /// Re-read the stored grant. Callable from a screen's `onAppear` because the flags can also be
@@ -1692,7 +1824,10 @@ final class DeviceAudioStreamManager: ObservableObject {
         // Only a grant that CHANGED something is an answer; the mirrors re-fire on every status
         // change, and a replay must neither clear a "Hozir emas" nor flood the log.
         if grantedConsent != before, let granted = grantedConsent {
-            consentDeclinedAtUptime.removeAll()
+            // Narrowed to what was granted, as in `recordConsent`: an audio yes leaves a camera
+            // "Hozir emas" standing.
+            clearDecline(.audio)
+            if granted == .video { clearDecline(.video) }
             recordMedia(status: state == .live ? "live" : "idle",
                         event: "consent_granted_\(source.rawValue)_\(granted.rawValue)")
         }
@@ -2055,15 +2190,26 @@ final class DeviceAudioStreamManager: ObservableObject {
 
     /// Revoke the one-time consent — both halves of it. The next listen or watch request must ask
     /// again, and a camera grant must never outlive the audio grant it was taken alongside.
-    func revokeConsent() {
+    ///
+    /// - Parameter stampingDecline: true for the CHILD's own withdrawal (the Settings button). It is
+    ///   a "no" at least as firm as "Hozir emas", so it starts the same cooldown for both modes:
+    ///   otherwise the parent's retry or renewal loop (~4 s / ~60 s) put the question back on the
+    ///   Settings screen seconds after the child withdrew. "Your parent will have to ask you again"
+    ///   still holds once the cooldown ends. An unpair keeps the default, which clears every stamp —
+    ///   a refusal by this child must not keep the NEXT family from being asked.
+    func revokeConsent(stampingDecline: Bool = false) {
         defaults.removeObject(forKey: consentKey)
         defaults.removeObject(forKey: videoConsentKey)
         needsConsent = false
         pendingCommand = nil
-        // A withdrawal (or an unpair, which lands here through `purgeChildScopedData`) starts the
-        // question over: the next request asks, as the Settings copy promises — a "Hozir emas" from
-        // before must not keep that question from being asked, least of all for the NEXT family.
-        consentDeclinedAtUptime.removeAll()
+        if stampingDecline {
+            let now = wallNow()
+            stampDecline(.audio, at: now)
+            stampDecline(.video, at: now)
+        } else {
+            clearDecline(.audio)
+            clearDecline(.video)
+        }
         refreshGrantedConsent()
         // Withdrawing consent must also end anything running under it — otherwise "I take it back"
         // leaves the microphone open until the server lease happens to expire. `stop()` ends the

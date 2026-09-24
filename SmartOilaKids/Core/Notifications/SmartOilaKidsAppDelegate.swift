@@ -323,17 +323,35 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
 
     /// How one of our own notifications is shown while the app is ON screen.
     ///  • The listen request: not at all. It exists to bring the app forward, and the app is forward.
-    ///  • The live-session presence banner: Notification Centre only. On screen the bottom bar is the
-    ///    disclosure, and a banner dropping over the app every `presenceRepostInterval` reads like an
-    ///    alert. It is re-posted as a banner the moment the app leaves the screen
-    ///    (`DeviceAudioStreamManager.handleAppDidEnterBackground`).
+    ///  • The live-session presence banner: Notification Centre only WHILE THE BOTTOM BAR IS VISIBLE.
+    ///    The bar is then the disclosure, and a banner dropping over the app every
+    ///    `presenceRepostInterval` reads like an alert. But the bar is a row of RootView's root stack,
+    ///    so anything presented over the root hides it — the consent sheet itself (raised over a live
+    ///    audio session when the parent asks for video), the chat image viewer, the SOS, language and
+    ///    Screen Time sheets, a confirmation dialog — and under a modal the silent banner (its
+    ///    content has no sound) is the in-app disclosure again, as it was before build 28. Off screen
+    ///    this delegate is not asked at all; the banner is re-posted the moment the app leaves the
+    ///    screen (`DeviceAudioStreamManager.handleAppDidEnterBackground`).
     ///  • Everything else: as before.
-    static func presentationOptions(forLocal identifier: String) -> UNNotificationPresentationOptions {
+    static func presentationOptions(forLocal identifier: String, modalCoversRoot: Bool) -> UNNotificationPresentationOptions {
         switch identifier {
         case LocalNotificationID.listenRequest: return []
-        case LocalNotificationID.livePresence: return [.list]
+        case LocalNotificationID.livePresence: return modalCoversRoot ? [.banner, .list] : [.list]
         default: return [.banner, .sound, .badge]
         }
+    }
+
+    /// Whether something is presented over the root view controller — every SwiftUI `.sheet`,
+    /// `.fullScreenCover` and `.confirmationDialog` in the app is, since none of them defines its own
+    /// presentation context. The lock takeover counts too, although it draws the bar itself: a
+    /// silent banner over it is what every screen got before build 28, so erring that way is safe.
+    @MainActor
+    static func modalCoversRootNow() -> Bool {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+        let keyWindow = windows.first(where: \.isKeyWindow) ?? windows.first
+        return keyWindow?.rootViewController?.presentedViewController != nil
     }
 
     func userNotificationCenter(
@@ -353,7 +371,10 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
             if identifier == LocalNotificationID.listenRequest {
                 Task { @MainActor in DeviceAudioStreamManager.shared.consumePendingListenRequest() }
             }
-            completionHandler(Self.presentationOptions(forLocal: identifier))
+            // Read on the main actor: the answer depends on the live view-controller hierarchy.
+            Task { @MainActor in
+                completionHandler(Self.presentationOptions(forLocal: identifier, modalCoversRoot: Self.modalCoversRootNow()))
+            }
             return
         }
         PushCommandRouter.handle(
