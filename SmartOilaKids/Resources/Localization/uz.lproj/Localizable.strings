@@ -176,8 +176,8 @@
 "perm2.notifications.title" = "Bildirishnomalar aloqada bo'lishga yordam beradi";
 "perm2.notifications.body" = "Bildirishnomalar ota-onangiz xabar yuborganini yoki tekshiruv boshlaganini ko'rsatadi.";
 "perm2.notifications.cta" = "Bildirishnomalarni yoqish";
-"perm2.microphone.title" = "Jonli ovozni eshitishni xohlaysizmi?";
-"perm2.camera.title" = "Jonli videoni ko'rishni xohlaysizmi?";
+"perm2.microphone.title" = "Ota-onangiz jonli tinglay olsinmi?";
+"perm2.camera.title" = "Ota-onangiz kamera orqali jonli ko'ra olsinmi?";
 "perm2.location.title" = "Farzandingiz qayerdaligini xaritada ko'ring";
 "perm2.location.body" = "Xaritada real vaqtda joylashuvni ko'rasiz va xavfsiz hududlar belgilay olasiz.";
 "perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuv yangilanadi";
@@ -263,9 +263,9 @@
 "perm2.item.location" = "Joylashuv";
 
 "perm2.item.microphone" = "Mikrofon";
-"perm2.microphone.body" = "Ota-ona jonli ovozni eshitishi uchun. Mikrofon yoniq bo'lganda siz doim belgini ko'rasiz.";
+"perm2.microphone.body" = "Faqat ota-onangiz so'raganda, xavfsizligingiz uchun. Yoniq paytda pastda doim qizil panel va iPhone'ning to'q sariq nuqtasi ko'rinadi. Hech narsa yozib olinmaydi. Bolajon360 sozlamalarida istalgan vaqtda o'chirishingiz mumkin.";
 "perm2.item.camera" = "Kamera";
-"perm2.camera.body" = "Ota-ona jonli videoni ko'rishi uchun. Hech narsa yozib olinmaydi va saqlanmaydi.";
+"perm2.camera.body" = "Faqat ota-onangiz so'raganda va faqat Bolajon360 ochiq bo'lganda. Kamera yoniq paytda qizil panel va iPhone'ning yashil nuqtasi doim ko'rinadi. Hech narsa yozib olinmaydi. Bolajon360 sozlamalarida istalgan vaqtda o'chirishingiz mumkin.";
 "perm2.item.bglocation" = "Fon joylashuvi";
 
 
@@ -314,13 +314,15 @@
 "audio2.watching" = "Ota-ona kuzatyapti";
 "audio2.camera_unavailable" = "Kamera ochilmadi — faqat ovoz";
 "audio2.stop" = "To'xtatish";
-"audio2.request.title" = "Ota-onangiz eshitmoqchi";
-"audio2.request.video.title" = "Ota-onangiz ko'rmoqchi";
-"audio2.request.body" = "Boshlash uchun bosing";
+"audio2.request.title" = "Ota-onangiz bog'lanmoqda";
+"audio2.request.video.title" = "Ota-onangiz video orqali bog'lanmoqda";
+"audio2.request.body" = "Bolajon360 ni oching — jonli ovoz o'zi boshlanadi.";
+"audio2.request.video.body" = "Bolajon360 ni oching — jonli video o'zi boshlanadi.";
+"audio2.request.answer_body" = "Javob berish uchun Bolajon360 ni oching.";
 "audio2.consent.title" = "Jonli ovozga ruxsat berasizmi?";
-"audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. U yoniq bo'lganda yuqorida doim qizil belgi ko'rinadi.";
+"audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. U yoniq bo'lganda ekran pastida doim qizil panel ko'rinadi. Hech narsa yozib olinmaydi.";
 "audio2.consent.video.title" = "Jonli videoga ruxsat berasizmi?";
-"audio2.consent.video.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizni ko'rishi va eshitishi mumkin. Kamera yoniq bo'lganda yuqorida doim qizil belgi ko'rinadi.";
+"audio2.consent.video.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizni ko'rishi va eshitishi mumkin — faqat Bolajon360 ochiq bo'lganda. Kamera yoniq bo'lganda ekran pastida doim qizil panel ko'rinadi. Hech narsa yozib olinmaydi.";
 "audio2.consent.hint" = "Yoniqligini doim ko'rasiz";
 "audio2.consent.allow" = "Ruxsat berish";
 "audio2.consent.decline" = "Hozir emas";
@@ -329,6 +331,8 @@
 "audio2.consent.granted_sub" = "Ota-onangiz tinglashiga rozilik bergansiz. Buni istalgan vaqtda qaytarib olsangiz bo'ladi — keyin u yana so'raydi.";
 "audio2.consent.revoke_cta" = "Ruxsatni qaytarib olish";
 "audio2.consent.revoke_confirm" = "Ruxsat qaytarib olinsinmi? Jonli efir darhol to'xtaydi va ota-onangiz yana so'rashi kerak bo'ladi.";
+"audio2.consent.offer_title" = "Jonli tekshiruv o'chiq";
+"audio2.consent.add_video" = "Jonli videoga ham ruxsat berish";
 "chat2.system.sos" = "SOS — yordam so'raldi";
 "chat2.system.generic" = "Tizim xabari";
 
@@ -428,6 +432,8 @@
 "perm2.media.agree" = "Roziman";
 "perm2.microphone.consent_hint" = "Mikrofon bu telefonda allaqachon yoqilgan. Ota-onangiz jonli ovozni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — mikrofon yoniqligi doim ekranda ko'rinadi va uni to'xtatish mumkin. Aks holda «Hozir emas»ni tanlang.";
 "perm2.camera.consent_hint" = "Kamera bu telefonda allaqachon yoqilgan. Ota-onangiz jonli videoni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — kamera yoniqligi doim ekranda ko'rinadi, hech narsa yozib olinmaydi. Aks holda «Hozir emas»ni tanlang.";
+"perm2.microphone.os_on" = "Mikrofon yoqilgan";
+"perm2.camera.os_on" = "Kamera yoqilgan";
 "perm2.location.settings_unchanged" = "Sozlamalarda hech narsa o'zgarmadi. Qayta urinish uchun «Sozlamalarni ochish»ni bosing — yoki bu telefonda sozlamani o'zgartirib bo'lmasa, busiz davom eting. Ota-ona buni saytda ko'radi.";
 "perm2.screentime.failed_retry" = "Ekran vaqtini hozir yoqib bo'lmadi. Internetni tekshiring va «Qayta urinish»ni bosing.";
 "perm2.bglocation.body_settings" = "Doimiy kuzatuv uchun Bolajon360 joylashuv ruxsati “Always” («Всегда») bo'lishi kerak.";

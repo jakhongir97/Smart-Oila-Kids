@@ -176,8 +176,8 @@
 "perm2.notifications.title" = "Notifications keep you in touch";
 "perm2.notifications.body" = "Notifications show you when your parent sends a message or starts a check.";
 "perm2.notifications.cta" = "Enable notifications";
-"perm2.microphone.title" = "Want to be able to hear live sound?";
-"perm2.camera.title" = "Want to be able to see live video?";
+"perm2.microphone.title" = "May your parent listen in live?";
+"perm2.camera.title" = "May your parent see you live through the camera?";
 "perm2.location.title" = "See where your child is on the map";
 "perm2.location.body" = "You'll see the location on the map in real time and can set safe zones.";
 "perm2.bglocation.title" = "Location updates even when the app is closed";
@@ -263,9 +263,9 @@
 "perm2.item.location" = "Location";
 
 "perm2.item.microphone" = "Microphone";
-"perm2.microphone.body" = "Lets a parent start a live audio check. You always see an indicator while the microphone is on.";
+"perm2.microphone.body" = "Only when your parent asks, for your safety. While it is on you always see a red bar at the bottom and iPhone's orange dot. Nothing is recorded. You can turn it off any time in Bolajon360 Settings.";
 "perm2.item.camera" = "Camera";
-"perm2.camera.body" = "Lets a parent start a live video check. Nothing is ever recorded or saved.";
+"perm2.camera.body" = "Only when your parent asks, and only while Bolajon360 is open. You always see a red bar and iPhone's green dot while the camera is on. Nothing is recorded. You can turn it off any time in Bolajon360 Settings.";
 "perm2.item.bglocation" = "Background location";
 
 
@@ -314,13 +314,15 @@
 "audio2.watching" = "Parent is watching";
 "audio2.camera_unavailable" = "Camera did not open — sound only";
 "audio2.stop" = "Stop";
-"audio2.request.title" = "Your parent wants to listen";
-"audio2.request.video.title" = "Your parent wants to look";
-"audio2.request.body" = "Tap to start";
+"audio2.request.title" = "Your parent is checking in";
+"audio2.request.video.title" = "Your parent is checking in by video";
+"audio2.request.body" = "Open Bolajon360 — live sound starts by itself.";
+"audio2.request.video.body" = "Open Bolajon360 — live video starts by itself.";
+"audio2.request.answer_body" = "Open Bolajon360 to answer.";
 "audio2.consent.title" = "Allow live audio?";
-"audio2.consent.body" = "Your parent can listen to your surroundings for your safety. You will always see a red indicator at the top while it is on.";
+"audio2.consent.body" = "Your parent can listen to your surroundings for your safety. While it is on you always see a red bar at the bottom of the screen. Nothing is recorded.";
 "audio2.consent.video.title" = "Allow live video?";
-"audio2.consent.video.body" = "Your parent can see and hear what is around you for your safety. You will always see a red indicator at the top while the camera is on.";
+"audio2.consent.video.body" = "Your parent can see and hear what is around you for your safety, only while Bolajon360 is open. While the camera is on you always see a red bar at the bottom of the screen. Nothing is recorded.";
 "audio2.consent.hint" = "You always see when it's on";
 "audio2.consent.allow" = "Allow";
 "audio2.consent.decline" = "Not now";
@@ -329,6 +331,8 @@
 "audio2.consent.granted_sub" = "You agreed that your parent may listen. You can take that back at any time — they will have to ask you again.";
 "audio2.consent.revoke_cta" = "Withdraw permission";
 "audio2.consent.revoke_confirm" = "Withdraw permission? Any live session stops now and your parent will have to ask you again.";
+"audio2.consent.offer_title" = "Live check is off";
+"audio2.consent.add_video" = "Also allow live video";
 "chat2.system.sos" = "SOS — help requested";
 "chat2.system.generic" = "System message";
 
@@ -428,6 +432,8 @@
 "perm2.media.agree" = "I agree";
 "perm2.microphone.consent_hint" = "The microphone is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live audio check — you'll always see an indicator and can stop it. Otherwise choose “Not now”.";
 "perm2.camera.consent_hint" = "The camera is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live video check — you'll always see an indicator and nothing is recorded. Otherwise choose “Not now”.";
+"perm2.microphone.os_on" = "Microphone is on";
+"perm2.camera.os_on" = "Camera is on";
 "perm2.location.settings_unchanged" = "Nothing changed in Settings. Tap “Open Settings” to try again — or, if the setting can't be changed on this phone, continue without it. Your parent will see this on the site.";
 "perm2.screentime.failed_retry" = "Screen Time couldn't be turned on just now. Check the internet connection and tap “Try again”.";
 "perm2.bglocation.body_settings" = "For continuous tracking, Bolajon360's location access must be set to “Always”.";
