@@ -4700,11 +4700,24 @@ final class CredentialAbsenceTests: XCTestCase {
     }
 
     func testOnlyAConclusiveProbeAnswerEndsThePairingAfterOneProbe() {
-        // DEVICE_UNPAIRED and CREDENTIAL_ABSENT cannot change by asking again; the legacy refresh
-        // refusal still needs the second agreeing probe.
+        // DEVICE_UNPAIRED, CREDENTIAL_ABSENT and an expired token cannot change by asking again; the
+        // legacy refresh refusal still needs the second agreeing probe.
         XCTAssertTrue(OilaTelemetryService.probeAnswerIsConclusive(error(OilaAPIError.deviceUnpairedCode)))
         XCTAssertTrue(OilaTelemetryService.probeAnswerIsConclusive(error(OilaAPIError.credentialAbsentCode)))
+        XCTAssertTrue(OilaTelemetryService.probeAnswerIsConclusive(error(OilaAPIError.deviceTokenExpiredCode)))
         XCTAssertFalse(OilaTelemetryService.probeAnswerIsConclusive(error("REFRESH_INVALID")))
+        XCTAssertFalse(OilaTelemetryService.probeAnswerIsConclusive(error("UNAUTHORIZED")))
+    }
+
+    func testAnExpiredDeviceTokenEndsThePairingAndIsNotARefusal() {
+        // The token cannot be renewed (no device refresh route), so a refusal of an expired token is
+        // the one UNAUTHORIZED that means only a new pairing helps.
+        XCTAssertTrue(error(OilaAPIError.deviceTokenExpiredCode).requiresRePair)
+        XCTAssertTrue(error(OilaAPIError.deviceTokenExpiredCode).isDeviceTokenExpired)
+        XCTAssertFalse(error(OilaAPIError.deviceTokenExpiredCode).isCredentialRejected)
+        XCTAssertFalse(error(OilaAPIError.deviceTokenExpiredCode).isCredentialAbsent,
+                       "it still goes through the confirmation probe")
+        XCTAssertFalse(error("UNAUTHORIZED").isDeviceTokenExpired)
     }
 }
 
@@ -4738,6 +4751,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         private var statusCalls = 0
         private var batches: [[OilaLocationFix]] = []
         private var sos: [OilaSOSContext] = []
+        private var statuses: [OilaDeviceStatus] = []
 
         init(lockAnswers: [Error], statusError: Error? = nil, locationError: Error? = nil) {
             self.lockAnswers = lockAnswers
@@ -4750,6 +4764,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         var statusPostCalls: Int { locked { statusCalls } }
         var uploadedBatches: [[OilaLocationFix]] { locked { batches } }
         var sentSOS: [OilaSOSContext] { locked { sos } }
+        var postedStatuses: [OilaDeviceStatus] { locked { statuses } }
 
         func fetchLockState() async throws -> OilaLockState {
             let answer: Error = locked { () -> Error in
@@ -4759,7 +4774,7 @@ final class TelemetryPairingLossTests: XCTestCase {
             throw answer
         }
         func postDeviceStatus(_ status: OilaDeviceStatus) async throws {
-            locked { statusCalls += 1 }
+            locked { statusCalls += 1; statuses.append(status) }
             if let statusError { throw statusError }
         }
         func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {
@@ -4950,6 +4965,8 @@ final class TelemetryPairingLossTests: XCTestCase {
         let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
         let (service, _, _) = start(stub)
         defer { service.stop() }
+        // No fresh fix to fall back on either: the phone holds nothing.
+        service.heldLocationOverride = { nil }
 
         service.enqueueUndeliveredSOS(OilaSOSContext(
             lat: 41.31, lng: 69.24, accuracy: 8, batteryPercent: 40,
@@ -4963,6 +4980,201 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertNil(delivered?.lng)
         XCTAssertNil(delivered?.accuracy)
         XCTAssertEqual(delivered?.batteryPercent, 40, "with everything that is still true")
+    }
+
+    func testAQueuedSOSWhosePositionHasGoneStaleIsSentWithTheFreshFixThePhoneHolds() async {
+        // The dead-zone press: a 20 s old fix at the press, the network back minutes later. GPS
+        // needed no network, so the phone knows where the child is NOW — and that is what goes.
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        let heldNow = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 41.3402, longitude: 69.2871),
+            altitude: 0, horizontalAccuracy: 7, verticalAccuracy: 5,
+            timestamp: Date().addingTimeInterval(-5)
+        )
+        service.heldLocationOverride = { heldNow }
+
+        service.enqueueUndeliveredSOS(OilaSOSContext(
+            lat: 41.31, lng: 69.24, accuracy: 8, batteryPercent: 40,
+            locationAt: Date().addingTimeInterval(-260)
+        ))
+
+        let sent = await waitUntil { !stub.sentSOS.isEmpty }
+        XCTAssertTrue(sent)
+        let delivered = stub.sentSOS.first
+        XCTAssertEqual(delivered?.lat, 41.3402, "the fresh fix, not no pin at all")
+        XCTAssertEqual(delivered?.lng, 69.2871)
+        XCTAssertEqual(delivered?.accuracy, 7)
+        XCTAssertEqual(delivered?.batteryPercent, 40, "the battery reading is still the press's")
+    }
+
+    // MARK: A refused token: the location drain backs off, the chip eventually says why
+
+    func testTheTimerBacksTheLocationDrainOffWhileTheTokenIsRefused() async throws {
+        try seedPendingFixes()
+        let refused = apiError(401, "UNAUTHORIZED")
+        let stub = Stub(lockAnswers: [refused], statusError: refused, locationError: refused)
+        let (service, _, invalidations) = start(stub)
+        defer { service.stop() }
+        // Let the launch's own poll and status post (and any connectivity-driven drain) land.
+        let answered = await waitUntil { stub.lockStateCalls >= 1 && stub.statusPostCalls >= 1 }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(answered)
+        XCTAssertGreaterThanOrEqual(service.consecutiveCredentialRejections, 2,
+                                    "the launch's poll and status post were both refused")
+
+        let t0 = Date()
+        let before = batchesCarryingSeeded(stub)
+        await service.flushLocationsOnTimer(now: t0)
+        XCTAssertEqual(batchesCarryingSeeded(stub), before + 1, "the first timer drain still tries")
+        XCTAssertGreaterThanOrEqual(service.consecutiveCredentialRejections, 3)
+
+        // At least three refusals: the backoff is at least 240 s.
+        await service.flushLocationsOnTimer(now: t0.addingTimeInterval(30))
+        await service.flushLocationsOnTimer(now: t0.addingTimeInterval(200))
+        XCTAssertEqual(batchesCarryingSeeded(stub), before + 1,
+                       "every 30 s tick used to re-send the queue to be refused again")
+
+        // …and never more than the 10-minute cap.
+        await service.flushLocationsOnTimer(now: t0.addingTimeInterval(601))
+        XCTAssertEqual(batchesCarryingSeeded(stub), before + 2, "past the backoff it tries again")
+
+        XCTAssertEqual(invalidations.value, 0, "still not a gone pairing")
+        let kept = Set(persistedFixes().map(\.ts))
+        XCTAssertTrue(Set(seeded.map(\.ts)).isSubset(of: kept), "and the route stays queued")
+    }
+
+    func testAnOfflineDrainIsNotBackedOffByTheRefusalRule() async throws {
+        try seedPendingFixes()
+        let offline = URLError(.notConnectedToInternet)
+        let stub = Stub(lockAnswers: [offline], statusError: offline, locationError: offline)
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        _ = await waitUntil { stub.lockStateCalls >= 1 && stub.statusPostCalls >= 1 }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(service.consecutiveCredentialRejections, 0, "offline is not a refused token")
+
+        let t0 = Date()
+        let before = batchesCarryingSeeded(stub)
+        await service.flushLocationsOnTimer(now: t0)
+        await service.flushLocationsOnTimer(now: t0.addingTimeInterval(30))
+        XCTAssertEqual(batchesCarryingSeeded(stub), before + 2, "offline drains keep their 30 s cadence")
+    }
+
+    func testOnlyARefusedTokenIsCountedAsARefusal() {
+        let service = OilaTelemetryService(service: Stub(lockAnswers: [URLError(.notConnectedToInternet)]))
+        for notARefusal: Error in [
+            URLError(.notConnectedToInternet),
+            apiError(500, nil),
+            apiError(400, "VALIDATION_FAILED"),
+            apiError(401, OilaAPIError.deviceUnpairedCode),
+            apiError(401, OilaAPIError.deviceTokenExpiredCode),
+            apiError(401, OilaAPIError.noCredentialCode),
+            apiError(401, OilaAPIError.credentialAbsentCode)
+        ] {
+            service.recordCredentialRefusal(notARefusal)
+        }
+        XCTAssertEqual(service.consecutiveCredentialRejections, 0)
+        service.recordCredentialRefusal(apiError(401, "UNAUTHORIZED"))
+        service.recordCredentialRefusal(apiError(401, nil))
+        XCTAssertEqual(service.consecutiveCredentialRejections, 2)
+    }
+
+    func testAnAnsweredCallClearsTheRefusalCount() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)]) // status posts succeed
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        _ = await waitUntil { stub.statusPostCalls >= 1 }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        service.recordCredentialRefusal(apiError(401, "UNAUTHORIZED"))
+        service.recordCredentialRefusal(apiError(401, nil))
+        XCTAssertEqual(service.consecutiveCredentialRejections, 2)
+
+        service.postStatusNow()
+        let cleared = await waitUntil { service.consecutiveCredentialRejections == 0 }
+        XCTAssertTrue(cleared, "one answered call ends the run of refusals")
+    }
+
+    func testARefusalThatHasOutlastedTheRelinkWindowTellsTheChildToAskAParent() {
+        let silentSince = Date().addingTimeInterval(-(OilaTelemetryService.credentialRefusalRelinkAfter + 60))
+        UserDefaults.standard.set(silentSince.timeIntervalSince1970, forKey: "OILA_LAST_SUCCESSFUL_CONTACT")
+        let service = OilaTelemetryService(service: Stub(lockAnswers: [URLError(.notConnectedToInternet)]))
+        XCTAssertTrue(service.hasCredential)
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: service.hasCredential, offPermissions: 0,
+                              lastContactAt: service.lastSuccessfulContactAt),
+            .outOfContact(since: service.lastSuccessfulContactAt),
+            "before: an out-of-contact chip, which reads as a network problem to wait out"
+        )
+
+        service.recordCredentialRefusal(apiError(401, "UNAUTHORIZED"))
+
+        XCTAssertFalse(service.hasCredential)
+        XCTAssertEqual(
+            LinkHealth.decide(hasCredential: service.hasCredential, offPermissions: 0,
+                              lastContactAt: service.lastSuccessfulContactAt),
+            .noCredential,
+            "after: home2.link_relink — ask a parent"
+        )
+    }
+
+    func testARecentRefusalDoesNotYetTellTheChildToFetchAParent() {
+        UserDefaults.standard.set(Date().addingTimeInterval(-3_600).timeIntervalSince1970,
+                                  forKey: "OILA_LAST_SUCCESSFUL_CONTACT")
+        let service = OilaTelemetryService(service: Stub(lockAnswers: [URLError(.notConnectedToInternet)]))
+        service.recordCredentialRefusal(apiError(401, "UNAUTHORIZED"))
+        XCTAssertTrue(service.hasCredential, "a backend auth blip must not send every child to a parent")
+    }
+
+    func testTheRelinkWindowIsMeasuredFromTheLastAnsweredCall() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let window = OilaTelemetryService.credentialRefusalRelinkAfter
+        XCTAssertTrue(OilaTelemetryService.credentialRefusalIsSustained(
+            lastContactAt: now.addingTimeInterval(-window), refusedSince: now, now: now))
+        XCTAssertFalse(OilaTelemetryService.credentialRefusalIsSustained(
+            lastContactAt: now.addingTimeInterval(-window + 1), refusedSince: now.addingTimeInterval(-10 * window), now: now),
+            "an answered call inside the window wins over a long run of refusals")
+        XCTAssertTrue(OilaTelemetryService.credentialRefusalIsSustained(
+            lastContactAt: nil, refusedSince: now.addingTimeInterval(-window), now: now),
+            "a pairing never answered at all counts from its first refusal")
+        XCTAssertFalse(OilaTelemetryService.credentialRefusalIsSustained(
+            lastContactAt: now.addingTimeInterval(86_400), refusedSince: now.addingTimeInterval(-window), now: now),
+            "a contact stamp in the future (clock moved back) is not a long silence")
+    }
+
+    // MARK: An expired device token
+
+    func testAnExpiredTokenEndsThePairingAfterOneProbe() async {
+        // A year after pairing the token runs out and nothing can renew it. The poll hears it, one
+        // probe confirms it, and the child is routed to pairing instead of going quiet for good.
+        let stub = Stub(lockAnswers: [apiError(401, OilaAPIError.deviceTokenExpiredCode)])
+        let (service, probes, invalidations) = start(stub)
+        defer { service.stop() }
+
+        let ended = await waitUntil { invalidations.value == 1 }
+
+        XCTAssertTrue(ended)
+        XCTAssertEqual(probes.value, 1)
+        XCTAssertFalse(service.isRunning)
+    }
+
+    // MARK: Diagnostics on the real status post
+
+    func testTheStatusPostCarriesTheScreenTimeAuthorizationAsUsageAccess() async throws {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+
+        let posted = await waitUntil { !stub.postedStatuses.isEmpty }
+
+        XCTAssertTrue(posted)
+        let diagnostics = try XCTUnwrap(stub.postedStatuses.first?.diagnostics)
+        let usageAccess = try XCTUnwrap(diagnostics["usageAccess"], "the status post must carry usageAccess")
+        XCTAssertEqual(usageAccess,
+                       DeviceDiagnosticsReporter.usageAccessValue(ScreenTimeAuthorizationManager.shared.status),
+                       "read from the Screen Time authorization the post just refreshed")
     }
 }
 
@@ -5065,6 +5277,67 @@ final class SOSLocationFreshnessTests: XCTestCase {
     func testAReplayWithNoPositionIsLeftAlone() {
         let none = OilaPendingSOS(context: OilaSOSContext(batteryPercent: 20), queuedAt: now)
         XCTAssertEqual(OilaTelemetryService.sosReplayContext(none, now: now), none.context)
+    }
+
+    // MARK: …and the fix the phone holds now
+
+    /// The outbox exists for the press made with no network, and GPS needs none: by the time the
+    /// network is back the press-time fix is usually stale while the manager holds a fresh one.
+    private func held(age: TimeInterval, accuracy: CLLocationAccuracy = 6) -> CLLocation {
+        CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 41.3402, longitude: 69.2871),
+            altitude: 0,
+            horizontalAccuracy: accuracy,
+            verticalAccuracy: 5,
+            timestamp: now.addingTimeInterval(-age)
+        )
+    }
+
+    func testAStaleReplayTakesTheFreshFixThePhoneHoldsNow() {
+        let context = OilaTelemetryService.sosReplayContext(
+            queued(fixAge: 260), currentFix: held(age: 5), now: now)
+        XCTAssertEqual(context.lat, 41.3402)
+        XCTAssertEqual(context.lng, 69.2871)
+        XCTAssertEqual(context.accuracy, 6)
+        XCTAssertEqual(context.locationAt, now.addingTimeInterval(-5))
+        XCTAssertEqual(context.batteryPercent, 55, "the battery reading is still the press's")
+    }
+
+    func testAFreshQueuedFixIsKeptOverTheCurrentOne() {
+        let context = OilaTelemetryService.sosReplayContext(
+            queued(fixAge: 30), currentFix: held(age: 1), now: now)
+        XCTAssertEqual(context.lat, 41.31, "the press-time position, while it is inside the bound")
+    }
+
+    func testAStaleReplayWithNoFreshFixEitherTravelsWithoutAPosition() {
+        let stale = held(age: OilaTelemetryService.sosLocationMaxAge + 1)
+        let context = OilaTelemetryService.sosReplayContext(
+            queued(fixAge: 260), currentFix: stale, now: now)
+        XCTAssertNil(context.lat, "no position older than the bound is ever sent")
+        XCTAssertNil(context.lng)
+        XCTAssertNil(context.accuracy)
+    }
+
+    func testAnInvalidCurrentFixIsNotUsed() {
+        let context = OilaTelemetryService.sosReplayContext(
+            queued(fixAge: 260), currentFix: held(age: 5, accuracy: -1), now: now)
+        XCTAssertNil(context.lat)
+    }
+
+    func testAnEntryQueuedByAnOlderBuildTakesTheFreshCurrentFix() {
+        let legacy = OilaPendingSOS(
+            context: OilaSOSContext(lat: 41.31, lng: 69.24, accuracy: 12, batteryPercent: 80),
+            queuedAt: now
+        )
+        let context = OilaTelemetryService.sosReplayContext(legacy, currentFix: held(age: 5), now: now)
+        XCTAssertEqual(context.lat, 41.3402, "its own position has no provable age; the fresh one does")
+    }
+
+    func testAPressWithNoPositionIsFilledFromAFreshFixAtReplay() {
+        let none = OilaPendingSOS(context: OilaSOSContext(batteryPercent: 20), queuedAt: now)
+        let context = OilaTelemetryService.sosReplayContext(none, currentFix: held(age: 5), now: now)
+        XCTAssertEqual(context.lat, 41.3402)
+        XCTAssertEqual(context.batteryPercent, 20)
     }
 
     func testAFixTimestampedInTheFutureIsAlsoRefused() {

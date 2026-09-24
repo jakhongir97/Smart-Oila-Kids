@@ -40,6 +40,17 @@ struct OilaAPIError: LocalizedError {
     /// deleted, handset swapped). Distinct from `UNAUTHORIZED`, which is a bad token.
     static let deviceUnpairedCode = "DEVICE_UNPAIRED"
 
+    /// The app's own code for "the server refused our device token, AND the token's own `exp` claim
+    /// has passed". Set only by `OilaDeviceClient.surfacedRejection`, never by the server.
+    ///
+    /// The device token expires: the live pair response carries `iat`/`exp` exactly 365 days apart,
+    /// paired devices hold no refresh token, and the spec has no device-token refresh route. So a year
+    /// after pairing every call answers 401 UNAUTHORIZED ("expired"), for good. UNAUTHORIZED alone
+    /// never ends a pairing (see `requiresRePair`), which left such a phone silently out of contact
+    /// forever. Both halves together are conclusive: a child moving the clock forward cannot produce
+    /// it, because the server must also be refusing the token.
+    static let deviceTokenExpiredCode = "DEVICE_TOKEN_EXPIRED"
+
     /// The pairing is gone — the caller should force re-pairing.
     ///
     /// Decided by `errorCode` ALONE, because that is what the live contract says to switch on (every
@@ -50,10 +61,12 @@ struct OilaAPIError: LocalizedError {
     /// outlasted the few minutes of confirmation probes could wipe the child's pairing (Keychain
     /// token, DSN, per-child data) — and only a parent minting a new code could undo it.
     ///
-    /// The three codes that do mean it:
+    /// The codes that do mean it:
     /// - `DEVICE_UNPAIRED` — the server says so.
     /// - `CREDENTIAL_ABSENT` — the app's own: the Keychain answered definitively that there is no
     ///   token, so waiting cannot produce one.
+    /// - `DEVICE_TOKEN_EXPIRED` — the app's own: the server refused the token and the token's own
+    ///   `exp` has passed. No route can renew it, so only a new pairing can.
     /// - `REFRESH_INVALID` — legacy installs that still hold a refresh token, whose refresh was
     ///   refused.
     ///
@@ -62,10 +75,16 @@ struct OilaAPIError: LocalizedError {
     /// 401 that came back looked like a revocation, and the probe self-confirmed it.
     var requiresRePair: Bool {
         switch errorCode {
-        case Self.deviceUnpairedCode, Self.credentialAbsentCode, "REFRESH_INVALID": return true
-        default: return false
+        case Self.deviceUnpairedCode, Self.credentialAbsentCode, Self.deviceTokenExpiredCode,
+             "REFRESH_INVALID":
+            return true
+        default:
+            return false
         }
     }
+
+    /// The server refused a token whose own `exp` has passed. See `deviceTokenExpiredCode`.
+    var isDeviceTokenExpired: Bool { errorCode == Self.deviceTokenExpiredCode }
 
     /// A server 401 that does NOT say the pairing is gone — UNAUTHORIZED, or no errorCode at all.
     /// Never tears anything down: it is recorded (see `OilaDeviceClient.noteCredentialRejected`),
@@ -1594,6 +1613,8 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 request.setValue(contentType, forHTTPHeaderField: "Content-Type")
             }
         }
+        // The Bearer this request carried, so a 401 can be read against the token's own `exp`.
+        var sentToken: String?
         if authorized {
             // Fail fast instead of sending an UNAUTHENTICATED request. There was no `else` here, so
             // an unreadable Keychain silently produced a request with no Authorization header, and
@@ -1612,6 +1633,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 )
             }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            sentToken = token
         }
 
         let (data, http) = try await execute(request, allowRetry: method == .get)
@@ -1645,7 +1667,10 @@ final class OilaDeviceClient: OilaDeviceServicing {
         // discarding the real `message`/`errorCode` the backend sent (why the pairing was
         // rejected) and replacing it with an error about a token this device never had.
         if http.statusCode == 401, authorized {
-            let serverError = Self.error(from: json, statusCode: http.statusCode)
+            let serverError = Self.surfacedRejection(
+                Self.error(from: json, statusCode: http.statusCode),
+                sentToken: sentToken
+            )
             guard allowRefresh, secureTokens.refreshToken()?.trimmedNonEmpty != nil else {
                 Self.noteCredentialRejected(serverError, path: path)
                 throw serverError
@@ -1682,26 +1707,104 @@ final class OilaDeviceClient: OilaDeviceServicing {
     /// the last entry, because a backed-off poll would otherwise bury the timeline in one line.
     /// Recorded HERE rather than at each caller so the lock poll, the screens and the telemetry
     /// flushes are all covered by one rule.
+    ///
+    /// An expired token (`DEVICE_TOKEN_EXPIRED`, see `surfacedRejection`) is recorded the same way
+    /// under its own event name: it is what ends the pairing, so the timeline should say why.
     static func noteCredentialRejected(_ error: OilaAPIError, path: String) {
-        guard error.isCredentialRejected else { return }
+        let event: String
+        if error.isCredentialRejected {
+            event = credentialRejectedEvent
+        } else if error.isDeviceTokenExpired {
+            event = deviceTokenExpiredEvent
+        } else {
+            return
+        }
         let code = error.errorCode ?? "none"
-        authLog.error("device_credential_rejected code=\(code, privacy: .public) path=\(path, privacy: .public)")
+        authLog.error("\(event, privacy: .public) code=\(code, privacy: .public) path=\(path, privacy: .public)")
+        let now = Date()
         Task { @MainActor in
-            let signature = "\(code) \(path)"
-            let now = Date()
-            if let last = lastCredentialRejectionNote,
-               last.signature == signature,
-               now.timeIntervalSince(last.at) < credentialRejectionNoteGap {
-                return
-            }
-            lastCredentialRejectionNote = (signature, now)
-            RuntimeDiagnosticsCenter.shared.updateLifecycle(lastEvent: "device_credential_rejected \(signature)")
+            recordCredentialRejection(event: event, signature: "\(code) \(path)", now: now)
         }
     }
 
+    static let credentialRejectedEvent = "device_credential_rejected"
+    static let deviceTokenExpiredEvent = "device_token_expired"
+
+    /// Writes one refusal to the lifecycle timeline, unless the same code on the same route was
+    /// written less than `credentialRejectionNoteGap` ago. Returns whether it wrote.
+    ///
+    /// Remembered per signature, not just the last one: the lock poll, the status post and the
+    /// location drain all fail together on a refused token, and with a single remembered signature
+    /// their three routes took turns defeating the dedupe, so every failure was written anyway.
+    @MainActor @discardableResult
+    static func recordCredentialRejection(event: String, signature: String, now: Date) -> Bool {
+        if let last = credentialRejectionNotes[signature] {
+            let elapsed = now.timeIntervalSince(last)
+            if elapsed >= 0, elapsed < credentialRejectionNoteGap { return false }
+        }
+        credentialRejectionNotes[signature] = now
+        RuntimeDiagnosticsCenter.shared.updateLifecycle(lastEvent: "\(event) \(signature)", eventDate: now)
+        return true
+    }
+
+    /// Forget every remembered refusal. Tests only: the memory is process-wide.
+    @MainActor static func resetCredentialRejectionNotes() {
+        credentialRejectionNotes.removeAll()
+    }
+
     private static let authLog = Logger(subsystem: "uz.smartoila.kids", category: "auth")
-    private static let credentialRejectionNoteGap: TimeInterval = 600
-    @MainActor private static var lastCredentialRejectionNote: (signature: String, at: Date)?
+    static let credentialRejectionNoteGap: TimeInterval = 600
+    /// Bounded by construction: one entry per (code, route) pair, and both sets are small and fixed.
+    @MainActor private static var credentialRejectionNotes: [String: Date] = [:]
+
+    /// How far past its own `exp` a refused token must be before the refusal is read as expiry.
+    /// Covers a phone clock running a little ahead of the server's.
+    static let expiredTokenSkew: TimeInterval = 600
+
+    /// What a server 401 surfaces as. Unchanged, except for one case: the server refused the token
+    /// (`isCredentialRejected`) AND the token this request carried says, in its own `exp` claim,
+    /// that it expired more than `expiredTokenSkew` ago. That is `DEVICE_TOKEN_EXPIRED`, which
+    /// `requiresRePair`, because no route can renew a device token (see `deviceTokenExpiredCode`).
+    ///
+    /// The claim is read unverified, which is safe here because it can only ADD a condition to a
+    /// refusal the server already made: a forged or clock-shifted `exp` changes nothing on a token
+    /// the server accepts. Pure, so the rule is testable without a network.
+    static func surfacedRejection(
+        _ serverError: OilaAPIError,
+        sentToken: String?,
+        now: Date = Date()
+    ) -> OilaAPIError {
+        guard serverError.isCredentialRejected,
+              let sentToken,
+              let expiry = deviceTokenExpiry(sentToken),
+              now.timeIntervalSince(expiry) > expiredTokenSkew
+        else { return serverError }
+        return OilaAPIError(
+            statusCode: serverError.statusCode,
+            message: serverError.message,
+            errorCode: OilaAPIError.deviceTokenExpiredCode,
+            fieldErrors: serverError.fieldErrors
+        )
+    }
+
+    /// The `exp` claim of a device JWT, NOT verified — see `surfacedRejection` for why that is
+    /// enough. nil when the token is not a three-part JWT, its payload is not base64url JSON, or it
+    /// carries no numeric `exp`.
+    static func deviceTokenExpiry(_ token: String) -> Date? {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        var payload = parts[1]
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = payload.count % 4
+        if remainder > 0 { payload += String(repeating: "=", count: 4 - remainder) }
+        guard let data = Data(base64Encoded: payload),
+              let claims = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let exp = claims["exp"] as? NSNumber,
+              CFGetTypeID(exp) != CFBooleanGetTypeID()
+        else { return nil }
+        return Date(timeIntervalSince1970: exp.doubleValue)
+    }
 
     /// At most three attempts per idempotent request, backing off 0.4 s then 0.8 s.
     private static let idempotentRetryAttempts = 3

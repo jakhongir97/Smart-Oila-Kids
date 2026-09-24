@@ -106,6 +106,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// Whether the Keychain currently holds a usable device credential. Re-evaluated at `start()` and
     /// whenever a call comes back conclusively credential-less, so the UI can say "ask a parent to
     /// re-link this device" instead of a green chip that will never be true again.
+    ///
+    /// Also false once the server has been refusing the token (`isCredentialRejected`) with no
+    /// successful call for `credentialRefusalRelinkAfter` — see `recordCredentialRefusal`. Such a
+    /// token is not usable either, and "out of contact" reads to a child as a network problem they
+    /// should wait out. Any answered call sets it back (`recordSuccessfulContact`).
     @Published private(set) var hasCredential = true
     /// The whole-device lock, DECIDED ON THE PHONE (`reevaluateLock`): the saved policy snapshot
     /// (`DeviceLockPolicySnapshot` — manual window + schedules from the last `GET /device/lock/state`)
@@ -242,6 +247,17 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var lockRefreshRequestedWhileBusy = false
     /// Consecutive `fetchLockState()` failures, driving the timer's backoff.
     private var consecutiveLockFailures = 0
+    /// Consecutive server answers, on ANY telemetry route (lock poll, status, location, SOS), that
+    /// refused the device token (`OilaAPIError.isCredentialRejected`) with no answered call between
+    /// them. Drives the location drain's backoff (`flushLocationsOnTimer`). Cleared by
+    /// `recordSuccessfulContact`.
+    private(set) var consecutiveCredentialRejections = 0
+    /// When the current run of refusals began; nil while none is running. In memory only — the
+    /// persisted `lastSuccessfulContactAt` is what carries "how long" across a relaunch.
+    private var credentialRefusedSince: Date?
+    /// When the flush TIMER last drained the location queue (`flushNow`, connectivity and the probe
+    /// do not set this).
+    private var lastTimerLocationFlushAt: Date?
     /// When the TIMER last actually issued a poll (push/foreground refreshes do not set this).
     private var lastLockPollAt: Date?
     /// Lock-refresh observer. Registered here, not only in `RootView`, because a lock push can arrive
@@ -431,6 +447,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     var sessionInvalidationSignal: () -> Void = {
         NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
     }
+    /// Injection seam for the fix CoreLocation is holding (`CLLocationManager.location`, which is not
+    /// otherwise injectable). nil reads the real manager. Only the SOS outbox replay reads it.
+    var heldLocationOverride: (() -> CLLocation?)?
 
     init(service: OilaDeviceServicing = OilaDeviceClient.shared, lockRuntime: OilaLockRuntime? = nil) {
         self.service = service
@@ -480,6 +499,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         didSignalInvalidation = false
         isConfirmingInvalidation = false
         didPostResolvedNetworkType = false
+        // A refusal counted by a call that landed after the previous run's stop() must not start
+        // this run backed off.
+        consecutiveCredentialRejections = 0
+        credentialRefusedSince = nil
+        lastTimerLocationFlushAt = nil
         // Ask the Keychain directly rather than waiting for the first request to fail. A device
         // restored from a backup has no credential at all — every item this app writes is
         // `…ThisDeviceOnly` and backups exclude those — so the answer is available at once, and the
@@ -608,9 +632,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
         flushTimer = Timer.scheduledTimer(withTimeInterval: flushInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                // SOS first: it is the only queue whose delivery is an emergency.
+                // SOS first: it is the only queue whose delivery is an emergency, and it never backs
+                // off. The location drain does while the token is refused — see there.
                 await self?.flushPendingSOS()
-                await self?.flushLocations()
+                await self?.flushLocationsOnTimer()
             }
         }
         statusTimer = Timer.scheduledTimer(withTimeInterval: statusInterval, repeats: true) { [weak self] _ in
@@ -841,6 +866,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lastSuccessfulContactAt = nil
         UserDefaults.standard.removeObject(forKey: Self.lastContactKey)
         hasCredential = true
+        consecutiveCredentialRejections = 0
+        credentialRefusedSince = nil
+        lastTimerLocationFlushAt = nil
         // Same reasoning as the SOS outbox and the contact stamp above: the location-push address
         // and the extension's credential copy belong to the pairing that made them. Left behind,
         // they would let a push sent for the previous family be answered by this handset.
@@ -921,8 +949,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 continue
             }
             // Re-judged at every attempt: a position that was fresh at the press is not fresh an hour
-            // into an outage. See `sosReplayContext`.
-            let context = Self.sosReplayContext(entry)
+            // into an outage, and the fix CoreLocation holds NOW (GPS needs no network) replaces it
+            // when it is fresh. See `sosReplayContext`.
+            let context = Self.sosReplayContext(entry, currentFix: heldLocation())
             do {
                 try await service.sendSOS(
                     lat: context.lat,
@@ -938,7 +967,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             } catch {
                 // Still offline — or a 401 that is not DEVICE_UNPAIRED, which is a token problem and
                 // not a reason to give up on an emergency. Keep the whole remaining queue for the
-                // next flush.
+                // next flush. Counted, but the SOS outbox itself never backs off.
+                recordCredentialRefusal(error)
                 break
             }
         }
@@ -946,6 +976,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         guard !delivered.isEmpty else { return }
         pendingSOS.removeAll { delivered.contains($0.id) }
         persistPendingSOS()
+    }
+
+    /// The fix CoreLocation is holding right now, or the test seam's. Read once per use.
+    private func heldLocation() -> CLLocation? {
+        if let heldLocationOverride { return heldLocationOverride() }
+        return locationManager.location
     }
 
     private func persistPendingSOS() {
@@ -1274,19 +1310,57 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private func recordSuccessfulContact() {
         lastSuccessfulContactAt = Date()
         if !hasCredential { hasCredential = true }
+        consecutiveCredentialRejections = 0
+        credentialRefusedSince = nil
+    }
+
+    /// How long the server may refuse the token, with no answered call at all, before the child's chip
+    /// stops saying "out of contact" and says "ask a parent to re-link" (`LinkHealth.noCredential`).
+    ///
+    /// An expired token is recognised at once (`DEVICE_TOKEN_EXPIRED` ends the pairing). This covers
+    /// the refusals nothing can recognise — a token signed with a key the server has rotated away,
+    /// say — which never end the pairing and never recover either. Six hours is far longer than a
+    /// backend auth incident should last, so a blip does not tell every child to fetch a parent.
+    nonisolated static let credentialRefusalRelinkAfter: TimeInterval = 6 * 3_600
+
+    /// Whether a refusal has gone on long enough to tell the child to ask a parent. Measured from the
+    /// last answered call, or from the first refusal when this pairing has never been answered. A
+    /// contact stamp in the future (clock moved back) is not a long silence. Pure, so it is testable.
+    nonisolated static func credentialRefusalIsSustained(
+        lastContactAt: Date?,
+        refusedSince: Date,
+        now: Date
+    ) -> Bool {
+        now.timeIntervalSince(lastContactAt ?? refusedSince) >= credentialRefusalRelinkAfter
+    }
+
+    /// Every telemetry route's failure branch calls this. Only a server's refusal of the token
+    /// (`isCredentialRejected`: UNAUTHORIZED, or a 401 with no code) counts; offline, 5xx and the
+    /// pairing-ending codes do not. Internal (not private) so a test can drive it with a clock.
+    func recordCredentialRefusal(_ error: Error, now: Date = Date()) {
+        guard (error as? OilaAPIError)?.isCredentialRejected == true else { return }
+        consecutiveCredentialRejections += 1
+        let since = credentialRefusedSince ?? now
+        credentialRefusedSince = since
+        if hasCredential,
+           Self.credentialRefusalIsSustained(lastContactAt: lastSuccessfulContactAt, refusedSince: since, now: now) {
+            hasCredential = false
+        }
     }
 
     /// A telemetry call reported `requiresRePair`: the server said DEVICE_UNPAIRED, the Keychain
-    /// said there is no token (CREDENTIAL_ABSENT), or a legacy refresh was refused (REFRESH_INVALID).
+    /// said there is no token (CREDENTIAL_ABSENT), the server refused a token whose own `exp` has
+    /// passed (DEVICE_TOKEN_EXPIRED), or a legacy refresh was refused (REFRESH_INVALID).
     ///
-    /// What does NOT arrive here, since 2026-09-24: a 401 UNAUTHORIZED, or a 401 with no errorCode.
-    /// The live contract defines those as a bad TOKEN, not a gone pairing ("only DEVICE_UNPAIRED
-    /// means the pairing is gone"), and they used to run the same confirmation as a real unpair — so
-    /// a signing-key rotation or a gateway answering 401 for longer than the probes' few minutes
-    /// could wipe every child's pairing at once. Each caller's generic failure branch now takes them
-    /// like any other failed request: the lock poll counts it and backs off, SOS and location keep
-    /// their queues, the status post is dropped. `OilaDeviceClient.noteCredentialRejected` records
-    /// each one.
+    /// What does NOT arrive here, since 2026-09-24: a 401 UNAUTHORIZED, or a 401 with no errorCode,
+    /// on a token that has not expired. The live contract defines those as a bad TOKEN, not a gone
+    /// pairing ("only DEVICE_UNPAIRED means the pairing is gone"), and they used to run the same
+    /// confirmation as a real unpair — so a signing-key rotation or a gateway answering 401 for
+    /// longer than the probes' few minutes could wipe every child's pairing at once. Each caller's
+    /// generic failure branch now takes them like any other failed request: the lock poll counts it
+    /// and backs off, SOS and location keep their queues (the location drain backs off too), the
+    /// status post is dropped. `recordCredentialRefusal` counts each one and
+    /// `OilaDeviceClient.noteCredentialRejected` records it.
     ///
     /// Even the server's DEVICE_UNPAIRED is confirmed by an independent probe after a randomized
     /// delay — see `confirmAndInvalidate` — rather than trusted from a single response.
@@ -1318,8 +1392,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// keeps the session.
     ///
     /// How many probes: ONE, when the probe's own answer is conclusive — DEVICE_UNPAIRED, which the
-    /// contract defines as the pairing being gone, or CREDENTIAL_ABSENT (see
-    /// `probeAnswerIsConclusive`). A second probe after that could only repeat the server's
+    /// contract defines as the pairing being gone, CREDENTIAL_ABSENT, or DEVICE_TOKEN_EXPIRED (see
+    /// `probeAnswerIsConclusive`). The one probe is still worth its delay for an expired token: if the
+    /// server accepts the token after all, the refusal was a blip that happened to land after `exp`. A second probe after that could only repeat the server's
     /// answer, and it cost the child another one to two minutes on a phone whose parent has
     /// already removed it. Only REFRESH_INVALID — the legacy refresh path, which says the refresh
     /// token was refused rather than that the pairing is gone — still needs
@@ -1364,9 +1439,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// Whether ONE probe answering with `error` is enough to end the pairing. Pure, so the rule is
     /// pinned by a test: DEVICE_UNPAIRED is the server stating the pairing is gone, CREDENTIAL_ABSENT
-    /// is the Keychain stating there is no token — neither changes by asking again.
+    /// is the Keychain stating there is no token, DEVICE_TOKEN_EXPIRED is the server refusing a token
+    /// that has run out and cannot be renewed — none of them changes by asking again.
     nonisolated static func probeAnswerIsConclusive(_ error: OilaAPIError) -> Bool {
         error.errorCode == OilaAPIError.deviceUnpairedCode || error.isCredentialAbsent
+            || error.isDeviceTokenExpired
     }
 
     private func flushLocations() async {
@@ -1427,7 +1504,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 // but never resurrect a queue the session already tore down. Stop at the first
                 // failed slice: the rest of the queue is older than nothing and the next trigger
                 // will retry it in order. A 401 that is not DEVICE_UNPAIRED lands here too, and
-                // keeps its fixes: a refused token is not a verdict on the route the child took.
+                // keeps its fixes: a refused token is not a verdict on the route the child took. It
+                // is counted, and the count backs the timer's drain off (`flushLocationsOnTimer`).
+                recordCredentialRefusal(error)
                 guard isRunning else { return }
                 pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
                 break
@@ -1438,6 +1517,30 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
         // Persist the (possibly re-queued) backlog so an offline route survives a process kill.
         persistPendingFixes()
+    }
+
+    /// The 30 s flush timer's entry point to the location drain, which backs off while the server
+    /// keeps refusing the device token.
+    ///
+    /// Since a refused token (UNAUTHORIZED, or a 401 with no code) no longer ends the pairing, it can
+    /// be a permanent state, and the drain re-queues on it. Unbacked, every tick re-sent the head of
+    /// the queue — up to 250 fixes, ~20 KB — to be refused again: about 2,900 POSTs and 55 MB a day
+    /// from a child's phone, often on a prepaid plan, with nothing on screen. The curve is the lock
+    /// poll's (`lockPollBackoff`: doubling, capped at 10 minutes), keyed on refusals from any route.
+    /// Offline and 5xx failures are not counted: offline costs no data, and neither is new here.
+    /// `flushNow`, a restored connection and the parent's probe still drain at once, and the SOS
+    /// outbox never backs off. Internal (not private) so a test can drive it with a clock.
+    func flushLocationsOnTimer(now: Date = Date()) async {
+        guard isRunning else { return }
+        let backoff = Self.lockPollBackoff(consecutiveFailures: consecutiveCredentialRejections,
+                                           baseInterval: flushInterval)
+        if backoff > 0, let last = lastTimerLocationFlushAt {
+            let elapsed = now.timeIntervalSince(last)
+            // A negative elapsed is a clock moved backwards; do not let it stretch the backoff.
+            if elapsed >= 0, elapsed < backoff { return }
+        }
+        lastTimerLocationFlushAt = now
+        await flushLocations()
     }
 
     /// Whether `POST /device/location/batch` refused a batch for good. Pure, so the line is pinned by
@@ -1565,7 +1668,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         } catch let error as OilaAPIError where error.requiresRePair {
             handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
         } catch {
-            // Ignore transient status-post failures.
+            // Ignore transient status-post failures — but count a refused token.
+            recordCredentialRefusal(error)
         }
     }
 
@@ -1645,6 +1749,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             // Keep the saved policy on a transient failure — but stop asking at full rate. The rule
             // itself runs on: this is the offline branch, and offline is exactly where it must act.
             consecutiveLockFailures += 1
+            recordCredentialRefusal(error)
             reevaluateLock(reason: "poll_failed")
         }
     }
@@ -2452,7 +2557,8 @@ extension OilaTelemetryService: SOSTelemetryProviding {
         let batteryPercent = Self.batteryPercent()
 
         // Ask for a fresh fix in the background too. It cannot help THIS request, but SOS retries
-        // from the outbox and a foregrounded manager usually lands one within seconds.
+        // from the outbox and a foregrounded manager usually lands one within seconds — which
+        // `sosReplayContext` sends in place of a press-time fix that has gone stale.
         if [.authorizedAlways, .authorizedWhenInUse].contains(locationManager.authorizationStatus) {
             locationManager.requestLocation()
         }
@@ -2467,23 +2573,45 @@ extension OilaTelemetryService: SOSTelemetryProviding {
         )
     }
 
-    /// The context a QUEUED SOS is sent with: the one captured at the press, minus its position once
-    /// that position is older than `sosLocationMaxAge`.
+    /// The context a QUEUED SOS is sent with: the one captured at the press while its position is
+    /// within `sosLocationMaxAge`; past that, the fix CoreLocation holds NOW (`currentFix`) if THAT
+    /// one is usable (`sosUsableLocation`: fresh, valid); and only when neither is, no position.
     ///
     /// The press-time rule above only bounds the fix at the moment of the press. The outbox then
     /// replays that same context for up to `sosMaxAge` (six hours), and `TriggerSosDto` has no
     /// timestamp, so the parent was shown the pin as where their child is NOW — possibly hours after
-    /// the child left it. The same freshness bound now holds at every send: past it, lat/lng/accuracy
-    /// travel as absent and the alert still goes out with its battery reading. An entry with no
-    /// `locationAt` (queued by an older build) cannot show its fix is fresh, so it is treated as
-    /// stale. Pure, so the rule is testable without an outbox or a clock.
-    nonisolated static func sosReplayContext(_ entry: OilaPendingSOS, now: Date = Date()) -> OilaSOSContext {
+    /// the child left it. The same freshness bound now holds at every send.
+    ///
+    /// The current fix is what makes that bound affordable. The outbox exists for the press made
+    /// with no network, and GPS needs none: by the time the network is back — often minutes later,
+    /// after the press screen's own attempts have used up 90 s — the press-time fix is stale almost
+    /// every time, while the manager holds one seconds old (`currentSOSContext` asks for exactly that
+    /// with `requestLocation()`). Stripping the position then sent the parent a panic alert with no
+    /// pin while the phone knew where the child was. The same fill applies to an entry pressed with
+    /// no position at all, and to one queued by an older build with no `locationAt` (its age is
+    /// unknown, so its own position is never sent). The battery reading is always the press's.
+    ///
+    /// Pure, so the rule is testable without an outbox, a location manager or a clock.
+    nonisolated static func sosReplayContext(
+        _ entry: OilaPendingSOS,
+        currentFix: CLLocation? = nil,
+        now: Date = Date()
+    ) -> OilaSOSContext {
         var context = entry.context
-        guard context.lat != nil || context.lng != nil || context.accuracy != nil else { return context }
-        if let locationAt = context.locationAt,
+        let hasQueuedPosition = context.lat != nil || context.lng != nil || context.accuracy != nil
+        if hasQueuedPosition,
+           let locationAt = context.locationAt,
            abs(now.timeIntervalSince(locationAt)) <= sosLocationMaxAge {
             return context
         }
+        if let fresh = sosUsableLocation(currentFix, now: now) {
+            context.lat = fresh.coordinate.latitude
+            context.lng = fresh.coordinate.longitude
+            context.accuracy = fresh.horizontalAccuracy
+            context.locationAt = fresh.timestamp
+            return context
+        }
+        guard hasQueuedPosition else { return context }
         context.lat = nil
         context.lng = nil
         context.accuracy = nil

@@ -201,8 +201,8 @@ final class OilaDeviceClientTests: XCTestCase {
     }
 
     /// What a 401 surfaces as for a paired device (no refresh token, so it can't be refreshed away).
-    private func surfacedError(for body: String) async -> OilaAPIError? {
-        let client = makeClient(tokens: InMemoryTokenStore(access: "OLD", refresh: nil))
+    private func surfacedError(for body: String, token: String = "OLD") async -> OilaAPIError? {
+        let client = makeClient(tokens: InMemoryTokenStore(access: token, refresh: nil))
         TestHTTPURLProtocol.requestHandler = { [self] request in status(request, 401, body) }
         do {
             try await client.updateFCMToken("fcm-token")
@@ -236,6 +236,162 @@ final class OilaDeviceClientTests: XCTestCase {
         XCTAssertEqual(error?.errorCode, "UNAUTHORIZED", "the server's own code survives the missing refresh token")
         XCTAssertEqual(error?.requiresRePair, false)
         XCTAssertEqual(error?.isCredentialRejected, true)
+    }
+
+    // MARK: An expired device token
+
+    private static let unauthorizedBody = #"{"success":false,"message":"Invalid token","errorCode":"UNAUTHORIZED"}"#
+    private static let unpairedBody = #"{"success":false,"message":"Device unpaired","errorCode":"DEVICE_UNPAIRED"}"#
+
+    /// A device JWT shaped like the live pair response's (`sub`, `memberId`, `type`, `dsn`, `iat`,
+    /// `exp`), base64url with the padding stripped. The signature is never checked on this side.
+    private func deviceJWT(exp: Any?) -> String {
+        func base64URL(_ data: Data) -> String {
+            data.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }
+        var claims: [String: Any] = [
+            "sub": "child-1", "memberId": "member-1", "type": "device", "dsn": "DSN-1", "iat": 1_790_205_216
+        ]
+        if let exp { claims["exp"] = exp }
+        let header = base64URL(Data(#"{"alg":"HS256","typ":"JWT"}"#.utf8))
+        let payload = base64URL(try! JSONSerialization.data(withJSONObject: claims))
+        return "\(header).\(payload).c2lnbmF0dXJl"
+    }
+
+    func testTheExpiryIsReadFromTheDeviceTokensOwnClaim() {
+        // The live pair response: iat 1790205216, exp 1821741216 — exactly 365 days.
+        XCTAssertEqual(OilaDeviceClient.deviceTokenExpiry(deviceJWT(exp: 1_821_741_216)),
+                       Date(timeIntervalSince1970: 1_821_741_216))
+        XCTAssertNil(OilaDeviceClient.deviceTokenExpiry(deviceJWT(exp: nil)), "no exp, no expiry")
+        XCTAssertNil(OilaDeviceClient.deviceTokenExpiry(deviceJWT(exp: "soon")), "a non-numeric exp is not one")
+        XCTAssertNil(OilaDeviceClient.deviceTokenExpiry(deviceJWT(exp: true)), "nor is a boolean")
+        XCTAssertNil(OilaDeviceClient.deviceTokenExpiry("OLD"), "an opaque token has no claims")
+        XCTAssertNil(OilaDeviceClient.deviceTokenExpiry("a.%%%.c"), "a payload that is not base64url")
+    }
+
+    func testARefusedTokenPastItsOwnExpiryEndsThePairing() async {
+        // A year after pairing: the server says UNAUTHORIZED ("expired"), and the token agrees.
+        let expired = deviceJWT(exp: Date().addingTimeInterval(-2 * 86_400).timeIntervalSince1970)
+        let error = await surfacedError(for: Self.unauthorizedBody, token: expired)
+        XCTAssertEqual(error?.errorCode, OilaAPIError.deviceTokenExpiredCode)
+        XCTAssertEqual(error?.requiresRePair, true, "no route renews a device token; only a new pairing helps")
+        XCTAssertEqual(error?.isCredentialRejected, false)
+
+        let bare = await surfacedError(for: #"{"success":false}"#, token: expired)
+        XCTAssertEqual(bare?.errorCode, OilaAPIError.deviceTokenExpiredCode, "a code-less 401 on it too")
+    }
+
+    func testARefusedTokenThatHasNotExpiredStaysARefusal() async {
+        let live = deviceJWT(exp: Date().addingTimeInterval(30 * 86_400).timeIntervalSince1970)
+        let error = await surfacedError(for: Self.unauthorizedBody, token: live)
+        XCTAssertEqual(error?.errorCode, "UNAUTHORIZED", "a refusal of a live token is not a verdict on the pairing")
+        XCTAssertEqual(error?.requiresRePair, false)
+    }
+
+    func testAnExpiryInsideTheClockSkewIsNotYetExpiry() {
+        let now = Date(timeIntervalSince1970: 1_821_741_216)
+        let refused = OilaAPIError(statusCode: 401, message: "m", errorCode: "UNAUTHORIZED", fieldErrors: [])
+        let token = deviceJWT(exp: now.timeIntervalSince1970 - OilaDeviceClient.expiredTokenSkew)
+        XCTAssertEqual(OilaDeviceClient.surfacedRejection(refused, sentToken: token, now: now).errorCode, "UNAUTHORIZED")
+        XCTAssertEqual(
+            OilaDeviceClient.surfacedRejection(refused, sentToken: token, now: now.addingTimeInterval(1)).errorCode,
+            OilaAPIError.deviceTokenExpiredCode
+        )
+    }
+
+    func testOnlyARefusalIsEverReadAsExpiry() async {
+        let expired = deviceJWT(exp: Date().addingTimeInterval(-2 * 86_400).timeIntervalSince1970)
+        let unpaired = await surfacedError(for: Self.unpairedBody, token: expired)
+        XCTAssertEqual(unpaired?.errorCode, OilaAPIError.deviceUnpairedCode, "the server's own verdict is kept")
+
+        let now = Date()
+        for status in [403, 500, 503] {
+            let other = OilaAPIError(statusCode: status, message: "m", errorCode: nil, fieldErrors: [])
+            XCTAssertNil(OilaDeviceClient.surfacedRejection(other, sentToken: expired, now: now).errorCode, "\(status)")
+        }
+        let noToken = OilaAPIError(statusCode: 401, message: "m", errorCode: "UNAUTHORIZED", fieldErrors: [])
+        XCTAssertEqual(OilaDeviceClient.surfacedRejection(noToken, sentToken: nil, now: now).errorCode, "UNAUTHORIZED")
+    }
+
+    // MARK: A refused token leaves a trace
+
+    @MainActor
+    private func timelineEntries(containing needle: String) -> Int {
+        RuntimeDiagnosticsCenter.shared.lifecycle.recentEvents.filter { $0.contains(needle) }.count
+    }
+
+    @MainActor
+    private func waitForTimeline(_ condition: () -> Bool, timeout: TimeInterval = 3) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return condition()
+    }
+
+    @MainActor
+    func testEachKindOfRefusalLeavesOneDiagnosticsEntryAndAnUnpairLeavesNone() async {
+        // Let any note an earlier test queued land before the slate is wiped.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        OilaDeviceClient.resetCredentialRejectionNotes()
+        RuntimeDiagnosticsCenter.shared.resetLifecycle()
+        defer { OilaDeviceClient.resetCredentialRejectionNotes() }
+        let rejected = OilaDeviceClient.credentialRejectedEvent
+
+        _ = await surfacedError(for: Self.unauthorizedBody)
+        let unauthorizedNoted = await waitForTimeline {
+            timelineEntries(containing: "\(rejected) UNAUTHORIZED device/fcm-token") == 1
+        }
+        XCTAssertTrue(unauthorizedNoted, "a 401 UNAUTHORIZED is written to the diagnostics timeline")
+
+        _ = await surfacedError(for: Self.unauthorizedBody)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(timelineEntries(containing: "\(rejected) UNAUTHORIZED"), 1,
+                       "the same code on the same route inside ten minutes is not written again")
+
+        _ = await surfacedError(for: #"{"success":false}"#)
+        let bareNoted = await waitForTimeline {
+            timelineEntries(containing: "\(rejected) none device/fcm-token") == 1
+        }
+        XCTAssertTrue(bareNoted, "a bare 401 is written too, under its own code")
+
+        _ = await surfacedError(for: Self.unpairedBody)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(timelineEntries(containing: rejected), 2, "DEVICE_UNPAIRED is not a refused token")
+        XCTAssertEqual(timelineEntries(containing: OilaAPIError.deviceUnpairedCode), 0)
+
+        let expired = deviceJWT(exp: Date().addingTimeInterval(-2 * 86_400).timeIntervalSince1970)
+        _ = await surfacedError(for: Self.unauthorizedBody, token: expired)
+        let expiryNoted = await waitForTimeline {
+            timelineEntries(containing: "\(OilaDeviceClient.deviceTokenExpiredEvent) \(OilaAPIError.deviceTokenExpiredCode)") == 1
+        }
+        XCTAssertTrue(expiryNoted, "the refusal that ends the pairing says why")
+    }
+
+    @MainActor
+    func testTheTimelineDedupeIsPerCodeAndRoute() {
+        OilaDeviceClient.resetCredentialRejectionNotes()
+        defer { OilaDeviceClient.resetCredentialRejectionNotes() }
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let gap = OilaDeviceClient.credentialRejectionNoteGap
+        func record(_ signature: String, _ at: Date) -> Bool {
+            OilaDeviceClient.recordCredentialRejection(
+                event: OilaDeviceClient.credentialRejectedEvent, signature: signature, now: at)
+        }
+
+        XCTAssertTrue(record("UNAUTHORIZED device/lock/state", t0))
+        XCTAssertFalse(record("UNAUTHORIZED device/lock/state", t0.addingTimeInterval(gap - 1)))
+        XCTAssertTrue(record("UNAUTHORIZED device/status", t0.addingTimeInterval(1)), "another route")
+        XCTAssertTrue(record("none device/lock/state", t0.addingTimeInterval(2)), "another code")
+        // The three telemetry routes fail together; with one remembered signature they took turns
+        // defeating the dedupe.
+        XCTAssertFalse(record("UNAUTHORIZED device/lock/state", t0.addingTimeInterval(3)),
+                       "interleaved routes no longer defeat the dedupe")
+        XCTAssertTrue(record("UNAUTHORIZED device/lock/state", t0.addingTimeInterval(gap)))
     }
 
     // MARK: Location batch
