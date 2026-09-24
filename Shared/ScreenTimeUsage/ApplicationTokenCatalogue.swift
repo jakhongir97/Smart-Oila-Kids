@@ -68,7 +68,37 @@ struct ApplicationTokenCatalogue {
 
     func entries() -> [Entry] {
         guard let userDefaults, let data = userDefaults.data(forKey: Self.storageKey) else { return [] }
-        return (try? JSONDecoder().decode([Entry].self, from: data)) ?? []
+        return Self.decodeCache.entries(for: data) {
+            (try? JSONDecoder().decode([Entry].self, from: $0)) ?? []
+        }
+    }
+
+    /// The last decode, keyed by the exact stored bytes. One Settings tap reads the catalogue a
+    /// dozen times (label, rows, enforcement, arm) and each read decoded up to 300 tokens on the
+    /// main thread. Keyed by the bytes, not by a flag, so a write from the OTHER process (a
+    /// different blob) is never served stale.
+    private static let decodeCache = DecodeCache()
+
+    private final class DecodeCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data: Data?
+        private var decoded: [Entry] = []
+
+        func entries(for data: Data, decode: (Data) -> [Entry]) -> [Entry] {
+            lock.lock()
+            if data == self.data {
+                let hit = decoded
+                lock.unlock()
+                return hit
+            }
+            lock.unlock()
+            let fresh = decode(data)
+            lock.lock()
+            self.data = data
+            decoded = fresh
+            lock.unlock()
+            return fresh
+        }
     }
 
     /// Merge newly-seen apps into the map, newest-wins, oldest-dropped past the cap.
@@ -123,8 +153,9 @@ struct ApplicationTokenCatalogue {
     func remove(bundleId: String) {
         guard let userDefaults else { return }
         let key = bundleId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let remaining = entries().filter { $0.bundleId != key }
-        guard remaining.count != entries().count else { return }
+        let all = entries()
+        let remaining = all.filter { $0.bundleId != key }
+        guard remaining.count != all.count else { return }
         if let data = try? JSONEncoder().encode(remaining) {
             userDefaults.set(data, forKey: Self.storageKey)
         }

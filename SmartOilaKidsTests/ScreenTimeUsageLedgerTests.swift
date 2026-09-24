@@ -51,6 +51,36 @@ final class ScreenTimeUsageLedgerTests: XCTestCase {
         XCTAssertEqual(keys.last, "2026-09-05")
     }
 
+    /// The phone's own ledger on 2026-09-24: the app's `touch` and the extension's `record` both
+    /// appended today. The server refuses a report that repeats a date ("days must not repeat a
+    /// date", 400) — every report, for as long as the duplicate lived. A read merges it, and the
+    /// next write stores the merged array.
+    func testARepeatedDayIsMergedOnReadAndHealedByTheNextWrite() throws {
+        let defaults = makeDefaults()
+        let stored = [
+            ScreenTimeUsageLedger.Day(dayKey: "2026-09-24", seconds: ["com.google.ios.youtube": 15900, ScreenTimeUsageLedger.deviceTotalKey: 32400], updatedAt: Date(timeIntervalSinceReferenceDate: 811953223)),
+            ScreenTimeUsageLedger.Day(dayKey: "2026-09-23", seconds: ["a": 300], updatedAt: Date(timeIntervalSinceReferenceDate: 811850000)),
+            ScreenTimeUsageLedger.Day(dayKey: "2026-09-24", seconds: ["com.google.ios.youtube": 600, "ph.telegra.telegraph": 60], updatedAt: Date(timeIntervalSinceReferenceDate: 811943446))
+        ]
+        defaults.set(try JSONEncoder().encode(stored), forKey: ScreenTimeUsageLedger.storageKey)
+        let ledger = ScreenTimeUsageLedger(userDefaults: defaults)
+
+        XCTAssertEqual(ledger.days().map(\.dayKey), ["2026-09-24", "2026-09-23"])
+        XCTAssertEqual(ledger.day("2026-09-24")?.seconds, [
+            "com.google.ios.youtube": 15900,
+            ScreenTimeUsageLedger.deviceTotalKey: 32400,
+            "ph.telegra.telegraph": 60
+        ], "per app the higher figure — the staircase never goes down")
+        XCTAssertEqual(ledger.day("2026-09-24")?.updatedAt, Date(timeIntervalSinceReferenceDate: 811953223))
+
+        let reported = ScreenTimeUsageReport.days(ledger: ledger, now: ISO8601DateFormatter().date(from: "2026-09-24T14:00:00Z")!)
+        XCTAssertEqual(reported.map(\.date), ["2026-09-24", "2026-09-23"], "no date twice on the wire")
+
+        ledger.record(bundleId: "a", secondsReached: 600, dayKey: "2026-09-23")
+        let raw = try JSONDecoder().decode([ScreenTimeUsageLedger.Day].self, from: defaults.data(forKey: ScreenTimeUsageLedger.storageKey)!)
+        XCTAssertEqual(raw.map(\.dayKey), ["2026-09-24", "2026-09-23"], "the write stored the merged array")
+    }
+
     func testTouchCreatesAnEmptyDayOnceAndNeverOverwrites() {
         let ledger = ScreenTimeUsageLedger(userDefaults: makeDefaults())
         ledger.touch(dayKey: "2026-09-16")

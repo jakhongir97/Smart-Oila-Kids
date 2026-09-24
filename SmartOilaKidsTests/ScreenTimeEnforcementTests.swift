@@ -1200,3 +1200,75 @@ final class ScreenTimeLockEnforcementTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: BlockedApplicationsController.persistedGlobalLockKey))
     }
 }
+
+/// Every DeviceActivity / ManagedSettings call the app makes goes through this queue (the
+/// 2026-09-24 watchdog kill was the main thread parked in `startMonitoring`). Order is the safety
+/// property: a lock and the unlock after it must reach the OS in the order they were decided.
+final class ScreenTimeSystemWorkerTests: XCTestCase {
+    func testWorkRunsOffTheMainThreadInTheOrderItWasQueued() async throws {
+        let recorder = OrderRecorder()
+        for index in 0..<50 {
+            ScreenTimeSystemWorker.async(.settings) { recorder.append(index, onMain: Thread.isMainThread) }
+        }
+        let value = try await ScreenTimeSystemWorker.run(.settings) { () throws -> Int in
+            recorder.append(50, onMain: Thread.isMainThread)
+            return 7
+        }
+        XCTAssertEqual(value, 7)
+        XCTAssertEqual(recorder.values, Array(0...50))
+        XCTAssertFalse(recorder.anyOnMain)
+    }
+
+    func testWorkQueuedFromTheWorkerRunsInlineInsteadOfDeadlocking() async throws {
+        let order = try await ScreenTimeSystemWorker.run(.activity) { () -> [String] in
+            var order: [String] = []
+            ScreenTimeSystemWorker.async(.activity) { order.append("nested") }
+            order.append("after")
+            return order
+        }
+        XCTAssertEqual(order, ["nested", "after"])
+    }
+
+    func testAThrowingJobReachesTheCaller() async {
+        struct Refused: Error {}
+        do {
+            _ = try await ScreenTimeSystemWorker.run(.activity) { () throws -> Int in throw Refused() }
+            XCTFail("the error must reach the caller")
+        } catch {
+            XCTAssertTrue(error is Refused)
+        }
+    }
+
+    /// A slow `startMonitoring` must never hold a lock write behind it: the two daemons have their
+    /// own lanes.
+    func testASlowActivityJobDoesNotHoldTheSettingsLane() async throws {
+        let release = DispatchSemaphore(value: 0)
+        ScreenTimeSystemWorker.async(.activity) { release.wait() }
+        let started = Date()
+        let value = try await ScreenTimeSystemWorker.run(.settings) { 1 }
+        XCTAssertEqual(value, 1)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        release.signal()
+        ScreenTimeSystemWorker.drain(.activity)
+    }
+
+    /// A decision that waited in the lane while a newer one was made is not written over it.
+    func testTheWholeDeviceWriteAppliesTheLatestDecision() {
+        ScreenTimeSystemWorker.requestWholeDevice(true)
+        ScreenTimeSystemWorker.requestWholeDevice(false)
+        XCTAssertFalse(ScreenTimeSystemWorker.latestWholeDevice(fallback: true))
+        ScreenTimeSystemWorker.requestWholeDevice(true)
+        XCTAssertTrue(ScreenTimeSystemWorker.latestWholeDevice(fallback: false))
+    }
+
+    private final class OrderRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var values: [Int] = []
+        private(set) var anyOnMain = false
+        func append(_ value: Int, onMain: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            values.append(value)
+            anyOnMain = anyOnMain || onMain
+        }
+    }
+}

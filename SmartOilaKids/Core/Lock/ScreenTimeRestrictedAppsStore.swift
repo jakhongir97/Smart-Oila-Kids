@@ -42,8 +42,18 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         /// The label, when the parent has given one.
         let bundleId: String?
         let name: String?
+        /// The token's encoded bytes, computed ONCE. It used to be a computed property: the sort in
+        /// `rebuildRows` and every `ForEach` pass JSON-encoded a token per access — thousands of
+        /// encodes on the main thread for one tap on a phone with a couple of hundred apps.
+        let id: String
 
-        var id: String { ScreenTimeRestrictedAppsStore.tokenKey(token) }
+        init(token: ApplicationToken, bundleId: String?, name: String?) {
+            self.token = token
+            self.bundleId = bundleId
+            self.name = name
+            self.id = ScreenTimeRestrictedAppsStore.tokenKey(token)
+        }
+
         var isLabelled: Bool { bundleId != nil }
     }
 
@@ -390,9 +400,10 @@ final class ScreenTimeRestrictedAppsStore: ObservableObject {
         // Picked tokens plus every labelled token, so a label the phone enforces is always visible
         // here even when the picker selection no longer carries it.
         let tokens = selection.applicationTokens.union(labels.map(\.token))
+        let labelByToken = Dictionary(labels.map { ($0.token, $0) }, uniquingKeysWith: { first, _ in first })
         rows = tokens
             .map { token in
-                let entry = labels.first { $0.token == token }
+                let entry = labelByToken[token]
                 return Row(token: token, bundleId: entry?.bundleId, name: entry?.displayName)
             }
             .sorted { lhs, rhs in

@@ -1902,6 +1902,13 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         NotificationCenter.default.post(name: Self.oilaLockExtensionDidEvaluate, object: nil)
     }
 
+    /// The worker could not start every edge activity it was asked to (too many activities,
+    /// FamilyControls not ready yet at launch). The plan is not in place: forget it, so the next
+    /// evaluation arms again.
+    func handleEdgeArmFailure() {
+        lastArmedEdgeSignature = nil
+    }
+
     /// The phone's clock or zone changed. The armed activities are local date components, so the OS
     /// may now read them at different instants from the ones this process remembers arming: the
     /// arm cache is dropped and the armed set compared again, then the rule re-decided.
@@ -2152,35 +2159,56 @@ struct OilaLockRuntime {
             clock: .live,
             calendar: { DeviceLockPolicy.phoneCalendar() },
             pairedDSN: { UserDefaults.standard.string(forKey: "DSN")?.trimmedNonEmpty },
+            // Every call below is synchronous XPC into managedsettingsd / usagetrackingd, and the
+            // evaluation that makes them runs on the main actor (every tick, poll, foreground and
+            // extension edge). They are queued on `ScreenTimeSystemWorker` — in order, so a lock and
+            // the unlock after it cannot swap — and the main thread never waits for the daemon.
             applyWholeDevice: { locked in
                 guard OilaLockRuntime.screenTimeAuthorized() else { return }
-                if DeviceLockPolicy.applyWholeDevice(locked: locked) {
-                    OilaTelemetryService.lockLog.notice("lock_shield written locked=\(locked ? 1 : 0, privacy: .public)")
+                ScreenTimeSystemWorker.requestWholeDevice(locked)
+                ScreenTimeSystemWorker.async(.settings) {
+                    // The latest decision when this runs, not the one captured when it was queued.
+                    let latest = ScreenTimeSystemWorker.latestWholeDevice(fallback: locked)
+                    if DeviceLockPolicy.applyWholeDevice(locked: latest) {
+                        OilaTelemetryService.lockLog.notice("lock_shield written locked=\(latest ? 1 : 0, privacy: .public)")
+                    }
                 }
             },
             armEdges: { entries in
                 guard OilaLockRuntime.screenTimeAuthorized() else { return nil }
-                let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: Date())
-                // While there is anything to arm, the daily heartbeat keeps the chain alive through a
-                // phone that is off across every armed edge (see `DeviceLockHeartbeat`).
-                var heartbeatStarted = false
-                if !entries.isEmpty, let dsn = UserDefaults.standard.string(forKey: "DSN")?.trimmedNonEmpty {
-                    heartbeatStarted = DeviceLockHeartbeat.ensureArmed(dsn: dsn)
+                let dsn = UserDefaults.standard.string(forKey: "DSN")?.trimmedNonEmpty
+                ScreenTimeSystemWorker.async(.activity) {
+                    let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: Date())
+                    // While there is anything to arm, the daily heartbeat keeps the chain alive through a
+                    // phone that is off across every armed edge (see `DeviceLockHeartbeat`).
+                    var heartbeatStarted = false
+                    if !entries.isEmpty, let dsn {
+                        heartbeatStarted = DeviceLockHeartbeat.ensureArmed(dsn: dsn)
+                    }
+                    OilaTelemetryService.lockLog.notice(
+                        "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public) heartbeat_started=\(heartbeatStarted ? 1 : 0, privacy: .public)"
+                    )
+                    if result.failures > 0 {
+                        Task { @MainActor in OilaTelemetryService.shared.handleEdgeArmFailure() }
+                    }
                 }
-                OilaTelemetryService.lockLog.notice(
-                    "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public) heartbeat_started=\(heartbeatStarted ? 1 : 0, privacy: .public)"
-                )
-                return result
+                // Queued, so not known yet: taken as armed, and a refused start reported back by the
+                // worker drops the arm cache so the next evaluation retries — as a failure here did.
+                return DeviceLockEdgeMonitoring.ArmResult(started: entries.map(\.name))
             },
             stopAllEdges: {
-                DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter())
-                DeviceLockHeartbeat.stopAll()
+                ScreenTimeSystemWorker.async(.activity) {
+                    DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter())
+                    DeviceLockHeartbeat.stopAll()
+                }
             },
             legacyDefaults: .standard,
             retireLegacyDeadline: {
-                let center = LiveDeviceLockEdgeCenter()
-                center.stop(names: center.lockActivities().map(\.name).filter { DeviceLockLegacyDeadline.isLegacyActivity(rawValue: $0) })
-                DeviceLockLegacyDeadline.clear()
+                ScreenTimeSystemWorker.async(.activity) {
+                    let center = LiveDeviceLockEdgeCenter()
+                    center.stop(names: center.lockActivities().map(\.name).filter { DeviceLockLegacyDeadline.isLegacyActivity(rawValue: $0) })
+                    DeviceLockLegacyDeadline.clear()
+                }
             },
             clearAlwaysAllowed: { ScreenTimeAlwaysAllowedSharedStore.clear() }
         )

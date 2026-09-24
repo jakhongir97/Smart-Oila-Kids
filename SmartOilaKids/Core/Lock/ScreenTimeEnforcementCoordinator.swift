@@ -50,7 +50,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     typealias SyncUpdateAction = (String?, [DeviceAppLockSyncEntry]) async -> Void
     typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
     typealias LabelledEntriesAction = () -> [ApplicationTokenCatalogue.Entry]
-    typealias ArmUsageAction = (String) throws -> Int
+    /// Async because the live arm runs on `ScreenTimeSystemWorker`: `startMonitoring` is a
+    /// synchronous XPC call that took over five seconds on hardware (watchdog kill, 2026-09-24).
+    typealias ArmUsageAction = (String) async throws -> Int
     typealias UploadUsageAction = ([ScreenTimeUsageReportDay]) async throws -> DeviceApplicationUsageReportResponse
     /// Stop the usage activity of `dsn`. Injected so tests can see a pairing change retire it.
     typealias StopUsageAction = (String) -> Void
@@ -136,16 +138,26 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             ScreenTimeRestrictedAppsStore.shared.reloadFromDisk()
         }
         self.armUsage = armUsage ?? { dsn in
-            // A cold launch arms before anything has loaded the label store; mirror the one-tap
-            // pick's categories first, or the device total would wait for the next foreground.
-            ScreenTimeRestrictedAppsStore.mirrorStoredCategories()
-            return try ScreenTimeUsageMonitoring.arm(dsn: dsn)
+            // Off the main thread, always: the daemon recomputes past activity for every token
+            // when the events change, and the UI waited on it (see `ScreenTimeSystemWorker`).
+            try await ScreenTimeSystemWorker.run(.activity) {
+                // The pairing can end while this job waits in the lane (the unpair wipe runs on the
+                // main thread meanwhile): an arm for a pairing that is gone must neither start the
+                // activity nor write the wiped ledger back.
+                let stillPaired = { ScreenTimeEnforcementCoordinator.activeUsageDSN.get() == dsn }
+                guard stillPaired() else { return 0 }
+                // A cold launch arms before anything has loaded the label store; mirror the one-tap
+                // pick's categories first, or the device total would wait for the next foreground.
+                ScreenTimeRestrictedAppsStore.mirrorStoredCategories()
+                return try ScreenTimeUsageMonitoring.arm(dsn: dsn, shouldContinue: stillPaired)
+            }
         }
         self.uploadUsage = uploadUsage ?? { days in
             try await OilaDeviceClient.shared.reportDailyUsage(days: days)
         }
         self.stopUsage = stopUsage ?? { dsn in
-            ScreenTimeUsageMonitoring.stop(dsn: dsn)
+            // Queued on the worker, so it also lands BEFORE any arm asked for after it.
+            ScreenTimeSystemWorker.async(.activity) { ScreenTimeUsageMonitoring.stop(dsn: dsn) }
         }
         self.totalMonitoringPossible = totalMonitoringPossible ?? {
             ScreenTimeUsageMonitoring.isSupported && ScreenTimeUsageTotalCategoryStore().hasTokens
@@ -172,6 +184,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         let dsnChanged = normalized != currentDSN
         let previousDSN = currentDSN
         currentDSN = normalized
+        Self.activeUsageDSN.set(normalized)
 
         if lockStateObserver == nil {
             observeLockState()
@@ -185,8 +198,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         // The old pairing's usage activity would otherwise keep firing and re-arming itself from
         // the extension — a wasted activity slot and wake-ups for a family this phone left.
         if dsnChanged, let previous = previousDSN { stopUsage(previous) }
-        armUsageMonitoring(reason: dsnChanged ? "start_new_dsn" : "start")
         Task {
+            await armUsageMonitoring(reason: dsnChanged ? "start_new_dsn" : "start")
             await syncCatalogueIfNeeded(force: dsnChanged)
             await uploadUsageNow(reason: "start")
         }
@@ -209,6 +222,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             stopUsage(dsn)
         }
         currentDSN = nil
+        Self.activeUsageDSN.set(nil)
         // A request in flight belongs to the pairing that just ended; its answer must not be
         // enforced on the next one, and the flags must not wedge the next one's first upload.
         isUploadingUsage = false
@@ -231,10 +245,13 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     /// likely to be discovered and where a missed push is most cheaply recovered.
     func refreshNow() async {
         guard currentDSN != nil else { return }
+        // A foreground is where a newly installed app is discovered: the probe reuse is for taps
+        // within one visit, never across them.
+        lastProbe = nil
         applyNow()
         // Re-armed on every foreground, not only on a label change: the day may have rolled over
         // while the app slept, and a re-arm is idempotent when nothing changed.
-        armUsageMonitoring(reason: "refresh")
+        await armUsageMonitoring(reason: "refresh")
         await syncCatalogueIfNeeded(force: false)
         await uploadUsageNow(reason: "refresh")
     }
@@ -244,8 +261,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     func restrictedAppsDidChange() {
         guard currentDSN != nil else { return }
         applyNow()
-        armUsageMonitoring(reason: "labels_changed")
         Task {
+            await armUsageMonitoring(reason: "labels_changed")
             await syncCatalogueIfNeeded(force: true)
             await uploadUsageNow(reason: "labels_changed")
         }
@@ -253,25 +270,40 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
 
     // MARK: - Usage
 
-    private func armUsageMonitoring(reason: String) {
+    /// One arm at a time. A request while one is on the worker is folded into a single re-run after
+    /// it (launch alone used to ask three times: `start`, the pairing `onChange`, `refreshNow`).
+    private func armUsageMonitoring(reason: String) async {
         guard AppRuntime.screenTimeFeaturesEnabled, let dsn = currentDSN else { return }
+        guard !isArmingUsage else {
+            armRequestedWhileBusy = true
+            return
+        }
         let status = authorizationStatusAction()
         Self.log.notice("usage_monitor arming reason=\(reason, privacy: .public) auth=\(status.rawValue, privacy: .public)")
         guard status == .granted else {
             RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(status: "not_authorized", dsn: dsn, lastError: "-")
             return
         }
+        isArmingUsage = true
         do {
-            let armed = try armUsage(dsn)
-            RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(
-                status: armed > 0 ? "monitoring" : "nothing_picked",
-                dsn: dsn,
-                selectedApps: armed,
-                lastError: "-"
-            )
+            let armed = try await armUsage(dsn)
+            // The pairing ended (or changed) while the worker ran; `start`/`stop` own that state now.
+            if currentDSN == dsn {
+                RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(
+                    status: armed > 0 ? "monitoring" : "nothing_picked",
+                    dsn: dsn,
+                    selectedApps: armed,
+                    lastError: "-"
+                )
+            }
         } catch {
             Self.log.error("usage_monitor arm_failed reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .public)")
             RuntimeDiagnosticsCenter.shared.updateScreenTimeUsage(status: "arm_failed", dsn: dsn, lastError: String(describing: error))
+        }
+        isArmingUsage = false
+        if armRequestedWhileBusy {
+            armRequestedWhileBusy = false
+            await armUsageMonitoring(reason: "coalesced")
         }
     }
 
@@ -303,10 +335,34 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             Self.log.notice("usage_upload reason=\(reason, privacy: .public) outcome=lock_busy")
             return
         }
-        defer { lock.release() }
+        // The lock is a `flock` on a file in the App Group container, and iOS kills a process that
+        // is suspended holding one (0xDEAD10CC — seen 2026-09-24 17:51: this upload runs on the
+        // ledger's Darwin notification, usually while the app is in the background). A background
+        // task keeps the process running until the request is done; if iOS ends that time first,
+        // the lock is released before the suspension instead of being carried into it.
+        // The request is cancelled with it: once the lock is gone the extension may send a newer
+        // body, and this older one must not land after it.
+        let upload = uploadUsage
+        let request = Task { try await upload(days) }
+        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "oila.usage.upload") {
+            request.cancel()
+            lock.release()
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+        defer {
+            lock.release()
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
         let requestDSN = dsn
         do {
-            let response = try await uploadUsage(days)
+            let response = try await request.value
             // The pairing may have ended while the request was out; its answer is not ours to apply
             // (`stop()` already reset the flags this function would otherwise clear below).
             guard currentDSN == requestDSN else {
@@ -470,6 +526,18 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         force || syncedVersion < catalogueSyncVersion || shouldProbeCatalogue(lastSyncedAt: lastSyncedAt, now: now)
     }
 
+    /// The installed-app probe, reused for `probeReuseInterval`. Also what the label screens show,
+    /// which used to re-probe on every appearance.
+    func installedEntries() -> [AppCatalogueEntry] {
+        if let cached = lastProbe, now().timeIntervalSince(cached.at) >= 0,
+           now().timeIntervalSince(cached.at) < Self.probeReuseInterval {
+            return cached.installed
+        }
+        let installed = InstalledAppProbe.installedEntries(canOpen: canOpenScheme)
+        lastProbe = (now(), installed)
+        return installed
+    }
+
     func syncCatalogueIfNeeded(force: Bool) async {
         guard let dsn = currentDSN else { return }
 
@@ -480,7 +548,10 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             now: now()
         ) else { return }
 
-        let installed = InstalledAppProbe.installedEntries(canOpen: canOpenScheme)
+        // ~35 synchronous `canOpenURL` calls on the main thread. A label change forces a publish but
+        // installs nothing, so a probe from the last few minutes is reused rather than re-run on
+        // every tap in the label screen.
+        let installed = installedEntries()
         let entries = Self.mergedSyncEntries(
             probed: InstalledAppProbe.syncEntries(for: installed),
             labelled: labelledEntries(),
@@ -658,6 +729,12 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private let userDefaults: UserDefaults
     private let now: () -> Date
     private var isUploadingUsage = false
+    private var isArmingUsage = false
+    private var lastProbe: (at: Date, installed: [AppCatalogueEntry])?
+    nonisolated static let probeReuseInterval: TimeInterval = 10 * 60
+    /// `currentDSN`, readable from the Screen Time lanes (see the live `armUsage`).
+    nonisolated static let activeUsageDSN = LockedValue<String?>(nil)
+    private var armRequestedWhileBusy = false
     private var uploadRequestedWhileBusy = false
     private var lastUploadedUsageSignature: String?
     private var lockStateObserver: NSObjectProtocol?

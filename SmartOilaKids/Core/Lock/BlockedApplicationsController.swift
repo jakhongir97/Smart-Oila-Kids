@@ -102,21 +102,26 @@ final class BlockedApplicationsController {
             // Apple-documented ManagedSettings key accepted and inert; a device log line with the
             // read-back is the only proof, and a silent "already set" would be indistinguishable
             // from "never asserted".
-            let desired: Bool? = protect ? true : nil
-            let current = store.application.denyAppRemoval
-            let written = current != desired
-            if written { store.application.denyAppRemoval = desired }
-            let readBack = store.application.denyAppRemoval
-            guard written || lastLoggedProtection != protect else { return }
-            lastLoggedProtection = protect
-            Self.log.notice(
-                "app_removal_protection desired=\(protect ? 1 : 0, privacy: .public) was=\(Self.describe(current), privacy: .public) written=\(written ? 1 : 0, privacy: .public) read_back=\(Self.describe(readBack), privacy: .public)"
-            )
-            #if DEBUG
-            // Mirrored to stdout so a `devicectl … --console` run shows it; os_log lines do not
-            // reach that stream, and this Mac cannot attach `idevicesyslog` over the network.
-            print("[screentime] app_removal_protection desired=\(protect ? 1 : 0) was=\(Self.describe(current)) written=\(written ? 1 : 0) read_back=\(Self.describe(readBack))")
-            #endif
+            //
+            // Every read and write here is synchronous XPC into managedsettingsd, so it runs on
+            // `ScreenTimeSystemWorker`, never on the main thread (the 2026-09-24 freeze).
+            ScreenTimeSystemWorker.async(.settings) {
+                let desired: Bool? = protect ? true : nil
+                let current = store.application.denyAppRemoval
+                let written = current != desired
+                if written { store.application.denyAppRemoval = desired }
+                let readBack = store.application.denyAppRemoval
+                guard written || lastLoggedProtection != protect else { return }
+                lastLoggedProtection = protect
+                Self.log.notice(
+                    "app_removal_protection desired=\(protect ? 1 : 0, privacy: .public) was=\(Self.describe(current), privacy: .public) written=\(written ? 1 : 0, privacy: .public) read_back=\(Self.describe(readBack), privacy: .public)"
+                )
+                #if DEBUG
+                // Mirrored to stdout so a `devicectl … --console` run shows it; os_log lines do not
+                // reach that stream, and this Mac cannot attach `idevicesyslog` over the network.
+                print("[screentime] app_removal_protection desired=\(protect ? 1 : 0) was=\(Self.describe(current)) written=\(written ? 1 : 0) read_back=\(Self.describe(readBack))")
+                #endif
+            }
         }
 
         self.authorizationStatusAction = authorizationStatus ?? {
@@ -132,16 +137,27 @@ final class BlockedApplicationsController {
             // by the shared helper. The per-app shield is written EITHER WAY: a whole-device lock
             // used to nil it, so the parent's per-app blocks vanished for the lock's duration and
             // were not there when an edge opened the phone with no app process to put them back.
-            DeviceLockPolicy.applyWholeDevice(locked: wholeDeviceLocked, store: store)
-            store.shield.applications = tokens.isEmpty ? nil : tokens
-            store.shield.webDomains = nil
+            //
+            // Queued on `ScreenTimeSystemWorker` (serial, so writes land in the order asked for):
+            // each key is a synchronous cross-process call and the main thread must not wait on it.
+            ScreenTimeSystemWorker.requestWholeDevice(wholeDeviceLocked)
+            ScreenTimeSystemWorker.async(.settings) {
+                DeviceLockPolicy.applyWholeDevice(locked: ScreenTimeSystemWorker.latestWholeDevice(fallback: wholeDeviceLocked), store: store)
+                store.shield.applications = tokens.isEmpty ? nil : tokens
+                store.shield.webDomains = nil
+            }
         }
-        self.clearAction = { DeviceLockManagedSettingsStoreFactory.clearAllSettings(store) }
+        self.clearAction = { ScreenTimeSystemWorker.async(.settings) { DeviceLockManagedSettingsStoreFactory.clearAllSettings(store) } }
         // `clearAllSettings()` on the DEFAULT store wipes every setting this app has written there,
         // which is exactly the intent on a lost authorization or an unpair. The other writers of
         // that store — `OilaTelemetryService.reevaluateLock` and the monitor extension at an edge —
         // write only the two whole-device keys, through the same helper as this.
-        self.wholeDeviceAction = wholeDevice ?? { locked in DeviceLockPolicy.applyWholeDevice(locked: locked, store: store) }
+        self.wholeDeviceAction = wholeDevice ?? { locked in
+            ScreenTimeSystemWorker.requestWholeDevice(locked)
+            ScreenTimeSystemWorker.async(.settings) {
+                DeviceLockPolicy.applyWholeDevice(locked: ScreenTimeSystemWorker.latestWholeDevice(fallback: locked), store: store)
+            }
+        }
     }
 
     /// Apps this build refuses to hide, whatever the server says.

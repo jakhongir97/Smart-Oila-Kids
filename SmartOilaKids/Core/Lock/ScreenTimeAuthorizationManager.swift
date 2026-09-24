@@ -15,9 +15,16 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
     @Published private(set) var status: ScreenTimePermissionStatus = .notDetermined
     @Published private(set) var lastErrorText: String?
 
+    /// Assigned only when it changes. Every Settings/Home screen and every foreground refreshes this
+    /// several times, and an unconditional `@Published` write re-rendered every observer each time
+    /// even though the answer was the same.
+    private func publish(_ newStatus: ScreenTimePermissionStatus) {
+        if status != newStatus { status = newStatus }
+    }
+
     func refreshStatus() {
         guard AppRuntime.screenTimeFeaturesEnabled else {
-            status = .unavailable
+            publish(.unavailable)
             persistStatus(status)
             return
         }
@@ -36,20 +43,20 @@ final class ScreenTimeAuthorizationManager: ObservableObject {
         if Self.isPendingAnswer(rawStatus: rawStatus, previousStatus: previousStatus,
                                 sinceLaunch: Date().timeIntervalSince(launchedAt),
                                 markedUnavailable: markedUnavailable) {
-            status = previousStatus
+            publish(previousStatus)
             scheduleGraceRecheck()
             return
         }
 
         switch rawStatus {
         case .approved:
-            status = .granted
+            publish(.granted)
         case .denied:
-            status = markedUnavailable ? .unavailable : .denied
+            publish(markedUnavailable ? .unavailable : .denied)
         case .notDetermined:
-            status = markedUnavailable ? .unavailable : .notDetermined
+            publish(markedUnavailable ? .unavailable : .notDetermined)
         @unknown default:
-            status = markedUnavailable ? .unavailable : .notDetermined
+            publish(markedUnavailable ? .unavailable : .notDetermined)
         }
 
         persistStatus(status)

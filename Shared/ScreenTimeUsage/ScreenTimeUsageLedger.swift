@@ -58,11 +58,36 @@ struct ScreenTimeUsageLedger {
 
     var isAvailable: Bool { userDefaults != nil }
 
-    /// Newest day first.
+    /// Newest day first, one entry per day.
+    ///
+    /// The two processes read-modify-write this array with nothing between them, so the app's
+    /// `touch` and the extension's `record` of a new day can both append it: measured 2026-09-24,
+    /// the phone held `2026-09-24` twice (one empty), and the server refused every report from then
+    /// on — "days must not repeat a date" (400) — so the parent saw no screen time at all. Days are
+    /// therefore merged on every read (per app the higher figure, which is the staircase's rule
+    /// anyway); the next write stores the merged array, so a phone already carrying a duplicate
+    /// heals itself.
     func days() -> [Day] {
         guard let userDefaults, let data = userDefaults.data(forKey: Self.storageKey) else { return [] }
         let decoded = (try? JSONDecoder().decode([Day].self, from: data)) ?? []
-        return decoded.sorted { $0.dayKey > $1.dayKey }
+        return Self.mergingRepeatedDays(decoded)
+    }
+
+    /// One `Day` per `dayKey`, newest first: seconds merged by max, the later `updatedAt` kept.
+    static func mergingRepeatedDays(_ days: [Day]) -> [Day] {
+        var merged: [String: Day] = [:]
+        for day in days {
+            guard var existing = merged[day.dayKey] else {
+                merged[day.dayKey] = day
+                continue
+            }
+            for (key, seconds) in day.seconds {
+                existing.seconds[key] = max(existing.seconds[key] ?? 0, seconds)
+            }
+            existing.updatedAt = max(existing.updatedAt, day.updatedAt)
+            merged[day.dayKey] = existing
+        }
+        return merged.values.sorted { $0.dayKey > $1.dayKey }
     }
 
     func day(_ dayKey: String) -> Day? {

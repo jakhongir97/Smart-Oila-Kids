@@ -206,7 +206,8 @@ enum ScreenTimeUsageMonitoring {
         now: Date = Date(),
         calendar: Calendar = ScreenTimeUsageDayFormatter.gregorian,
         start: StartMonitoring? = nil,
-        stop: StopMonitoring? = nil
+        stop: StopMonitoring? = nil,
+        shouldContinue: (() -> Bool)? = nil
     ) throws -> Int {
         let center = DeviceActivityCenter()
         let startMonitoring = start ?? { name, schedule, events in
@@ -248,6 +249,9 @@ enum ScreenTimeUsageMonitoring {
         // forced "day is over" upload per rung. A start on a running activity replaces its events
         // (the staircase kept climbing after this change, which is the proof).
         try startMonitoring(activity, schedule, armed)
+        // The app arms from a background lane; if the pairing ended while `startMonitoring` was in
+        // the daemon, the unpair wipe has already emptied the App Group and must stay empty.
+        guard shouldContinue?() ?? true else { return events.count }
         ledger.setArmedDay(dayKey)
         // Today now exists in the ledger even before the first step, so an upload can state a
         // measured zero instead of staying silent.

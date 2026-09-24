@@ -216,7 +216,7 @@ struct ScreenTimeRestrictedAppsView: View {
         }
         .onAppear {
             authorization.refreshStatus()
-            installed = InstalledAppProbe.installedEntries(canOpen: ScreenTimeEnforcementCoordinator.shared.canOpenScheme)
+            installed = ScreenTimeEnforcementCoordinator.shared.installedEntries()
         }
     }
 
@@ -459,7 +459,7 @@ struct ScreenTimeAppLabelSheet: View {
             if let name = row.name, row.bundleId?.hasPrefix(ScreenTimeRestrictedAppsStore.customBundleIdPrefix) == true {
                 customName = name
             }
-            installed = Set(InstalledAppProbe.installedEntries(canOpen: ScreenTimeEnforcementCoordinator.shared.canOpenScheme).map(\.bundleId))
+            installed = Set(ScreenTimeEnforcementCoordinator.shared.installedEntries().map(\.bundleId))
         }
     }
 
