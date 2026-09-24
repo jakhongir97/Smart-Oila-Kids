@@ -105,13 +105,16 @@ struct BolajonHomeView: View {
                     // Draws nothing unless the phone still lacks the one-tap app pick (build 26). Told
                     // whether a figure is on screen right above it, so the two never contradict.
                     ScreenTimeSetupCard(showsUsageFigure: viewModel.showsScreenTimeCard && viewModel.showsUsageFigure)
-                    // Detected (or web-blocked) apps that no icon is linked to yet — their minutes
-                    // are lumped under "ios.other" on the web until they are (Ibrohim, build 28).
-                    ScreenTimeLinkNudgeCard(onLink: { path.append(.settingsRestrictedAppsLinking) })
                     sosCard
                     if AppRuntime.chatFeaturesEnabled {
                         ChatHomeCard(refreshToken: chatUnreadRefreshToken, onOpen: { path.append(.chat) })
                     }
+                    // Detected (or web-blocked) apps that no icon is linked to yet — their minutes
+                    // are lumped under "ios.other" on the web until they are (Ibrohim, build 28).
+                    // BELOW the SOS card: a setup nag must never push the safety button down the
+                    // screen (on a 375x667 phone it moved SOS to the fold), and while a web-blocked
+                    // app is unlinked this card cannot be dismissed.
+                    ScreenTimeLinkNudgeCard(onLink: { path.append(.settingsRestrictedAppsLinking) })
                     tasksCard
                 }
             }

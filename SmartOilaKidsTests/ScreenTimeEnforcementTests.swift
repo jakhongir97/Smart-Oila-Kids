@@ -873,6 +873,11 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         XCTAssertEqual(ScreenTimeSetupCard.titleKey(hasLabelledApps: false, showsUsageFigure: false),
                        "home2.screentime_setup.title", "no figure on screen: the plain truth")
         XCTAssertNotEqual(L10n.tr("home2.screentime_setup.title_resume"), "home2.screentime_setup.title_resume")
+        // The body follows the title: under a figure it explains why the figure may be behind,
+        // instead of asking again "so the parent can see screen time".
+        XCTAssertEqual(ScreenTimeSetupCard.bodyKey(showsUsageFigure: true), "home2.screentime_setup.body_resume")
+        XCTAssertEqual(ScreenTimeSetupCard.bodyKey(showsUsageFigure: false), "home2.screentime_setup.body")
+        XCTAssertNotEqual(L10n.tr("home2.screentime_setup.body_resume"), "home2.screentime_setup.body_resume")
     }
 
     // MARK: Home's link nudge (build 28)

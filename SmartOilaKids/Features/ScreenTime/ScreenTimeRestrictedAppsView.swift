@@ -589,6 +589,12 @@ struct ScreenTimeSetupCard: View {
         return hasLabelledApps ? "home2.screentime_setup.title_partial" : "home2.screentime_setup.title"
     }
 
+    /// The body follows the title: under a figure it says why that figure may be behind, rather
+    /// than "so the parent can see screen time" beneath the very screen time it shows.
+    static func bodyKey(showsUsageFigure: Bool) -> String {
+        showsUsageFigure ? "home2.screentime_setup.body_resume" : "home2.screentime_setup.body"
+    }
+
     var body: some View {
         if Self.isNeeded(
             featuresEnabled: AppRuntime.screenTimeFeaturesEnabled,
@@ -611,7 +617,7 @@ struct ScreenTimeSetupCard: View {
                                 .font(AppTypography.bodyStrong(14))
                                 .foregroundStyle(AppColors.inkPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Text(L10n.tr("home2.screentime_setup.body"))
+                            Text(L10n.tr(Self.bodyKey(showsUsageFigure: showsUsageFigure)))
                                 .font(AppTypography.bodyText(13))
                                 .foregroundStyle(AppColors.inkSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
