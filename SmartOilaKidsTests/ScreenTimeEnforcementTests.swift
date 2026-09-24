@@ -863,6 +863,18 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(L10n.tr("home2.screentime_setup.title_partial"), "home2.screentime_setup.title_partial")
     }
 
+    /// Ibrohim's re-pair screenshot: "Bugungi ekran vaqti 4s 15d" above "Ekran vaqti
+    /// hisoblanmayapti". With a figure on screen the card asks for the pick instead of denying it.
+    func testTheSetupCardNeverDeniesAFigureShownAboveIt() {
+        for labelled in [false, true] {
+            XCTAssertEqual(ScreenTimeSetupCard.titleKey(hasLabelledApps: labelled, showsUsageFigure: true),
+                           "home2.screentime_setup.title_resume")
+        }
+        XCTAssertEqual(ScreenTimeSetupCard.titleKey(hasLabelledApps: false, showsUsageFigure: false),
+                       "home2.screentime_setup.title", "no figure on screen: the plain truth")
+        XCTAssertNotEqual(L10n.tr("home2.screentime_setup.title_resume"), "home2.screentime_setup.title_resume")
+    }
+
     /// `ios.other` is not an app: no token stands for it. A parent who blocks or limits "other apps"
     /// on the web must not produce a phantom "unenforceable" block on the phone.
     func testOtherAppsIsNeverCountedUnenforceable() {

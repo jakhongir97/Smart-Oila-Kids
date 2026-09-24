@@ -413,3 +413,6 @@
 "perm2.apps.need_all" = "Eng yuqoridagi “All Apps & Categories” («Все приложения и категории») tugmasi yoqilmadi. Yana bosing va uni yoqing — yoki keyinroq ilovaning asosiy oynasidan tanlang.";
 "perm2.apps.unavailable" = "Ekran vaqti ruxsati yo'q, shuning uchun ilovalarni hozir tanlab bo'lmaydi. Davom etishingiz mumkin.";
 "perm2.later" = "Keyinroq";
+
+/* build 28 — the setup card never contradicts a figure above it */
+"home2.screentime_setup.title_resume" = "Ekran vaqti yangilanib turishi uchun ilovalarni tanlang";

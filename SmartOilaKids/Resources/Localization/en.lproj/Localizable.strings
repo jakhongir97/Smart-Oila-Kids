@@ -413,3 +413,6 @@
 "perm2.apps.need_all" = "The “All Apps & Categories” switch at the top wasn't turned on. Tap again and switch it on — or do it later from the app's main screen.";
 "perm2.apps.unavailable" = "Screen Time access is off, so apps can't be chosen now. You can continue.";
 "perm2.later" = "Later";
+
+/* build 28 — the setup card never contradicts a figure above it */
+"home2.screentime_setup.title_resume" = "Choose apps to keep screen time updating";

@@ -91,8 +91,9 @@ struct BolajonHomeView: View {
                     if viewModel.showsScreenTimeCard {
                         screenTimeCard
                     }
-                    // Draws nothing unless the phone still lacks the one-tap app pick (build 26).
-                    ScreenTimeSetupCard()
+                    // Draws nothing unless the phone still lacks the one-tap app pick (build 26). Told
+                    // whether a figure is on screen right above it, so the two never contradict.
+                    ScreenTimeSetupCard(showsUsageFigure: viewModel.showsScreenTimeCard && viewModel.showsUsageFigure)
                     sosCard
                     if AppRuntime.chatFeaturesEnabled {
                         ChatHomeCard(refreshToken: chatUnreadRefreshToken, onOpen: { path.append(.chat) })

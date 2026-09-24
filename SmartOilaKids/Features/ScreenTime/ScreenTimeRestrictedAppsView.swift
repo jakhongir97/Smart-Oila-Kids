@@ -522,6 +522,12 @@ struct ScreenTimeSetupCard: View {
     /// The picker's answer, applied once the sheet has gone: applying it inside the sheet would
     /// remove this card — and the `.sheet` it hosts — while the sheet is still on screen.
     @State private var pendingSelection: FamilyActivitySelection?
+    /// Home is drawing a usage figure right above this card. See `titleKey`.
+    private let showsUsageFigure: Bool
+
+    init(showsUsageFigure: Bool = false) {
+        self.showsUsageFigure = showsUsageFigure
+    }
 
     /// Pure, so the rule is pinned by a test. Authorization first: without it the picker has
     /// nothing to hand out, and the header chip already tells the child that permission is off.
@@ -537,8 +543,16 @@ struct ScreenTimeSetupCard: View {
 
     /// The honest title: a phone that already measures some named apps IS counting — only not the
     /// whole phone — and must not be told "not being counted" under a figure on the same screen.
-    static func titleKey(hasLabelledApps: Bool) -> String {
-        hasLabelledApps ? "home2.screentime_setup.title_partial" : "home2.screentime_setup.title"
+    ///
+    /// Nor may a phone with NO labels, when Home is showing a figure anyway. That was Ibrohim's
+    /// screenshot after a re-pair (2026-09-25): "Bugungi ekran vaqti 4s 15d" directly above
+    /// "Ekran vaqti hisoblanmayapti". Both were true — the figure is the server's sum of what this
+    /// phone uploaded before the unpair, and the unpair wipe had removed the pick, so nothing new was
+    /// being measured — but side by side they read as a contradiction. With a figure on screen the
+    /// card asks for what it needs ("choose apps to keep it updating") instead of denying the number.
+    static func titleKey(hasLabelledApps: Bool, showsUsageFigure: Bool = false) -> String {
+        if showsUsageFigure { return "home2.screentime_setup.title_resume" }
+        return hasLabelledApps ? "home2.screentime_setup.title_partial" : "home2.screentime_setup.title"
     }
 
     var body: some View {
@@ -558,7 +572,8 @@ struct ScreenTimeSetupCard: View {
                                 .foregroundStyle(AppColors.ctaPurple)
                         }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(L10n.tr(Self.titleKey(hasLabelledApps: store.labelledCount > 0)))
+                            Text(L10n.tr(Self.titleKey(hasLabelledApps: store.labelledCount > 0,
+                                                       showsUsageFigure: showsUsageFigure)))
                                 .font(AppTypography.bodyStrong(14))
                                 .foregroundStyle(AppColors.inkPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
