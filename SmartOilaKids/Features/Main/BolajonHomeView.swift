@@ -721,6 +721,14 @@ final class BolajonHomeViewModel: ObservableObject {
     /// telemetry service for exactly this and had zero readers, so the child was told the alert
     /// "couldn't send" while it was queued and retrying.
     @Published var sosQueued = false
+    /// The SOS request still running after its sheet stopped waiting (see `sendSOS`).
+    private var sosDelivery: Task<Error?, Never>?
+    /// Bumped when the sheet closes, so a delivery that ends later does not paint an old outcome
+    /// on the next sheet.
+    private var sosSheetGeneration = 0
+    /// The sheet generation that shows the running delivery's outcome: the one that started it,
+    /// or a later one whose press joined it.
+    private var sosDeliveryOwner = 0
     @Published var errorMessage: String?
 
     /// Tasks whose completion is currently in flight — guards against a rapid double-tap
@@ -973,6 +981,15 @@ final class BolajonHomeViewModel: ObservableObject {
     }
 
     func sendSOS() async {
+        // A delivery the sheet stopped waiting for is still running: pressing again must not start
+        // a second POST beside it — it says "still trying", which is the truth.
+        if sosDelivery != nil {
+            // This sheet now owns the running delivery's outcome ("sent", or queued on failure).
+            sosDeliveryOwner = sosSheetGeneration
+            sosFailed = true
+            sosQueued = true
+            return
+        }
         guard !isSendingSOS, !sosSent else { return }
         isSendingSOS = true
         sosFailed = false
@@ -992,7 +1009,64 @@ final class BolajonHomeViewModel: ObservableObject {
         // routine GPS breadcrumb in this app gets a persisted, restored, retried 200-deep queue --
         // the one call that matters most had none. So a failed SOS is now ENQUEUED and retried by
         // the telemetry service for as long as the app lives, across relaunches.
+        //
+        // The sheet cannot be closed while it waits, so it waits at most `SOSDelivery.sheetDeadline`
+        // (on a network that connects but never answers, three 30 s request timeouts plus the
+        // backoff held the child on a frozen sheet for ~92 s). The delivery itself is NOT cancelled
+        // at the deadline: the server may already have the POST and be slow to answer, and a
+        // cancelled request followed by the queued copy would alert the parent twice. It keeps
+        // running exactly as before, and is queued only if it finally fails.
+        sosDeliveryOwner = sosSheetGeneration
+        let delivery = Task { await self.deliverSOS(context) }
+        sosDelivery = delivery
+        let deadline = Task {
+            do {
+                try await Task.sleep(nanoseconds: SOSDelivery.sheetDeadlineNanoseconds)
+            } catch {
+                return
+            }
+            self.sosSheetDeadlinePassed()
+        }
+        let failure = await delivery.value
+        deadline.cancel()
+        sosDelivery = nil
+        guard let failure else {
+            // Shown on the sheet that owns the delivery; one closed meanwhile starts clean.
+            if sosDeliveryOwner == sosSheetGeneration {
+                sosSent = true
+                sosFailed = false
+                sosQueued = false
+                errorMessage = nil
+            }
+            return
+        }
+        // NOTE: deliberately no `requiresRePair` branch here. This is the panic path -- the
+        // one control most likely to be pressed on a degraded network, and a single
+        // transient 401 used to destroy the pairing mid-emergency (wiping the Keychain token
+        // and regenerating the DSN) while the SOS itself was never delivered. Session
+        // invalidation is now owned solely by OilaTelemetryService, which confirms a 401
+        // with repeated independent probes before tearing anything down.
+        telemetry.enqueueUndeliveredSOS(context)
+        guard sosDeliveryOwner == sosSheetGeneration else { return }
+        sosQueued = telemetry.hasUndeliveredSOS
+        sosFailed = true
+        errorMessage = NetworkError.userMessage(for: failure)
+    }
+
+    /// The sheet stops waiting: whatever sheet is up can be closed (even one reopened after a lock
+    /// takeover closed the first), and the owner says the alert is still being tried.
+    private func sosSheetDeadlinePassed() {
+        guard sosDelivery != nil else { return }
+        isSendingSOS = false
+        guard sosDeliveryOwner == sosSheetGeneration else { return }
+        sosFailed = true
+        sosQueued = true
+    }
+
+    /// Up to three sends with a short backoff. Nil when delivered, else the last error.
+    private func deliverSOS(_ context: OilaSOSContext) async -> Error? {
         let maxAttempts = 3
+        var lastError: Error?
         for attempt in 1 ... maxAttempts {
             do {
                 try await service.sendSOS(
@@ -1001,32 +1075,22 @@ final class BolajonHomeViewModel: ObservableObject {
                     accuracy: context.accuracy,
                     batteryLevel: context.batteryPercent.map(Double.init)
                 )
-                sosSent = true
-                sosFailed = false
-                errorMessage = nil
-                return
+                return nil
             } catch {
-                // NOTE: deliberately no `requiresRePair` branch here. This is the panic path -- the
-                // one control most likely to be pressed on a degraded network, and a single
-                // transient 401 used to destroy the pairing mid-emergency (wiping the Keychain token
-                // and regenerating the DSN) while the SOS itself was never delivered. Session
-                // invalidation is now owned solely by OilaTelemetryService, which confirms a 401
-                // with repeated independent probes before tearing anything down.
-                if attempt == maxAttempts {
-                    telemetry.enqueueUndeliveredSOS(context)
-                    sosQueued = telemetry.hasUndeliveredSOS
-                    sosFailed = true
-                    errorMessage = NetworkError.userMessage(for: error)
-                } else {
+                lastError = error
+                if attempt < maxAttempts {
                     try? await Task.sleep(nanoseconds: UInt64(attempt) * 800_000_000)
                 }
             }
         }
+        return lastError
     }
 
     func resetSOS() {
+        sosSheetGeneration += 1
         sosSent = false
         sosFailed = false
+        sosQueued = false
         errorMessage = nil
     }
 

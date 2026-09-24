@@ -103,6 +103,7 @@ struct DeviceLockOverlay: View {
                 isSending: sos.isSending,
                 sent: sos.sent,
                 failed: sos.failed,
+                queued: sos.queued,
                 onConfirm: { Task { await sos.send() } },
                 onClose: { sos.dismiss() }
             )
@@ -120,6 +121,8 @@ final class LockOverlaySOSModel: ObservableObject {
     @Published var isSending = false
     @Published var sent = false
     @Published var failed = false
+    /// Still being tried (the sheet stopped waiting, or the alert is in the persisted queue).
+    @Published var queued = false
 
     private let telemetry: SOSTelemetryProviding
     private let service: OilaDeviceServicing
@@ -142,17 +145,71 @@ final class LockOverlaySOSModel: ObservableObject {
     }
 
     func reset() {
+        sheetGeneration += 1
         sent = false
         failed = false
+        queued = false
     }
 
     func send() async {
+        // Still running after the sheet stopped waiting: no second POST beside it.
+        if delivery != nil {
+            deliveryOwner = sheetGeneration
+            failed = true
+            queued = true
+            return
+        }
         guard !isSending, !sent else { return }
         isSending = true
         failed = false
+        queued = false
         defer { isSending = false }
 
         let context = telemetry.currentSOSContext()
+        // Bounded like Home's (see `BolajonHomeViewModel.sendSOS` and `SOSDelivery`): the sheet
+        // stops waiting at the deadline; the delivery is not cancelled and is queued only if it
+        // finally fails.
+        deliveryOwner = sheetGeneration
+        let running = Task { await self.deliver(context) }
+        delivery = running
+        let deadline = Task {
+            do {
+                try await Task.sleep(nanoseconds: SOSDelivery.sheetDeadlineNanoseconds)
+            } catch {
+                return
+            }
+            self.sheetDeadlinePassed()
+        }
+        let delivered = await running.value
+        deadline.cancel()
+        delivery = nil
+        if delivered {
+            if deliveryOwner == sheetGeneration {
+                sent = true
+                failed = false
+                queued = false
+            }
+            return
+        }
+        // No `requiresRePair` branch: this is SOS from behind the lock cover — the single
+        // most safety-critical path in the app — and a transient 401 used to destroy the
+        // pairing here rather than deliver the alert. Session invalidation belongs to
+        // OilaTelemetryService, which confirms with repeated independent probes.
+        telemetry.enqueueUndeliveredSOS(context)
+        guard deliveryOwner == sheetGeneration else { return }
+        queued = telemetry.hasUndeliveredSOS
+        failed = true
+    }
+
+    private func sheetDeadlinePassed() {
+        guard delivery != nil else { return }
+        isSending = false
+        guard deliveryOwner == sheetGeneration else { return }
+        failed = true
+        queued = true
+    }
+
+    private func deliver(_ context: OilaSOSContext) async -> Bool {
         let maxAttempts = 3
         for attempt in 1 ... maxAttempts {
             do {
@@ -162,21 +219,29 @@ final class LockOverlaySOSModel: ObservableObject {
                     accuracy: context.accuracy,
                     batteryLevel: context.batteryPercent.map(Double.init)
                 )
-                sent = true
-                failed = false
-                return
+                return true
             } catch {
-                // No `requiresRePair` branch: this is SOS from behind the lock cover — the single
-                // most safety-critical path in the app — and a transient 401 used to destroy the
-                // pairing here rather than deliver the alert. Session invalidation belongs to
-                // OilaTelemetryService, which confirms with repeated independent probes.
-                if attempt == maxAttempts {
-                    telemetry.enqueueUndeliveredSOS(context)
-                    failed = true
-                } else {
+                if attempt < maxAttempts {
                     try? await Task.sleep(nanoseconds: UInt64(attempt) * 800_000_000)
                 }
             }
         }
+        return false
     }
+
+    private var delivery: Task<Bool, Never>?
+    private var sheetGeneration = 0
+    private var deliveryOwner = 0
+}
+
+/// How long an SOS sheet WAITS for its delivery. The sheet cannot be dismissed while it waits;
+/// unbounded, a network that connects but never answers held it for 3 × 30 s request timeouts plus
+/// backoff (~92 s). Past this the sheet can be closed and says "still trying"; the delivery keeps
+/// running untouched (cancelling it would not stop a server that already has the POST, and the
+/// queued copy would alert the parent twice) and goes to the persisted retry queue
+/// (`OilaTelemetryService.enqueueUndeliveredSOS`) only if it finally fails.
+enum SOSDelivery {
+    /// `var` only so a test can shorten it.
+    static var sheetDeadline: TimeInterval = 20
+    static var sheetDeadlineNanoseconds: UInt64 { UInt64(sheetDeadline * 1_000_000_000) }
 }

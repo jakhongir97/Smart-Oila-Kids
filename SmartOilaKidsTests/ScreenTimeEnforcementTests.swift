@@ -1272,3 +1272,141 @@ final class ScreenTimeSystemWorkerTests: XCTestCase {
         }
     }
 }
+
+/// The installed-app probe is ~35 synchronous `canOpenURL` round trips on the main thread. It must
+/// not run on every cold launch for a list the server already has, and concurrent callers (the
+/// sync, the Restricted-apps screen, its label sheet) must share one probe.
+@MainActor
+final class InstalledAppProbeSchedulingTests: XCTestCase {
+    private var suiteNames: [String] = []
+
+    override func tearDown() {
+        for name in suiteNames {
+            UserDefaults.standard.removePersistentDomain(forName: name)
+        }
+        suiteNames = []
+        super.tearDown()
+    }
+
+    private func makeDefaults() -> UserDefaults {
+        let name = "InstalledAppProbeSchedulingTests.\(UUID().uuidString)"
+        suiteNames.append(name)
+        return UserDefaults(suiteName: name)!
+    }
+
+    private final class Counter {
+        var probes = 0
+        var synced: [[DeviceAppLockSyncEntry]] = []
+        var serverConfirms = true
+    }
+
+    private func makeCoordinator(defaults: UserDefaults, counter: Counter) -> ScreenTimeEnforcementCoordinator {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        return ScreenTimeEnforcementCoordinator(
+            lockState: { .released },
+            blockedApplications: BlockedApplicationsController(
+                authorizationStatus: { .denied },
+                apply: { _, _, _ in },
+                tokenCatalogue: ApplicationTokenCatalogue(userDefaults: defaults),
+                userDefaults: defaults
+            ),
+            authorizationStatus: { .granted },
+            canOpenScheme: { scheme in
+                counter.probes += 1
+                return scheme == "tg"
+            },
+            syncUpdate: { dsn, entries in if dsn != nil { counter.synced.append(entries) } },
+            syncConfirmed: { _ in counter.serverConfirms },
+            labelledEntries: { [] },
+            reloadLabels: {},
+            armUsage: { _ in 1 },
+            uploadUsage: { _ in DeviceApplicationUsageReportResponse(lockedPackages: [], stats: []) },
+            stopUsage: { _ in },
+            totalMonitoringPossible: { false },
+            usageLedger: ScreenTimeUsageLedger(userDefaults: makeDefaults()),
+            userDefaults: defaults,
+            now: { now }
+        )
+    }
+
+    /// `start` runs its sync in a Task; give it the main actor until it has finished.
+    private func settle() async {
+        try? await Task.sleep(nanoseconds: 300_000_000)
+    }
+
+    func testAColdLaunchOfTheSamePairingNeitherProbesNorRepublishes() async {
+        let defaults = makeDefaults()
+        let counter = Counter()
+
+        let firstLaunch = makeCoordinator(defaults: defaults, counter: counter)
+        firstLaunch.start(dsn: "child-1")
+        await settle()
+        XCTAssertEqual(counter.synced.count, 1, "a pairing the list was never published for publishes at once")
+        XCTAssertGreaterThan(counter.probes, 0)
+        XCTAssertEqual(defaults.string(forKey: ScreenTimeEnforcementCoordinator.catalogueSyncedDSNKey), "child-1")
+
+        // A relaunch: a new process, the same pairing, a stamp from minutes ago.
+        counter.probes = 0
+        let relaunch = makeCoordinator(defaults: defaults, counter: counter)
+        relaunch.start(dsn: "child-1")
+        await settle()
+        XCTAssertEqual(counter.probes, 0, "no probe on the main thread at launch")
+        XCTAssertEqual(counter.synced.count, 1, "no full-replace publish of an unchanged list")
+
+        // A different pairing is still forced, stamp or not.
+        relaunch.start(dsn: "child-2")
+        await settle()
+        XCTAssertEqual(counter.synced.count, 2)
+
+        relaunch.stop()
+        XCTAssertNil(defaults.string(forKey: ScreenTimeEnforcementCoordinator.catalogueSyncedDSNKey), "an unpair forgets it")
+    }
+
+    /// A publish the server did not confirm (it is retried in memory only) is owed again on the
+    /// next cold launch.
+    func testAnUnconfirmedPublishIsForcedAgainOnTheNextLaunch() async {
+        let defaults = makeDefaults()
+        let counter = Counter()
+        counter.serverConfirms = false
+
+        let firstLaunch = makeCoordinator(defaults: defaults, counter: counter)
+        firstLaunch.start(dsn: "child-1")
+        await settle()
+        XCTAssertEqual(counter.synced.count, 1)
+        XCTAssertNil(defaults.string(forKey: ScreenTimeEnforcementCoordinator.catalogueSyncedDSNKey))
+
+        counter.serverConfirms = true
+        let relaunch = makeCoordinator(defaults: defaults, counter: counter)
+        relaunch.start(dsn: "child-1")
+        await settle()
+        XCTAssertEqual(counter.synced.count, 2, "the owed publish goes out")
+        XCTAssertEqual(defaults.string(forKey: ScreenTimeEnforcementCoordinator.catalogueSyncedDSNKey), "child-1")
+        relaunch.stop()
+    }
+
+    func testConcurrentCallersShareOneProbeAndAForegroundMakesItStale() async {
+        let defaults = makeDefaults()
+        let counter = Counter()
+        let coordinator = makeCoordinator(defaults: defaults, counter: counter)
+        let schemes = AppCatalogue.all.filter { !($0.scheme ?? "").isEmpty }.count
+
+        async let a = coordinator.refreshInstalledEntries()
+        async let b = coordinator.refreshInstalledEntries()
+        let (first, second) = await (a, b)
+        XCTAssertEqual(first.map(\.bundleId), second.map(\.bundleId))
+        XCTAssertEqual(first.map(\.scheme), ["tg"])
+        XCTAssertEqual(counter.probes, schemes, "one probe for both callers")
+        XCTAssertEqual(coordinator.cachedInstalledEntries().map(\.scheme), ["tg"])
+
+        _ = await coordinator.refreshInstalledEntries()
+        XCTAssertEqual(counter.probes, schemes, "reused within the visit")
+
+        coordinator.start(dsn: "child-1")
+        await settle()
+        counter.probes = 0
+        await coordinator.refreshNow()
+        _ = await coordinator.refreshInstalledEntries()
+        XCTAssertEqual(counter.probes, schemes, "a foreground re-probes (a new install is found), once")
+        coordinator.stop()
+    }
+}

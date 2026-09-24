@@ -75,6 +75,13 @@ actor DeviceAppLockSyncCoordinator {
         await syncIfNeeded(force: true)
     }
 
+    /// Whether the server confirmed the current list for `dsn` (a failed publish is retried only
+    /// in memory, so the caller must not remember it as published across launches).
+    func hasSynced(dsn: String) -> Bool {
+        guard let current = currentDSN, current == normalizedDSN(dsn) else { return false }
+        return lastSyncedSignature == signatureForCurrentState(dsn: current)
+    }
+
     private func syncIfNeeded(force: Bool) async {
         guard let dsn = currentDSN else { return }
 

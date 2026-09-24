@@ -216,7 +216,15 @@ struct ScreenTimeRestrictedAppsView: View {
         }
         .onAppear {
             authorization.refreshStatus()
-            installed = ScreenTimeEnforcementCoordinator.shared.installedEntries()
+            // The last probe at once; the fresh one after the push has settled (it is ~35 round
+            // trips to LaunchServices on the main thread, run in chunks — see
+            // `refreshInstalledEntries`).
+            installed = ScreenTimeEnforcementCoordinator.shared.cachedInstalledEntries()
+        }
+        .task {
+            // Cancelled when the screen goes away before the delay: no probe during the pop.
+            do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
+            installed = await ScreenTimeEnforcementCoordinator.shared.refreshInstalledEntries()
         }
     }
 
@@ -459,7 +467,11 @@ struct ScreenTimeAppLabelSheet: View {
             if let name = row.name, row.bundleId?.hasPrefix(ScreenTimeRestrictedAppsStore.customBundleIdPrefix) == true {
                 customName = name
             }
-            installed = Set(ScreenTimeEnforcementCoordinator.shared.installedEntries().map(\.bundleId))
+            installed = Set(ScreenTimeEnforcementCoordinator.shared.cachedInstalledEntries().map(\.bundleId))
+        }
+        .task {
+            do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
+            installed = Set(await ScreenTimeEnforcementCoordinator.shared.refreshInstalledEntries().map(\.bundleId))
         }
     }
 

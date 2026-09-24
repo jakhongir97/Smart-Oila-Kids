@@ -60,6 +60,38 @@ final class BolajonHomeViewModelTests: XCTestCase {
         XCTAssertNotNil(viewModel.errorMessage)
     }
 
+    /// A server that has the POST but answers after the sheet's deadline: the sheet frees itself
+    /// and says "still trying" WITHOUT cancelling the request, a reopened sheet's press joins the
+    /// running delivery instead of sending a second SOS, and that sheet shows the outcome — one
+    /// POST, nothing queued, "sent".
+    func testAPressAfterTheSheetStoppedWaitingJoinsTheDeliveryAndShowsItsOutcome() async {
+        SOSDelivery.sheetDeadline = 0.1
+        defer { SOSDelivery.sheetDeadline = 20 }
+        let service = SOSServiceSpy()
+        let gate = SOSGate()
+        service.sendSOSGate = { await gate.wait() }
+        let telemetry = StubSOSTelemetry(context: OilaSOSContext(lat: 1, lng: 2, accuracy: 3, batteryPercent: 50))
+        let viewModel = BolajonHomeViewModel(service: service, telemetry: telemetry)
+
+        let firstPress = Task { await viewModel.sendSOS() }
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertFalse(viewModel.isSendingSOS, "the sheet can be closed after the deadline")
+        XCTAssertTrue(viewModel.sosQueued, "and says it is still trying")
+        XCTAssertFalse(viewModel.sosSent)
+
+        viewModel.resetSOS()          // the child closes the sheet…
+        await viewModel.sendSOS()     // …opens it again and presses
+        XCTAssertTrue(viewModel.sosQueued)
+        XCTAssertEqual(service.sosCalls.count, 1, "the press joined the running delivery")
+
+        gate.open()                   // the server finally answers 200
+        await firstPress.value
+        XCTAssertTrue(viewModel.sosSent, "the reopened sheet shows the delivery's outcome")
+        XCTAssertFalse(viewModel.sosQueued)
+        XCTAssertEqual(service.sosCalls.count, 1)
+        XCTAssertTrue(telemetry.enqueued.isEmpty, "a delivered SOS is not queued again")
+    }
+
     func testScreenTimeCardHiddenWhenNoLocalUsageData() async {
         let viewModel = BolajonHomeViewModel(
             service: SOSServiceSpy(),
@@ -85,6 +117,24 @@ final class BolajonHomeViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.showsScreenTimeCard)
         XCTAssertEqual(viewModel.trackedUsageSeconds, 3900)
         XCTAssertEqual(viewModel.trackedUsageMinutes, 65)
+    }
+}
+
+/// Holds every waiter until `open()`.
+@MainActor
+private final class SOSGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters = []
     }
 }
 
@@ -114,6 +164,8 @@ private final class SOSServiceSpy: OilaDeviceServicing {
 
     private(set) var sosCalls: [(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?)] = []
     var sendSOSError: Error?
+    /// Awaited inside `sendSOS` — a server that holds the answer.
+    var sendSOSGate: (() async -> Void)?
     var fetchTasksError: Error?
     var fetchTasksResult: [OilaDeviceTask] = []
     private(set) var fetchTasksCallCount = 0
@@ -122,6 +174,7 @@ private final class SOSServiceSpy: OilaDeviceServicing {
 
     func sendSOS(lat: Double?, lng: Double?, accuracy: Double?, batteryLevel: Double?) async throws {
         sosCalls.append((lat, lng, accuracy, batteryLevel))
+        if let sendSOSGate { await sendSOSGate() }
         if let sendSOSError { throw sendSOSError }
     }
 

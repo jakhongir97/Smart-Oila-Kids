@@ -48,6 +48,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     typealias LockStateAction = () -> ScreenTimeEnforcementLockState
     typealias CanOpenSchemeAction = (String) -> Bool
     typealias SyncUpdateAction = (String?, [DeviceAppLockSyncEntry]) async -> Void
+    /// Whether the server confirmed the list last handed to `SyncUpdateAction` for this DSN.
+    typealias SyncConfirmedAction = (String) async -> Bool
     typealias AuthorizationStatusAction = () -> ScreenTimePermissionStatus
     typealias LabelledEntriesAction = () -> [ApplicationTokenCatalogue.Entry]
     /// Async because the live arm runs on `ScreenTimeSystemWorker`: `startMonitoring` is a
@@ -91,6 +93,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         authorizationStatus: AuthorizationStatusAction? = nil,
         canOpenScheme: CanOpenSchemeAction? = nil,
         syncUpdate: SyncUpdateAction? = nil,
+        syncConfirmed: SyncConfirmedAction? = nil,
         labelledEntries: LabelledEntriesAction? = nil,
         reloadLabels: (() -> Void)? = nil,
         armUsage: ArmUsageAction? = nil,
@@ -130,6 +133,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
         self.syncUpdate = syncUpdate ?? { dsn, entries in
             await DeviceAppLockSyncCoordinator.shared.update(dsn: dsn, entries: entries)
+        }
+        self.syncConfirmed = syncConfirmed ?? { dsn in
+            await DeviceAppLockSyncCoordinator.shared.hasSynced(dsn: dsn)
         }
         self.labelledEntries = labelledEntries ?? {
             ScreenTimeRestrictedAppsStore.shared.labelledEntries
@@ -198,9 +204,13 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         // The old pairing's usage activity would otherwise keep firing and re-arming itself from
         // the extension — a wasted activity slot and wake-ups for a family this phone left.
         if dsnChanged, let previous = previousDSN { stopUsage(previous) }
+        // A cold launch reads as a DSN change (nothing was current yet); only a pairing this phone
+        // has not published the list for forces the probe and the full-replace publish. Otherwise
+        // every launch probed ~35 schemes on the main thread for a list the server already has.
+        let publishForced = dsnChanged && userDefaults.string(forKey: Self.catalogueSyncedDSNKey) != normalized
         Task {
             await armUsageMonitoring(reason: dsnChanged ? "start_new_dsn" : "start")
-            await syncCatalogueIfNeeded(force: dsnChanged)
+            await syncCatalogueIfNeeded(force: publishForced)
             await uploadUsageNow(reason: "start")
         }
     }
@@ -223,6 +233,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
         currentDSN = nil
         Self.activeUsageDSN.set(nil)
+        userDefaults.removeObject(forKey: Self.catalogueSyncedDSNKey)
         // A request in flight belongs to the pairing that just ended; its answer must not be
         // enforced on the next one, and the flags must not wedge the next one's first upload.
         isUploadingUsage = false
@@ -246,8 +257,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     func refreshNow() async {
         guard currentDSN != nil else { return }
         // A foreground is where a newly installed app is discovered: the probe reuse is for taps
-        // within one visit, never across them.
-        lastProbe = nil
+        // within one visit, never across them. Marked stale rather than dropped, so a screen opened
+        // now shows the last list at once while the new probe runs.
+        probeIsStale = true
         applyNow()
         // Re-armed on every foreground, not only on a label change: the day may have rolled over
         // while the app slept, and a re-arm is idempotent when nothing changed.
@@ -260,6 +272,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     /// label set: what is enforceable, what the server lists, what usage is measured for.
     func restrictedAppsDidChange() {
         guard currentDSN != nil else { return }
+        // The list changed: it is owed to the server from THIS moment, so a kill before the publish
+        // below has run (or confirmed) leaves the next cold launch forcing it.
+        userDefaults.removeObject(forKey: Self.catalogueSyncedDSNKey)
         applyNow()
         Task {
             await armUsageMonitoring(reason: "labels_changed")
@@ -342,17 +357,19 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         // the lock is released before the suspension instead of being carried into it.
         // The request is cancelled with it: once the lock is gone the extension may send a newer
         // body, and this older one must not land after it.
-        let upload = uploadUsage
-        let request = Task { try await upload(days) }
+        var request: Task<DeviceApplicationUsageReportResponse, Error>?
         var backgroundTask: UIBackgroundTaskIdentifier = .invalid
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "oila.usage.upload") {
-            request.cancel()
+            request?.cancel()
             lock.release()
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
                 backgroundTask = .invalid
             }
         }
+        let upload = uploadUsage
+        let sending = Task { try await upload(days) }
+        request = sending
         defer {
             lock.release()
             if backgroundTask != .invalid {
@@ -362,7 +379,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         }
         let requestDSN = dsn
         do {
-            let response = try await request.value
+            let response = try await sending.value
             // The pairing may have ended while the request was out; its answer is not ours to apply
             // (`stop()` already reset the flags this function would otherwise clear below).
             guard currentDSN == requestDSN else {
@@ -526,15 +543,68 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         force || syncedVersion < catalogueSyncVersion || shouldProbeCatalogue(lastSyncedAt: lastSyncedAt, now: now)
     }
 
-    /// The installed-app probe, reused for `probeReuseInterval`. Also what the label screens show,
-    /// which used to re-probe on every appearance.
-    func installedEntries() -> [AppCatalogueEntry] {
-        if let cached = lastProbe, now().timeIntervalSince(cached.at) >= 0,
-           now().timeIntervalSince(cached.at) < Self.probeReuseInterval {
-            return cached.installed
+    /// The last probe's answer, whatever its age: what a screen shows the moment it opens.
+    func cachedInstalledEntries() -> [AppCatalogueEntry] {
+        lastProbe?.installed ?? []
+    }
+
+    /// The installed-app probe: one synchronous `canOpenURL` round trip to LaunchServices per
+    /// catalogue scheme (~35). `canOpenURL` is main-thread UIKit API, so it cannot move to the
+    /// Screen Time lanes; instead it runs in chunks with a run-loop turn between them (frames keep
+    /// rendering), one probe at a time (every caller awaits the same one), and a fresh answer is
+    /// reused for `probeReuseInterval` within one foreground visit. It used to run in one piece in
+    /// `onAppear` — during the push animation of the Restricted-apps screen — and on every launch.
+    func refreshInstalledEntries() async -> [AppCatalogueEntry] {
+        if let fresh = freshProbe() {
+            return fresh
+        }
+        if let probeTask {
+            return await probeTask.value
+        }
+        let task = Task { await self.probeInChunks() }
+        probeTask = task
+        let installed = await task.value
+        probeTask = nil
+        storeProbe(installed)
+        return installed
+    }
+
+    /// The publish's probe: the fresh answer, or one synchronous probe. The publish runs at a
+    /// pairing, once a day and on a label change — no longer on every launch — and keeping it free
+    /// of suspension points keeps `start` → `refreshNow` in the order the upload relies on.
+    private func installedEntriesForSync() -> [AppCatalogueEntry] {
+        if let fresh = freshProbe() {
+            return fresh
         }
         let installed = InstalledAppProbe.installedEntries(canOpen: canOpenScheme)
+        storeProbe(installed)
+        return installed
+    }
+
+    private func freshProbe() -> [AppCatalogueEntry]? {
+        guard !probeIsStale, let cached = lastProbe,
+              now().timeIntervalSince(cached.at) >= 0,
+              now().timeIntervalSince(cached.at) < Self.probeReuseInterval else { return nil }
+        return cached.installed
+    }
+
+    private func storeProbe(_ installed: [AppCatalogueEntry]) {
         lastProbe = (now(), installed)
+        probeIsStale = false
+    }
+
+    private func probeInChunks() async -> [AppCatalogueEntry] {
+        let catalogue = AppCatalogue.all
+        var installed: [AppCatalogueEntry] = []
+        var start = 0
+        while start < catalogue.count {
+            let end = min(start + Self.probeChunkSize, catalogue.count)
+            installed += InstalledAppProbe.installedEntries(in: Array(catalogue[start ..< end]), canOpen: canOpenScheme)
+            start = end
+            if start < catalogue.count {
+                try? await Task.sleep(nanoseconds: 1_000_000)
+            }
+        }
         return installed
     }
 
@@ -551,7 +621,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         // ~35 synchronous `canOpenURL` calls on the main thread. A label change forces a publish but
         // installs nothing, so a probe from the last few minutes is reused rather than re-run on
         // every tap in the label screen.
-        let installed = installedEntries()
+        let installed = installedEntriesForSync()
         let entries = Self.mergedSyncEntries(
             probed: InstalledAppProbe.syncEntries(for: installed),
             labelled: labelledEntries(),
@@ -571,11 +641,23 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
             return
         }
 
+        // A forced publish (new pairing, label change) is owed until the server confirms it; a kill
+        // in between must leave the next cold launch forcing it again.
+        if force { userDefaults.removeObject(forKey: Self.catalogueSyncedDSNKey) }
         await syncUpdate(dsn, entries)
         // Stamped after the hand-off, not before: a stamp written first would suppress the next
         // probe even when nothing was ever published.
         userDefaults.set(now(), forKey: Self.lastCatalogueSyncKey)
         userDefaults.set(Self.catalogueSyncVersion, forKey: Self.catalogueSyncVersionKey)
+        // Remembered only when the server confirmed it: a failed publish is retried in memory only,
+        // and a relaunch must then force it again.
+        let confirmed = await syncConfirmed(dsn)
+        guard currentDSN == dsn else { return }
+        if confirmed {
+            userDefaults.set(dsn, forKey: Self.catalogueSyncedDSNKey)
+        } else {
+            userDefaults.removeObject(forKey: Self.catalogueSyncedDSNKey)
+        }
     }
 
     /// The probe result plus every labelled app, one row per package, plus `otherApps` last when
@@ -719,6 +801,7 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private let authorizationStatusAction: AuthorizationStatusAction
     let canOpenScheme: CanOpenSchemeAction
     private let syncUpdate: SyncUpdateAction
+    private let syncConfirmed: SyncConfirmedAction
     private let labelledEntries: LabelledEntriesAction
     private let reloadLabels: () -> Void
     private let armUsage: ArmUsageAction
@@ -731,6 +814,12 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private var isUploadingUsage = false
     private var isArmingUsage = false
     private var lastProbe: (at: Date, installed: [AppCatalogueEntry])?
+    private var probeIsStale = false
+    private var probeTask: Task<[AppCatalogueEntry], Never>?
+    nonisolated static let probeChunkSize = 5
+    /// The pairing the app list was last published for — so a cold launch of the same pairing does
+    /// not force a probe and a full-replace publish. Removed by `stop()` (unpair).
+    nonisolated static let catalogueSyncedDSNKey = "SCREEN_TIME_CATALOGUE_SYNCED_DSN"
     nonisolated static let probeReuseInterval: TimeInterval = 10 * 60
     /// `currentDSN`, readable from the Screen Time lanes (see the live `armUsage`).
     nonisolated static let activeUsageDSN = LockedValue<String?>(nil)
