@@ -39,6 +39,17 @@ struct ScreenTimeRestrictedAppsView: View {
     @State private var installed: [AppCatalogueEntry] = []
     /// The row whose "which app is this?" sheet is open.
     @State private var labelling: ScreenTimeRestrictedAppsStore.Row?
+    /// Opened from Home's "N ta ilova belgilanmagan" card (`ScreenTimeLinkNudgeCard`): link mode
+    /// starts at once and walks EVERY pending app — the web's, then the detected ones — instead of
+    /// the web queue alone, and "O'tkazib yuborish" moves to the next app rather than leaving.
+    private let startsLinkQueue: Bool
+    @State private var didStartLinkQueue = false
+    /// Apps passed over with "O'tkazib yuborish" in this visit, so the queue does not come back to them.
+    @State private var skippedInQueue: Set<String> = []
+
+    init(startsLinkQueue: Bool = false) {
+        self.startsLinkQueue = startsLinkQueue
+    }
 
     private var pendingGroups: (web: [AppCatalogueEntry], installed: [AppCatalogueEntry]) {
         store.pendingTargetGroups(
@@ -220,6 +231,10 @@ struct ScreenTimeRestrictedAppsView: View {
             // trips to LaunchServices on the main thread, run in chunks — see
             // `refreshInstalledEntries`).
             installed = ScreenTimeEnforcementCoordinator.shared.cachedInstalledEntries()
+            if startsLinkQueue, !didStartLinkQueue, authorization.status == .granted {
+                didStartLinkQueue = true
+                linking = linkQueue.first
+            }
         }
         .task {
             // Cancelled when the screen goes away before the delay: no probe during the pop.
@@ -231,10 +246,24 @@ struct ScreenTimeRestrictedAppsView: View {
     // MARK: - Link mode
 
     /// After one app is linked, the next one the web is waiting for is asked about at once, so a
-    /// parent at pairing taps through the whole queue without returning to the list each time.
+    /// parent at pairing taps through the whole queue without returning to the list each time. From
+    /// Home's nudge the queue is every pending app, the detected ones included.
     private func advanceLinking(after done: AppCatalogueEntry) {
-        let remaining = pendingGroups.web.filter { $0.bundleId != done.bundleId }
-        linking = remaining.first
+        let queue = startsLinkQueue ? linkQueue : pendingGroups.web
+        linking = queue.first { $0.bundleId != done.bundleId }
+    }
+
+    /// The nudge's queue: what the web is waiting for first, then what the probe found, minus what
+    /// was skipped in this visit. Pure over `pendingGroups`, so its order is pinned by a test.
+    private var linkQueue: [AppCatalogueEntry] {
+        Self.linkQueue(pending: pendingGroups, skipped: skippedInQueue)
+    }
+
+    static func linkQueue(
+        pending: (web: [AppCatalogueEntry], installed: [AppCatalogueEntry]),
+        skipped: Set<String>
+    ) -> [AppCatalogueEntry] {
+        (pending.web + pending.installed).filter { !skipped.contains($0.bundleId) }
     }
 
     private func linkModeCard(_ entry: AppCatalogueEntry, canTapIcons: Bool) -> some View {
@@ -265,8 +294,13 @@ struct ScreenTimeRestrictedAppsView: View {
                     Spacer(minLength: 8)
                     Button {
                         AppHaptics.selection()
-                        linking = nil
                         message = nil
+                        if startsLinkQueue {
+                            skippedInQueue.insert(entry.bundleId)
+                            linking = linkQueue.first { $0.bundleId != entry.bundleId }
+                        } else {
+                            linking = nil
+                        }
                     } label: {
                         Text(L10n.tr("screentime.restricted.link_skip"))
                             .font(AppTypography.bodyStrong(13))
@@ -607,5 +641,116 @@ struct ScreenTimeSetupCard: View {
         guard let selection = pendingSelection else { return }
         pendingSelection = nil
         store.updateSelection(selection)
+    }
+}
+
+// MARK: - Home: detected apps nobody has linked yet
+
+/// "N ta ilova belgilanmagan — Belgilash": the Home card for catalogue apps this phone KNOWS about —
+/// found installed by the probe, or blocked/limited on the web — that no icon is linked to yet.
+///
+/// WHY (Ibrohim, 2026-09-25): the parent's web listed Telegram, Instagram and Google Chrome by name,
+/// yet every minute of theirs sat under one "ios.other" row. iOS measures and blocks an app only once
+/// its icon is linked to the name (Apple's tokens are unreadable — see `ScreenTimeRestrictedAppsStore`),
+/// and the only door to that was Settings › restricted apps › "Telefonda topilgan ilovalar" ›
+/// Belgilash, which nobody finds. This card puts the door on Home and opens the link queue directly
+/// (`ScreenTimeRestrictedAppsView(startsLinkQueue:)`): one tap per app on its own icon. No typing, no
+/// switch (product rule 2026-09-21), and no probe — Home reads the list the last probe persisted
+/// (`ScreenTimeEnforcementCoordinator.installedEntries`).
+///
+/// Shown only once the pick exists (link mode needs icons to tap) and never beside the setup card
+/// (one ask at a time). "Keyinroq" sets the DETECTED apps aside until a new one is found — but not
+/// an app the web has blocked: that block does nothing until the app is linked, so hiding it would
+/// hide a rule that is silently not working.
+struct ScreenTimeLinkNudgeCard: View {
+    @ObservedObject private var store = ScreenTimeRestrictedAppsStore.shared
+    @ObservedObject private var authorization = ScreenTimeAuthorizationManager.shared
+    @ObservedObject private var telemetry = OilaTelemetryService.shared
+    @ObservedObject private var coordinator = ScreenTimeEnforcementCoordinator.shared
+    @State private var snoozed: Set<String> = ScreenTimeLinkNudgeCard.storedSnooze()
+    private let onLink: () -> Void
+
+    init(onLink: @escaping () -> Void) {
+        self.onLink = onLink
+    }
+
+    /// Pure, so the rule is pinned by a test. Authorization and the pick first: without them link
+    /// mode has nothing to tap. The setup card outranks this one — the pick comes before the names.
+    static func isEligible(
+        featuresEnabled: Bool,
+        authorization: ScreenTimePermissionStatus,
+        hasPickedApps: Bool,
+        setupCardNeeded: Bool
+    ) -> Bool {
+        featuresEnabled && authorization == .granted && hasPickedApps && !setupCardNeeded
+    }
+
+    /// The number on the card, or nil for no card. The web's apps always count and are never set
+    /// aside; the detected ones hide while every one of them was set aside with "Keyinroq".
+    static func visibleCount(pendingWeb: [String], pendingInstalled: [String], snoozed: Set<String>) -> Int? {
+        if !pendingWeb.isEmpty { return pendingWeb.count + pendingInstalled.count }
+        guard !pendingInstalled.isEmpty, !Set(pendingInstalled).isSubset(of: snoozed) else { return nil }
+        return pendingInstalled.count
+    }
+
+    var body: some View {
+        let pending = store.pendingTargetGroups(
+            lockedPackages: telemetry.lockedPackages,
+            limitedPackages: telemetry.appLimits.map(\.packageName),
+            installed: coordinator.installedEntries
+        )
+        let web = pending.web.map(\.bundleId)
+        let installed = pending.installed.map(\.bundleId)
+        let eligible = Self.isEligible(
+            featuresEnabled: AppRuntime.screenTimeFeaturesEnabled,
+            authorization: authorization.status,
+            hasPickedApps: !store.rows.isEmpty,
+            setupCardNeeded: ScreenTimeSetupCard.isNeeded(
+                featuresEnabled: AppRuntime.screenTimeFeaturesEnabled,
+                supported: ScreenTimeUsageMonitoring.isSupported,
+                authorization: authorization.status,
+                hasCategoryTokens: !store.selection.categoryTokens.isEmpty
+            )
+        )
+        if eligible, let count = Self.visibleCount(pendingWeb: web, pendingInstalled: installed, snoozed: snoozed) {
+            InfoCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ZStack {
+                            Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 46, height: 46)
+                            Image(systemName: "link")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(AppColors.ctaPurple)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.tr("screentime.nudge.title", count))
+                                .font(AppTypography.bodyStrong(14))
+                                .foregroundStyle(AppColors.inkPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(L10n.tr("screentime.nudge.body"))
+                                .font(AppTypography.bodyText(13))
+                                .foregroundStyle(AppColors.inkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    BolajonPrimaryButton(title: L10n.tr("screentime.restricted.guided_cta"), action: onLink)
+                    if web.isEmpty {
+                        GhostButton(title: L10n.tr("perm2.later")) {
+                            snooze(installed)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func snooze(_ bundleIds: [String]) {
+        snoozed.formUnion(bundleIds)
+        UserDefaults.standard.set(snoozed.sorted(), forKey: ScreenTimeEnforcementCoordinator.linkNudgeSnoozedKey)
+    }
+
+    private static func storedSnooze() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: ScreenTimeEnforcementCoordinator.linkNudgeSnoozedKey) ?? [])
     }
 }

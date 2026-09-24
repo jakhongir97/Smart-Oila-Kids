@@ -416,3 +416,7 @@
 
 /* build 28 — the setup card never contradicts a figure above it */
 "home2.screentime_setup.title_resume" = "Choose apps to keep screen time updating";
+
+/* build 28 — Home nudge for detected apps no icon is linked to */
+"screentime.nudge.title" = "Apps not linked: %d";
+"screentime.nudge.body" = "An unlinked app's time doesn't show separately on the website (it goes into “Boshqa ilovalar”), and it can't be blocked. Link each one once — just tap its icon in the list, nothing to type.";

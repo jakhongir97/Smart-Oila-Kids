@@ -64,6 +64,18 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
 
     static let shared = ScreenTimeEnforcementCoordinator()
 
+    /// The catalogue apps the last probe found on this phone — kept, published and persisted so Home
+    /// can say "N apps not linked" (`ScreenTimeLinkNudgeCard`) WITHOUT probing: Home must never run
+    /// the ~35 synchronous `canOpenURL` calls (the 2026-09-24 freeze work took them off every launch
+    /// and screen-open path). Filled by whichever probe runs anyway — the pairing's forced publish,
+    /// the daily one, the Restricted-apps screen. Cleared by `stop()`: an unpair leaves nothing of
+    /// the previous pairing behind (`SessionStore.purgeChildScopedData`).
+    @Published private(set) var installedEntries: [AppCatalogueEntry] = []
+    nonisolated static let installedEntriesKey = "SCREEN_TIME_LAST_PROBE_INSTALLED_V1"
+    /// Detected apps the child set aside with "Keyinroq" on that nudge. Per pairing, like the list
+    /// it filters, so `stop()` removes it with the list.
+    nonisolated static let linkNudgeSnoozedKey = "SCREEN_TIME_LINK_NUDGE_SNOOZED_V1"
+
     /// How often the installed-app catalogue is re-probed. A probe is ~50 synchronous
     /// `canOpenURL` calls, and the answer only changes when the child installs or deletes
     /// something, so daily matches what the Android client does with `PackageChangeReceiver`.
@@ -174,6 +186,8 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         self.usageLedger = usageLedger
         self.userDefaults = userDefaults
         self.now = now
+        installedEntries = (userDefaults.stringArray(forKey: Self.installedEntriesKey) ?? [])
+            .compactMap(AppCatalogue.entry(forBundleId:))
     }
 
     // MARK: - Lifecycle
@@ -237,6 +251,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         currentDSN = nil
         Self.activeUsageDSN.set(nil)
         userDefaults.removeObject(forKey: Self.catalogueSyncedDSNKey)
+        installedEntries = []
+        userDefaults.removeObject(forKey: Self.installedEntriesKey)
+        userDefaults.removeObject(forKey: Self.linkNudgeSnoozedKey)
         // A request in flight belongs to the pairing that just ended; its answer must not be
         // enforced on the next one, and the flags must not wedge the next one's first upload.
         isUploadingUsage = false
@@ -546,9 +563,10 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
         force || syncedVersion < catalogueSyncVersion || shouldProbeCatalogue(lastSyncedAt: lastSyncedAt, now: now)
     }
 
-    /// The last probe's answer, whatever its age: what a screen shows the moment it opens.
+    /// The last probe's answer, whatever its age: what a screen shows the moment it opens. Falls back
+    /// to the persisted list, so a cold launch shows it too before any probe of this process.
     func cachedInstalledEntries() -> [AppCatalogueEntry] {
-        lastProbe?.installed ?? []
+        lastProbe?.installed ?? installedEntries
     }
 
     /// The installed-app probe: one synchronous `canOpenURL` round trip to LaunchServices per
@@ -594,6 +612,9 @@ final class ScreenTimeEnforcementCoordinator: ObservableObject {
     private func storeProbe(_ installed: [AppCatalogueEntry]) {
         lastProbe = (now(), installed)
         probeIsStale = false
+        guard installed != installedEntries else { return }
+        installedEntries = installed
+        userDefaults.set(installed.map(\.bundleId), forKey: Self.installedEntriesKey)
     }
 
     private func probeInChunks() async -> [AppCatalogueEntry] {

@@ -875,6 +875,52 @@ final class ScreenTimeEnforcementCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(L10n.tr("home2.screentime_setup.title_resume"), "home2.screentime_setup.title_resume")
     }
 
+    // MARK: Home's link nudge (build 28)
+
+    /// Link mode needs icons to tap and the pick comes first: no card before both, never beside the
+    /// setup card.
+    func testTheLinkNudgeWaitsForThePickAndNeverSitsBesideTheSetupCard() {
+        XCTAssertTrue(ScreenTimeLinkNudgeCard.isEligible(featuresEnabled: true, authorization: .granted,
+                                                         hasPickedApps: true, setupCardNeeded: false))
+        XCTAssertFalse(ScreenTimeLinkNudgeCard.isEligible(featuresEnabled: true, authorization: .granted,
+                                                          hasPickedApps: false, setupCardNeeded: false), "no icons to tap")
+        XCTAssertFalse(ScreenTimeLinkNudgeCard.isEligible(featuresEnabled: true, authorization: .granted,
+                                                          hasPickedApps: true, setupCardNeeded: true), "one ask at a time")
+        XCTAssertFalse(ScreenTimeLinkNudgeCard.isEligible(featuresEnabled: true, authorization: .denied,
+                                                          hasPickedApps: true, setupCardNeeded: false))
+        XCTAssertFalse(ScreenTimeLinkNudgeCard.isEligible(featuresEnabled: false, authorization: .granted,
+                                                          hasPickedApps: true, setupCardNeeded: false))
+    }
+
+    /// Ibrohim's phone: Telegram, Instagram and Chrome detected, none linked → "3 ta ilova belgilanmagan".
+    /// "Keyinroq" sets detected apps aside until a NEW one is found; a web block is never set aside.
+    func testTheLinkNudgeCountsDetectedAndWebAppsAndOnlyTheDetectedOnesCanWait() {
+        let detected = ["ph.telegra.Telegraph", "com.burbn.instagram", "com.google.chrome.ios"]
+        XCTAssertEqual(ScreenTimeLinkNudgeCard.visibleCount(pendingWeb: [], pendingInstalled: detected, snoozed: []), 3)
+        XCTAssertNil(ScreenTimeLinkNudgeCard.visibleCount(pendingWeb: [], pendingInstalled: [], snoozed: []))
+        XCTAssertNil(ScreenTimeLinkNudgeCard.visibleCount(pendingWeb: [], pendingInstalled: detected, snoozed: Set(detected)),
+                     "set aside")
+        XCTAssertEqual(ScreenTimeLinkNudgeCard.visibleCount(pendingWeb: [], pendingInstalled: detected + ["com.zhiliaoapp.musically"],
+                                                            snoozed: Set(detected)), 4, "a new app brings it back")
+        XCTAssertEqual(ScreenTimeLinkNudgeCard.visibleCount(pendingWeb: ["com.zhiliaoapp.musically"], pendingInstalled: detected,
+                                                            snoozed: Set(detected)), 4, "a web block is never hidden")
+        XCTAssertNotEqual(L10n.tr("screentime.nudge.title", 3), "screentime.nudge.title")
+        XCTAssertTrue(L10n.tr("screentime.nudge.title", 3).contains("3"))
+    }
+
+    /// From the nudge the link queue walks the web's apps first, then the detected ones, and a skip
+    /// moves on instead of coming back.
+    func testTheNudgeLinkQueueIsWebFirstThenDetectedMinusSkipped() {
+        let telegram = AppCatalogue.entry(forBundleId: "ph.telegra.Telegraph")!
+        let tiktok = AppCatalogue.entry(forBundleId: "com.zhiliaoapp.musically")!
+        let instagram = AppCatalogue.entry(forBundleId: "com.burbn.instagram")!
+        let queue = ScreenTimeRestrictedAppsView.linkQueue(pending: (web: [tiktok], installed: [telegram, instagram]), skipped: [])
+        XCTAssertEqual(queue.map(\.name), ["TikTok", "Telegram", "Instagram"])
+        let afterSkip = ScreenTimeRestrictedAppsView.linkQueue(pending: (web: [tiktok], installed: [telegram, instagram]),
+                                                              skipped: [telegram.bundleId])
+        XCTAssertEqual(afterSkip.map(\.name), ["TikTok", "Instagram"])
+    }
+
     /// `ios.other` is not an app: no token stands for it. A parent who blocks or limits "other apps"
     /// on the web must not produce a phantom "unenforceable" block on the phone.
     func testOtherAppsIsNeverCountedUnenforceable() {
@@ -1394,6 +1440,31 @@ final class InstalledAppProbeSchedulingTests: XCTestCase {
         XCTAssertEqual(counter.synced.count, 2, "the owed publish goes out")
         XCTAssertEqual(defaults.string(forKey: ScreenTimeEnforcementCoordinator.catalogueSyncedDSNKey), "child-1")
         relaunch.stop()
+    }
+
+    /// Home's link nudge reads the probe's answer without probing — so it must survive a relaunch —
+    /// and an unpair must take it (and what was set aside from it) away with the pairing.
+    func testTheProbeListOutlivesTheProcessButNotThePairing() async {
+        let defaults = makeDefaults()
+        let counter = Counter()
+        let first = makeCoordinator(defaults: defaults, counter: counter)
+        XCTAssertTrue(first.installedEntries.isEmpty)
+        _ = await first.refreshInstalledEntries()
+        XCTAssertEqual(first.installedEntries.map(\.scheme), ["tg"])
+
+        counter.probes = 0
+        let relaunch = makeCoordinator(defaults: defaults, counter: counter)
+        XCTAssertEqual(relaunch.installedEntries.map(\.scheme), ["tg"], "restored from disk")
+        XCTAssertEqual(relaunch.cachedInstalledEntries().map(\.scheme), ["tg"], "a screen opened at launch shows it at once")
+        XCTAssertEqual(counter.probes, 0, "without a probe")
+
+        defaults.set(["ph.telegra.Telegraph"], forKey: ScreenTimeEnforcementCoordinator.linkNudgeSnoozedKey)
+        relaunch.start(dsn: "child-1")
+        await settle()
+        relaunch.stop()
+        XCTAssertTrue(relaunch.installedEntries.isEmpty, "an unpair forgets what the previous pairing detected")
+        XCTAssertNil(defaults.stringArray(forKey: ScreenTimeEnforcementCoordinator.installedEntriesKey))
+        XCTAssertNil(defaults.stringArray(forKey: ScreenTimeEnforcementCoordinator.linkNudgeSnoozedKey))
     }
 
     func testConcurrentCallersShareOneProbeAndAForegroundMakesItStale() async {

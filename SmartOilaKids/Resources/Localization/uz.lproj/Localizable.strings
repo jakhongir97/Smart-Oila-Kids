@@ -416,3 +416,7 @@
 
 /* build 28 — the setup card never contradicts a figure above it */
 "home2.screentime_setup.title_resume" = "Ekran vaqti yangilanib turishi uchun ilovalarni tanlang";
+
+/* build 28 — Home nudge for detected apps no icon is linked to */
+"screentime.nudge.title" = "%d ta ilova belgilanmagan";
+"screentime.nudge.body" = "Belgilanmagan ilovaning vaqti saytda alohida ko'rinmaydi («Boshqa ilovalar» ichiga tushadi) va uni bloklab bo'lmaydi. Har birini bir marta belgilang — ro'yxatda belgisini bosish kifoya, nom yozish shart emas.";

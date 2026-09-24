@@ -416,3 +416,7 @@
 
 /* build 28 — the setup card never contradicts a figure above it */
 "home2.screentime_setup.title_resume" = "Чтобы экранное время обновлялось, выберите приложения";
+
+/* build 28 — Home nudge for detected apps no icon is linked to */
+"screentime.nudge.title" = "Не связано приложений: %d";
+"screentime.nudge.body" = "Время несвязанного приложения на сайте не видно отдельно (оно попадает в «Boshqa ilovalar»), и его нельзя заблокировать. Свяжите каждое один раз — достаточно нажать на его значок в списке, вводить ничего не нужно.";

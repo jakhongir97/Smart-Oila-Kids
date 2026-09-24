@@ -11,6 +11,8 @@ enum HomeRoute: Hashable {
     case settings
     case settingsPermissions
     case settingsRestrictedApps
+    /// The same screen, opened by Home's link nudge straight into its link queue.
+    case settingsRestrictedAppsLinking
     case settingsDisconnect
 }
 
@@ -24,6 +26,7 @@ func homeRouteDestination(_ route: HomeRoute, path: Binding<[HomeRoute]>) -> som
     case .settings: SettingsRootView(path: path)
     case .settingsPermissions: SettingsPermissionsScreen()
     case .settingsRestrictedApps: ScreenTimeRestrictedAppsView()
+    case .settingsRestrictedAppsLinking: ScreenTimeRestrictedAppsView(startsLinkQueue: true)
     case .settingsDisconnect: SettingsDisconnectScreen()
     }
 }
@@ -94,6 +97,9 @@ struct BolajonHomeView: View {
                     // Draws nothing unless the phone still lacks the one-tap app pick (build 26). Told
                     // whether a figure is on screen right above it, so the two never contradict.
                     ScreenTimeSetupCard(showsUsageFigure: viewModel.showsScreenTimeCard && viewModel.showsUsageFigure)
+                    // Detected (or web-blocked) apps that no icon is linked to yet — their minutes
+                    // are lumped under "ios.other" on the web until they are (Ibrohim, build 28).
+                    ScreenTimeLinkNudgeCard(onLink: { path.append(.settingsRestrictedAppsLinking) })
                     sosCard
                     if AppRuntime.chatFeaturesEnabled {
                         ChatHomeCard(refreshToken: chatUnreadRefreshToken, onOpen: { path.append(.chat) })
