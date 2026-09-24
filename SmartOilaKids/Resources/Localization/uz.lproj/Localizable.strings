@@ -263,9 +263,9 @@
 "perm2.item.location" = "Joylashuv";
 
 "perm2.item.microphone" = "Mikrofon";
-"perm2.microphone.body" = "Faqat ota-onangiz so'raganda, xavfsizligingiz uchun. Yoniq paytda pastda doim qizil panel va iPhone'ning to'q sariq nuqtasi ko'rinadi. Hech narsa yozib olinmaydi. Bolajon360 sozlamalarida istalgan vaqtda o'chirishingiz mumkin.";
+"perm2.microphone.body" = "Faqat ota-onangiz so'raganda, xavfsizligingiz uchun. Bolajon360 ichida pastda qizil panel ko'rinadi. Ilovadan chiqsangiz ham tinglash davom etishi mumkin — unda buni bildirishnoma va iPhone'ning to'q sariq nuqtasi ko'rsatadi. Bolajon360 sozlamalarida istalgan vaqtda o'chirishingiz mumkin.";
 "perm2.item.camera" = "Kamera";
-"perm2.camera.body" = "Faqat ota-onangiz so'raganda va faqat Bolajon360 ochiq bo'lganda. Kamera yoniq paytda qizil panel va iPhone'ning yashil nuqtasi doim ko'rinadi. Hech narsa yozib olinmaydi. Bolajon360 sozlamalarida istalgan vaqtda o'chirishingiz mumkin.";
+"perm2.camera.body" = "Faqat ota-onangiz so'raganda va faqat Bolajon360 ochiq bo'lganda. Kamera yoniq paytda qizil panel va iPhone'ning yashil nuqtasi doim ko'rinadi. Bolajon360 sozlamalarida istalgan vaqtda o'chirishingiz mumkin.";
 "perm2.item.bglocation" = "Fon joylashuvi";
 
 
@@ -320,9 +320,9 @@
 "audio2.request.video.body" = "Bolajon360 ni oching — jonli video o'zi boshlanadi.";
 "audio2.request.answer_body" = "Javob berish uchun Bolajon360 ni oching.";
 "audio2.consent.title" = "Jonli ovozga ruxsat berasizmi?";
-"audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. U yoniq bo'lganda ekran pastida doim qizil panel ko'rinadi. Hech narsa yozib olinmaydi.";
+"audio2.consent.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizdagi ovozni tinglashi mumkin. Bolajon360 ichida pastda qizil panel ko'rinadi. Ilovadan chiqsangiz ham tinglash davom etishi mumkin — unda buni bildirishnoma va iPhone'ning to'q sariq nuqtasi ko'rsatadi.";
 "audio2.consent.video.title" = "Jonli videoga ruxsat berasizmi?";
-"audio2.consent.video.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizni ko'rishi va eshitishi mumkin — faqat Bolajon360 ochiq bo'lganda. Kamera yoniq bo'lganda ekran pastida doim qizil panel ko'rinadi. Hech narsa yozib olinmaydi.";
+"audio2.consent.video.body" = "Ota-onangiz xavfsizligingiz uchun atrofingizni ko'rishi va eshitishi mumkin — faqat Bolajon360 ochiq bo'lganda. Kamera yoniq bo'lganda ekran pastida doim qizil panel ko'rinadi.";
 "audio2.consent.hint" = "Yoniqligini doim ko'rasiz";
 "audio2.consent.allow" = "Ruxsat berish";
 "audio2.consent.decline" = "Hozir emas";
@@ -430,8 +430,8 @@
 
 /* build 28 review — consent wording, a way past a locked Settings switch, retry-first Screen Time */
 "perm2.media.agree" = "Roziman";
-"perm2.microphone.consent_hint" = "Mikrofon bu telefonda allaqachon yoqilgan. Ota-onangiz jonli ovozni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — mikrofon yoniqligi doim ekranda ko'rinadi va uni to'xtatish mumkin. Aks holda «Hozir emas»ni tanlang.";
-"perm2.camera.consent_hint" = "Kamera bu telefonda allaqachon yoqilgan. Ota-onangiz jonli videoni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — kamera yoniqligi doim ekranda ko'rinadi, hech narsa yozib olinmaydi. Aks holda «Hozir emas»ni tanlang.";
+"perm2.microphone.consent_hint" = "Mikrofon bu telefonda allaqachon yoqilgan. Ota-onangiz jonli ovozni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — u yoniqligini ilovada qizil panel, ilovadan tashqarida esa bildirishnoma va iPhone'ning to'q sariq nuqtasi ko'rsatadi, uni to'xtatish ham mumkin. Aks holda «Hozir emas»ni tanlang.";
+"perm2.camera.consent_hint" = "Kamera bu telefonda allaqachon yoqilgan. Ota-onangiz jonli videoni yoqishiga rozi bo'lsangizgina «Roziman»ni bosing — kamera yoniqligi doim ekranda ko'rinadi. Aks holda «Hozir emas»ni tanlang.";
 "perm2.microphone.os_on" = "Mikrofon yoqilgan";
 "perm2.camera.os_on" = "Kamera yoqilgan";
 "perm2.location.settings_unchanged" = "Sozlamalarda hech narsa o'zgarmadi. Qayta urinish uchun «Sozlamalarni ochish»ni bosing — yoki bu telefonda sozlamani o'zgartirib bo'lmasa, busiz davom eting. Ota-ona buni saytda ko'radi.";

@@ -263,9 +263,9 @@
 "perm2.item.location" = "Location";
 
 "perm2.item.microphone" = "Microphone";
-"perm2.microphone.body" = "Only when your parent asks, for your safety. While it is on you always see a red bar at the bottom and iPhone's orange dot. Nothing is recorded. You can turn it off any time in Bolajon360 Settings.";
+"perm2.microphone.body" = "Only when your parent asks, for your safety. In Bolajon360 a red bar shows at the bottom. If you leave the app, listening can keep going, and then a notification and iPhone's orange dot show it. You can turn it off any time in Bolajon360 Settings.";
 "perm2.item.camera" = "Camera";
-"perm2.camera.body" = "Only when your parent asks, and only while Bolajon360 is open. You always see a red bar and iPhone's green dot while the camera is on. Nothing is recorded. You can turn it off any time in Bolajon360 Settings.";
+"perm2.camera.body" = "Only when your parent asks, and only while Bolajon360 is open. You always see a red bar and iPhone's green dot while the camera is on. You can turn it off any time in Bolajon360 Settings.";
 "perm2.item.bglocation" = "Background location";
 
 
@@ -320,9 +320,9 @@
 "audio2.request.video.body" = "Open Bolajon360 — live video starts by itself.";
 "audio2.request.answer_body" = "Open Bolajon360 to answer.";
 "audio2.consent.title" = "Allow live audio?";
-"audio2.consent.body" = "Your parent can listen to your surroundings for your safety. While it is on you always see a red bar at the bottom of the screen. Nothing is recorded.";
+"audio2.consent.body" = "Your parent can listen to your surroundings for your safety. In Bolajon360 a red bar shows at the bottom. If you leave the app, listening can keep going, and then a notification and iPhone's orange dot show it.";
 "audio2.consent.video.title" = "Allow live video?";
-"audio2.consent.video.body" = "Your parent can see and hear what is around you for your safety, only while Bolajon360 is open. While the camera is on you always see a red bar at the bottom of the screen. Nothing is recorded.";
+"audio2.consent.video.body" = "Your parent can see and hear what is around you for your safety, only while Bolajon360 is open. While the camera is on you always see a red bar at the bottom of the screen.";
 "audio2.consent.hint" = "You always see when it's on";
 "audio2.consent.allow" = "Allow";
 "audio2.consent.decline" = "Not now";
@@ -430,8 +430,8 @@
 
 /* build 28 review — consent wording, a way past a locked Settings switch, retry-first Screen Time */
 "perm2.media.agree" = "I agree";
-"perm2.microphone.consent_hint" = "The microphone is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live audio check — you'll always see an indicator and can stop it. Otherwise choose “Not now”.";
-"perm2.camera.consent_hint" = "The camera is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live video check — you'll always see an indicator and nothing is recorded. Otherwise choose “Not now”.";
+"perm2.microphone.consent_hint" = "The microphone is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live audio check — a red bar in the app, or a notification and iPhone's orange dot outside it, show when it's on, and you can stop it. Otherwise choose “Not now”.";
+"perm2.camera.consent_hint" = "The camera is already on for this phone. Tap “I agree” only if you're OK with your parent starting a live video check — you'll always see an indicator. Otherwise choose “Not now”.";
 "perm2.microphone.os_on" = "Microphone is on";
 "perm2.camera.os_on" = "Camera is on";
 "perm2.location.settings_unchanged" = "Nothing changed in Settings. Tap “Open Settings” to try again — or, if the setting can't be changed on this phone, continue without it. Your parent will see this on the site.";
