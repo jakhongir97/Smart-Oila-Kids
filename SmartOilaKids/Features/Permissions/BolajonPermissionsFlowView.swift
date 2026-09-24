@@ -424,11 +424,14 @@ enum BolajonStepGate {
                 // as THIS child's consent — and no system dialog follows this screen, so the button is
                 // the agreement itself and says so ("Roziman"). "Davom etish" here recorded standing
                 // consent to live audio/video from a tap the hint called a formality.
+                //
+                // The badge states the hardware fact ("Mikrofon yoqilgan"), not "Ruxsat berilgan": a
+                // tick reading "permission granted" above a question reads as nothing left to decide.
                 return BolajonStepActions(
                     primary: .advance, primaryKey: "perm2.media.agree", secondary: skip,
                     hint: .init(key: step.kind == .microphone ? "perm2.microphone.consent_hint" : "perm2.camera.consent_hint",
                                 tone: .success),
-                    badgeKey: "perm2.granted"
+                    badgeKey: step.kind == .microphone ? "perm2.microphone.os_on" : "perm2.camera.os_on"
                 )
             }
             // A media step the child has just agreed to offers no "Hozir emas": consent is grant-only
@@ -883,10 +886,16 @@ struct BolajonPermissionsFlowView: View {
     /// which is grant-only precisely because this state is long-lived and re-fired. Both answers are
     /// still sent together, so the destination sees the whole picture in one call.
     private func mirrorMediaConsent() {
-        streaming.grantOnboardingMediaConsent(
-            microphone: microphoneAnswer == true && manager.microphonePermission == .granted,
-            camera: cameraAnswer == true && manager.cameraAuthorizationStatus == .authorized
+        // `hasAudioConsent: false`: onboarding always starts from cleared flags, and its own answers
+        // are the whole of what it may grant. The Settings screen is the one caller that passes true.
+        let grant = MediaConsentAnswer.grant(
+            microphoneAnswer: microphoneAnswer,
+            cameraAnswer: cameraAnswer,
+            microphoneGranted: manager.microphonePermission == .granted,
+            cameraGranted: manager.cameraAuthorizationStatus == .authorized,
+            hasAudioConsent: false
         )
+        streaming.grantOnboardingMediaConsent(microphone: grant.microphone, camera: grant.camera)
     }
 
     /// The media steps' answer. Every primary press on them — ask ("Davom etish" before the system

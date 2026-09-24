@@ -400,14 +400,19 @@ final class BolajonPermissionChecklistTests: XCTestCase {
     /// No system dialog follows a granted media step, so its button IS the agreement and must say so:
     /// "Davom etish" there recorded standing consent to live audio/video from a tap the hint called a
     /// formality (re-pair: the iOS grants survive the unpair).
+    ///
+    /// The badge states the hardware fact ("Mikrofon yoqilgan"), never "Ruxsat berilgan": a tick
+    /// saying "permission granted" above the question reads as nothing left to decide (build 28).
     func testAGrantedMediaStepAsksForExplicitAgreement() {
-        for (kind, hint) in [(Kind.microphone, "perm2.microphone.consent_hint"), (.camera, "perm2.camera.consent_hint")] {
+        for (kind, hint, badge) in [(Kind.microphone, "perm2.microphone.consent_hint", "perm2.microphone.os_on"),
+                                    (.camera, "perm2.camera.consent_hint", "perm2.camera.os_on")] {
             let actions = BolajonStepGate.actions(for: step(kind), phase: .granted)
             XCTAssertEqual(actions.primary, .advance)
             XCTAssertEqual(actions.primaryKey, "perm2.media.agree")
             XCTAssertEqual(actions.secondary, .init(action: .decline, key: "perm2.not_now"))
             XCTAssertEqual(actions.hint, .init(key: hint, tone: .success))
-            XCTAssertEqual(actions.badgeKey, "perm2.granted")
+            XCTAssertEqual(actions.badgeKey, badge)
+            XCTAssertNotEqual(L10n.tr(badge), badge, "\(badge) must be localized")
         }
         XCTAssertEqual(BolajonStepGate.actions(for: step(.location), phase: .granted).primaryKey, "perm2.continue",
                        "not a consent step: plain Continue")
