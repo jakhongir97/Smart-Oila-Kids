@@ -1832,7 +1832,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
            evaluated.timeIntervalSince(trustedNow) <= DeviceLockEdgeMonitoring.earlyCallbackTolerance {
             evaluationTime = evaluated
         }
-        let calendar = lockRuntime.calendar()
+        let calendar = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: lockRuntime.calendar())
         let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
         // The same planning path as the extension's. Edges are the instants the answer FLIPS, so while
         // locked the first one is where the episode ends (`DeviceLockPolicy.episodeEnd`) — unless it
@@ -1856,7 +1856,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // plan in absolute time is unchanged — only `arm`'s read-back sees it) and an extension
         // re-arm since (from the snapshot IT read; its notification is lost while this app is
         // suspended, its evaluation stamp is not).
-        let signature = [calendar.timeZone.identifier, "\(extensionEvaluatedAt?.timeIntervalSince1970 ?? 0)"]
+        // The PHONE's zone, not the rule's: the armed components are read in the phone's zone.
+        let signature = [lockRuntime.calendar().timeZone.identifier, "\(extensionEvaluatedAt?.timeIntervalSince1970 ?? 0)"]
             + outlook.entries.map { "\($0.name)@\(Int($0.wallStart.timeIntervalSince1970 / 60))" }
         if signature != lastArmedEdgeSignature {
             // Remembered only when every start succeeded: a failed start (too many activities,
@@ -1966,7 +1967,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 dsn: dsn, manualLock: manual, schedules: state.schedules ?? [], serverTime: state.serverTime,
                 receivedAt: anchor.wall, clock: anchor, isLegacy: false,
                 // The held window's end is the phone's own ceiling, renewed by every poll.
-                manualEndIsCeiling: manual != nil && state.manualLock == .unreadable ? true : nil
+                manualEndIsCeiling: manual != nil && state.manualLock == .unreadable ? true : nil,
+                scheduleZoneSecondsFromGMT: DeviceLockPolicy.scheduleZoneSeconds(
+                    deviceLocalTime: state.deviceLocalTime, serverTime: state.serverTime
+                )
             )
         }
         guard let legacyLocked = state.isDeviceLocked else { return nil }

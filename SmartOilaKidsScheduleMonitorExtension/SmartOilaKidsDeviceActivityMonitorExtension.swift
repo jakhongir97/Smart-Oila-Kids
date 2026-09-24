@@ -193,7 +193,7 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         let evaluationTime = callback == .intervalStart
             ? DeviceLockEdgeMonitoring.evaluationTime(now: trustedNow, activityName: raw)
             : trustedNow
-        let calendar = DeviceLockPolicy.phoneCalendar()
+        let calendar = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: DeviceLockPolicy.phoneCalendar())
         let locked = DeviceLockPolicy.isLocked(at: evaluationTime, snapshot: snapshot, calendar: calendar)
         let wrote = DeviceLockPolicy.applyWholeDevice(locked: locked)
         lockPolicyStore.markEdgeEvaluated(at: evaluationTime)

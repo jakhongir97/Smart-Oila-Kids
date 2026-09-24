@@ -207,6 +207,14 @@ struct DeviceLockPolicySnapshot: Codable, Equatable {
     /// an old backend it is renewed by every poll, so a shown time would slide forward every 30 s
     /// (build 25 showed only the server's own end, for the same reason). nil in older saves.
     var manualEndIsCeiling: Bool? = nil
+    /// The UTC offset of the zone the SERVER evaluates schedules in — the device timezone captured at
+    /// pairing (api.json LockScheduleDto: "startMinute: Minutes from midnight, device timezone").
+    /// Derived from the payload's own `deviceLocalTime` + `serverTime` (see
+    /// `scheduleZoneSeconds(deviceLocalTime:serverTime:)`), because no DTO carries the zone itself.
+    /// Schedules are read in this zone, so a child who switches the phone to a zone ten hours away
+    /// cannot move the night lock to the afternoon — and the phone agrees with the server's own
+    /// `scheduleLocked` minute for minute. nil (older saves, old backends) = the phone's zone.
+    var scheduleZoneSecondsFromGMT: Int? = nil
 }
 
 /// The pure rule. No state, no clock of its own: `now` and the calendar are always passed in, so a
@@ -222,6 +230,38 @@ enum DeviceLockPolicy {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .autoupdatingCurrent
         return calendar
+    }
+
+    /// The calendar the rule reads SCHEDULES with: Gregorian in the server's device zone when the
+    /// snapshot knows it, else `phone`'s zone. Manual windows are absolute instants and do not care.
+    static func ruleCalendar(for snapshot: DeviceLockPolicySnapshot?, phone: Calendar) -> Calendar {
+        guard let seconds = snapshot?.scheduleZoneSecondsFromGMT,
+              let zone = TimeZone(secondsFromGMT: seconds) else { return phone }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        return calendar
+    }
+
+    /// The device zone's UTC offset, from the lock-state payload's `deviceLocalTime` ("HH:mm in the
+    /// device timezone") and `serverTime` (the same instant in UTC). Rounded to the nearest 15
+    /// minutes, which absorbs the payload's minute boundary and covers every real zone (±14 h).
+    /// nil when either is missing or malformed.
+    static func scheduleZoneSeconds(deviceLocalTime: String?, serverTime: Date?) -> Int? {
+        guard let deviceLocalTime, let serverTime else { return nil }
+        let parts = deviceLocalTime.split(separator: ":")
+        guard parts.count >= 2, let hour = Int(parts[0]), let minute = Int(parts[1]),
+              (0 ..< 24).contains(hour), (0 ..< 60).contains(minute) else { return nil }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let serverParts = utc.dateComponents([.hour, .minute, .second], from: serverTime)
+        let serverMinutes = Double((serverParts.hour ?? 0) * 60 + (serverParts.minute ?? 0))
+            + Double(serverParts.second ?? 0) / 60
+        var delta = Double(hour * 60 + minute) - serverMinutes
+        // Into (-12 h, +14 h], the range real zones live in.
+        while delta <= -12 * 60 { delta += 1_440 }
+        while delta > 14 * 60 { delta -= 1_440 }
+        let quarters = (delta / 15).rounded()
+        return Int(quarters) * 15 * 60
     }
 
     /// Monday = 0 … Sunday = 6, from `Calendar`'s Sunday = 1 … Saturday = 7.

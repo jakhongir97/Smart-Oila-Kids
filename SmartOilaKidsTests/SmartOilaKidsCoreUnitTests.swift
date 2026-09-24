@@ -6409,6 +6409,48 @@ final class OilaLockPolicyParsingTests: XCTestCase {
 
         XCTAssertNil(OilaTelemetryService.lockPolicySnapshot(from: OilaLockState(isLocked: nil, raw: ["x": 1]), dsn: "child", anchor: anchor))
     }
+
+    // MARK: Schedules are read in the server's device zone (build 26, closes a zone-change bypass)
+
+    func testTheDeviceZoneIsDerivedFromTheServersOwnClockAndLocalTime() {
+        let offset = { (local: String, server: String) in
+            DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: local, serverTime: LockFixture.utc(server))
+        }
+        XCTAssertEqual(offset("19:05", "2026-09-22T14:05:00Z"), 5 * 3_600, "Tashkent, +05:00")
+        XCTAssertEqual(offset("04:13", "2026-09-23T23:13:48Z"), 5 * 3_600, "across UTC midnight (the live 04:13 sample)")
+        XCTAssertEqual(offset("04:14", "2026-09-23T23:13:59Z"), 5 * 3_600, "the payload's minute boundary rounds away")
+        XCTAssertEqual(offset("09:30", "2026-09-22T14:30:00Z"), -5 * 3_600, "a zone west of UTC")
+        XCTAssertEqual(offset("19:35", "2026-09-22T14:05:00Z"), 5 * 3_600 + 1_800, "a half-hour zone")
+        XCTAssertNil(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "7pm", serverTime: Date()))
+        XCTAssertNil(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: "19:05", serverTime: nil))
+        XCTAssertNil(DeviceLockPolicy.scheduleZoneSeconds(deviceLocalTime: nil, serverTime: Date()))
+    }
+
+    func testTheSnapshotCarriesTheDeviceZone() throws {
+        let state = try parse(Self.payload(isLocked: false, manualLockEnabled: false, manualLock: "null"))
+        let anchor = DeviceLockClockAnchor(wall: LockFixture.utc("2026-09-22T14:05:00Z"), monotonicNanos: 1, offset: 0, bootSessionID: nil)
+        let snapshot = try XCTUnwrap(OilaTelemetryService.lockPolicySnapshot(from: state, dsn: "dsn", anchor: anchor))
+        XCTAssertEqual(snapshot.scheduleZoneSecondsFromGMT, 5 * 3_600)
+    }
+
+    /// The bypass this closes: a child switches the phone to New York. Read in the phone's zone, the
+    /// 22:00–07:00 night lock would move to 07:00–16:00 Tashkent time. Read in the device zone the
+    /// server uses, it stays exactly where the parent put it — and agrees with `scheduleLocked`.
+    func testAPhoneSetToAnotherZoneStillLocksOnTheParentsHours() {
+        var snapshot = LockFixture.snapshot(schedules: [LockFixture.schedule(22 * 60, 7 * 60)])
+        snapshot.scheduleZoneSecondsFromGMT = 5 * 3_600
+        let newYork = LockFixture.calendar("America/New_York")
+        let fourAMTashkent = LockFixture.utc("2026-09-23T23:00:00Z")
+        let noonTashkent = LockFixture.utc("2026-09-24T07:00:00Z")
+
+        let rule = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: newYork)
+        XCTAssertTrue(DeviceLockPolicy.isLocked(at: fourAMTashkent, snapshot: snapshot, calendar: rule))
+        XCTAssertFalse(DeviceLockPolicy.isLocked(at: noonTashkent, snapshot: snapshot, calendar: rule))
+        // Without the device zone the phone's zone decides — the old behaviour, kept for old saves.
+        snapshot.scheduleZoneSecondsFromGMT = nil
+        let phoneRule = DeviceLockPolicy.ruleCalendar(for: snapshot, phone: newYork)
+        XCTAssertFalse(DeviceLockPolicy.isLocked(at: fourAMTashkent, snapshot: snapshot, calendar: phoneRule))
+    }
 }
 
 // MARK: - The service: re-evaluation, relaunch, migration
@@ -6517,10 +6559,16 @@ final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
 
     private func livePayload(startsAt: Date, endsAt: Date, serverTime: Date, schedules: [[String: Any]] = []) -> OilaLockState {
         let iso = ISO8601DateFormatter()
+        // `deviceLocalTime` is the SAME instant as `serverTime`, in the device zone (Tashkent) — the
+        // phone derives the schedule zone from the pair, so a fixed "13:00" would name a wrong zone.
+        let local = DateFormatter()
+        local.locale = Locale(identifier: "en_US_POSIX")
+        local.timeZone = F.tashkent.timeZone
+        local.dateFormat = "HH:mm"
         return OilaDeviceClient.parseLockState(from: [
             "isLocked": false, "manualLockEnabled": false,
             "manualLock": ["startsAt": iso.string(from: startsAt), "endsAt": iso.string(from: endsAt)],
-            "serverTime": iso.string(from: serverTime), "scheduleLocked": false, "deviceLocalTime": "13:00",
+            "serverTime": iso.string(from: serverTime), "scheduleLocked": false, "deviceLocalTime": local.string(from: serverTime),
             "activeSchedule": NSNull(), "lockedPackages": [], "appLimits": [], "schedules": schedules
         ])
     }
