@@ -4789,16 +4789,19 @@ final class TelemetryPairingLossTests: XCTestCase {
         private var lockAnswers: [Error]
         private let statusError: Error?
         private let locationError: Error?
+        /// How long `POST /device/status` takes to answer.
+        private let statusDelay: UInt64
         private var lockCalls = 0
         private var statusCalls = 0
         private var batches: [[OilaLocationFix]] = []
         private var sos: [OilaSOSContext] = []
         private var statuses: [OilaDeviceStatus] = []
 
-        init(lockAnswers: [Error], statusError: Error? = nil, locationError: Error? = nil) {
+        init(lockAnswers: [Error], statusError: Error? = nil, locationError: Error? = nil, statusDelay: UInt64 = 0) {
             self.lockAnswers = lockAnswers
             self.statusError = statusError
             self.locationError = locationError
+            self.statusDelay = statusDelay
         }
 
         private func locked<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
@@ -4817,6 +4820,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         }
         func postDeviceStatus(_ status: OilaDeviceStatus) async throws {
             locked { statusCalls += 1; statuses.append(status) }
+            if statusDelay > 0 { try? await Task.sleep(nanoseconds: statusDelay) }
             if let statusError { throw statusError }
         }
         func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {
@@ -4962,6 +4966,21 @@ final class TelemetryPairingLossTests: XCTestCase {
                               awaitingContact: service.isAwaitingFirstContact),
             .outOfContact(since: nil)
         )
+    }
+
+    /// `start()` sends the lock read and the status post side by side. A failed read while the post
+    /// is still out must not end the wait — that flashed red before green, the flash R5 removes.
+    func testAFailedLockReadAloneDoesNotEndTheWait() async {
+        let stub = Stub(lockAnswers: [URLError(.timedOut)], statusDelay: 400_000_000) // the post succeeds, late
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        let lockFailed = await waitUntil { stub.lockStateCalls >= 1 }
+        XCTAssertTrue(lockFailed)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(service.isAwaitingFirstContact, "the status post has not answered yet")
+        let answered = await waitUntil { service.lastSuccessfulContactAt != nil }
+        XCTAssertTrue(answered)
+        XCTAssertFalse(service.isAwaitingFirstContact)
     }
 
     func testTheWaitEndsOnItsDeadlineAndOnStop() async {

@@ -134,10 +134,11 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// token is not usable either, and "out of contact" reads to a child as a network problem they
     /// should wait out. Any answered call sets it back (`recordSuccessfulContact`).
     @Published private(set) var hasCredential = true
-    /// True from the moment a run starts asking the server until its first answer — or its first
-    /// failure, or `awaitingContactDeadline`, whichever comes first. Drives `LinkHealth.connecting`.
-    /// Ended by a FAILURE too, on purpose: an offline phone must still read "Hozir aloqa yo'q" as
-    /// soon as that is known, not after a grace period that only exists to hide the first second.
+    /// True from the moment a run starts asking the server until its first answer — or the status
+    /// post failing, or `awaitingContactDeadline`, whichever comes first. Drives
+    /// `LinkHealth.connecting`. Ended by a FAILURE too, on purpose: an offline phone must still read
+    /// "Hozir aloqa yo'q" as soon as that is known, not after a grace period that only exists to hide
+    /// the first second.
     @Published private(set) var isAwaitingFirstContact = false
     /// The whole-device lock, DECIDED ON THE PHONE (`reevaluateLock`): the saved policy snapshot
     /// (`DeviceLockPolicySnapshot` — manual window + schedules from the last `GET /device/lock/state`)
@@ -543,7 +544,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
     }
 
-    /// The wait is over: an answer (`recordSuccessfulContact`), a failure, the deadline, or `stop()`.
+    /// The wait is over: an answer on any route (`recordSuccessfulContact`), the status post failing,
+    /// a refused credential, the deadline, or `stop()`. A failed lock read alone does not end it —
+    /// see `refreshLock`.
     private func endAwaitingContact() {
         if isAwaitingFirstContact { isAwaitingFirstContact = false }
     }
@@ -606,12 +609,12 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 // The one foreground hook that exists without a scene: an edge that passed while the
                 // process was suspended (its timer could not fire) takes effect here.
                 self?.reevaluateLock(reason: "foreground")
-                // Back after a long silence: the stamp is stale, and the post below is about to
-                // settle it one way or the other. Wait for it instead of flashing red first.
-                if let self, LinkHealth.isContactStale(lastContactAt: self.lastSuccessfulContactAt) {
-                    self.beginAwaitingContact()
-                }
-                await self?.postStatusForEvent()
+                // Back after a long silence: the stamp is stale, and the post is about to settle it
+                // one way or the other — wait for it instead of flashing red first. Only when the
+                // post is really made (`awaitingContactIfStale`): this notification also fires after
+                // Control Center, Notification Center and every system alert, and a wait started for
+                // a post the throttle then skips showed a grey chip for 20 s on an offline phone.
+                await self?.postStatusForEvent(awaitingContactIfStale: true)
             }
         }
 
@@ -1697,10 +1700,16 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// `postStatus()` for an out-of-band trigger (network change, foreground), rate-limited by
     /// `eventStatusMinimumGap`.
-    private func postStatusForEvent() async {
+    ///
+    /// `awaitingContactIfStale`: the chip waits for this post (`beginAwaitingContact`) when the last
+    /// contact is stale — decided AFTER the throttle, so a skipped post never starts a wait.
+    private func postStatusForEvent(awaitingContactIfStale: Bool = false) async {
         guard isRunning else { return }
         if let last = lastStatusPostAt, Date().timeIntervalSince(last) < eventStatusMinimumGap {
             return
+        }
+        if awaitingContactIfStale, LinkHealth.isContactStale(lastContactAt: lastSuccessfulContactAt) {
+            beginAwaitingContact()
         }
         await postStatus()
     }
@@ -1827,7 +1836,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         } catch {
             // Keep the saved policy on a transient failure — but stop asking at full rate. The rule
             // itself runs on: this is the offline branch, and offline is exactly where it must act.
-            endAwaitingContact()
+            // The chip's wait is NOT ended here: `start()` sends this read and the status post side
+            // by side, and one failed read while the post was still out flashed red before green —
+            // the flash the wait exists to prevent. The post's own result settles it.
             consecutiveLockFailures += 1
             recordCredentialRefusal(error)
             reevaluateLock(reason: "poll_failed")
