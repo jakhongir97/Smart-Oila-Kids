@@ -14,6 +14,10 @@ final class PairingResetCoordinatorTests: XCTestCase {
         /// Answers to the confirming probe, in order; the last one repeats. nil = 200.
         var probeAnswers: [Error?] = [nil]
         var probeCalls = 0
+        /// Answers of the second route (`GET /device/home`), same rules. nil = 200.
+        var secondRouteAnswers: [Error?] = [nil]
+        var secondRouteCalls = 0
+        var reassertCalls = 0
         var healthy = true
         var healthCalls = 0
         var clock = Date(timeIntervalSince1970: 1_800_000_000)
@@ -53,6 +57,11 @@ final class PairingResetCoordinatorTests: XCTestCase {
                     let answer = probeAnswers.count > 1 ? probeAnswers.removeFirst() : probeAnswers[0]
                     if let answer { throw answer }
                 },
+                probeSecondRoute: { [unowned self] in
+                    secondRouteCalls += 1
+                    let answer = secondRouteAnswers.count > 1 ? secondRouteAnswers.removeFirst() : secondRouteAnswers[0]
+                    if let answer { throw answer }
+                },
                 checkHealth: { [unowned self] in
                     healthCalls += 1
                     return healthy
@@ -75,7 +84,8 @@ final class PairingResetCoordinatorTests: XCTestCase {
                 wipe: { [unowned self] reason in
                     wipes.append(reason)
                     paired = false
-                }
+                },
+                reassertEnforcement: { [unowned self] in reassertCalls += 1 }
             )
         }
     }
@@ -142,15 +152,47 @@ extension PairingResetCoordinatorTests {
         let outcome = await coordinator.confirmConclusive(source: .response)
         XCTAssertEqual(outcome, .stillPaired)
         XCTAssertTrue(world.wipes.isEmpty)
+        XCTAssertEqual(world.reassertCalls, 0, "only a stale extension marker re-applies enforcement")
     }
 
-    /// An expired device token is conclusive too (no route can renew it).
-    func testAnExpiredTokenConfirmedByTheProbeWipes() async {
+    /// An expired device token is conclusive too (no route can renew it) — but its one probe waits
+    /// 30–60 s first: the code is synthesized from the phone's own clock, so an immediate probe could
+    /// land inside the same server 401 blip (b29 review).
+    func testAnExpiredTokenIsConfirmedByOneDelayedProbe() async {
         let expired = apiError(401, OilaAPIError.deviceTokenExpiredCode)
         world.probeAnswers = [expired]
         coordinator.handle(.refused(expired, path: "device/status"))
-        let wiped = await waitUntil { !self.world.wipes.isEmpty }
+        let wiped = await waitUntil { !self.world.wipes.isEmpty && !self.coordinator.isConfirmingRevocation }
         XCTAssertTrue(wiped)
+        XCTAssertEqual(world.wipes, [.serverUnpaired])
+        XCTAssertEqual(world.probeCalls, 1)
+        XCTAssertEqual(world.sleeps.count, 1, "one wait, before the probe")
+        XCTAssertTrue(PairingResetCoordinator.expiredTokenProbeDelayRange.contains(world.sleeps[0]))
+        XCTAssertGreaterThanOrEqual(world.sleeps[0], 30)
+        XCTAssertEqual(world.keepAlivesBegun, world.keepAlivesEnded)
+    }
+
+    /// The blip case: the delayed probe is answered 200, so nothing is wiped.
+    func testAnExpiredTokenBlipIsCancelledByTheDelayedProbe() async {
+        let expired = apiError(401, OilaAPIError.deviceTokenExpiredCode)
+        world.probeAnswers = [nil]
+        coordinator.handle(.refused(expired, path: "device/status"))
+        let settled = await waitUntil { self.world.probeCalls == 1 && !self.coordinator.isConfirmingRevocation }
+        XCTAssertTrue(settled)
+        XCTAssertTrue(world.wipes.isEmpty)
+        XCTAssertEqual(world.sleeps.count, 1)
+    }
+
+    /// The chip stays neutral while the expired token waits for its probe.
+    func testTheChipIsNeutralWhileAnExpiredTokenWaits() async {
+        world.holdsSleep = true
+        coordinator.handle(.refused(apiError(401, OilaAPIError.deviceTokenExpiredCode), path: "device/status"))
+        let waiting = await waitUntil { self.world.sleepGate != nil }
+        XCTAssertTrue(waiting)
+        XCTAssertTrue(coordinator.isConfirmingRevocation)
+        XCTAssertEqual(world.probeCalls, 0, "no probe before the wait")
+        world.sleepGate?.resume()
+        _ = await waitUntil { !self.coordinator.isConfirmingRevocation }
     }
 
     /// Offline during the probe: nothing is decided.
@@ -272,9 +314,11 @@ extension PairingResetCoordinatorTests {
         XCTAssertNil(world.defaults.object(forKey: PairingResetCoordinator.unauthorizedSinceKey))
     }
 
-    /// Refused now, at ~2 min and at ~10 min, with /health up throughout: the pairing is gone.
+    /// Refused now, at ~2 min and at ~10 min, and on a second route at the end, with /health up
+    /// throughout: the pairing is gone.
     func testSustainedUnauthorizedWipes() async {
         world.probeAnswers = [unauthorized]
+        world.secondRouteAnswers = [unauthorized]
         let start = world.clock
         coordinator.handle(.refused(unauthorized, path: "device/home"))
 
@@ -282,6 +326,7 @@ extension PairingResetCoordinatorTests {
         XCTAssertTrue(wiped)
         XCTAssertEqual(world.wipes, [.sustainedUnauthorized])
         XCTAssertEqual(world.probeCalls, 3, "immediate, short and long re-probe")
+        XCTAssertEqual(world.secondRouteCalls, 1, "one refusal from a second route before the wipe")
         XCTAssertEqual(world.healthCalls, 2, "at the start and again before the wipe")
         XCTAssertEqual(world.sleeps, [PairingResetCoordinator.unauthorizedShortRecheck,
                                       PairingResetCoordinator.unauthorizedLongRecheck - PairingResetCoordinator.unauthorizedShortRecheck])
@@ -289,12 +334,27 @@ extension PairingResetCoordinatorTests {
         XCTAssertEqual(world.keepAlivesBegun, 1, "only the short wait keeps the app alive")
         XCTAssertEqual(world.keepAlivesBegun, world.keepAlivesEnded)
         XCTAssertNil(world.defaults.object(forKey: PairingResetCoordinator.unauthorizedSinceKey))
+        XCTAssertNil(world.defaults.object(forKey: PairingResetCoordinator.unauthorizedLastRefusalKey))
+    }
+
+    /// One route refusing on its own (a route-level guard bug) is not the pairing: a 2xx from the
+    /// second route cancels the sequence at the last step.
+    func testASecondRouteThatAnswersCancelsTheWipe() async {
+        world.probeAnswers = [unauthorized]
+        world.secondRouteAnswers = [nil]
+        coordinator.handle(.refused(unauthorized, path: "device/lock/state"))
+        let settled = await waitUntil { self.world.secondRouteCalls == 1 && !self.coordinator.isConfirmingRevocation }
+        XCTAssertTrue(settled)
+        XCTAssertTrue(world.wipes.isEmpty)
+        XCTAssertEqual(world.probeCalls, 3)
+        XCTAssertNil(world.defaults.object(forKey: PairingResetCoordinator.unauthorizedSinceKey))
     }
 
     /// The thresholds 699760 is answered with — pinned so a change is a decision, not a drift.
     func testTheSustainedThresholds() {
         XCTAssertEqual(PairingResetCoordinator.unauthorizedShortRecheck, 120)
         XCTAssertEqual(PairingResetCoordinator.unauthorizedLongRecheck, 600)
+        XCTAssertEqual(PairingResetCoordinator.unauthorizedStaleAfter, 900)
     }
 
     /// Any 2xx on any authorized route while the sequence waits cancels it.
@@ -335,11 +395,15 @@ extension PairingResetCoordinatorTests {
         XCTAssertEqual(world.wipes, [.serverUnpaired])
     }
 
-    /// The ~10 min re-probe survives a suspension: the persisted stage runs on the next wake.
+    /// The ~10 min re-probe survives a suspension: a stage 2 that is due (refusals at −11 and −9 min
+    /// on record, so a little overdue) runs on the next wake.
     func testTheLongRecheckRunsOnTheNextWake() async {
         world.probeAnswers = [unauthorized]
+        world.secondRouteAnswers = [unauthorized]
         world.defaults.set(world.clock.addingTimeInterval(-11 * 60).timeIntervalSince1970,
                            forKey: PairingResetCoordinator.unauthorizedSinceKey)
+        world.defaults.set(world.clock.addingTimeInterval(-9 * 60).timeIntervalSince1970,
+                           forKey: PairingResetCoordinator.unauthorizedLastRefusalKey)
         world.defaults.set(2, forKey: PairingResetCoordinator.unauthorizedStageKey)
 
         coordinator.checkOnLaunchOrForeground()
@@ -348,7 +412,97 @@ extension PairingResetCoordinatorTests {
         XCTAssertTrue(wiped)
         XCTAssertEqual(world.wipes, [.sustainedUnauthorized])
         XCTAssertEqual(world.probeCalls, 1)
-        XCTAssertTrue(world.sleeps.isEmpty, "overdue: no further wait")
+        XCTAssertEqual(world.secondRouteCalls, 1)
+        XCTAssertTrue(world.sleeps.isEmpty, "due: no further wait")
+    }
+
+    /// b29 review: a wake with stage 1 overdue probes stage 1 NOW, but stage 2 still waits its full
+    /// gap after that refusal — the two re-probes are never fired back to back.
+    func testOverdueStagesAreNotProbedTogether() async {
+        world.probeAnswers = [unauthorized]
+        world.secondRouteAnswers = [unauthorized]
+        world.holdsSleep = true
+        let since = world.clock.addingTimeInterval(-5 * 60)
+        world.defaults.set(since.timeIntervalSince1970, forKey: PairingResetCoordinator.unauthorizedSinceKey)
+        world.defaults.set(since.timeIntervalSince1970, forKey: PairingResetCoordinator.unauthorizedLastRefusalKey)
+        world.defaults.set(1, forKey: PairingResetCoordinator.unauthorizedStageKey)
+        let wake = world.clock
+
+        coordinator.checkOnLaunchOrForeground()
+
+        let waiting = await waitUntil { self.world.sleepGate != nil }
+        XCTAssertTrue(waiting)
+        XCTAssertEqual(world.probeCalls, 1, "stage 1 only")
+        XCTAssertTrue(world.wipes.isEmpty, "no wipe until a second, spaced refusal")
+        let gap = PairingResetCoordinator.unauthorizedLongRecheck - PairingResetCoordinator.unauthorizedShortRecheck
+        XCTAssertEqual(world.sleeps, [gap], "stage 2 waits its gap after the stage-1 refusal")
+        XCTAssertEqual(world.defaults.double(forKey: PairingResetCoordinator.unauthorizedLastRefusalKey),
+                       wake.timeIntervalSince1970)
+
+        world.holdsSleep = false
+        world.sleepGate?.resume()
+        let wiped = await waitUntil { !self.world.wipes.isEmpty }
+        XCTAssertTrue(wiped)
+        XCTAssertEqual(world.wipes, [.sustainedUnauthorized])
+        XCTAssertEqual(world.probeCalls, 2)
+        XCTAssertEqual(world.secondRouteCalls, 1)
+    }
+
+    /// b29 review: a sequence found hours overdue proves nothing about the time in between. It starts
+    /// over at stage 0 (one probe, a new first-refusal stamp) instead of resuming into a wipe.
+    func testAStaleSequenceStartsOverInsteadOfWiping() async {
+        world.probeAnswers = [unauthorized]
+        world.secondRouteAnswers = [unauthorized]
+        world.holdsSleep = true
+        let old = world.clock.addingTimeInterval(-3 * 3_600)
+        world.defaults.set(old.timeIntervalSince1970, forKey: PairingResetCoordinator.unauthorizedSinceKey)
+        world.defaults.set(old.addingTimeInterval(120).timeIntervalSince1970,
+                           forKey: PairingResetCoordinator.unauthorizedLastRefusalKey)
+        world.defaults.set(2, forKey: PairingResetCoordinator.unauthorizedStageKey)
+
+        coordinator.checkOnLaunchOrForeground()
+
+        let waiting = await waitUntil { self.world.sleepGate != nil }
+        XCTAssertTrue(waiting)
+        XCTAssertTrue(world.wipes.isEmpty)
+        XCTAssertEqual(world.probeCalls, 1, "the restarted stage 0 probe")
+        XCTAssertEqual(world.secondRouteCalls, 0)
+        XCTAssertEqual(world.defaults.double(forKey: PairingResetCoordinator.unauthorizedSinceKey),
+                       world.clock.timeIntervalSince1970, "a new first refusal")
+        XCTAssertEqual(world.defaults.integer(forKey: PairingResetCoordinator.unauthorizedStageKey), 1)
+        XCTAssertEqual(world.sleeps, [PairingResetCoordinator.unauthorizedShortRecheck])
+    }
+
+    /// A sleep that ends long past its deadline (it spanned a suspension) is judged stale too.
+    func testASleepThatOutlivedTheWindowStartsOver() async {
+        world.probeAnswers = [unauthorized]
+        world.holdsSleep = true
+        coordinator.handle(.refused(unauthorized, path: "device/home"))
+        let waiting = await waitUntil { self.world.sleepGate != nil }
+        XCTAssertTrue(waiting)
+        // The process was suspended for an hour on top of the 2 min wait.
+        world.clock = world.clock.addingTimeInterval(3_600)
+        world.probeAnswers = [nil]
+        world.holdsSleep = false
+        let gate = world.sleepGate
+        world.sleepGate = nil
+        gate?.resume()
+        let settled = await waitUntil { self.world.probeCalls == 2 && !self.coordinator.isConfirmingRevocation }
+        XCTAssertTrue(settled)
+        XCTAssertTrue(world.wipes.isEmpty)
+        XCTAssertEqual(world.healthCalls, 1, "the restart's probe answered 200: no second health check")
+        XCTAssertNil(world.defaults.object(forKey: PairingResetCoordinator.unauthorizedSinceKey))
+    }
+
+    /// Pure spacing rule.
+    func testStageDueTimes() {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertEqual(PairingResetCoordinator.unauthorizedStageDue(stage: 1, since: t0, lastRefusal: t0),
+                       t0.addingTimeInterval(120))
+        XCTAssertEqual(PairingResetCoordinator.unauthorizedStageDue(stage: 2, since: t0, lastRefusal: t0.addingTimeInterval(120)),
+                       t0.addingTimeInterval(600))
+        XCTAssertEqual(PairingResetCoordinator.unauthorizedStageDue(stage: 2, since: t0, lastRefusal: t0.addingTimeInterval(3_000)),
+                       t0.addingTimeInterval(3_480), "a late stage 1 pushes stage 2 out by the full gap")
     }
 }
 
@@ -398,6 +552,10 @@ extension PairingResetCoordinatorTests {
         }
         XCTAssertTrue(cleared)
         XCTAssertTrue(world.wipes.isEmpty)
+        // b29 review: the extension released its shield when it wrote the marker; the stale marker
+        // puts the lock and the per-app shields back.
+        let reasserted = await waitUntil { self.world.reassertCalls == 1 }
+        XCTAssertTrue(reasserted)
     }
 
     /// Offline: the marker stays for the next wake.
@@ -409,6 +567,7 @@ extension PairingResetCoordinatorTests {
         XCTAssertTrue(probed)
         XCTAssertNotNil(world.group.object(forKey: PairingResetCoordinator.extensionRevokedAtKey))
         XCTAssertTrue(world.wipes.isEmpty)
+        XCTAssertEqual(world.reassertCalls, 0)
     }
 
     func testTheMarkerKeyIsTheOneTheExtensionWrites() {
@@ -443,10 +602,22 @@ final class UnpairPushRoutingTests: XCTestCase {
         XCTAssertTrue(PushCommandRouter.suppressesInboxRow(payload))
     }
 
-    /// The payload's device serial is read under its own spelling too.
-    func testTheDeviceSerialIsReadAsTheDSN() {
-        let payload = PushCommandRouter.parsePayload(from: ["event": "unpair", "deviceSerial": "ABC-1"])
-        XCTAssertEqual(payload.dsn, "ABC-1")
+    /// The unpair push is addressed by its dsn, else by a device serial.
+    func testTheUnpairPushIsAddressedByDSNOrDeviceSerial() {
+        let bySerial = PushCommandRouter.parsePayload(from: ["event": "unpair", "deviceSerial": "ABC-1"])
+        XCTAssertEqual(bySerial.unpairAddressee, "ABC-1")
+        let snake = PushCommandRouter.parsePayload(from: ["event": "unpair", "data": ["device_serial": "ABC-2"]])
+        XCTAssertEqual(snake.unpairAddressee, "ABC-2")
+        let both = PushCommandRouter.parsePayload(from: ["event": "unpair", "dsn": "D-1", "deviceSerial": "ABC-1"])
+        XCTAssertEqual(both.unpairAddressee, "D-1", "the dsn wins")
+    }
+
+    /// b29 review: a device serial is NOT the dsn for any other push — folded into `dsn` it would make
+    /// every lock and chat push fail the root's dsn match.
+    func testADeviceSerialIsNotTheDSNOfOtherPushes() {
+        let payload = PushCommandRouter.parsePayload(from: ["event": "lock.refresh", "deviceSerial": "HW-SERIAL"])
+        XCTAssertNil(payload.dsn)
+        XCTAssertEqual(payload.deviceSerial, "HW-SERIAL")
     }
 }
 
@@ -587,5 +758,72 @@ final class SessionStoreAppGroupPurgeTests: XCTestCase {
         XCTAssertNil(reread.object(forKey: PairingResetCoordinator.extensionRevokedAtKey))
         XCTAssertNil(reread.object(forKey: "SOME_EXTENSION_KEY"))
         XCTAssertEqual(reread.string(forKey: "APP_LANGUAGE"), AppLanguage.ru.rawValue)
+    }
+}
+
+// MARK: The Screen Time teardown order
+
+@MainActor
+final class ScreenTimeTeardownOrderTests: XCTestCase {
+    /// b29 review: the two worker lanes are not ordered against each other, so a monitor edge can
+    /// write the shield between the first clear and `stopMonitoring`. A second clear is queued only
+    /// after the stop has returned, and the App Group is swept then too.
+    func testManagedSettingsIsClearedAgainAfterTheMonitorsStop() {
+        var log: [String] = []
+        var lanes: [ScreenTimeSystemWorker.Lane: [() -> Void]] = [:]
+        var main: [() -> Void] = []
+        let teardown = PairingResetCoordinator.ScreenTimeTeardown(
+            enqueue: { lane, work in lanes[lane, default: []].append(work) },
+            onMain: { main.append($0) },
+            clearSettings: { log.append("clear") },
+            stopMonitoring: { log.append("stop") },
+            purgeAppGroup: { log.append("purge") }
+        )
+
+        PairingResetCoordinator.queueScreenTimeTeardown(teardown)
+        // The race the review describes: the settings lane runs first, an extension edge writes the
+        // shield, then the activity lane stops the monitors; then main, then the settings lane again.
+        func drain(_ lane: ScreenTimeSystemWorker.Lane) {
+            while let job = lanes[lane]?.first { lanes[lane]?.removeFirst(); job() }
+        }
+        drain(.settings)
+        log.append("extension-edge-writes-shield")
+        drain(.activity)
+        while let job = main.first { main.removeFirst(); job() }
+        drain(.settings)
+
+        XCTAssertEqual(log, ["clear", "extension-edge-writes-shield", "stop", "purge", "clear"])
+        XCTAssertEqual(log.last, "clear", "the last word on the stores comes after the monitors stopped")
+    }
+}
+
+// MARK: A reset while the child is still in setup
+
+final class SetupFlowResetRoutingTests: XCTestCase {
+    /// b29 review: a reset on A4 Success (paired, setup not completed) stays on the root's setup
+    /// branch; the bumped generation is the setup flow's identity, so it is rebuilt — and an unpaired
+    /// store starts it at the language screen.
+    func testAResetBumpsTheGenerationAndTheFlowRestartsAtLanguage() {
+        let suiteName = "SetupFlowResetRoutingTests.\(UUID().uuidString)"
+        let groupName = "SetupFlowResetRoutingGroup.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            UserDefaults(suiteName: groupName)?.removePersistentDomain(forName: groupName)
+            L10n.setLanguage(AppLanguage.defaultForDevice.rawValue)
+        }
+        let store = SessionStore(userDefaults: defaults, secureTokens: SecureTokenStoreStub(access: nil),
+                                 deviceTokens: SecureTokenStoreStub(access: "DEVICE_JWT"), appGroupIdentifier: groupName)
+        store.setOilaPaired(true)
+        XCTAssertEqual(BolajonSetupFlowView.initialPath(startAtSuccess: store.oilaPaired), [.success])
+        let before = store.sessionGeneration
+
+        store.clearSession()
+
+        XCTAssertNotEqual(store.sessionGeneration, before)
+        XCTAssertFalse(store.oilaPaired)
+        XCTAssertFalse(store.setupCompleted)
+        XCTAssertEqual(BolajonSetupFlowView.initialPath(startAtSuccess: store.oilaPaired), [],
+                       "the rebuilt flow starts at A1 Language")
     }
 }

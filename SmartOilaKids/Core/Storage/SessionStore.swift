@@ -47,6 +47,11 @@ final class SessionStore: ObservableObject {
     /// True only after a successful oila360 `POST /device/pair` issued this install's tokens.
     /// Gates telemetry — a legacy DSN alone is NOT an oila360 credential.
     @Published private(set) var oilaPaired: Bool = false
+    /// Bumped by every `clearSession()`. The root keys the setup flow on it, so a reset that lands
+    /// while the child is still INSIDE setup (A4 Success: paired, setup not completed — the unpair
+    /// push or any route's DEVICE_UNPAIRED can now wipe there, build 29) rebuilds the flow at the
+    /// language screen instead of leaving its navigation path on Success.
+    @Published private(set) var sessionGeneration = 0
     /// True when the one-time routing migration reset an EXISTING install (legacy DSN or
     /// previously-completed flow) — as opposed to a fresh install, which also runs the
     /// migration branch but has nothing to lose. Drives the "re-link to keep protection on"
@@ -274,6 +279,7 @@ final class SessionStore: ObservableObject {
         setOnboardingCompleted(false)
         setOilaPaired(false)
         purgeChildScopedData()
+        sessionGeneration &+= 1
     }
 
     /// Wipes every per-child artifact on disconnect so re-pairing this device to a DIFFERENT child

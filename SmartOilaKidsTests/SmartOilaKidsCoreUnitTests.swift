@@ -6538,6 +6538,8 @@ final class TelemetryPairingLossTests: XCTestCase {
     func testAnExpiredTokenEndsThePairingAfterOneProbe() async {
         // A year after pairing the token runs out and nothing can renew it. The poll hears it, one
         // probe confirms it, and the child is routed to pairing instead of going quiet for good.
+        // The probe waits its randomized delay first (b29 review): the code is synthesized from the
+        // phone's own clock, so an immediate probe could land inside the same server 401 blip.
         let stub = Stub(lockAnswers: [apiError(401, OilaAPIError.deviceTokenExpiredCode)])
         let (service, probes, invalidations) = start(stub)
         defer { service.stop() }
@@ -6545,7 +6547,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         let ended = await waitUntil { invalidations.value == 1 }
 
         XCTAssertTrue(ended)
-        XCTAssertEqual(probes.value, 0, "build 29: conclusive, so the one probe goes out with no wait")
+        XCTAssertEqual(probes.value, 1, "one delayed probe — only DEVICE_UNPAIRED skips the wait")
         XCTAssertEqual(stub.lockStateCalls, 2, "the poll that heard it, then the one probe")
         XCTAssertFalse(service.isRunning)
     }

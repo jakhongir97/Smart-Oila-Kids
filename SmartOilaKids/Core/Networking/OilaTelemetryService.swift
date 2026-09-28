@@ -1631,26 +1631,29 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             return
         }
         isConfirmingInvalidation = true
-        // A conclusive answer (DEVICE_UNPAIRED, an expired token) is probed AT ONCE — build 29,
-        // Ibrohim 699760: the random 30–120 s wait kept an unpaired phone on Home showing "no
-        // connection" (photo 699758), and a suspension during the wait paused it indefinitely.
-        let probeImmediately = Self.probeAnswerIsConclusive(error)
+        // DEVICE_UNPAIRED is probed AT ONCE — build 29, Ibrohim 699760: the random 30–120 s wait
+        // kept an unpaired phone on Home showing "no connection" (photo 699758), and a suspension
+        // during the wait paused it indefinitely. DEVICE_TOKEN_EXPIRED keeps the wait (b29 review):
+        // it is synthesized on the phone from a server UNAUTHORIZED plus the phone's own clock, so
+        // an immediate probe could land in the same seconds-long server blip and confirm it.
+        let probeImmediately = error.errorCode == OilaAPIError.deviceUnpairedCode
         Task { [weak self] in await self?.confirmAndInvalidate(probeImmediately: probeImmediately) }
     }
 
     /// Confirm a reported `requiresRePair` before destroying the pairing.
     ///
     /// Each probe is an authorized `GET /device/lock/state`. Since build 29 the probe after a
-    /// CONCLUSIVE answer goes out immediately (`probeImmediately`); only REFRESH_INVALID still waits
-    /// a randomized 30–120 s between probes — the delay that keeps a backend blip from unpairing the
+    /// DEVICE_UNPAIRED goes out immediately (`probeImmediately`); DEVICE_TOKEN_EXPIRED and
+    /// REFRESH_INVALID still wait a randomized 30–120 s before each probe — the delay that keeps a backend blip from unpairing the
     /// fleet at once and de-synchronizes a mass revocation. Any probe that succeeds, or
     /// that fails for any other reason (offline, 5xx, and since 2026-09-24 a 401 UNAUTHORIZED),
     /// keeps the session.
     ///
     /// How many probes: ONE, when the probe's own answer is conclusive — DEVICE_UNPAIRED, which the
     /// contract defines as the pairing being gone, CREDENTIAL_ABSENT, or DEVICE_TOKEN_EXPIRED (see
-    /// `probeAnswerIsConclusive`). The one probe is still worth its delay for an expired token: if the
-    /// server accepts the token after all, the refusal was a blip that happened to land after `exp`. A second probe after that could only repeat the server's
+    /// `probeAnswerIsConclusive`). The one probe after an expired token still waits its delay: if the
+    /// server accepts the token after all, the refusal was a blip that happened to land after `exp`.
+    /// A second probe after that could only repeat the server's
     /// answer, and it cost the child another one to two minutes on a phone whose parent has
     /// already removed it. Only REFRESH_INVALID — the legacy refresh path, which says the refresh
     /// token was refused rather than that the pairing is gone — still needs
@@ -1663,10 +1666,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         guard !didSignalInvalidation, isRunning else { return }
 
         for attempt in 1 ... Self.invalidationConfirmationsRequired {
-            // Build 29: the FIRST probe after a conclusive answer goes out now, with no randomized
-            // wait. The wait only ever protected against a fleet-wide blip, and DEVICE_UNPAIRED is
+            // Build 29: the FIRST probe after DEVICE_UNPAIRED goes out now, with no randomized wait.
+            // The wait only ever protected against a fleet-wide blip, and DEVICE_UNPAIRED is
             // per-device by construction (re-pairing needs a new code from that child's parent).
-            // REFRESH_INVALID keeps the delayed multi-probe.
+            // DEVICE_TOKEN_EXPIRED keeps its one delayed probe; REFRESH_INVALID the delayed multi-probe.
             if !(probeImmediately && attempt == 1) {
                 let delay = Self.invalidationProbeDelayRange.randomElement() ?? 45
                 do {

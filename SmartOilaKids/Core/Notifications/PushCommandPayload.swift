@@ -14,6 +14,14 @@ struct PushCommandPayload {
     var streamMaxDurationSeconds: String? = nil
     var streamExpiresAt: String? = nil
 
+    /// A `deviceSerial` / `device_serial` field, if the push carried one. Undocumented; only the
+    /// unpair push reads it (build 29).
+    var deviceSerial: String? = nil
+
+    /// Which device an unpair push is addressed to: its dsn, else its device serial. A value that is
+    /// not this install's persisted DSN makes `PairingResetCoordinator.handleUnpairPush` ignore it.
+    var unpairAddressee: String? { dsn ?? deviceSerial }
+
     var routingHaystack: String {
         let normalizedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         let normalizedBody = body?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""

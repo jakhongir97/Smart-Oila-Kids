@@ -226,7 +226,7 @@ private extension PushCommandRouter {
         // for a family that may be gone. It never ends the pairing by itself — the coordinator asks
         // the server first (a 200 means the push is stale) and ignores a push for another dsn.
         if isUnpairCommand(payload.commandHaystack) {
-            let pushedDSN = payload.dsn
+            let pushedDSN = payload.unpairAddressee
             Task { @MainActor in
                 _ = await PairingResetCoordinator.shared.handleUnpairPush(pushedDSN: pushedDSN)
             }

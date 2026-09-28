@@ -22,8 +22,12 @@ import os
 ///  3. The unpair push was not handled at all (`handleUnpairPush`).
 ///
 /// What each trigger needs before the wipe:
-///  • DEVICE_UNPAIRED / DEVICE_TOKEN_EXPIRED, the unpair push, the monitor extension's marker: ONE
-///    immediate `GET /device/lock/state` that answers conclusively. A 200 means the trigger was stale.
+///  • DEVICE_UNPAIRED, the unpair push, the monitor extension's marker: ONE immediate
+///    `GET /device/lock/state` that answers conclusively. A 200 means the trigger was stale.
+///  • DEVICE_TOKEN_EXPIRED: the same ONE probe, but only after `expiredTokenProbeDelayRange`. That
+///    code is synthesized on the phone (a server UNAUTHORIZED plus the phone's own clock past the
+///    token's `exp`), so a seconds-long server 401 blip on a phone with a fast clock would otherwise
+///    confirm itself (b29 review).
 ///  • CREDENTIAL_ABSENT (the Keychain says there is no token) while the flags say paired: nothing —
 ///    no probe can produce a token that is not there.
 ///  • A plain 401 UNAUTHORIZED: the sustained sequence below. Every device in the field would wipe
@@ -73,6 +77,9 @@ final class PairingResetCoordinator: ObservableObject {
         var credentialIsAbsent: @MainActor () -> Bool
         /// The confirming probe: an authorized `GET /device/lock/state`. Throws what the client threw.
         var probe: @MainActor () async throws -> Void
+        /// A second authorized route (`GET /device/home`), asked once before a sustained-UNAUTHORIZED
+        /// wipe so one route that refuses on its own (a route-level guard bug) cannot unpair a phone.
+        var probeSecondRoute: @MainActor () async throws -> Void
         /// Public `GET /health` answered 200.
         var checkHealth: @MainActor () async -> Bool
         var sleep: @MainActor (TimeInterval) async throws -> Void
@@ -87,6 +94,10 @@ final class PairingResetCoordinator: ObservableObject {
         var appGroupDefaults: UserDefaults?
         /// The wipe itself. Production: `PairingResetCoordinator.liveWipe`.
         var wipe: @MainActor (Reason) -> Void
+        /// Writes the lock and the per-app shields again. Called when the monitor extension's
+        /// revocation marker turns out stale: the extension released its shield when it wrote the
+        /// marker, and nothing else would put it back.
+        var reassertEnforcement: @MainActor () -> Void
     }
 
     // MARK: Thresholds (Ibrohim 699760: "also on HTTP 401")
@@ -94,19 +105,30 @@ final class PairingResetCoordinator: ObservableObject {
     /// A plain 401 UNAUTHORIZED ends the pairing only when it is SUSTAINED: the immediate probe
     /// refuses too, the public `/health` answers 200 (the server is up and still refusing), a
     /// re-probe after `unauthorizedShortRecheck` refuses, and a last one after
-    /// `unauthorizedLongRecheck` (both measured from the first confirmed refusal) refuses with
-    /// `/health` still 200. Any 2xx on any authorized route in between cancels the whole sequence.
-    /// Every real unpair already answers DEVICE_UNPAIRED (09-24 live probe), which is immediate; this
-    /// path exists for the refusals the contract cannot name, without letting a deploy-time blip
-    /// wipe every child's phone.
+    /// `unauthorizedLongRecheck` refuses — on `GET /device/lock/state` AND on a second route
+    /// (`GET /device/home`) — with `/health` still 200. Any 2xx on any authorized route in between
+    /// cancels the whole sequence. Every real unpair already answers DEVICE_UNPAIRED (09-24 live
+    /// probe), which is immediate; this path exists for the refusals the contract cannot name,
+    /// without letting a deploy-time blip wipe every child's phone.
+    ///
+    /// The probes are SPACED, not just late (b29 review): each stage is due no earlier than its
+    /// offset from the first refusal AND its gap after the previous refusal (short, then
+    /// long − short), so a phone that was suspended past both deadlines cannot fire the last two
+    /// probes back to back and call that "ten minutes of refusals". A stage overdue by more than
+    /// `unauthorizedStaleAfter` shows nothing about continuity: the sequence starts again.
     nonisolated static let unauthorizedShortRecheck: TimeInterval = 2 * 60
     nonisolated static let unauthorizedLongRecheck: TimeInterval = 10 * 60
+    nonisolated static let unauthorizedStaleAfter: TimeInterval = 15 * 60
+    /// DEVICE_TOKEN_EXPIRED waits this long (random within) before its one probe. See the header.
+    nonisolated static let expiredTokenProbeDelayRange: ClosedRange<TimeInterval> = 30 ... 60
 
     /// Written by the DeviceActivity monitor extension (another lane) when ITS server call gets
     /// 401 DEVICE_UNPAIRED: a Double, epoch seconds. The app confirms it and wipes.
     nonisolated static let extensionRevokedAtKey = "PAIRING_REVOKED_AT_V1"
     nonisolated static let unauthorizedSinceKey = "PAIRING_UNAUTHORIZED_SINCE_V1"
     nonisolated static let unauthorizedStageKey = "PAIRING_UNAUTHORIZED_STAGE_V1"
+    /// When the latest refusal of the sequence was confirmed (epoch seconds).
+    nonisolated static let unauthorizedLastRefusalKey = "PAIRING_UNAUTHORIZED_LAST_REFUSAL_V1"
 
     /// True while a revocation is being confirmed — Home's chip shows the neutral "Ulanmoqda…"
     /// instead of the red "Hozir aloqa yo'q" (photo 699758 was exactly that red chip).
@@ -118,6 +140,8 @@ final class PairingResetCoordinator: ObservableObject {
 
     private let deps: Dependencies
     private var conclusiveTask: Task<ConfirmationOutcome, Never>?
+    /// A DEVICE_TOKEN_EXPIRED waiting out `expiredTokenProbeDelayRange` before its probe.
+    private var expiredTask: Task<ConfirmationOutcome, Never>?
     private var unauthorizedTask: Task<Void, Never>?
     /// Bumped by every cancel, so a sequence that was cancelled while awaiting cannot act later.
     private var unauthorizedGeneration = 0
@@ -153,6 +177,8 @@ extension PairingResetCoordinator {
             if error.isCredentialAbsent {
                 guard deps.isPaired() else { return }
                 reset(reason: .credentialAbsent)
+            } else if error.isDeviceTokenExpired {
+                Task { _ = await confirmExpiredToken() }
             } else if OilaTelemetryService.probeAnswerIsConclusive(error) {
                 Task { _ = await confirmConclusive(source: .response) }
             } else if error.statusCode == 401, !error.holdsNoCredential {
@@ -218,6 +244,30 @@ extension PairingResetCoordinator {
         return outcome
     }
 
+    /// DEVICE_TOKEN_EXPIRED: the one confirming probe, after a short random wait. Single-flight;
+    /// the chip stays neutral meanwhile.
+    func confirmExpiredToken() async -> ConfirmationOutcome {
+        if let running = expiredTask { return await running.value }
+        guard deps.isPaired() else { return .notPaired }
+        let task = Task { @MainActor [weak self] () -> ConfirmationOutcome in
+            guard let self else { return .inconclusive }
+            let endKeepAlive = self.deps.keepAlive("oila.pairing.expired")
+            defer { endKeepAlive() }
+            do {
+                try await self.deps.sleep(TimeInterval.random(in: Self.expiredTokenProbeDelayRange))
+            } catch {
+                return .inconclusive
+            }
+            return await self.confirmConclusive(source: .response)
+        }
+        expiredTask = task
+        refreshPublishedState()
+        let outcome = await task.value
+        if expiredTask == task { expiredTask = nil }
+        refreshPublishedState()
+        return outcome
+    }
+
     private func runConclusiveProbe(source: ConfirmationSource) async -> ConfirmationOutcome {
         let endKeepAlive = deps.keepAlive("oila.pairing.confirm")
         defer { endKeepAlive() }
@@ -225,8 +275,16 @@ extension PairingResetCoordinator {
         case .succeeded:
             // The pairing answered: the refusal, push or marker was stale.
             clearMarker()
+            if source == .extensionMarker {
+                // The extension released its shield when it wrote the marker; put the lock and the
+                // per-app shields back, or blocked apps stay open until something else re-applies.
+                deps.reassertEnforcement()
+            }
             return .stillPaired
-        case .conclusive:
+        case .conclusive, .expired:
+            // An expired token is conclusive here: this probe either already waited
+            // (`confirmExpiredToken`) or follows independent evidence (DEVICE_UNPAIRED, the push,
+            // the extension's marker).
             let reason: Reason
             switch source {
             case .response: reason = .serverUnpaired
@@ -248,17 +306,21 @@ extension PairingResetCoordinator {
 
     enum ProbeAnswer: Equatable {
         case succeeded
+        /// DEVICE_UNPAIRED or CREDENTIAL_ABSENT.
         case conclusive
+        /// DEVICE_TOKEN_EXPIRED — conclusive only once it has waited (see the header).
+        case expired
         /// A server 401 that does not say the pairing is gone.
         case refused
         case unanswered
     }
 
-    private func probeAnswer() async -> ProbeAnswer {
+    private func probeAnswer(_ probe: (@MainActor () async throws -> Void)? = nil) async -> ProbeAnswer {
         do {
-            try await deps.probe()
+            try await (probe ?? deps.probe)()
             return .succeeded
         } catch let error as OilaAPIError {
+            if error.isDeviceTokenExpired { return .expired }
             if OilaTelemetryService.probeAnswerIsConclusive(error) { return .conclusive }
             if error.statusCode == 401, !error.holdsNoCredential { return .refused }
             return .unanswered
@@ -278,8 +340,10 @@ extension PairingResetCoordinator {
         startUnauthorizedSequence()
     }
 
-    /// The persisted stage that is due (or overdue) is run now; one still waiting is re-armed. Also
-    /// what lets the ~10 min re-probe land on the next wake or foreground after a suspension.
+    /// The persisted stage that is due (or a little overdue) is run now; one still waiting is
+    /// re-armed; one overdue by more than `unauthorizedStaleAfter` starts the sequence over. Also
+    /// what lets the ~10 min re-probe land on the next wake or foreground after a suspension. An
+    /// overdue stage 1 never pulls stage 2 along: stage 2 still waits its gap after the new refusal.
     func resumeUnauthorizedSequenceIfPending() {
         guard deps.defaults.object(forKey: Self.unauthorizedSinceKey) != nil else { return }
         guard deps.isPaired() else {
@@ -319,30 +383,45 @@ extension PairingResetCoordinator {
             if current() { clearPersistedUnauthorized() }
         }
 
-        if deps.defaults.object(forKey: Self.unauthorizedSinceKey) == nil {
-            // Stage 0: probe at once.
-            switch await probeAnswer() {
-            case .succeeded: return abandon("probe_ok")
-            case .unanswered: return abandon("probe_unanswered")
-            case .conclusive:
+        while current() {
+            guard let since = persistedUnauthorizedSince() else {
+                // Stage 0: probe at once.
+                switch await probeAnswer() {
+                case .succeeded: return abandon("probe_ok")
+                case .unanswered: return abandon("probe_unanswered")
+                case .expired: return handOverToExpiredToken(abandon)
+                case .conclusive:
+                    guard current() else { return }
+                    return reset(reason: .serverUnpaired)
+                case .refused: break
+                }
+                // The server is refusing — but is it well? A server that fails its own health check
+                // is in trouble, and its 401s say nothing about this phone.
+                guard current(), await deps.checkHealth() else { return abandon("health") }
                 guard current() else { return }
-                return reset(reason: .serverUnpaired)
-            case .refused: break
+                let now = deps.now().timeIntervalSince1970
+                deps.defaults.set(now, forKey: Self.unauthorizedSinceKey)
+                deps.defaults.set(now, forKey: Self.unauthorizedLastRefusalKey)
+                deps.defaults.set(1, forKey: Self.unauthorizedStageKey)
+                continue
             }
-            // The server is refusing — but is it well? A server that fails its own health check is
-            // in trouble, and its 401s say nothing about this phone.
-            guard current(), await deps.checkHealth() else { return abandon("health") }
-            guard current() else { return }
-            deps.defaults.set(deps.now().timeIntervalSince1970, forKey: Self.unauthorizedSinceKey)
-            deps.defaults.set(1, forKey: Self.unauthorizedStageKey)
-        }
 
-        while current(), let since = persistedUnauthorizedSince() {
             let stage = deps.defaults.integer(forKey: Self.unauthorizedStageKey) == 2 ? 2 : 1
-            let delay = stage == 1 ? Self.unauthorizedShortRecheck : Self.unauthorizedLongRecheck
-            let wait = since.addingTimeInterval(delay).timeIntervalSince(deps.now())
+            let lastRefusal = persistedLastRefusal() ?? since
+            let due = Self.unauthorizedStageDue(stage: stage, since: since, lastRefusal: lastRefusal)
+            let now = deps.now()
+            if now.timeIntervalSince(due) > Self.unauthorizedStaleAfter {
+                // Overdue by far more than the window (a long suspension): the refusals on record
+                // say nothing about the ones in between. Start over at stage 0 — never collapse.
+                Self.log.notice("pairing_unauthorized restarted=stale stage=\(stage, privacy: .public)")
+                clearPersistedUnauthorized()
+                continue
+            }
+            let wait = due.timeIntervalSince(now)
             if wait > 0 {
-                // Only the short wait keeps the app alive; the long one runs on the next wake.
+                // Only the short wait keeps the app alive; the long one runs on the next wake. The
+                // loop re-reads everything after the wait, so a sleep that spanned a suspension is
+                // judged for staleness too.
                 let endKeepAlive: @MainActor () -> Void = stage == 1 ? deps.keepAlive("oila.pairing.unauthorized") : {}
                 do {
                     try await deps.sleep(wait)
@@ -351,26 +430,59 @@ extension PairingResetCoordinator {
                     return
                 }
                 endKeepAlive()
+                continue
             }
             guard current() else { return }
             switch await probeAnswer() {
             case .succeeded: return abandon("recheck_ok")
             case .unanswered: return abandon("recheck_unanswered")
+            case .expired: return handOverToExpiredToken(abandon)
             case .conclusive:
                 guard current() else { return }
                 return reset(reason: .serverUnpaired)
             case .refused:
                 guard current() else { return }
                 if stage == 1 {
+                    deps.defaults.set(deps.now().timeIntervalSince1970, forKey: Self.unauthorizedLastRefusalKey)
                     deps.defaults.set(2, forKey: Self.unauthorizedStageKey)
                     continue
                 }
-                guard await deps.checkHealth() else { return abandon("final_health") }
-                guard current() else { return }
-                Self.log.notice("pairing_unauthorized sustained since=\(since.timeIntervalSince1970, privacy: .public)")
-                return reset(reason: .sustainedUnauthorized)
             }
+            // Stage 2 refused on lock/state. One route alone is not the pairing: a second one must
+            // refuse too, and a 2xx there cancels everything.
+            switch await probeAnswer(deps.probeSecondRoute) {
+            case .succeeded: return abandon("second_route_ok")
+            case .unanswered: return abandon("second_route_unanswered")
+            case .expired: return handOverToExpiredToken(abandon)
+            case .conclusive:
+                guard current() else { return }
+                return reset(reason: .serverUnpaired)
+            case .refused: break
+            }
+            guard current(), await deps.checkHealth() else { return abandon("final_health") }
+            guard current() else { return }
+            Self.log.notice("pairing_unauthorized sustained since=\(since.timeIntervalSince1970, privacy: .public)")
+            return reset(reason: .sustainedUnauthorized)
         }
+    }
+
+    /// When the stage is due: its offset from the first refusal, and never sooner than its gap
+    /// after the previous refusal (stage 1: short; stage 2: long − short).
+    nonisolated static func unauthorizedStageDue(stage: Int, since: Date, lastRefusal: Date) -> Date {
+        let offset = stage == 1 ? unauthorizedShortRecheck : unauthorizedLongRecheck
+        let gap = stage == 1 ? unauthorizedShortRecheck : unauthorizedLongRecheck - unauthorizedShortRecheck
+        return max(since.addingTimeInterval(offset), lastRefusal.addingTimeInterval(gap))
+    }
+
+    /// A probe in the sequence answered DEVICE_TOKEN_EXPIRED: that has its own (delayed) rule.
+    private func handOverToExpiredToken(_ abandon: (String) -> Void) {
+        abandon("expired_token")
+        Task { _ = await confirmExpiredToken() }
+    }
+
+    private func persistedLastRefusal() -> Date? {
+        guard let stamp = deps.defaults.object(forKey: Self.unauthorizedLastRefusalKey) as? Double else { return nil }
+        return Date(timeIntervalSince1970: stamp)
     }
 
     private func persistedUnauthorizedSince() -> Date? {
@@ -381,6 +493,7 @@ extension PairingResetCoordinator {
     private func clearPersistedUnauthorized() {
         deps.defaults.removeObject(forKey: Self.unauthorizedSinceKey)
         deps.defaults.removeObject(forKey: Self.unauthorizedStageKey)
+        deps.defaults.removeObject(forKey: Self.unauthorizedLastRefusalKey)
     }
 
     private func clearMarker() {
@@ -388,7 +501,7 @@ extension PairingResetCoordinator {
     }
 
     private func refreshPublishedState() {
-        let pending = conclusiveTask != nil || unauthorizedTask != nil
+        let pending = conclusiveTask != nil || expiredTask != nil || unauthorizedTask != nil
         if isConfirmingRevocation != pending { isConfirmingRevocation = pending }
     }
 }
@@ -425,26 +538,9 @@ extension PairingResetCoordinator {
         OilaTelemetryService.shared.stopForPairingReset()
         // 2. Per-app enforcement: per-app shields, denyAppRemoval (default store), the usage monitor.
         ScreenTimeEnforcementCoordinator.shared.stop()
-        // 3. ManagedSettings: the default store and the four legacy named stores, queued AFTER any
-        //    write already on the settings lane so an earlier lock cannot land on top of the clear.
+        // 3 + 4. ManagedSettings and every DeviceActivity monitor — see `queueScreenTimeTeardown`.
         ScreenTimeSystemWorker.requestWholeDevice(false)
-        ScreenTimeSystemWorker.async(.settings) {
-            ManagedSettingsStore().clearAllSettings()
-            for name in [DeviceLockManagedSettingsStoreName.enforcement,
-                         DeviceLockManagedSettingsStoreName.runtime,
-                         DeviceLockManagedSettingsStoreName.schedule,
-                         DeviceLockManagedSettingsStoreName.limit] {
-                DeviceLockManagedSettingsStoreFactory.clearAllSettings(
-                    DeviceLockManagedSettingsStoreFactory.make(named: name)
-                )
-            }
-        }
-        // 4. Every DeviceActivity monitor (lock edges, heartbeat, usage staircase, legacy), then the
-        //    App Group once more: the extension could still write between now and that stop.
-        ScreenTimeSystemWorker.async(.activity) {
-            DeviceActivityCenter().stopMonitoring()
-            DispatchQueue.main.async { SessionStore.shared.purgeAppGroupContainer() }
-        }
+        queueScreenTimeTeardown(.live)
         // 5. The session: Keychain token + DSN, paired/setup/onboarding flags, every per-child store,
         //    the App Group (language kept), live A/V.
         SessionStore.shared.clearSession()
@@ -461,6 +557,59 @@ extension PairingResetCoordinator {
     }
 }
 
+extension PairingResetCoordinator {
+    /// The Screen Time half of the wipe, on the worker's two lanes.
+    struct ScreenTimeTeardown {
+        var enqueue: (ScreenTimeSystemWorker.Lane, @escaping () -> Void) -> Void
+        var onMain: (@escaping () -> Void) -> Void
+        /// The default ManagedSettings store and the four legacy named stores.
+        var clearSettings: () -> Void
+        var stopMonitoring: () -> Void
+        var purgeAppGroup: () -> Void
+
+        static var live: ScreenTimeTeardown {
+            ScreenTimeTeardown(
+                enqueue: { lane, work in ScreenTimeSystemWorker.async(lane, work) },
+                onMain: { DispatchQueue.main.async(execute: $0) },
+                clearSettings: {
+                    ManagedSettingsStore().clearAllSettings()
+                    for name in [DeviceLockManagedSettingsStoreName.enforcement,
+                                 DeviceLockManagedSettingsStoreName.runtime,
+                                 DeviceLockManagedSettingsStoreName.schedule,
+                                 DeviceLockManagedSettingsStoreName.limit] {
+                        DeviceLockManagedSettingsStoreFactory.clearAllSettings(
+                            DeviceLockManagedSettingsStoreFactory.make(named: name)
+                        )
+                    }
+                },
+                stopMonitoring: { DeviceActivityCenter().stopMonitoring() },
+                purgeAppGroup: { SessionStore.shared.purgeAppGroupContainer() }
+            )
+        }
+    }
+
+    /// 1. ManagedSettings cleared, queued AFTER any write already on the settings lane so an earlier
+    ///    lock cannot land on top of the clear.
+    /// 2. Every DeviceActivity monitor stopped (lock edges, heartbeat, usage staircase, legacy).
+    /// 3. After that stop has RETURNED: ManagedSettings cleared again and the App Group swept again.
+    ///    Nothing orders the two lanes (`ScreenTimeSystemWorker`), and the activity lane can sit
+    ///    behind a slow `startMonitoring` for seconds — a monitor-extension edge firing between the
+    ///    first clear and the stop (a bedtime schedule starting at 21:00 while the unpair lands at
+    ///    20:59:59) would write the whole-device shield again with nothing left to lift it. Only
+    ///    once no monitor can fire is the last clear final. Hopping through main keeps it inside a
+    ///    background-task assertion (the worker takes one only for jobs queued from main).
+    static func queueScreenTimeTeardown(_ teardown: ScreenTimeTeardown) {
+        teardown.enqueue(.settings, teardown.clearSettings)
+        teardown.enqueue(.activity) {
+            teardown.stopMonitoring()
+            teardown.onMain {
+                teardown.enqueue(.settings, teardown.clearSettings)
+                teardown.purgeAppGroup()
+            }
+        }
+    }
+}
+
 extension PairingResetCoordinator.Dependencies {
     @MainActor static var live: PairingResetCoordinator.Dependencies {
         PairingResetCoordinator.Dependencies(
@@ -470,6 +619,7 @@ extension PairingResetCoordinator.Dependencies {
             },
             credentialIsAbsent: { SecureTokenStore.oila.accessTokenState() == .absent },
             probe: { _ = try await OilaDeviceClient.shared.fetchLockState() },
+            probeSecondRoute: { _ = try await OilaDeviceClient.shared.fetchHome() },
             checkHealth: { await OilaDeviceClient.shared.checkHealth() },
             sleep: { seconds in try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000)) },
             now: { Date() },
@@ -491,7 +641,11 @@ extension PairingResetCoordinator.Dependencies {
             localDSN: { OilaDeviceIdentity.persistedDSN() },
             defaults: .standard,
             appGroupDefaults: UserDefaults(suiteName: ScreenTimeUsageAppGroup.identifier),
-            wipe: { PairingResetCoordinator.liveWipe($0) }
+            wipe: { PairingResetCoordinator.liveWipe($0) },
+            reassertEnforcement: {
+                OilaTelemetryService.shared.refreshLockNow()
+                ScreenTimeEnforcementCoordinator.shared.handleExtensionLockEdge()
+            }
         )
     }
 }
