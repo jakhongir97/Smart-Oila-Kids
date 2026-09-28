@@ -77,13 +77,26 @@ struct BolajonPermissionStep: Identifiable {
 
     /// The step after `index`. The app pick is skipped while Screen Time is not granted: Apple's
     /// picker hands out nothing without the grant, so the step could only ever say "unavailable".
-    /// Pure, so the rule is pinned by a test.
+    /// The second Screen Time step (`.appLimits`) is skipped while it IS granted (build 29): it
+    /// shares the one FamilyControls grant with `.usage`, so on arrival it could only show
+    /// "✓ Ruxsat berilgan" and wait for an extra "Davom etish" — a screen that seems to ask again
+    /// (Ibrohim's "yana so'rayapti"). It still shows when `.usage` was passed without the grant
+    /// (`.unavailable`, or two failed rounds), where it is a second chance to grant. The checklist
+    /// keeps both rows. Pure, so the rule is pinned by a test.
     static func nextIndex(after index: Int, in steps: [BolajonPermissionStep], screenTimeGranted: Bool) -> Int? {
         var next = index + 1
-        while next < steps.count, steps[next].kind == .appSelection, !screenTimeGranted {
+        while next < steps.count, isSkipped(steps[next].kind, screenTimeGranted: screenTimeGranted) {
             next += 1
         }
         return next < steps.count ? next : nil
+    }
+
+    private static func isSkipped(_ kind: Kind, screenTimeGranted: Bool) -> Bool {
+        switch kind {
+        case .appSelection: return !screenTimeGranted
+        case .appLimits: return screenTimeGranted
+        default: return false
+        }
     }
 
     /// Onboarding steps, feature-gated: a step ships only while something in the build can consume
@@ -484,12 +497,41 @@ enum BolajonStepGate {
     ]
 
     /// The body under the title. The Always step's own body describes the system alert that is about
-    /// to appear, which is wrong once iOS will not show it again.
-    static func bodyKey(for step: BolajonPermissionStep, phase: BolajonStepPhase) -> String {
+    /// to appear, which is wrong once iOS will not show it again. The usage step's body promises
+    /// per-app minutes and limits, which below iOS 17.4 nothing measures (`ScreenTimeUsageMonitoring
+    /// .isSupported`), so that phone reads a variant that promises only what works there: blocking.
+    static func bodyKey(
+        for step: BolajonPermissionStep,
+        phase: BolajonStepPhase,
+        usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported
+    ) -> String {
         if step.kind == .backgroundLocation, case .needsSettings = phase {
             return "perm2.bglocation.body_settings"
         }
+        if step.kind == .usage {
+            return usageBodyKey(usageMeasured: usageMeasured)
+        }
         return step.bodyKey
+    }
+
+    /// The title above it. Below iOS 17.4 the usage step's own title ("See which apps are used
+    /// most") would sit right above a body saying nothing is counted there, so that phone reads a
+    /// title that asks only for what works: blocking.
+    static func titleKey(
+        for step: BolajonPermissionStep,
+        usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported
+    ) -> String {
+        if step.kind == .usage, !usageMeasured {
+            return "perm2.usage.title_legacy"
+        }
+        return step.titleKey
+    }
+
+    /// What the Screen Time "usage" grant is for, in one place: the onboarding step's body and the
+    /// checklist row's description (Settings, the summary) read the same key, so the two cannot
+    /// drift apart.
+    static func usageBodyKey(usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported) -> String {
+        usageMeasured ? "perm2.usage.body" : "perm2.usage.body_legacy"
     }
 
     /// The app pick. One tap opens Apple's picker; the step completes itself when the pick has the
@@ -1085,7 +1127,7 @@ private struct PermissionStepView: View {
                 if let badgeKey = actions.badgeKey {
                     StatusPill(text: L10n.tr(badgeKey), state: .granted, icon: "checkmark.circle.fill")
                 }
-                Text(L10n.tr(step.titleKey))
+                Text(L10n.tr(BolajonStepGate.titleKey(for: step)))
                     .font(AppTypography.title(23))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
@@ -1263,7 +1305,8 @@ enum BolajonPermissionChecklist {
     /// Pure mapping from a status snapshot to checklist rows — deterministic and unit-testable.
     static func states(from snapshot: PermissionStatusSnapshot,
                        screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled,
-                       mediaEnabled: Bool = AppRuntime.audioStreamingEnabled) -> [BolajonPermissionState] {
+                       mediaEnabled: Bool = AppRuntime.audioStreamingEnabled,
+                       usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported) -> [BolajonPermissionState] {
         let notifications = [.authorized, .provisional, .ephemeral].contains(snapshot.notificationAuthorizationStatus)
         let location = [.authorizedAlways, .authorizedWhenInUse].contains(snapshot.locationAuthorizationStatus)
         let backgroundLocation = snapshot.locationAuthorizationStatus == .authorizedAlways
@@ -1297,7 +1340,8 @@ enum BolajonPermissionChecklist {
         // permanently lit and left inert "Enable" buttons in B11/C5. Hide until enforcement ships.
         if screenTimeEnabled {
             rows.append(BolajonPermissionState(id: "usage", icon: "chart.bar.fill", labelKey: "perm2.item.usage",
-                                               descriptionKey: "perm2.usage.body", availability: live(screenTime), requirement: .usageStats))
+                                               descriptionKey: BolajonStepGate.usageBodyKey(usageMeasured: usageMeasured),
+                                               availability: live(screenTime), requirement: .usageStats))
             rows.append(BolajonPermissionState(id: "screen", icon: "square.stack.3d.up.fill", labelKey: "perm2.item.screen",
                                                descriptionKey: "perm2.limits.body", availability: live(screenTime), requirement: .usageStats))
         }

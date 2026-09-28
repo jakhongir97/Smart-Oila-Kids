@@ -5457,6 +5457,37 @@ final class ChatSystemNoticeTextTests: XCTestCase {
     }
 }
 
+// MARK: - Settings version row
+
+/// Builds 23 to 28 all read "Bolajon360 · v1.1.2", so a tester could not name the build from inside
+/// the app. The row now carries the build number too.
+final class SettingsVersionLabelTests: XCTestCase {
+    func testShowsVersionAndBuild() {
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: [
+            "CFBundleShortVersionString": "1.1.2", "CFBundleVersion": "29"
+        ]), "1.1.2 (29)")
+    }
+
+    func testFallsBackWithoutABuild() {
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: ["CFBundleShortVersionString": "1.1.2"]), "1.1.2")
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: [
+            "CFBundleShortVersionString": "1.1.2", "CFBundleVersion": ""
+        ]), "1.1.2")
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: [
+            "CFBundleShortVersionString": "2.0", "CFBundleVersion": "2.0"
+        ]), "2.0", "no '2.0 (2.0)'")
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: nil), "1.0")
+    }
+
+    /// The test host is the app, so its own bundle must produce the "(build)" form.
+    func testTheAppBundleShowsItsBuildNumber() {
+        let info = Bundle.main.infoDictionary
+        let build = info?["CFBundleVersion"] as? String ?? ""
+        XCTAssertFalse(build.isEmpty)
+        XCTAssertTrue(SettingsRootView.versionLabel(infoDictionary: info).hasSuffix("(\(build))"))
+    }
+}
+
 // MARK: - Link health (the chip that used to always say "Connected")
 
 /// Home and Settings both drew a hardcoded green "Connected" pill bound to no state whatsoever. On a
@@ -5708,6 +5739,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         private var sosDelivered = 0
         private var sosScript: (@Sendable (Int) async throws -> Void)?
         private var statuses: [OilaDeviceStatus] = []
+        private var statusFailuresLeft = 0
 
         init(lockAnswers: [Error], statusError: Error? = nil, locationError: Error? = nil, statusDelay: UInt64 = 0) {
             self.lockAnswers = lockAnswers
@@ -5733,6 +5765,8 @@ final class TelemetryPairingLossTests: XCTestCase {
             set { locked { sosScript = newValue } }
         }
         var postedStatuses: [OilaDeviceStatus] { locked { statuses } }
+        /// The next this-many `POST /device/status` calls time out (after being counted).
+        func failNextStatusPosts(_ count: Int) { locked { statusFailuresLeft = count } }
 
         func fetchLockState() async throws -> OilaLockState {
             let answer: Error = locked { () -> Error in
@@ -5745,6 +5779,12 @@ final class TelemetryPairingLossTests: XCTestCase {
             locked { statusCalls += 1; statuses.append(status) }
             if statusDelay > 0 { try? await Task.sleep(nanoseconds: statusDelay) }
             if let statusError { throw statusError }
+            let scriptedFailure = locked { () -> Bool in
+                guard statusFailuresLeft > 0 else { return false }
+                statusFailuresLeft -= 1
+                return true
+            }
+            if scriptedFailure { throw URLError(.timedOut) }
         }
         func uploadLocationBatch(_ fixes: [OilaLocationFix]) async throws {
             locked { batches.append(fixes) }
@@ -6003,6 +6043,115 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertEqual(probes.value, 0, "build 29: the probe after DEVICE_UNPAIRED goes out with no wait")
         XCTAssertEqual(invalidations.value, 0)
         XCTAssertTrue(service.isRunning)
+    }
+
+    // MARK: Location authorization changes (build 29, diag-auth-change-throttled)
+
+    private typealias AuthPair = OilaTelemetryService.LocationAuthorizationSnapshot
+    private let alwaysPair = AuthPair(status: .authorizedAlways, accuracy: .fullAccuracy)
+    private let deniedPair = AuthPair(status: .denied, accuracy: .fullAccuracy)
+
+    private final class PairBox {
+        var value: AuthPair
+        init(_ value: AuthPair) { self.value = value }
+    }
+
+    /// A running service whose location authorization is `pair.value` (the simulator's own manager
+    /// only says `.notDetermined`), whose authorization-post keep-alive and retry pauses are counted,
+    /// and whose run's first status post has gone out and settled.
+    private func startReporting(_ stub: Stub, _ pair: PairBox) async
+        -> (service: OilaTelemetryService, begun: Tally, ended: Tally, retryPauses: Tally) {
+        let service = OilaTelemetryService(service: stub)
+        let begun = Tally(), ended = Tally(), retryPauses = Tally()
+        service.sleeper = { _ in }
+        service.sessionInvalidationSignal = {}
+        service.locationAuthorizationReader = { pair.value }
+        service.authorizationPostKeepAlive = {
+            begun.bump()
+            return { ended.bump() }
+        }
+        service.authorizationPostRetrySleeper = { _ in retryPauses.bump() }
+        service.start()
+        _ = await waitUntil { stub.statusPostCalls >= 1 }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        return (service, begun, ended, retryPauses)
+    }
+
+    /// The 09-28 failure: a post went out (leaving the app), and Location was set to "Never" 20 s
+    /// later. The change is decided against what that post REALLY carried and sent at once, under
+    /// background time that ends after it; and the post it sends becomes the new "last reported".
+    func testALocationSwitchOffRightAfterAPostReachesTheParentAtOnce() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let pair = PairBox(alwaysPair)
+        let (service, begun, ended, _) = await startReporting(stub, pair)
+        defer { service.stop() }
+        let before = stub.statusPostCalls
+
+        pair.value = deniedPair
+        XCTAssertEqual(service.reportLocationAuthorization(deniedPair), .immediate,
+                       "inside the 60 s gap, and still sent")
+        let sent = await waitUntil { ended.value == 1 }
+
+        XCTAssertTrue(sent)
+        XCTAssertEqual(begun.value, 1)
+        XCTAssertEqual(stub.statusPostCalls, before + 1)
+        XCTAssertEqual(stub.postedStatuses.last?.locationAuthorization, "Denied")
+        XCTAssertEqual(service.reportLocationAuthorization(deniedPair), .throttled,
+                       "the post recorded what it carried: the same status again is not news")
+    }
+
+    func testAnUnchangedLocationStatusRightAfterAPostStaysThrottled() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let (service, begun, _, _) = await startReporting(stub, PairBox(alwaysPair))
+        defer { service.stop() }
+        let before = stub.statusPostCalls
+
+        XCTAssertEqual(service.reportLocationAuthorization(alwaysPair), .throttled)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(begun.value, 0)
+        XCTAssertEqual(stub.statusPostCalls, before)
+    }
+
+    /// A weak connection: the first attempts time out. Retried inside the same background time,
+    /// which ends only after the attempt that lands.
+    func testAFailedSwitchOffPostIsRetriedBeforeTheAppIsSuspended() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let pair = PairBox(alwaysPair)
+        let (service, begun, ended, retryPauses) = await startReporting(stub, pair)
+        defer { service.stop() }
+        let before = stub.statusPostCalls
+
+        stub.failNextStatusPosts(2)
+        pair.value = deniedPair
+        XCTAssertEqual(service.reportLocationAuthorization(deniedPair), .immediate)
+        let finished = await waitUntil { ended.value == 1 }
+
+        XCTAssertTrue(finished)
+        XCTAssertEqual(begun.value, 1)
+        XCTAssertEqual(stub.statusPostCalls, before + 3, "two timeouts, then delivered")
+        XCTAssertEqual(retryPauses.value, 2)
+        XCTAssertEqual(service.reportLocationAuthorization(deniedPair), .throttled)
+    }
+
+    /// Every attempt failed: the parent was never told, so the same status reported again (a
+    /// foreground, a resume) is still a change and goes out at once.
+    func testASwitchOffThatNeverLandedIsStillAChange() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let pair = PairBox(alwaysPair)
+        let (service, _, ended, _) = await startReporting(stub, pair)
+        defer { service.stop() }
+        let before = stub.statusPostCalls
+
+        stub.failNextStatusPosts(1 + OilaTelemetryService.authorizationPostRetryDelays.count)
+        pair.value = deniedPair
+        XCTAssertEqual(service.reportLocationAuthorization(deniedPair), .immediate)
+        let finished = await waitUntil { ended.value == 1 }
+
+        XCTAssertTrue(finished)
+        XCTAssertEqual(stub.statusPostCalls, before + 1 + OilaTelemetryService.authorizationPostRetryDelays.count)
+        XCTAssertEqual(service.reportLocationAuthorization(deniedPair), .immediate)
+        _ = await waitUntil { ended.value == 2 }
     }
 
     // MARK: Location batches

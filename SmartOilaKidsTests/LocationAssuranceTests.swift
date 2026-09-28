@@ -452,3 +452,46 @@ final class StatusDiagnosticsSafetyTests: XCTestCase {
         }
     }
 }
+
+/// Build 29 (diag-auth-change-throttled): the child leaves the app for Settings — the backgrounding
+/// post goes out — and sets Location to "Never" 20 s later. The 60 s event gap skipped that report,
+/// every location service stopped, the app was suspended, and the parent kept seeing "granted".
+final class AuthorizationStatusPostTests: XCTestCase {
+    private typealias Snapshot = OilaTelemetryService.LocationAuthorizationSnapshot
+    private let postedAt = Date(timeIntervalSince1970: 1_800_000_000)
+    private let always = Snapshot(status: .authorizedAlways, accuracy: .fullAccuracy)
+
+    private func decide(_ current: Snapshot, last: Snapshot?, secondsAfterPost: TimeInterval?) -> OilaTelemetryService.AuthorizationStatusPost {
+        OilaTelemetryService.authorizationStatusPost(
+            current: current,
+            lastReported: last,
+            lastStatusPostAt: secondsAfterPost == nil ? nil : postedAt,
+            now: postedAt.addingTimeInterval(secondsAfterPost ?? 0),
+            minimumGap: 60
+        )
+    }
+
+    func testARevocationWithinTheGapStillPostsAtOnce() {
+        let denied = Snapshot(status: .denied, accuracy: .fullAccuracy)
+        XCTAssertEqual(decide(denied, last: always, secondsAfterPost: 20), .immediate)
+        let whenInUse = Snapshot(status: .authorizedWhenInUse, accuracy: .fullAccuracy)
+        XCTAssertEqual(decide(whenInUse, last: always, secondsAfterPost: 1), .immediate)
+    }
+
+    func testAnAccuracyChangeWithinTheGapStillPostsAtOnce() {
+        let approximate = Snapshot(status: .authorizedAlways, accuracy: .reducedAccuracy)
+        XCTAssertEqual(decide(approximate, last: always, secondsAfterPost: 5), .immediate)
+    }
+
+    func testAnUnchangedStatusStaysThrottled() {
+        XCTAssertEqual(decide(always, last: always, secondsAfterPost: 20), .throttled)
+        XCTAssertEqual(decide(always, last: always, secondsAfterPost: 59.9), .throttled)
+        XCTAssertEqual(decide(always, last: always, secondsAfterPost: 60), .event)
+    }
+
+    /// Nothing posted yet this run is not a "change": the run's first post carries the status.
+    func testNoEarlierReportIsNotAChange() {
+        XCTAssertEqual(decide(always, last: nil, secondsAfterPost: 10), .throttled)
+        XCTAssertEqual(decide(always, last: nil, secondsAfterPost: nil), .event)
+    }
+}

@@ -9,11 +9,12 @@ import ManagedSettings
 /// 2026-09-21). The whole-device lock is plain `.all()`, and the stored set is cleared at every
 /// launch (`ScreenTimeAlwaysAllowedSharedStore.clear`). What follows is the original rationale.
 ///
-/// THE REASON THIS EXISTED. A whole-device lock applies `shield.applicationCategories = .all()`,
-/// and `.all()` reaches Phone and Messages. Apple exempts the authorizing app, so Bolajon360 and
-/// its SOS button stay reachable (measured on device), but a child who cannot dial a parent
-/// directly is still a worse product than one who can. This set is how a parent says "these stay
-/// on" — Phone and Messages at minimum.
+/// THE REASON THIS EXISTED. A whole-device lock applies `shield.applicationCategories = .all()`.
+/// The premise was that `.all()` reaches Phone and Messages; measured on device (2026-09-13,
+/// before/after screenshots) it blocks Messages but leaves Phone usable — and Safari, whose web
+/// content is blocked through `webDomainCategories` instead. So a tel: call to a parent is NOT
+/// blocked during the lock. Apple exempts the authorizing app, so Bolajon360 and its SOS button
+/// stay reachable too (measured on device). This set was how a parent said "these stay on".
 ///
 /// Apple exposes no API to name a system app by bundle id and get an `ApplicationToken` back —
 /// tokens only ever come out of `FamilyActivityPicker`. So the always-allowed set cannot be

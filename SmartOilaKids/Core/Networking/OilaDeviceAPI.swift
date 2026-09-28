@@ -486,12 +486,13 @@ protocol OilaDeviceServicing {
 /// Background time for an SOS: one `POST /device/sos` (`OilaDeviceClient.sendSOS`), and one whole
 /// send of an outbox entry, its retries and its removal once delivered included
 /// (`OilaTelemetryService.sendSOSEntry`). Begun and ended on the main thread, where UIKit also calls
-/// the expiration handler, so the three can never overlap.
+/// the expiration handler, so the three can never overlap. Also holds a location-authorization
+/// change's status post and its retries open (`OilaTelemetryService.authorizationPostKeepAlive`).
 @MainActor
 final class SOSRequestKeepAlive {
-    static func begin() -> SOSRequestKeepAlive {
+    static func begin(named name: String = "oila.sos") -> SOSRequestKeepAlive {
         let keepAlive = SOSRequestKeepAlive()
-        keepAlive.identifier = UIApplication.shared.beginBackgroundTask(withName: "oila.sos") {
+        keepAlive.identifier = UIApplication.shared.beginBackgroundTask(withName: name) {
             // Out of time: the request runs on until the suspension, and a failure still lands in
             // the outbox the way it always has.
             keepAlive.end()
