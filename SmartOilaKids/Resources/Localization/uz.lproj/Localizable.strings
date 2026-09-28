@@ -37,6 +37,12 @@
 "lock.schedule" = "Jadval: %@";
 "lock.until" = "%@ gacha";
 "lock.offline_note" = "Internet bo'lmasa ham %@ da o'zi ochiladi.";
+"lock.by_schedule" = "Jadval bo'yicha";
+"lock.by_schedule_until" = "Jadval bo'yicha, %@ gacha";
+"lock.refresh" = "Yangilash";
+"lock.refresh_hint" = "Blok holatini qayta tekshiradi.";
+"lock.not_enforced" = "Bloklash ishlamayapti: Ekran vaqti ruxsati o'chiq.";
+"lock.fix_permission" = "Ruxsatni yoqish";
 
 
 

@@ -118,7 +118,6 @@
 		ABDC972206A0DD1BA72347C4 /* DeviceAppLockSelectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000EB148968CDFEE38501FBC /* DeviceAppLockSelectionStore.swift */; };
 		AC66ED9A739886DD1535E3E5 /* SettingsProtectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1315ADC2572DD71C45627D5 /* SettingsProtectionController.swift */; };
 		ACF90C412AB10A271B7BDFBB /* ScreenTimeUsageReportBridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50786F23B965A8D8ECF485A8 /* ScreenTimeUsageReportBridgeView.swift */; };
-		AEFC4A423E96D6F5343B9947 /* DeviceLockOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606CE5F9A5B49E4E586E2DDA /* DeviceLockOverlay.swift */; };
 		B1346442FED346C1AE4965C6 /* DeviceAppLimitSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F30C4E774EB78FB3C02B179 /* DeviceAppLimitSharedStore.swift */; };
 		B13A490B95DA82840D403B4E /* String+Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFDAC27DF29466EDA313D2C5 /* String+Formatting.swift */; };
 		BD96FDE910D0B24E8DF6AD59 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3856E652D5D319DC95A00A3 /* AppConfig.swift */; };
@@ -284,7 +283,6 @@
 		50786F23B965A8D8ECF485A8 /* ScreenTimeUsageReportBridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageReportBridgeView.swift; sourceTree = "<group>"; };
 		59E627ECB6EBB0A790D11AF5 /* BolajonKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolajonKit.swift; sourceTree = "<group>"; };
 		5B3FFE1159A9637FFBA1F1AE /* RootView+Lifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RootView+Lifecycle.swift"; sourceTree = "<group>"; };
-		606CE5F9A5B49E4E586E2DDA /* DeviceLockOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockOverlay.swift; sourceTree = "<group>"; };
 		611DF2DB1B84CE6845E61F65 /* DeviceAppLimitMonitorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAppLimitMonitorController.swift; sourceTree = "<group>"; };
 		646FB75A4701166CE156BEE6 /* LocationPermissionManager+Observation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LocationPermissionManager+Observation.swift"; sourceTree = "<group>"; };
 		6B23147D0A5327CED850D5FA /* ScreenTimeUsageAppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageAppGroup.swift; sourceTree = "<group>"; };
@@ -691,7 +689,6 @@
 		D4AB63EB01CEAB8CCC9B2E4F /* App */ = {
 			isa = PBXGroup;
 			children = (
-				606CE5F9A5B49E4E586E2DDA /* DeviceLockOverlay.swift */,
 				1A91856886268BFE3E002F1F /* RootView.swift */,
 				5B3FFE1159A9637FFBA1F1AE /* RootView+Lifecycle.swift */,
 				A8CB88E59DE6518D215B75D0 /* RootView+PushHandling.swift */,
@@ -1100,7 +1097,6 @@
 				E869FC25FABA547134DDBABE /* DeviceGlobalLockPayloadParser.swift in Sources */,
 				1B6F7C60D4C4D1BC1EFA8072 /* DeviceLockCoordinator.swift in Sources */,
 				526DDB581801D3C763C6AFE0 /* DeviceLockModels.swift in Sources */,
-				AEFC4A423E96D6F5343B9947 /* DeviceLockOverlay.swift in Sources */,
 				7035D0F4DFA51CF3C677B465 /* DeviceLockScheduleMonitorController.swift in Sources */,
 				350DE396F3550391AF1F3E17 /* DeviceLockScheduleSupport.swift in Sources */,
 				8C1B6ED634A4E71A01A4EC75 /* DeviceLockService.swift in Sources */,

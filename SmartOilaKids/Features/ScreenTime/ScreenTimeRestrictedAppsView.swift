@@ -186,13 +186,6 @@ struct ScreenTimeRestrictedAppsView: View {
                 }
             }
         }
-        // Both sheets yield to the lock: a sheet already up keeps the root's lock cover from
-        // presenting (the rule every presentation on the Home stack follows).
-        .onChange(of: telemetry.isLocked) { locked in
-            guard locked else { return }
-            isPickerPresented = false
-            labelling = nil
-        }
         .sheet(isPresented: $isPickerPresented) {
             ScreenTimeAppPickerView(
                 purpose: .restricted,
@@ -547,9 +540,6 @@ struct ScreenTimeAppLabelSheet: View {
 struct ScreenTimeSetupCard: View {
     @ObservedObject private var store = ScreenTimeRestrictedAppsStore.shared
     @ObservedObject private var authorization = ScreenTimeAuthorizationManager.shared
-    /// Observed only to close the picker when the lock engages: a sheet already up would keep the
-    /// root's lock cover from presenting (the rule every Home presentation follows).
-    @ObservedObject private var lockState = OilaTelemetryService.shared
 
     @State private var isPickerPresented = false
     @State private var draft = FamilyActivitySelection()
@@ -629,9 +619,6 @@ struct ScreenTimeSetupCard: View {
                         isPickerPresented = true
                     }
                 }
-            }
-            .onChange(of: lockState.isLocked) { locked in
-                if locked { isPickerPresented = false }
             }
             .sheet(isPresented: $isPickerPresented, onDismiss: applyPendingSelection) {
                 ScreenTimeAppPickerView(

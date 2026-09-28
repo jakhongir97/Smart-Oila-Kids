@@ -37,6 +37,12 @@
 "lock.schedule" = "Расписание: %@";
 "lock.until" = "До %@";
 "lock.offline_note" = "Даже без интернета разблокируется в %@.";
+"lock.by_schedule" = "По расписанию";
+"lock.by_schedule_until" = "По расписанию, до %@";
+"lock.refresh" = "Обновить";
+"lock.refresh_hint" = "Проверяет блокировку заново.";
+"lock.not_enforced" = "Блокировка не работает: разрешение «Экранное время» выключено.";
+"lock.fix_permission" = "Включить разрешение";
 
 
 

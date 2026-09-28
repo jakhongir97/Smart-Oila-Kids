@@ -53,9 +53,11 @@ extension LinkHealth {
 struct BolajonHomeView: View {
     @EnvironmentObject private var sessionStore: SessionStore
     @StateObject private var viewModel = BolajonHomeViewModel()
-    /// Observed so the SOS takeover can be dismissed the moment the device lock engages —
-    /// the root-level lock cover must never end up behind another presentation.
+    /// The telemetry service: the header chip's link half, and the parent's device lock that the
+    /// banner at the top of Home states (`DeviceLockBannerCard`).
     @ObservedObject private var lockState = OilaTelemetryService.shared
+    /// Whether iOS can enforce that lock at all — the banner warns when it cannot.
+    @ObservedObject private var screenTimeAuthorization = ScreenTimeAuthorizationManager.shared
     /// Drives the header chip's permission half. Owned here (not read from Settings) because the chip
     /// has to be right the moment Home appears, and Settings may never have been opened.
     @StateObject private var permissionManager = LocationPermissionManager()
@@ -99,13 +101,25 @@ struct BolajonHomeView: View {
             ScreenScaffold(intent: .lavender, background: AppColors.screenBackground) {
                 VStack(spacing: BolajonMetrics.stackSpacing) {
                     header
+                    // Build 29: the parent's lock is a card here, not a full-screen cover — the OS
+                    // shield blocks every other app, and Bolajon360 stays usable (Ibrohim 699654).
+                    // While it is up, SOS moves directly under it: the banner must never push the
+                    // panic button towards the fold.
+                    if let lockBanner {
+                        DeviceLockBannerCard(model: lockBanner) { action in
+                            DeviceLockBannerModel.perform(action, refresher: lockState) { path.append($0) }
+                        }
+                        sosCard
+                    }
                     if viewModel.showsScreenTimeCard {
                         screenTimeCard
                     }
                     // Draws nothing unless the phone still lacks the one-tap app pick (build 26). Told
                     // whether a figure is on screen right above it, so the two never contradict.
                     ScreenTimeSetupCard(showsUsageFigure: viewModel.showsScreenTimeCard && viewModel.showsUsageFigure)
-                    sosCard
+                    if lockBanner == nil {
+                        sosCard
+                    }
                     if AppRuntime.chatFeaturesEnabled {
                         ChatHomeCard(refreshToken: chatUnreadRefreshToken, onOpen: { path.append(.chat) })
                     }
@@ -180,11 +194,8 @@ struct BolajonHomeView: View {
                 if chatWasOpen, !chatOpen { chatUnreadRefreshToken += 1 }
                 chatWasOpen = chatOpen
             }
-            .onChange(of: lockState.isLocked) { locked in
-                // The SOS sheet steps aside for the lock takeover: the root presents it as a
-                // full-screen cover, and a sheet already up would block that presentation outright.
-                if locked { showSOSConfirm = false }
-            }
+            // No "close the SOS sheet when a lock lands" any more (build 29): there is no lock cover
+            // for the sheet to block, and closing it would cut a child's SOS off mid-send.
             .sheet(isPresented: $showSOSConfirm, onDismiss: { viewModel.resetSOS() }) {
                 SOSConfirmTakeover(
                     isSending: viewModel.isSendingSOS,
@@ -209,9 +220,10 @@ struct BolajonHomeView: View {
     /// before that never meet it again, so this stays. It costs nothing when the child HAS answered:
     /// from any status other than `.notDetermined` iOS shows no prompt, which is why the check is on
     /// the status and not on a counter. The header chip covers the denied case, which no prompt can
-    /// reopen.
+    /// reopen. A parent's device lock no longer holds it back (build 29): with no lock cover the
+    /// prompt has nothing to hide behind, and Bolajon360 is usable while locked.
     private func reaskForLocationIfNeverAnswered() {
-        guard !didReaskForLocation, sessionStore.oilaPaired, !lockState.isLocked else { return }
+        guard !didReaskForLocation, sessionStore.oilaPaired else { return }
         guard permissionManager.locationAuthorizationStatus == .notDetermined else { return }
         didReaskForLocation = true
         permissionManager.requestLocationPermission()
@@ -287,6 +299,18 @@ struct BolajonHomeView: View {
             return true
         }
         return pushedDSN.caseInsensitiveCompare(currentDSN) == .orderedSame
+    }
+
+    /// The lock banner's content, or nil while the phone is not locked.
+    private var lockBanner: DeviceLockBannerModel? {
+        DeviceLockBannerModel.make(
+            isLocked: lockState.isLocked,
+            endsAt: lockState.lockEndsAt,
+            bySchedule: lockState.lockIsBySchedule,
+            scheduleRange: lockState.scheduleRangeText,
+            screenTimeFeaturesEnabled: AppRuntime.screenTimeFeaturesEnabled,
+            screenTimeStatus: screenTimeAuthorization.status
+        )
     }
 
     private var header: some View {
@@ -1074,8 +1098,8 @@ final class BolajonHomeViewModel: ObservableObject {
         errorMessage = NetworkError.userMessage(for: failure)
     }
 
-    /// The sheet stops waiting: whatever sheet is up can be closed (even one reopened after a lock
-    /// takeover closed the first), and the owner says the alert is still being tried.
+    /// The sheet stops waiting: whatever sheet is up can be closed (even one reopened after the
+    /// child closed the first), and the owner says the alert is still being tried.
     private func sosSheetDeadlinePassed() {
         guard sosDelivery != nil else { return }
         isSendingSOS = false
@@ -1141,6 +1165,228 @@ struct LocalScreenTimeUsageProvider: ScreenTimeUsageProviding {
         return ledger.day(ScreenTimeUsageDayFormatter.dayKey(for: Date()))?
             .seconds[ScreenTimeUsageLedger.deviceTotalKey] != nil
     }
+}
+
+// MARK: - Device lock banner (build 29)
+
+/// What Home's lock banner says. Pure, so every line of it is pinned by a test.
+///
+/// Build 28 put the parent's lock on a full-screen cover over the whole app. The PO asked for the
+/// app to stay open (Ibrohim 699652/699654: "enough that Home shows it is locked"; agreed 699655):
+/// the lock itself is iOS's — `DeviceLockPolicy.applyWholeDevice` shields every other app and
+/// website — and Bolajon360, exempt from its own shield, keeps chat, tasks and SOS usable.
+struct DeviceLockBannerModel: Equatable {
+    /// "Telefon bloklandi".
+    let title: String
+    /// "14:30 gacha" for a window with a known end; "Jadval: 21:00 – 07:00", "Jadval bo'yicha,
+    /// 07:00 gacha" or "Jadval bo'yicha" for a schedule; the plain subtitle when nothing is known.
+    let detail: String
+    /// "Internet bo'lmasa ham 14:30 da o'zi ochiladi." — only beside a known end: it is a promise
+    /// about that end, never about a lock with none.
+    let offlineNote: String?
+    /// Locked by the parent, but iOS cannot enforce it: Screen Time permission is off, so
+    /// `OilaLockRuntime.applyWholeDevice` writes nothing and every app stays open. Without this line
+    /// the banner would claim a lock the phone is not applying (699621).
+    let showsEnforcementWarning: Bool
+
+    enum Action: Equatable {
+        /// Re-read the lock now (`OilaTelemetryService.refreshLockNow`): a missed unlock push heals
+        /// itself with one tap instead of waiting for the 30 s poll.
+        case refresh
+        /// The existing permission screen, whose Screen Time row asks iOS again.
+        case openPermissions
+    }
+
+    /// nil while the phone is not locked — no banner at all.
+    static func make(
+        isLocked: Bool,
+        endsAt: Date?,
+        bySchedule: Bool,
+        scheduleRange: String?,
+        screenTimeFeaturesEnabled: Bool,
+        screenTimeStatus: ScreenTimePermissionStatus,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = L10n.currentLocale
+    ) -> DeviceLockBannerModel? {
+        guard isLocked else { return nil }
+        let end = endsAt.map { endsAtText($0, now: now, calendar: calendar, locale: locale) }
+        let range = scheduleRange?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail: String
+        if bySchedule {
+            if let range, !range.isEmpty {
+                detail = L10n.tr("lock.schedule", range)
+            } else if let end {
+                detail = L10n.tr("lock.by_schedule_until", end)
+            } else {
+                detail = L10n.tr("lock.by_schedule")
+            }
+        } else {
+            detail = end.map { L10n.tr("lock.until", $0) } ?? L10n.tr("lock.subtitle")
+        }
+        // `.unavailable` is not warned about: it is a build without Screen Time or a phone that
+        // cannot have it, and the permission screen has no row that could turn it on.
+        let unenforceable = screenTimeFeaturesEnabled && [.denied, .notDetermined].contains(screenTimeStatus)
+        return DeviceLockBannerModel(
+            title: L10n.tr("lock.title"),
+            detail: detail,
+            offlineNote: end.map { L10n.tr("lock.offline_note", $0) },
+            showsEnforcementWarning: unenforceable
+        )
+    }
+
+    /// The deadline in the child's own locale and clock format, with the date only when it is not
+    /// today (an 8 h lock started in the evening ends tomorrow). `DateFormatter` rather than a
+    /// hard-coded "HH:mm", for the reason `BolajonChatView` records: a 12-hour-clock child should
+    /// read "7:00 AM", not "07:00".
+    static func endsAtText(_ date: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = L10n.currentLocale) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.timeStyle = .short
+        formatter.dateStyle = calendar.isDate(date, inSameDayAs: now) ? .none : .short
+        return formatter.string(from: date)
+    }
+
+    /// The whole card as ONE VoiceOver element: title, window, offline promise and warning.
+    var accessibilityLabel: String {
+        [title, detail, offlineNote, showsEnforcementWarning ? L10n.tr("lock.not_enforced") : nil]
+            .compactMap { $0 }
+            .joined(separator: ". ")
+    }
+
+    /// The banner's buttons, routed here so a test pins what each one does.
+    @MainActor
+    static func perform(_ action: Action, refresher: DeviceLockRefreshing, navigate: (HomeRoute) -> Void) {
+        switch action {
+        case .refresh: refresher.refreshLockNow()
+        case .openPermissions: navigate(.settingsPermissions)
+        }
+    }
+}
+
+/// What the banner's "Yangilash" needs: the telemetry service in the app, a recorder in tests.
+@MainActor
+protocol DeviceLockRefreshing: AnyObject {
+    func refreshLockNow()
+}
+
+extension OilaTelemetryService: DeviceLockRefreshing {}
+
+/// Home's lock banner: the lock, its end, the offline promise, a refresh, and — when iOS cannot
+/// enforce the lock — a warning with the way to fix it. Home's own card language (`InfoCard`, a
+/// tinted 46 pt icon circle, token inks), so it reads as part of Home rather than an alert over it.
+struct DeviceLockBannerCard: View {
+    let model: DeviceLockBannerModel
+    let onAction: (DeviceLockBannerModel.Action) -> Void
+
+    var body: some View {
+        InfoCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 14) {
+                    ZStack {
+                        Circle().fill(AppColors.ctaPurple.opacity(0.14)).frame(width: 46, height: 46)
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(AppColors.ctaPurple)
+                    }
+                    .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.title)
+                            .font(AppTypography.heading(17))
+                            .foregroundStyle(AppColors.inkPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(model.detail)
+                            .font(AppTypography.bodyStrong(14))
+                            .foregroundStyle(AppColors.inkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let note = model.offlineNote {
+                            Text(note)
+                                .font(AppTypography.caption(12))
+                                .foregroundStyle(AppColors.inkTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(model.accessibilityLabel)
+                    refreshButton
+                }
+                if model.showsEnforcementWarning {
+                    warning
+                }
+            }
+        }
+    }
+
+    private var refreshButton: some View {
+        Button {
+            AppHaptics.selection()
+            onAction(.refresh)
+        } label: {
+            Label(L10n.tr("lock.refresh"), systemImage: "arrow.clockwise")
+                .labelStyle(.titleAndIcon)
+                .font(AppTypography.bodyStrong(12))
+                .foregroundStyle(AppColors.ctaPurple)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(AppColors.chipNeutral))
+                // 44 pt tall hit area without making the chip itself tall.
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.tr("lock.refresh"))
+        .accessibilityHint(L10n.tr("lock.refresh_hint"))
+    }
+
+    /// Coral ink on a coral tint — the warning tokens the header chip and the permission list use.
+    private var warning: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .accessibilityHidden(true)
+                Text(L10n.tr("lock.not_enforced"))
+                    .font(AppTypography.bodyStrong(13))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(AppColors.pillCoralInk)
+            Button {
+                onAction(.openPermissions)
+            } label: {
+                Text(L10n.tr("lock.fix_permission"))
+                    .font(AppTypography.buttonLabel(14))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 44)
+                    // `ctaOrange` carries white labels at 4.80:1 light / 4.43:1 dark (AppColors).
+                    .background(Capsule().fill(AppColors.ctaOrange))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(AppColors.sosCoral.opacity(0.12))
+        )
+    }
+}
+
+/// How long an SOS sheet WAITS for its delivery. The sheet cannot be dismissed while it waits;
+/// unbounded, a network that connects but never answers held it for 3 × 30 s request timeouts plus
+/// backoff (~92 s). Past this the sheet can be closed and says "still trying"; the delivery keeps
+/// running untouched (cancelling it would not stop a server that already has the POST, and the
+/// queued copy would alert the parent twice), and the alert — in the persisted outbox since before
+/// its first POST (`OilaTelemetryService.deliverSOSDurably`) — stays there only if it finally fails.
+enum SOSDelivery {
+    /// `var` only so a test can shorten it.
+    static var sheetDeadline: TimeInterval = 20
+    static var sheetDeadlineNanoseconds: UInt64 { UInt64(sheetDeadline * 1_000_000_000) }
 }
 
 #if DEBUG

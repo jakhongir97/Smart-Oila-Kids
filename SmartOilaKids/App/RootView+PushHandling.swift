@@ -11,7 +11,7 @@ extension RootView {
 }
 
 /// Decides what a parent "lock" push refreshes. The oila360 lock state (GET /device/lock/state,
-/// which drives the lock overlay) must ALWAYS refresh immediately — it otherwise waits for the
+/// which drives the OS shield and Home's lock banner) must ALWAYS refresh immediately — it otherwise waits for the
 /// 30s poll. Only the legacy Screen Time DeviceLockCoordinator stays behind its feature flag.
 enum LockPushRefreshPolicy {
     struct Actions: Equatable {

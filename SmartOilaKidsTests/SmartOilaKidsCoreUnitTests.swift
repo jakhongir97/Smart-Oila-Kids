@@ -4211,17 +4211,14 @@ final class LiveConsentAskTests: XCTestCase {
 
     func testConsentSheetShouldShowRequiresFinishedOnboarding() {
         XCTAssertTrue(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
-                                                      lockTakingOver: false, onboardingCompleted: true))
+                                                      onboardingCompleted: true))
         XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
-                                                       lockTakingOver: false, onboardingCompleted: false),
+                                                       onboardingCompleted: false),
                        "never over onboarding")
-        XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
-                                                       lockTakingOver: true, onboardingCompleted: true),
-                       "the lock takeover wins")
         XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: false, needsConsent: true,
-                                                       lockTakingOver: false, onboardingCompleted: true))
+                                                       onboardingCompleted: true))
         XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: false,
-                                                       lockTakingOver: false, onboardingCompleted: true))
+                                                       onboardingCompleted: true))
     }
 
     // MARK: Root cause #3 — a yes given in Settings
@@ -6217,7 +6214,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         let firstPress = Task { await service.deliverSOSDurably(first) }
         let posted = await waitUntil { stub.sentSOS.count == 1 }
         XCTAssertTrue(posted)
-        // The lock cover came up and the child pressed its SOS too.
+        // The child pressed SOS again before the first press had its answer.
         let secondPress = Task { await service.deliverSOSDurably(second) }
         try? await Task.sleep(nanoseconds: 100_000_000)
 
@@ -8073,6 +8070,28 @@ final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
         h.clocks.advance(60)
         service.reevaluateLock(reason: "test")
         XCTAssertFalse(service.isLocked)
+    }
+
+    /// Home's lock banner says "Jadval bo'yicha" only for a lock no manual window covers.
+    func testLockIsByScheduleOnlyWhenNoManualWindowCoversNow() {
+        let evening = F.local(2026, 9, 21, 20, 30)
+        let h = makeHarness(at: evening)
+        let service = makeService(h)
+        // A manual window 20:30–21:30 overlapping a 21:00–07:00 schedule.
+        service.applyLockState(livePayload(
+            startsAt: evening, endsAt: evening.addingTimeInterval(3_600), serverTime: evening,
+            schedules: [["startMinute": 21 * 60, "endMinute": 7 * 60, "daysBitmask": 127, "enabled": true, "deletedAt": NSNull()]]
+        ))
+        XCTAssertTrue(service.isLocked)
+        XCTAssertFalse(service.lockIsBySchedule, "the parent's window is what locks it")
+        h.clocks.advance(3_600)
+        service.reevaluateLock(reason: "test")
+        XCTAssertTrue(service.isLocked)
+        XCTAssertTrue(service.lockIsBySchedule, "the window is over; the night schedule holds it")
+        h.clocks.advance(10 * 3_600)
+        service.reevaluateLock(reason: "test")
+        XCTAssertFalse(service.isLocked)
+        XCTAssertFalse(service.lockIsBySchedule)
     }
 
     /// The child moves the date forward to end the lock: the trusted clock does not move with it.

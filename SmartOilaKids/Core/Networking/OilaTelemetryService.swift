@@ -142,7 +142,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     @Published private(set) var isAwaitingFirstContact = false
     /// The whole-device lock, DECIDED ON THE PHONE (`reevaluateLock`): the saved policy snapshot
     /// (`DeviceLockPolicySnapshot` — manual window + schedules from the last `GET /device/lock/state`)
-    /// evaluated by the clock. Drives the lock overlay. Never persisted and never taken from the
+    /// evaluated by the clock. Drives Home's lock banner (build 29 — no full-screen cover any more:
+    /// the OS shield blocks the other apps, Bolajon360 itself stays usable). Never persisted and never taken from the
     /// server's `isLocked`: a saved verdict is what kept an offline phone locked forever
     /// (Akramjon, 2026-09-23); the saved DATA opens it on time by itself.
     @Published private(set) var isLocked = false
@@ -175,9 +176,13 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     @Published private(set) var scheduleRangeText: String?
     /// When the current locked EPISODE ends (`DeviceLockPolicy.episodeEnd`: the manual window and
     /// the schedules that overlap or abut it, merged — the phone does not open between them); nil
-    /// while unlocked or when no end exists within a week. Shown on the lock cover as the time the
-    /// phone opens by itself, internet or not.
+    /// while unlocked or when no end exists within a week. Shown on Home's lock banner as the time
+    /// the phone opens by itself, internet or not.
     @Published private(set) var lockEndsAt: Date?
+    /// True while locked by a SCHEDULE alone — no manual window covers the evaluated instant. Lets
+    /// the Home banner say "Jadval bo'yicha" when no end or range is known, instead of implying the
+    /// parent pressed Lock. False while unlocked.
+    @Published private(set) var lockIsBySchedule = false
     /// Whether a policy snapshot exists at all. False before the first successful poll of a pairing
     /// (and after unpair): "unknown", which is not "unlocked" — nothing may be written to the OS
     /// from it. `ScreenTimeEnforcementCoordinator` reads it before a server answer this launch.
@@ -2053,6 +2058,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             nextLockCheckAt = nil
             lockDecisionKnown = false
             if lockEndsAt != nil { lockEndsAt = nil }
+            if lockIsBySchedule { lockIsBySchedule = false }
             if isLocked {
                 isLocked = false
                 if announce { NotificationCenter.default.post(name: Self.oilaLockEvaluationDidChange, object: nil) }
@@ -2084,6 +2090,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         let changed = locked != isLocked
         if changed { isLocked = locked }
         if lockEndsAt != endsAt { lockEndsAt = endsAt }
+        let bySchedule = locked && !(snapshot.manualLock?.enforced?.contains(evaluationTime) ?? false)
+        if lockIsBySchedule != bySchedule { lockIsBySchedule = bySchedule }
         lockRuntime.applyWholeDevice(locked)
         armLockEdgeTimer(next: edges.first, trustedNow: trustedNow)
 
@@ -2179,6 +2187,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lockDecisionKnown = false
         if isLocked { isLocked = false }
         if lockEndsAt != nil { lockEndsAt = nil }
+        if lockIsBySchedule { lockIsBySchedule = false }
         lockRuntime.applyWholeDevice(false)
     }
 

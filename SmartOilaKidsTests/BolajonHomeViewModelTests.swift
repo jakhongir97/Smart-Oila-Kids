@@ -1132,3 +1132,120 @@ final class HomeChildIdentityRefreshTests: XCTestCase {
         XCTAssertEqual(service.fetchTasksCallCount, 1)
     }
 }
+
+/// Build 29: the parent's lock is a banner at the top of Home instead of a full-screen cover
+/// (Ibrohim 699652/699654). Pins every line the banner can say and what its two buttons do.
+@MainActor
+final class DeviceLockBannerModelTests: XCTestCase {
+    private var calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tashkent")!
+        return calendar
+    }()
+    private let locale = Locale(identifier: "en_GB")
+    private var now: Date { calendar.date(from: DateComponents(year: 2026, month: 9, day: 28, hour: 13, minute: 0))! }
+
+    private func make(
+        isLocked: Bool = true,
+        endsAt: Date? = nil,
+        bySchedule: Bool = false,
+        scheduleRange: String? = nil,
+        featuresEnabled: Bool = true,
+        status: ScreenTimePermissionStatus = .granted
+    ) -> DeviceLockBannerModel? {
+        DeviceLockBannerModel.make(
+            isLocked: isLocked, endsAt: endsAt, bySchedule: bySchedule, scheduleRange: scheduleRange,
+            screenTimeFeaturesEnabled: featuresEnabled, screenTimeStatus: status,
+            now: now, calendar: calendar, locale: locale
+        )
+    }
+
+    func testNoBannerWhileUnlocked() {
+        XCTAssertNil(make(isLocked: false, endsAt: now.addingTimeInterval(600), status: .denied))
+    }
+
+    func testManualWindowShowsItsEndAndTheOfflinePromise() throws {
+        let end = now.addingTimeInterval(90 * 60)
+        let banner = try XCTUnwrap(make(endsAt: end))
+        XCTAssertEqual(DeviceLockBannerModel.endsAtText(end, now: now, calendar: calendar, locale: locale), "14:30")
+        XCTAssertEqual(banner.title, L10n.tr("lock.title"))
+        XCTAssertEqual(banner.detail, L10n.tr("lock.until", "14:30"))
+        XCTAssertEqual(banner.offlineNote, L10n.tr("lock.offline_note", "14:30"))
+        XCTAssertFalse(banner.showsEnforcementWarning, "Screen Time is granted: iOS applies the lock")
+    }
+
+    func testAManualLockWithNoKnownEndPromisesNoTime() throws {
+        // A legacy lock's own 8 h ceiling is never shown as an end (`manualEndIsCeiling`).
+        let banner = try XCTUnwrap(make(endsAt: nil))
+        XCTAssertEqual(banner.detail, L10n.tr("lock.subtitle"))
+        XCTAssertNil(banner.offlineNote, "no offline promise without a known end")
+    }
+
+    func testAnEndOnAnotherDayCarriesTheDate() {
+        let tomorrow = now.addingTimeInterval(18 * 3_600)
+        let text = DeviceLockBannerModel.endsAtText(tomorrow, now: now, calendar: calendar, locale: locale)
+        XCTAssertNotEqual(text, "07:00")
+        XCTAssertTrue(text.contains("07:00") && text.contains("29"), text)
+    }
+
+    func testScheduleLocksSayTheyComeFromTheSchedule() throws {
+        let end = calendar.date(from: DateComponents(year: 2026, month: 9, day: 28, hour: 21, minute: 0))!
+        let ranged = try XCTUnwrap(make(endsAt: end, bySchedule: true, scheduleRange: "13:00 – 21:00"))
+        XCTAssertEqual(ranged.detail, L10n.tr("lock.schedule", "13:00 – 21:00"))
+        XCTAssertEqual(ranged.offlineNote, L10n.tr("lock.offline_note", "21:00"))
+
+        let unranged = try XCTUnwrap(make(endsAt: end, bySchedule: true, scheduleRange: "  "))
+        XCTAssertEqual(unranged.detail, L10n.tr("lock.by_schedule_until", "21:00"))
+
+        let open = try XCTUnwrap(make(endsAt: nil, bySchedule: true))
+        XCTAssertEqual(open.detail, L10n.tr("lock.by_schedule"))
+        XCTAssertNil(open.offlineNote)
+    }
+
+    func testWarnsWhenScreenTimeCannotEnforceTheLock() throws {
+        for status in [ScreenTimePermissionStatus.denied, .notDetermined] {
+            let banner = try XCTUnwrap(make(endsAt: now.addingTimeInterval(600), status: status))
+            XCTAssertTrue(banner.showsEnforcementWarning, "\(status): the phone is not really locked")
+            XCTAssertTrue(banner.accessibilityLabel.contains(L10n.tr("lock.not_enforced")),
+                          "VoiceOver hears the warning too")
+        }
+        XCTAssertFalse(try XCTUnwrap(make(status: .granted)).showsEnforcementWarning)
+        XCTAssertFalse(try XCTUnwrap(make(status: .unavailable)).showsEnforcementWarning,
+                       "nothing on the permission screen could turn it on")
+        XCTAssertFalse(try XCTUnwrap(make(featuresEnabled: false, status: .denied)).showsEnforcementWarning)
+    }
+
+    func testAccessibilityLabelReadsTheWholeCard() throws {
+        let banner = try XCTUnwrap(make(endsAt: now.addingTimeInterval(90 * 60)))
+        XCTAssertEqual(banner.accessibilityLabel,
+                       [L10n.tr("lock.title"), L10n.tr("lock.until", "14:30"), L10n.tr("lock.offline_note", "14:30")]
+                        .joined(separator: ". "))
+    }
+
+    func testRefreshReReadsTheLockAndGoesNowhere() {
+        let refresher = RecordingLockRefresher()
+        var routes: [HomeRoute] = []
+        DeviceLockBannerModel.perform(.refresh, refresher: refresher) { routes.append($0) }
+        XCTAssertEqual(refresher.refreshes, 1)
+        XCTAssertTrue(routes.isEmpty)
+    }
+
+    func testFixOpensThePermissionScreen() {
+        let refresher = RecordingLockRefresher()
+        var routes: [HomeRoute] = []
+        DeviceLockBannerModel.perform(.openPermissions, refresher: refresher) { routes.append($0) }
+        XCTAssertEqual(routes, [.settingsPermissions])
+        XCTAssertEqual(refresher.refreshes, 0)
+    }
+
+    func testTheTelemetryServiceIsTheLiveRefresher() {
+        let refresher: DeviceLockRefreshing = OilaTelemetryService.shared
+        XCTAssertTrue(refresher === OilaTelemetryService.shared)
+    }
+}
+
+@MainActor
+private final class RecordingLockRefresher: DeviceLockRefreshing {
+    private(set) var refreshes = 0
+    func refreshLockNow() { refreshes += 1 }
+}
