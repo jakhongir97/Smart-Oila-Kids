@@ -238,6 +238,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private var networkType: String?
     /// When the last `postStatus()` was issued, for `eventStatusMinimumGap`.
     private var lastStatusPostAt: Date?
+    /// The location authorization (and accuracy) the last issued `postStatus()` carried. A CHANGE
+    /// from it is posted at once, past `eventStatusMinimumGap` — see `authorizationStatusPost`.
+    private var lastReportedLocationAuthorization: LocationAuthorizationSnapshot?
     /// Whether a status post has already carried a resolved `networkType` this run. `NWPathMonitor`
     /// reports an unresolved `currentPath` until its first real callback lands, so the run's initial
     /// `postStatus()` often goes out with a nil network and the transition that fills it in arrives
@@ -933,6 +936,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         persistLastReportedVisit()
         networkType = nil
         lastStatusPostAt = nil
+        lastReportedLocationAuthorization = nil
         lastPostedBattery = nil
         clearLockPolicy()
         probeRequestsInFlight = 0
@@ -1455,7 +1459,27 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // dies with the process, and the parent is left looking at a stale `granted` forever —
         // which is precisely the failure `diagnostics` exists to end. Battery and network changes
         // already post immediately for the same reason.
-        Task { await postStatusForEvent() }
+        //
+        // A CHANGE since the last post goes out at once, past `eventStatusMinimumGap`, under a
+        // background-task assertion (build 29, diag-auth-change-throttled): the child leaves the app
+        // for Settings — `flushNow()` posts on the way out — and sets Location to "Never" 20 s later.
+        // The throttle skipped that post, the `default` branch stopped every location service, the
+        // app was suspended, and the parent's page kept saying "granted". An unchanged status (a
+        // pause/resume re-applying it) stays rate-limited like any other event.
+        switch Self.authorizationStatusPost(
+            current: LocationAuthorizationSnapshot(status: status, accuracy: locationManager.accuracyAuthorization),
+            lastReported: lastReportedLocationAuthorization,
+            lastStatusPostAt: lastStatusPostAt,
+            now: Date(),
+            minimumGap: eventStatusMinimumGap
+        ) {
+        case .immediate:
+            postStatusUnderBackgroundTask(named: "oila.telemetry.authorization")
+        case .event:
+            Task { await postStatusForEvent() }
+        case .throttled:
+            break
+        }
         switch status {
         case .authorizedAlways:
             // Info.plist declares UIBackgroundModes=location, so background updates are safe.
@@ -1846,6 +1870,56 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         }
     }
 
+    /// What a location authorization and accuracy pair is, as one comparable value.
+    struct LocationAuthorizationSnapshot: Equatable {
+        let status: CLAuthorizationStatus
+        let accuracy: CLAccuracyAuthorization
+    }
+
+    enum AuthorizationStatusPost: Equatable {
+        /// Changed since the last post: post now, past the event gap, under a background task.
+        case immediate
+        /// Unchanged (or nothing posted yet this run) and the gap has passed: an ordinary event post.
+        case event
+        /// Unchanged and inside `eventStatusMinimumGap`: nothing new to tell the parent.
+        case throttled
+    }
+
+    /// How `applyAuthorization` reports `current`. Only a real change against what the last post
+    /// carried bypasses the gap; nil `lastReported` (no post yet this run) is not a change — the
+    /// run's first post carries the status anyway. Pure, so the rule is pinned by tests.
+    nonisolated static func authorizationStatusPost(
+        current: LocationAuthorizationSnapshot,
+        lastReported: LocationAuthorizationSnapshot?,
+        lastStatusPostAt: Date?,
+        now: Date,
+        minimumGap: TimeInterval
+    ) -> AuthorizationStatusPost {
+        if let lastReported, lastReported != current { return .immediate }
+        if let lastStatusPostAt, now.timeIntervalSince(lastStatusPostAt) < minimumGap { return .throttled }
+        return .event
+    }
+
+    /// `postStatus()` held open by a background-task assertion, so a post started just before
+    /// suspension still finishes. Same shape as `flushNow()`.
+    private func postStatusUnderBackgroundTask(named name: String) {
+        guard isRunning else { return }
+        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: name) {
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+        Task {
+            await postStatus()
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+    }
+
     /// `postStatus()` for an out-of-band trigger (network change, foreground), rate-limited by
     /// `eventStatusMinimumGap`.
     ///
@@ -1884,6 +1958,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     private func postStatus() async {
         guard isRunning else { return }
         lastStatusPostAt = Date()
+        lastReportedLocationAuthorization = LocationAuthorizationSnapshot(
+            status: locationManager.authorizationStatus,
+            accuracy: locationManager.accuracyAuthorization
+        )
         if networkType != nil { didPostResolvedNetworkType = true }
         let battery = Self.batteryPercent()
         lastPostedBattery = battery
