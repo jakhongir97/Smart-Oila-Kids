@@ -650,7 +650,11 @@ extension PairingResetCoordinator {
         static var live: ScreenTimeTeardown {
             ScreenTimeTeardown(
                 enqueue: { lane, work in ScreenTimeSystemWorker.async(lane, work) },
-                onMain: { DispatchQueue.main.async(execute: $0) },
+                onMain: { work in
+                    // The hop runs `work` once, on main; the box only carries it across.
+                    let box = LockedValue(work)
+                    DispatchQueue.main.async { box.get()() }
+                },
                 clearSettings: {
                     ManagedSettingsStore().clearAllSettings()
                     for name in [DeviceLockManagedSettingsStoreName.enforcement,
