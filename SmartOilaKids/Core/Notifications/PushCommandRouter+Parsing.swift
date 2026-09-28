@@ -11,7 +11,11 @@ extension PushCommandRouter {
             streamMode: resolveStreamField(["mode", "streamMode", "stream_mode"], in: userInfo),
             streamCameraType: resolveStreamField(["cameraType", "camera", "streamCameraType", "camera_type"], in: userInfo),
             streamMaxDurationSeconds: resolveStreamField(["maxDurationSeconds", "maxDuration", "durationSeconds", "leaseSeconds"], in: userInfo),
-            streamExpiresAt: resolveStreamField(["expiresAt", "expires_at", "expiry", "leaseExpiresAt"], in: userInfo)
+            streamExpiresAt: resolveStreamField(["expiresAt", "expires_at", "expiry", "leaseExpiresAt"], in: userInfo),
+            // Read for the unpair push ONLY (`unpairAddressee`), never folded into `dsn`: no contract
+            // names this key, and a hardware or record serial there would make every lock and chat
+            // push fail `RootView.shouldHandlePush`'s dsn match (b29 review).
+            deviceSerial: resolveStreamField(["deviceSerial", "device_serial"], in: userInfo)
         )
     }
 }

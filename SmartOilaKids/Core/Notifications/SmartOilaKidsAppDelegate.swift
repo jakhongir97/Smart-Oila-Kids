@@ -38,6 +38,11 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
         // Touching the singleton makes observer registration a launch-time fact instead of a
         // side effect of rendering. It is cheap: no hardware is opened until a command arrives.
         _ = DeviceAudioStreamManager.shared
+        // Build 29: the pairing reset runs from HERE, not from a view — wire every authorized
+        // route's 401s into it and run the launch checks (a paired flag over an absent Keychain
+        // token, the monitor extension's revocation marker, a pending UNAUTHORIZED re-probe). A
+        // background launch connects no scene, and that is exactly where a reset used to strand.
+        PairingResetCoordinator.shared.install()
         armTelemetryIfPaired()
         // Drain the FCM outbox at LAUNCH too, not only from `applicationDidBecomeActive`. iOS
         // background-launches this app for silent pushes and for the `location` background mode, and
@@ -237,6 +242,18 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
                 PushCommandRouter.parsePayload(from: userInfo).commandHaystack
             )
             let isLockRefresh = PushCommandRouter.isLockRefreshCommand(userInfo: userInfo)
+            if PushCommandRouter.isUnpairCommand(PushCommandRouter.parsePayload(from: userInfo).commandHaystack) {
+                // The unpair push: held until its confirming GET has answered and, if the server
+                // said DEVICE_UNPAIRED, the wipe (synchronous) has run — shields and deletion
+                // protection must be released before iOS suspends the process again.
+                Task { @MainActor in
+                    await Self.holdWhileBusy {
+                        PairingResetCoordinator.shared.hasConclusiveConfirmationInFlight
+                    }
+                    completionHandler(.newData)
+                }
+                return
+            }
             if isStatusReport || isLockRefresh {
                 Task { @MainActor in
                     await Self.holdWhileBusy {
@@ -609,6 +626,26 @@ final class FCMPushRegistrar: NSObject {
         Messaging.messaging().token { [weak self] token, _ in
             guard let token = token?.trimmedNonEmpty else { return }
             self?.handleFCMToken(token)
+        }
+        #endif
+    }
+
+    /// Build 29, on every pairing reset: throw the FCM registration token away and mint a new one.
+    ///
+    /// Firebase otherwise hands back the SAME token after an unpair, and the backend may still map it
+    /// to the record this phone just left — so an unpair push re-sent for that old record could reach
+    /// a NEW pairing on this handset (the dsn check in `PairingResetCoordinator.handleUnpairPush` is
+    /// the other half). The fresh token is only stored locally: an unpaired install uploads nothing,
+    /// and the next `POST /device/pair` carries it in the redemption body.
+    func resetRegistrationToken() {
+        UserDefaults.standard.removeObject(forKey: Self.pendingFCMTokenDefaultsKey)
+        #if canImport(FirebaseMessaging)
+        guard isConfigured else { return }
+        Messaging.messaging().deleteToken { [weak self] error in
+            if let error {
+                PushCommandRouter.log.error("fcm_token_delete failed=\(String(describing: error), privacy: .public)")
+            }
+            self?.refreshRegistrationToken()
         }
         #endif
     }

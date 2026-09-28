@@ -92,14 +92,12 @@ struct RootView: View {
             handleLockRefreshNotification(notification)
         }
         .onReceive(NotificationCenter.default.publisher(for: .oilaSessionInvalidated)) { _ in
-            // The device credential was revoked or the parent unpaired this device server-side.
-            // Drop the session so the root routes back to pairing (setupCompleted + oilaPaired go
-            // false) instead of stranding the child on Home with silently-dead telemetry.
-            guard sessionStore.oilaPaired || sessionStore.setupCompleted else { return }
-            // The live A/V teardown that used to sit here now lives inside `clearSession()`, so the
-            // child-initiated Disconnect in Settings — which calls it directly and never passed
-            // through this handler — gets it too. One mechanism, both ways out of a session.
-            sessionStore.clearSession()
+            // The wipe itself runs in `PairingResetCoordinator` (build 29), synchronously and with no
+            // view needed — a background launch has no scene, and this handler was the ONLY place the
+            // wipe used to happen. By the time this fires the session is normally already cleared and
+            // the root has re-rendered on the language screen; the call below is an idempotent
+            // backstop for any poster that did not go through the coordinator.
+            PairingResetCoordinator.shared.reset(reason: .sessionInvalidated)
         }
         // Device-lock takeover as a NATIVE full-screen presentation. The binding ignores
         // dismissal attempts, so presentation is driven solely by the polled lock state:

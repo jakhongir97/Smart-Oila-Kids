@@ -5900,9 +5900,23 @@ final class TelemetryPairingLossTests: XCTestCase {
         let ended = await waitUntil { invalidations.value == 1 }
 
         XCTAssertTrue(ended, "DEVICE_UNPAIRED, confirmed, ends the pairing")
-        XCTAssertEqual(probes.value, 1, "conclusive: ONE probe, not the two a refresh refusal needs")
+        // Build 29 (699760): the one probe goes out AT ONCE — no randomized wait before it.
+        XCTAssertEqual(probes.value, 0, "conclusive: no delay before the ONE probe")
         XCTAssertEqual(stub.lockStateCalls, 2, "the poll that heard it, then the one probe")
         XCTAssertFalse(service.isRunning, "the pairing's telemetry stops with it")
+    }
+
+    /// Only the legacy refresh refusal keeps the delayed two-probe confirmation (build 29).
+    func testALegacyRefreshRefusalStillWaitsBetweenTwoProbes() async {
+        let stub = Stub(lockAnswers: [apiError(401, "REFRESH_INVALID")])
+        let (service, probes, invalidations) = start(stub)
+        defer { service.stop() }
+
+        let ended = await waitUntil { invalidations.value == 1 }
+
+        XCTAssertTrue(ended)
+        XCTAssertEqual(probes.value, 2, "a randomized wait before each of the two probes")
+        XCTAssertEqual(stub.lockStateCalls, 3, "the poll that heard it, then two probes")
     }
 
     // MARK: The chip's first answer (build 28)
@@ -5989,7 +6003,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 200_000_000)
 
         XCTAssertTrue(probed)
-        XCTAssertEqual(probes.value, 1)
+        XCTAssertEqual(probes.value, 0, "build 29: the probe after DEVICE_UNPAIRED goes out with no wait")
         XCTAssertEqual(invalidations.value, 0)
         XCTAssertTrue(service.isRunning)
     }
@@ -6524,6 +6538,8 @@ final class TelemetryPairingLossTests: XCTestCase {
     func testAnExpiredTokenEndsThePairingAfterOneProbe() async {
         // A year after pairing the token runs out and nothing can renew it. The poll hears it, one
         // probe confirms it, and the child is routed to pairing instead of going quiet for good.
+        // The probe waits its randomized delay first (b29 review): the code is synthesized from the
+        // phone's own clock, so an immediate probe could land inside the same server 401 blip.
         let stub = Stub(lockAnswers: [apiError(401, OilaAPIError.deviceTokenExpiredCode)])
         let (service, probes, invalidations) = start(stub)
         defer { service.stop() }
@@ -6531,7 +6547,8 @@ final class TelemetryPairingLossTests: XCTestCase {
         let ended = await waitUntil { invalidations.value == 1 }
 
         XCTAssertTrue(ended)
-        XCTAssertEqual(probes.value, 1)
+        XCTAssertEqual(probes.value, 1, "one delayed probe — only DEVICE_UNPAIRED skips the wait")
+        XCTAssertEqual(stub.lockStateCalls, 2, "the poll that heard it, then the one probe")
         XCTAssertFalse(service.isRunning)
     }
 
@@ -8346,5 +8363,25 @@ final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
         XCTAssertEqual(h.recorder.shield.last, false)
         service.reevaluateLock(reason: "tick")
         XCTAssertFalse(service.isLocked, "and nothing comes back from a policy that is gone")
+    }
+
+    /// Build 29: the pairing reset releases the lock even when telemetry was never started (`stop()`
+    /// is guarded on `isRunning`) — a phone unpaired mid-onboarding or in a launch that never armed
+    /// telemetry must not keep the old family's lock, edges or shield.
+    func testAPairingResetReleasesTheLockWhenTelemetryIsNotRunning() {
+        let start = F.local(2026, 9, 21, 13, 0)
+        let h = makeHarness(at: start)
+        let service = makeService(h)
+        service.applyLockState(livePayload(startsAt: start, endsAt: start.addingTimeInterval(3_600), serverTime: start))
+        XCTAssertTrue(service.isLocked)
+        XCTAssertFalse(service.isRunning)
+
+        service.stopForPairingReset()
+
+        XCTAssertFalse(service.isLocked)
+        XCTAssertNil(h.store.load())
+        XCTAssertEqual(h.recorder.stoppedAll, 1)
+        XCTAssertEqual(h.recorder.shield.last, false)
+        XCTAssertNil(service.lastSuccessfulContactAt)
     }
 }

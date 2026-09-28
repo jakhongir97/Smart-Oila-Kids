@@ -3,6 +3,13 @@ import UserNotifications
 import SwiftUI
 
 final class SessionStore: ObservableObject {
+    /// The app's one session. The SwiftUI root observes it (`SmartOilaKidsApp`) and
+    /// `PairingResetCoordinator` wipes it — the same object, so a reset that runs in a scene-less
+    /// background launch is the state the next scene renders (build 29). Created lazily: its first
+    /// reader is the first scene body or a reset, both after `didFinishLaunching` has purged the
+    /// credentials a previous install left behind.
+    static let shared = SessionStore()
+
     static let profileNameDefaultsKey = "PROFILE_NAME"
     /// Public so `DeviceAudioStreamManager` can tell whether B1–B11 has finished without holding a
     /// reference to the store: onboarding owns the live-consent question while it runs.
@@ -40,6 +47,11 @@ final class SessionStore: ObservableObject {
     /// True only after a successful oila360 `POST /device/pair` issued this install's tokens.
     /// Gates telemetry — a legacy DSN alone is NOT an oila360 credential.
     @Published private(set) var oilaPaired: Bool = false
+    /// Bumped by every `clearSession()`. The root keys the setup flow on it, so a reset that lands
+    /// while the child is still INSIDE setup (A4 Success: paired, setup not completed — the unpair
+    /// push or any route's DEVICE_UNPAIRED can now wipe there, build 29) rebuilds the flow at the
+    /// language screen instead of leaving its navigation path on Success.
+    @Published private(set) var sessionGeneration = 0
     /// True when the one-time routing migration reset an EXISTING install (legacy DSN or
     /// previously-completed flow) — as opposed to a fresh install, which also runs the
     /// migration branch but has nothing to lose. Drives the "re-link to keep protection on"
@@ -267,6 +279,7 @@ final class SessionStore: ObservableObject {
         setOnboardingCompleted(false)
         setOilaPaired(false)
         purgeChildScopedData()
+        sessionGeneration &+= 1
     }
 
     /// Wipes every per-child artifact on disconnect so re-pairing this device to a DIFFERENT child
@@ -364,14 +377,7 @@ final class SessionStore: ObservableObject {
         //    DSN-scoped in a way the regeneration reaches, all of it written by an EXTENSION that
         //    keeps running on its own schedule. A per-key sweep here would rot the moment the
         //    extension adds a key, so the suite goes wholesale.
-        if let appGroupDefaults {
-            appGroupDefaults.removePersistentDomain(forName: appGroupIdentifier)
-            // …except the language mirror, which is not child data. The extension reads it to
-            // localize its system notifications and has no other source; dropping it would silently
-            // switch those notifications to the DEVICE language, which is the exact bug the mirror
-            // was added to fix.
-            appGroupDefaults.set(appLanguage.rawValue, forKey: Keys.appLanguage)
-        }
+        purgeAppGroupContainer()
         // 10. DSN-scoped app-lock keys. Regenerating the DSN orphans these rather than deleting
         //     them: the blob naming the previous child's blocked apps stays on disk forever under a
         //     scope nothing will ever read again. Swept by PREFIX, so this also collects the orphans
@@ -393,6 +399,19 @@ final class SessionStore: ObservableObject {
         //     Bearer token is held when the queue finally flushes is who the server attributes it to.
         userDefaults.removeObject(forKey: "OILA_PENDING_SOS")
         userDefaults.removeObject(forKey: "OILA_PENDING_LOCATION_FIXES")
+    }
+
+    /// Purge step 9 on its own, because `PairingResetCoordinator` runs it a SECOND time once the
+    /// DeviceActivity monitors are stopped: the monitor extension keeps writing the App Group until
+    /// its activities are gone, and that stop is queued on the Screen Time worker lane.
+    func purgeAppGroupContainer() {
+        guard let appGroupDefaults else { return }
+        appGroupDefaults.removePersistentDomain(forName: appGroupIdentifier)
+        // …except the language mirror, which is not child data. The extension reads it to
+        // localize its system notifications and has no other source; dropping it would silently
+        // switch those notifications to the DEVICE language, which is the exact bug the mirror
+        // was added to fix. Kept for the same reason the language screen comes back preselected.
+        appGroupDefaults.set(appLanguage.rawValue, forKey: Keys.appLanguage)
     }
 
     private static func defaultLanguage(userDefaults: UserDefaults) -> AppLanguage {

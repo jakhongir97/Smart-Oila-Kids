@@ -148,6 +148,10 @@ extension RootView {
         if AppRuntime.audioStreamingEnabled {
             DeviceAudioStreamManager.shared.consumePendingListenRequest()
         }
+        // Build 29: before anything is sent — a paired flag over an absent Keychain token routes to
+        // onboarding now, the monitor extension's revocation marker is confirmed, and an overdue
+        // UNAUTHORIZED re-probe runs.
+        PairingResetCoordinator.shared.checkOnLaunchOrForeground()
         OilaTelemetryService.shared.refreshLockNow()
         OilaTelemetryService.shared.postStatusNow()
         RuntimeDiagnosticsCenter.shared.updateLifecycle(

@@ -13,6 +13,9 @@ extension RootView {
                 sessionStore.setSetupCompleted(true)
             }
             .environmentObject(sessionStore)
+            // A pairing reset while the child is still on A4 Success stays on this branch; the new
+            // identity rebuilds the flow (its @State path included) at the language screen.
+            .id(sessionStore.sessionGeneration)
         } else if !sessionStore.onboardingCompleted {
             BolajonPermissionsFlowView {
                 // BEFORE the flag: Home renders at once, telemetry starts one `onChange` later, and

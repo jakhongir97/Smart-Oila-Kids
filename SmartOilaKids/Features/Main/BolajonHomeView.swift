@@ -56,6 +56,8 @@ struct BolajonHomeView: View {
     /// Observed so the SOS takeover can be dismissed the moment the device lock engages —
     /// the root-level lock cover must never end up behind another presentation.
     @ObservedObject private var lockState = OilaTelemetryService.shared
+    /// Observed for the chip: a revocation being confirmed reads "Ulanmoqda…", not "no connection".
+    @ObservedObject private var pairingReset = PairingResetCoordinator.shared
     /// Drives the header chip's permission half. Owned here (not read from Settings) because the chip
     /// has to be right the moment Home appears, and Settings may never have been opened.
     @StateObject private var permissionManager = LocationPermissionManager()
@@ -73,7 +75,8 @@ struct BolajonHomeView: View {
             offPermissions: BolajonPermissionChecklist.states(from: permissionManager)
                 .filter { $0.availability == .notGranted }.count,
             lastContactAt: lockState.lastSuccessfulContactAt,
-            awaitingContact: lockState.isAwaitingFirstContact
+            awaitingContact: lockState.isAwaitingFirstContact,
+            revocationPending: pairingReset.isConfirmingRevocation
         )
     }
 
@@ -983,9 +986,10 @@ final class BolajonHomeViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             // A 401 here used to post .oilaSessionInvalidated directly, which wiped the device
-            // token and regenerated the DSN on the strength of ONE response. Invalidation is now
-            // owned solely by OilaTelemetryService's confirmation probe; a genuinely revoked token
-            // will be confirmed there within one poll cycle and routed back to pairing then.
+            // token and regenerated the DSN on the strength of ONE response. Since build 29 the
+            // client reports every authorized 401 itself (`OilaDeviceClient.pairingSignalSink`), so
+            // a DEVICE_UNPAIRED here — or from the `try?` reads in `load()` — is confirmed by
+            // `PairingResetCoordinator` with one immediate probe; nothing to do at this call site.
             errorMessage = NetworkError.userMessage(for: error)
         }
         // The star the child just earned has to land on the badge NOW. Since `starTotal` prefers the

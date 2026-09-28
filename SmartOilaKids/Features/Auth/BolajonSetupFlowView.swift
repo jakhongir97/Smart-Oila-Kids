@@ -29,7 +29,7 @@ struct BolajonSetupFlowView: View {
         _path = State(initialValue: Self.initialPath(startAtSuccess: startAtSuccess))
     }
 
-    private static func initialPath(startAtSuccess: Bool) -> [SetupRoute] {
+    static func initialPath(startAtSuccess: Bool) -> [SetupRoute] {
         if let debug = AppRuntime.debugSetupStep {
             switch debug {
             case .language: return []
