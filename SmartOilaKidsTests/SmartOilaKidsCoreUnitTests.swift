@@ -5460,6 +5460,37 @@ final class ChatSystemNoticeTextTests: XCTestCase {
     }
 }
 
+// MARK: - Settings version row
+
+/// Builds 23 to 28 all read "Bolajon360 · v1.1.2", so a tester could not name the build from inside
+/// the app. The row now carries the build number too.
+final class SettingsVersionLabelTests: XCTestCase {
+    func testShowsVersionAndBuild() {
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: [
+            "CFBundleShortVersionString": "1.1.2", "CFBundleVersion": "29"
+        ]), "1.1.2 (29)")
+    }
+
+    func testFallsBackWithoutABuild() {
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: ["CFBundleShortVersionString": "1.1.2"]), "1.1.2")
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: [
+            "CFBundleShortVersionString": "1.1.2", "CFBundleVersion": ""
+        ]), "1.1.2")
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: [
+            "CFBundleShortVersionString": "2.0", "CFBundleVersion": "2.0"
+        ]), "2.0", "no '2.0 (2.0)'")
+        XCTAssertEqual(SettingsRootView.versionLabel(infoDictionary: nil), "1.0")
+    }
+
+    /// The test host is the app, so its own bundle must produce the "(build)" form.
+    func testTheAppBundleShowsItsBuildNumber() {
+        let info = Bundle.main.infoDictionary
+        let build = info?["CFBundleVersion"] as? String ?? ""
+        XCTAssertFalse(build.isEmpty)
+        XCTAssertTrue(SettingsRootView.versionLabel(infoDictionary: info).hasSuffix("(\(build))"))
+    }
+}
+
 // MARK: - Link health (the chip that used to always say "Connected")
 
 /// Home and Settings both drew a hardcoded green "Connected" pill bound to no state whatsoever. On a

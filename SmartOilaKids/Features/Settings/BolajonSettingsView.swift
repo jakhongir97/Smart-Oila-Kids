@@ -79,10 +79,22 @@ struct SettingsRootView: View {
         )
     }
 
-    /// "Bolajon360 · v" + the real bundle version, so the row never drifts from the build.
+    /// "Bolajon360 · v1.1.2 (29)": the marketing version AND the build number, read from the bundle so
+    /// the row never drifts from the build. The build is what tells TestFlight builds apart — builds
+    /// 23 to 28 all read "v1.1.2" — so a tester can name the build from inside the app.
     private var appVersionText: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        return L10n.tr("settings2.version") + version
+        L10n.tr("settings2.version") + Self.versionLabel(infoDictionary: Bundle.main.infoDictionary)
+    }
+
+    /// "1.1.2 (29)" from an Info.plist dictionary; the build is left out when it is missing, empty or
+    /// the same as the version. Pure, so it is pinned by a test. Display only: the pairing still
+    /// sends the marketing version alone (`appVersion`), as the backend expects.
+    static func versionLabel(infoDictionary: [String: Any]?) -> String {
+        let version = (infoDictionary?["CFBundleShortVersionString"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "1.0"
+        guard let build = infoDictionary?["CFBundleVersion"] as? String,
+              !build.isEmpty, build != version else { return version }
+        return "\(version) (\(build))"
     }
 
     var body: some View {
