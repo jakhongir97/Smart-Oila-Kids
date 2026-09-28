@@ -76,8 +76,8 @@ enum AppColors {
     /// Filled CTA on peach cards ("Enable"). White on this measures 4.80:1 light / 4.43:1 dark.
     static let ctaOrange = dynamic(rgb(189, 82, 15), rgb(198, 86, 16))      // #BD520F
     /// Red FILL wherever a white label sits on it — the live-session disclosure banner (the one
-    /// element whose whole job is to be unmistakable while a microphone is open), the SOS button on
-    /// the lock takeover, and the destructive disconnect CTA. White measures 4.60:1 light / 5.20:1
+    /// element whose whole job is to be unmistakable while a microphone is open) and the destructive
+    /// disconnect CTA. White measures 4.60:1 light / 5.20:1
     /// dark here, against 3.22:1 / 2.73:1 on `sosCoral`, which fails even the 3:1 large-text floor.
     static let livePresenceCoral = dynamic(rgb(232, 23, 23), rgb(214, 28, 28)) // #E81717
     /// The DEEP end of the live-presence gradient — a darker red than `livePresenceCoral`, so the

@@ -25,11 +25,10 @@ struct RootView: View {
     /// reads as a tray sliding up — the call-bar / now-playing vocabulary a child already knows — and
     /// because the bottom of the child's home is open space, so the content above barely shifts.
     ///
-    /// Both places that draw the disclosure go through this helper rather than assembling their own
-    /// `VStack`, because the row is no longer just a view: it carries a transition, which needs an
-    /// animating ancestor to drive it, and a second hand-written stack would silently lose that half.
-    /// The lock takeover has to look identical to the root — that is the whole reason the banner is
-    /// drawn there at all.
+    /// A helper rather than an inline `VStack`, because the row is not just a view: it carries a
+    /// transition, which needs an animating ancestor to drive it. (Build 28 also drew it inside the
+    /// full-screen lock cover; build 29 has no cover — the lock is a banner on Home — so the root is
+    /// the only place, and nothing is ever presented over the bar by the lock.)
     private func disclosing<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) {
             content()
@@ -99,31 +98,10 @@ struct RootView: View {
             // backstop for any poster that did not go through the coordinator.
             PairingResetCoordinator.shared.reset(reason: .sessionInvalidated)
         }
-        // Device-lock takeover as a NATIVE full-screen presentation. The binding ignores
-        // dismissal attempts, so presentation is driven solely by the polled lock state:
-        // it re-presents while locked and cannot be swiped away (full-screen covers have
-        // no interactive dismissal). BolajonHomeView dismisses its SOS cover the moment
-        // the lock engages, so this cover is never stuck behind another presentation.
-        .fullScreenCover(isPresented: deviceLockCoverPresented) {
-            // The banner rides ABOVE the lock takeover, not behind it.
-            //
-            // A full-screen cover is presented over the whole window, so the disclosure sitting in
-            // the root VStack was completely hidden while the cover was up — and this is reachable
-            // in the shipping build: `refreshLock()` is not gated on the Screen Time flag, so a
-            // parent can lock the device today. That produced the one combination this module exists
-            // to prevent: a microphone open, the child staring at a lock screen, and nothing on it
-            // saying so. Same view, same state, drawn where it can actually be seen.
-            disclosing {
-                DeviceLockOverlay(
-                    scheduleRange: oilaTelemetry.scheduleRangeText,
-                    // The end of the whole locked EPISODE, worked out on the phone from the saved
-                    // window and schedules (`DeviceLockPolicy.episodeEnd`) — the moment the phone
-                    // really opens by itself, internet or not. No "device time" line any more: it
-                    // was the server's `deviceLocalTime` from the last poll, frozen once offline.
-                    endsAt: oilaTelemetry.lockEndsAt
-                )
-            }
-        }
+        // No full-screen lock cover any more (build 29, Ibrohim 699652/699654, agreed 699655). The
+        // parent's lock is enforced by the OS shield (`DeviceLockPolicy.applyWholeDevice`: every
+        // other app and website), and Bolajon360 itself stays usable — chat, tasks, SOS — with the
+        // lock stated by the banner at the top of Home (`DeviceLockBannerCard`).
         // No `ScreenTimeUsageReportBridgeView` any more (build 26). It rendered the DeviceActivity
         // report only to feed `DeviceApplicationUsageReportCoordinator` — the deprecated ADDITIVE
         // `POST /device/apps/usage` — and the report extension's snapshot never reaches the app
@@ -156,24 +134,6 @@ private extension RootView {
 #endif
     }
 
-    /// Presents the device-lock takeover. Driven by GET /device/lock/state, polled by
-    /// OilaTelemetryService (parent manual-lock + schedules). The setter is intentionally
-    /// a no-op: only the lock state may hide the cover.
-    /// Whether the parent's device-lock takeover should be on screen. Read by both bindings below,
-    /// so the two presentations can never disagree about which of them owns the window.
-    var deviceLockIsTakingOver: Bool {
-        oilaTelemetry.isLocked && sessionStore.oilaPaired && sessionStore.onboardingCompleted
-    }
-
-    var deviceLockCoverPresented: Binding<Bool> {
-        Binding(
-            // The lock only applies to a paired child on Home — never let a restored fail-closed
-            // lock cover the pairing or B1–B11 onboarding screens.
-            get: { deviceLockIsTakingOver },
-            set: { _ in }
-        )
-    }
-
     /// Presents the one-time live-audio consent sheet when a listen request arrives before the
     /// child has ever consented. Dismissing counts as "not now" (declineConsent).
     ///
@@ -183,33 +143,23 @@ private extension RootView {
     /// guard, and it also covers an unpair (onboarding resets) while a question is pending.
     var audioConsentPresented: Binding<Bool> {
         Binding(
-            // The lock takeover WINS. Both presentations are chained on this same view, and SwiftUI
-            // will not present a full-screen cover while a sheet from the same subtree is up — so an
-            // unanswered consent sheet (which is exactly what a listen request to a child who has
-            // never consented produces, and it can sit there indefinitely) blocked the parent's lock
-            // outright. `BolajonHomeView` already yields its SOS cover to the lock for this reason;
-            // this is the same rule for the last presentation that did not.
-            //
-            // The consent request is NOT answered here, only hidden: `needsConsent` stays true, so
-            // the sheet returns once the lock clears and the parent's request is still honoured
-            // (subject to the stale-lease check `grantConsentAndStart` already applies). Declining on
-            // the child's behalf because their parent locked the phone would be the wrong answer to
-            // a question nobody asked them.
+            // The parent's device lock no longer hides this sheet (build 29): there is no lock cover
+            // for it to block, so a listen request made while the phone is locked is asked at once,
+            // like any other time.
             get: {
                 Self.consentSheetShouldShow(
                     streamingEnabled: AppRuntime.audioStreamingEnabled,
                     needsConsent: audioStream.needsConsent,
-                    lockTakingOver: deviceLockIsTakingOver,
                     onboardingCompleted: sessionStore.onboardingCompleted
                 )
             },
-            // Only a dismissal the CHILD made is a "Hozir emas". A sheet hidden because the lock took
-            // over, or because onboarding restarted, was not answered by anyone — and neither was one
+            // Only a dismissal the CHILD made is a "Hozir emas". A sheet hidden because onboarding
+            // restarted was not answered by anyone — and neither was one
             // that went away because the question was already settled ("Allow", an answer given in
             // Settings, a withdrawn stale question): `needsConsent` is false by then, and a `false`
             // written back for it must not become a refusal with a ten-minute cooldown behind it.
             set: {
-                if !$0, audioStream.needsConsent, !deviceLockIsTakingOver, sessionStore.onboardingCompleted {
+                if !$0, audioStream.needsConsent, sessionStore.onboardingCompleted {
                     audioStream.declineConsent()
                 }
             }
@@ -222,9 +172,8 @@ extension RootView {
     static func consentSheetShouldShow(
         streamingEnabled: Bool,
         needsConsent: Bool,
-        lockTakingOver: Bool,
         onboardingCompleted: Bool
     ) -> Bool {
-        streamingEnabled && needsConsent && !lockTakingOver && onboardingCompleted
+        streamingEnabled && needsConsent && onboardingCompleted
     }
 }

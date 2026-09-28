@@ -360,8 +360,8 @@ final class SmartOilaKidsAppDelegate: NSObject, UIApplicationDelegate, UNUserNot
 
     /// Whether something is presented over the root view controller — every SwiftUI `.sheet`,
     /// `.fullScreenCover` and `.confirmationDialog` in the app is, since none of them defines its own
-    /// presentation context. The lock takeover counts too, although it draws the bar itself: a
-    /// silent banner over it is what every screen got before build 28, so erring that way is safe.
+    /// presentation context. A parent's device lock presents nothing here any more (build 29: it is a
+    /// banner on Home, and the OS shield covers the other apps), so it does not count either way.
     @MainActor
     static func modalCoversRootNow() -> Bool {
         let windows = UIApplication.shared.connectedScenes

@@ -37,6 +37,13 @@
 "lock.schedule" = "Schedule: %@";
 "lock.until" = "Until %@";
 "lock.offline_note" = "Unlocks by itself at %@, even without internet.";
+"lock.by_schedule" = "On schedule";
+"lock.by_schedule_until" = "On schedule, until %@";
+"lock.refresh" = "Refresh";
+"lock.refresh_hint" = "Checks the lock again.";
+"lock.not_enforced" = "The lock isn't working: Screen Time permission is off.";
+"lock.not_enforced_unavailable" = "The lock isn't working: Screen Time can't be turned on on this phone.";
+"lock.fix_permission" = "Turn on permission";
 
 
 

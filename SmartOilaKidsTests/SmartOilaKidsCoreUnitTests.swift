@@ -4211,17 +4211,14 @@ final class LiveConsentAskTests: XCTestCase {
 
     func testConsentSheetShouldShowRequiresFinishedOnboarding() {
         XCTAssertTrue(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
-                                                      lockTakingOver: false, onboardingCompleted: true))
+                                                      onboardingCompleted: true))
         XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
-                                                       lockTakingOver: false, onboardingCompleted: false),
+                                                       onboardingCompleted: false),
                        "never over onboarding")
-        XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: true,
-                                                       lockTakingOver: true, onboardingCompleted: true),
-                       "the lock takeover wins")
         XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: false, needsConsent: true,
-                                                       lockTakingOver: false, onboardingCompleted: true))
+                                                       onboardingCompleted: true))
         XCTAssertFalse(RootView.consentSheetShouldShow(streamingEnabled: true, needsConsent: false,
-                                                       lockTakingOver: false, onboardingCompleted: true))
+                                                       onboardingCompleted: true))
     }
 
     // MARK: Root cause #3 — a yes given in Settings
@@ -6231,7 +6228,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         let firstPress = Task { await service.deliverSOSDurably(first) }
         let posted = await waitUntil { stub.sentSOS.count == 1 }
         XCTAssertTrue(posted)
-        // The lock cover came up and the child pressed its SOS too.
+        // The child pressed SOS again before the first press had its answer.
         let secondPress = Task { await service.deliverSOSDurably(second) }
         try? await Task.sleep(nanoseconds: 100_000_000)
 
@@ -8142,6 +8139,28 @@ final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
         XCTAssertFalse(service.isLocked)
     }
 
+    /// Home's lock banner says "Jadval bo'yicha" only for a lock no manual window covers.
+    func testLockIsByScheduleOnlyWhenNoManualWindowCoversNow() {
+        let evening = F.local(2026, 9, 21, 20, 30)
+        let h = makeHarness(at: evening)
+        let service = makeService(h)
+        // A manual window 20:30–21:30 overlapping a 21:00–07:00 schedule.
+        service.applyLockState(livePayload(
+            startsAt: evening, endsAt: evening.addingTimeInterval(3_600), serverTime: evening,
+            schedules: [["startMinute": 21 * 60, "endMinute": 7 * 60, "daysBitmask": 127, "enabled": true, "deletedAt": NSNull()]]
+        ))
+        XCTAssertTrue(service.isLocked)
+        XCTAssertFalse(service.lockIsBySchedule, "the parent's window is what locks it")
+        h.clocks.advance(3_600)
+        service.reevaluateLock(reason: "test")
+        XCTAssertTrue(service.isLocked)
+        XCTAssertTrue(service.lockIsBySchedule, "the window is over; the night schedule holds it")
+        h.clocks.advance(10 * 3_600)
+        service.reevaluateLock(reason: "test")
+        XCTAssertFalse(service.isLocked)
+        XCTAssertFalse(service.lockIsBySchedule)
+    }
+
     /// The child moves the date forward to end the lock: the trusted clock does not move with it.
     func testMovingThePhonesClockDoesNotMoveTheLock() {
         let start = F.local(2026, 9, 21, 13, 0)
@@ -8433,6 +8452,38 @@ final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
         XCTAssertEqual(h.recorder.stoppedAll, 1)
         XCTAssertEqual(h.recorder.shield.last, false)
         XCTAssertNil(service.lastSuccessfulContactAt)
+    }
+
+    /// b29 merge (banner + unpair): a pairing reset while a SCHEDULE lock holds the phone releases
+    /// the OS shield AND takes the Home banner away — every input the banner reads is cleared, and
+    /// no later evaluation brings it back from a policy that is gone.
+    func testAPairingResetWhileLockedRemovesTheHomeBanner() {
+        let evening = F.local(2026, 9, 21, 22, 0)
+        let h = makeHarness(at: evening)
+        let service = makeService(h)
+        service.applyLockState(livePayload(
+            startsAt: evening.addingTimeInterval(-7_200), endsAt: evening.addingTimeInterval(-3_600), serverTime: evening,
+            schedules: [["startMinute": 21 * 60, "endMinute": 7 * 60, "daysBitmask": 127, "enabled": true, "deletedAt": NSNull()]]
+        ))
+        func banner() -> DeviceLockBannerModel? {
+            DeviceLockBannerModel.make(
+                isLocked: service.isLocked, endsAt: service.lockEndsAt, bySchedule: service.lockIsBySchedule,
+                scheduleRange: service.scheduleRangeText, screenTimeFeaturesEnabled: true, screenTimeStatus: .granted,
+                now: evening
+            )
+        }
+        XCTAssertTrue(service.lockIsBySchedule)
+        XCTAssertNotNil(banner(), "locked by the night schedule: Home shows the banner")
+
+        service.stopForPairingReset()
+
+        XCTAssertFalse(service.isLocked)
+        XCTAssertNil(service.lockEndsAt)
+        XCTAssertFalse(service.lockIsBySchedule)
+        XCTAssertEqual(h.recorder.shield.last, false, "the whole-device shield is released")
+        XCTAssertNil(banner(), "and the banner is gone")
+        service.reevaluateLock(reason: "tick")
+        XCTAssertNil(banner(), "nothing brings it back")
     }
 
     /// b29 review: an extension's unconfirmed DEVICE_UNPAIRED must not outlive proof that the
