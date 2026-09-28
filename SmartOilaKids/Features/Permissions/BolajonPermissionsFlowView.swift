@@ -508,10 +508,30 @@ enum BolajonStepGate {
         if step.kind == .backgroundLocation, case .needsSettings = phase {
             return "perm2.bglocation.body_settings"
         }
-        if step.kind == .usage, !usageMeasured {
-            return "perm2.usage.body_legacy"
+        if step.kind == .usage {
+            return usageBodyKey(usageMeasured: usageMeasured)
         }
         return step.bodyKey
+    }
+
+    /// The title above it. Below iOS 17.4 the usage step's own title ("See which apps are used
+    /// most") would sit right above a body saying nothing is counted there, so that phone reads a
+    /// title that asks only for what works: blocking.
+    static func titleKey(
+        for step: BolajonPermissionStep,
+        usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported
+    ) -> String {
+        if step.kind == .usage, !usageMeasured {
+            return "perm2.usage.title_legacy"
+        }
+        return step.titleKey
+    }
+
+    /// What the Screen Time "usage" grant is for, in one place: the onboarding step's body and the
+    /// checklist row's description (Settings, the summary) read the same key, so the two cannot
+    /// drift apart.
+    static func usageBodyKey(usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported) -> String {
+        usageMeasured ? "perm2.usage.body" : "perm2.usage.body_legacy"
     }
 
     /// The app pick. One tap opens Apple's picker; the step completes itself when the pick has the
@@ -1107,7 +1127,7 @@ private struct PermissionStepView: View {
                 if let badgeKey = actions.badgeKey {
                     StatusPill(text: L10n.tr(badgeKey), state: .granted, icon: "checkmark.circle.fill")
                 }
-                Text(L10n.tr(step.titleKey))
+                Text(L10n.tr(BolajonStepGate.titleKey(for: step)))
                     .font(AppTypography.title(23))
                     .foregroundStyle(AppColors.inkPrimary)
                     .multilineTextAlignment(.center)
@@ -1285,7 +1305,8 @@ enum BolajonPermissionChecklist {
     /// Pure mapping from a status snapshot to checklist rows — deterministic and unit-testable.
     static func states(from snapshot: PermissionStatusSnapshot,
                        screenTimeEnabled: Bool = AppRuntime.screenTimeFeaturesEnabled,
-                       mediaEnabled: Bool = AppRuntime.audioStreamingEnabled) -> [BolajonPermissionState] {
+                       mediaEnabled: Bool = AppRuntime.audioStreamingEnabled,
+                       usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported) -> [BolajonPermissionState] {
         let notifications = [.authorized, .provisional, .ephemeral].contains(snapshot.notificationAuthorizationStatus)
         let location = [.authorizedAlways, .authorizedWhenInUse].contains(snapshot.locationAuthorizationStatus)
         let backgroundLocation = snapshot.locationAuthorizationStatus == .authorizedAlways
@@ -1319,7 +1340,8 @@ enum BolajonPermissionChecklist {
         // permanently lit and left inert "Enable" buttons in B11/C5. Hide until enforcement ships.
         if screenTimeEnabled {
             rows.append(BolajonPermissionState(id: "usage", icon: "chart.bar.fill", labelKey: "perm2.item.usage",
-                                               descriptionKey: "perm2.usage.body", availability: live(screenTime), requirement: .usageStats))
+                                               descriptionKey: BolajonStepGate.usageBodyKey(usageMeasured: usageMeasured),
+                                               availability: live(screenTime), requirement: .usageStats))
             rows.append(BolajonPermissionState(id: "screen", icon: "square.stack.3d.up.fill", labelKey: "perm2.item.screen",
                                                descriptionKey: "perm2.limits.body", availability: live(screenTime), requirement: .usageStats))
         }

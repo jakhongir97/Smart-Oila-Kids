@@ -183,6 +183,7 @@
 "perm2.bglocation.title" = "Location updates even when the app is closed";
 "perm2.bglocation.body" = "So your parent sees where you are even when the app is closed, iOS will next ask whether to share location “Always”.";
 "perm2.usage.title" = "See which apps are used most";
+"perm2.usage.title_legacy" = "Allow app blocking";
 "perm2.usage.body" = "You'll see how much time each app takes and can set time limits.";
 "perm2.usage.body_legacy" = "Blocking apps works on this iOS version. Counting screen time needs iOS 17.4 or newer.";
 "perm2.limits.title" = "Restrict apps when needed";

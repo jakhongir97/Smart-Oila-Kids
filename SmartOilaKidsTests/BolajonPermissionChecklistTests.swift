@@ -390,6 +390,33 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertNotEqual(L10n.tr("perm2.usage.body_legacy"), L10n.tr("perm2.usage.body"))
     }
 
+    /// The title above that body must not promise "which apps are used most" either, or the screen
+    /// contradicts itself; other steps' titles are unchanged on every version.
+    func testTheUsageTitlePromisesNoTimeBelowIOS17_4() {
+        XCTAssertEqual(BolajonStepGate.titleKey(for: step(.usage), usageMeasured: true), "perm2.usage.title")
+        XCTAssertEqual(BolajonStepGate.titleKey(for: step(.usage), usageMeasured: false), "perm2.usage.title_legacy")
+        XCTAssertEqual(BolajonStepGate.titleKey(for: step(.appLimits), usageMeasured: false), "perm2.limits.title")
+        XCTAssertNotEqual(L10n.tr("perm2.usage.title_legacy"), "perm2.usage.title_legacy")
+        XCTAssertNotEqual(L10n.tr("perm2.usage.title_legacy"), L10n.tr("perm2.usage.title"))
+    }
+
+    /// The same promise reached Settings through the checklist row (its attention row prints the
+    /// description): the row reads the step's body key, so the two cannot drift apart.
+    func testTheUsageRowPromisesNoTimeBelowIOS17_4() {
+        func description(_ id: String, usageMeasured: Bool) -> String? {
+            BolajonPermissionChecklist.states(from: snapshot(), screenTimeEnabled: true, mediaEnabled: false,
+                                              usageMeasured: usageMeasured)
+                .first { $0.id == id }?.descriptionKey
+        }
+        XCTAssertEqual(description("usage", usageMeasured: true), "perm2.usage.body")
+        XCTAssertEqual(description("usage", usageMeasured: false), "perm2.usage.body_legacy")
+        XCTAssertEqual(description("screen", usageMeasured: false), "perm2.limits.body")
+        for measured in [true, false] {
+            XCTAssertEqual(description("usage", usageMeasured: measured),
+                           BolajonStepGate.bodyKey(for: step(.usage), phase: .notAsked, usageMeasured: measured))
+        }
+    }
+
     /// An upgrade iOS ignored in this run (Allow Once, or spent before the marker) goes to Settings
     /// for the rest of the run instead of another silent 2 s spinner.
     func testAnIgnoredAlwaysUpgradeGoesToSettings() {
@@ -517,6 +544,8 @@ final class BolajonPermissionChecklistTests: XCTestCase {
                 keys.insert(BolajonStepGate.bodyKey(for: step, phase: phase, usageMeasured: true))
                 keys.insert(BolajonStepGate.bodyKey(for: step, phase: phase, usageMeasured: false))
             }
+            keys.insert(BolajonStepGate.titleKey(for: step, usageMeasured: true))
+            keys.insert(BolajonStepGate.titleKey(for: step, usageMeasured: false))
         }
         for key in keys {
             XCTAssertNotEqual(L10n.tr(key), key, "raw key would reach the screen: \(key)")

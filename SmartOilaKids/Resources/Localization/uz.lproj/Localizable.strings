@@ -183,6 +183,7 @@
 "perm2.bglocation.title" = "Ilova yopiq bo'lsa ham joylashuv yangilanadi";
 "perm2.bglocation.body" = "Ota-onangiz ilova yopiq bo'lsa ham qayerdaligingizni ko'rishi uchun iOS keyin “Always” («Всегда») ruxsatini so'raydi.";
 "perm2.usage.title" = "Qaysi ilova ko'p ishlatilishini ko'ring";
+"perm2.usage.title_legacy" = "Ilovalarni bloklashga ruxsat bering";
 "perm2.usage.body" = "Har bir ilovaga qancha vaqt sarflanganini ko'rasiz va vaqt chegarasini qo'yasiz.";
 "perm2.usage.body_legacy" = "Ilovalarni bloklash bu iOS versiyasida ishlaydi. Ekran vaqtini hisoblash uchun iOS 17.4 yoki yangiroq kerak.";
 "perm2.limits.title" = "Kerak bo'lsa, ilovalarni cheklang";
