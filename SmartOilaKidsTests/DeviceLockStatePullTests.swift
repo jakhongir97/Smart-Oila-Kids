@@ -60,9 +60,11 @@ final class DeviceLockStatePullTests: XCTestCase {
         super.tearDown()
     }
 
-    private func credential(updatedAt: Date? = nil, dsn: String? = "8D905F9F-770B-4D36-B41E-E34FD6D46B17") -> LocationPushSharedCredential.Payload {
+    private func credential(
+        updatedAt: Date? = nil, dsn: String? = "8D905F9F-770B-4D36-B41E-E34FD6D46B17", accessToken: String = "device-token"
+    ) -> LocationPushSharedCredential.Payload {
         LocationPushSharedCredential.Payload(
-            accessToken: "device-token", baseURL: "https://api.example.test/api/v1", dsn: dsn,
+            accessToken: accessToken, baseURL: "https://api.example.test/api/v1", dsn: dsn,
             updatedAt: updatedAt ?? t0.addingTimeInterval(-3_600)
         )
     }
@@ -244,9 +246,9 @@ final class DeviceLockStatePullTests: XCTestCase {
         clocks.advance(120)
         XCTAssertEqual(run(server), .skipped("revoked"))
         XCTAssertEqual(server.requests.count, 3)
-        // …until the app has paired again and published a new credential.
+        // …until the app has paired again and published a new credential (a new token).
         server.answers = [ok(manualLock: nil)]
-        XCTAssertEqual(run(server, credential: credential(updatedAt: clocks.wall)), .saved(changed: true))
+        XCTAssertEqual(run(server, credential: credential(updatedAt: clocks.wall, accessToken: "new-pairing")), .saved(changed: true))
     }
 
     func testAnAnsweredRequestBetweenTwoUnpairedAnswersClearsTheSuspicion() {
@@ -273,8 +275,8 @@ final class DeviceLockStatePullTests: XCTestCase {
 
     func testTheUsageUploadsUnpairedAnswerGoesThroughTheSameRule() {
         let env = environment(Server([ok(manualLock: nil)]))
-        XCTAssertEqual(DeviceLockStatePull.handleUnpairedAnswer(now: t0, environment: env), .unpairedSuspected)
-        XCTAssertEqual(DeviceLockStatePull.handleUnpairedAnswer(now: t0.addingTimeInterval(45), environment: env), .unpairedConfirmed)
+        XCTAssertEqual(DeviceLockStatePull.handleUnpairedAnswer(now: t0, refused: credential(), environment: env), .unpairedSuspected)
+        XCTAssertEqual(DeviceLockStatePull.handleUnpairedAnswer(now: t0.addingTimeInterval(45), refused: credential(), environment: env), .unpairedConfirmed)
         XCTAssertEqual(teardown.released, 1)
         XCTAssertFalse(ScreenTimeUsageExtensionUploader.Outcome.unpaired.mayStillLand, "answered: nothing on the wire")
     }
@@ -297,16 +299,172 @@ final class DeviceLockStatePullTests: XCTestCase {
             schedules: [], serverTime: nil, receivedAt: t0, clock: nil, isLegacy: false
         ))
         store.markEdgeEvaluated(at: t0)
-        DeviceLockUnpairTeardown.perform(now: t0, store: store, userDefaults: defaults, actions: teardown.actions)
+        DeviceLockUnpairTeardown.perform(
+            now: t0, refusedAccessToken: "device-token", store: store, userDefaults: defaults, actions: teardown.actions
+        )
         XCTAssertNil(store.load())
         XCTAssertNil(store.lastEdgeEvaluatedAt())
         XCTAssertEqual([teardown.released, teardown.stopped, teardown.announced], [1, 1, 1])
         XCTAssertEqual(DevicePairingRevocation.revokedAt(userDefaults: defaults), t0)
-        XCTAssertTrue(DevicePairingRevocation.isRevoked(credentialUpdatedAt: t0.addingTimeInterval(-1), userDefaults: defaults))
-        XCTAssertTrue(DevicePairingRevocation.isRevoked(credentialUpdatedAt: nil, userDefaults: defaults))
-        XCTAssertFalse(DevicePairingRevocation.isRevoked(credentialUpdatedAt: t0.addingTimeInterval(1), userDefaults: defaults))
+        XCTAssertNotEqual(defaults.string(forKey: DevicePairingRevocation.revokedTokenKey), "device-token", "a fingerprint, never the token")
+        XCTAssertTrue(DevicePairingRevocation.isRevoked(credential: credential(updatedAt: t0.addingTimeInterval(-1)), userDefaults: defaults))
+        XCTAssertTrue(DevicePairingRevocation.isRevoked(credential: nil, userDefaults: defaults))
+        XCTAssertTrue(DevicePairingRevocation.isRevoked(credential: credential(updatedAt: t0.addingTimeInterval(1)), userDefaults: defaults),
+                      "the refused token stays refused whatever its copy's timestamp")
+        XCTAssertFalse(DevicePairingRevocation.isRevoked(credential: credential(accessToken: "new-pairing"), userDefaults: defaults))
         DevicePairingRevocation.clear(userDefaults: defaults)
-        XCTAssertFalse(DevicePairingRevocation.isRevoked(credentialUpdatedAt: nil, userDefaults: defaults))
+        XCTAssertFalse(DevicePairingRevocation.isRevoked(credential: nil, userDefaults: defaults))
+        XCTAssertNil(defaults.object(forKey: DevicePairingRevocation.revokedTokenKey))
+    }
+    // MARK: b29 review
+
+    /// A suspicion older than the confirmation window says nothing about the pairing now: a blip a
+    /// week later is only a new suspicion, and it takes a second answer inside the window again.
+    func testAStaleSuspicionDoesNotConfirmALaterBlip() {
+        XCTAssertEqual(DevicePairingRevocation.recordUnpairedAnswer(at: t0, userDefaults: defaults), .suspected)
+        let later = t0.addingTimeInterval(7 * 86_400)
+        XCTAssertEqual(DevicePairingRevocation.recordUnpairedAnswer(at: later, userDefaults: defaults), .suspected,
+                       "the stale record is replaced, never counted")
+        XCTAssertEqual(
+            DevicePairingRevocation.recordUnpairedAnswer(at: later.addingTimeInterval(DevicePairingRevocation.confirmationWindow + 1), userDefaults: defaults),
+            .suspected, "one second past the window is stale too"
+        )
+        // Inside the window, measured from the newest record, the second answer confirms.
+        let newest = later.addingTimeInterval(DevicePairingRevocation.confirmationWindow + 1)
+        XCTAssertEqual(DevicePairingRevocation.recordUnpairedAnswer(at: newest.addingTimeInterval(DevicePairingRevocation.confirmationWindow), userDefaults: defaults), .confirmed)
+        XCTAssertEqual(DevicePairingRevocation.confirmationWindow, 15 * 60)
+    }
+
+    func testAStaleSuspicionOnThePullPathTearsNothingDown() {
+        let server = Server([ok(manualLock: (t0.addingTimeInterval(-60), t0.addingTimeInterval(30 * 86_400)))])
+        XCTAssertEqual(run(server), .saved(changed: true))
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: t0, userDefaults: defaults) // an upload's blip
+        clocks.advance(DevicePairingRevocation.confirmationWindow + 60)
+        server.answers = [unpaired]
+        XCTAssertEqual(run(server), .unpairedSuspected)
+        XCTAssertEqual(teardown.released, 0)
+        XCTAssertTrue(lockedNow(), "a parent's lock is not dropped by two blips hours apart")
+    }
+
+    /// Any answer other than DEVICE_UNPAIRED keeps the pairing, as the app's probe does: a 5xx or a
+    /// refused token between two unpair answers clears the suspicion.
+    func testAnyOtherHTTPAnswerClearsTheSuspicion() {
+        for answer in [envelope(500, ["success": false]), envelope(401, ["success": false, "errorCode": "UNAUTHORIZED"])] {
+            let server = Server([unpaired, answer, unpaired])
+            XCTAssertEqual(run(server), .unpairedSuspected)
+            clocks.advance(61)
+            _ = run(server)
+            XCTAssertNil(defaults.object(forKey: DevicePairingRevocation.suspectedAtKey))
+            clocks.advance(61)
+            XCTAssertEqual(run(server), .unpairedSuspected)
+            clocks.advance(61)
+            DevicePairingRevocation.recordAnsweredContact(userDefaults: defaults)
+        }
+        // An offline attempt is no answer: it neither keeps nor confirms.
+        let server = Server([unpaired, .failed("offline"), unpaired])
+        XCTAssertEqual(run(server), .unpairedSuspected)
+        clocks.advance(61)
+        XCTAssertEqual(run(server), .failed("offline"))
+        clocks.advance(61)
+        XCTAssertEqual(run(server), .unpairedConfirmed)
+        XCTAssertEqual(teardown.released, 1)
+    }
+
+    /// The extension's usage upload: a `.sent` (or any non-unpair HTTP answer) is what the monitor
+    /// hands to `recordAnsweredContact`.
+    func testAnAnsweredUsageUploadCountsAsContact() {
+        typealias O = ScreenTimeUsageExtensionUploader.Outcome
+        XCTAssertTrue(O.sent(status: 200).wasAnswered)
+        XCTAssertTrue(O.failed(O.httpFailurePrefix + "500").wasAnswered)
+        XCTAssertFalse(O.failed("timeout").wasAnswered)
+        XCTAssertFalse(O.failed(O.encodeFailurePrefix + "x").wasAnswered)
+        XCTAssertFalse(O.skipped(reason: "no_credential").wasAnswered)
+        XCTAssertFalse(O.unpaired.wasAnswered)
+
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: t0, userDefaults: defaults)
+        DevicePairingRevocation.recordAnsweredContact(userDefaults: defaults)
+        XCTAssertNil(defaults.object(forKey: DevicePairingRevocation.suspectedAtKey))
+        XCTAssertEqual(DevicePairingRevocation.recordUnpairedAnswer(at: t0.addingTimeInterval(60), userDefaults: defaults), .suspected)
+    }
+
+    /// The app's answered calls go through the store's `clearUnpairedSuspicion`.
+    func testTheAppsStoreClearsTheSuspicion() {
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: t0, userDefaults: defaults)
+        store.clearUnpairedSuspicion()
+        XCTAssertNil(defaults.object(forKey: DevicePairingRevocation.suspectedAtKey))
+    }
+
+    /// The app, woken by a push, saved a newer answer while this pull's request was in flight: the
+    /// pull must not write its older answer over it.
+    func testAPullDoesNotOverwriteASnapshotSavedWhileItsRequestWasInFlight() {
+        let lockWindow = (t0.addingTimeInterval(-60), t0.addingTimeInterval(900))
+        let appsAnswer = Server([ok(manualLock: lockWindow)])
+        let pulled = Server([ok(manualLock: nil)])
+        let appsSuite = "DeviceLockStatePullTests.app.\(UUID().uuidString)"
+        suiteNames.append(appsSuite)
+        let appEnv = DeviceLockStatePull.Environment(
+            store: store, userDefaults: UserDefaults(suiteName: appsSuite), clock: clocks.clock,
+            transport: { request, _ in appsAnswer.answer(request) }, teardown: teardown.actions
+        )
+        var env = environment(pulled)
+        env.transport = { [self] request, _ in
+            // Mid-request: the app's own GET lands 2 s later and saves the parent's lock.
+            clocks.advance(2)
+            XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: appEnv), .saved(changed: true))
+            clocks.advance(1)
+            return pulled.answer(request)
+        }
+        XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: env), .skipped("superseded"))
+        XCTAssertTrue(lockedNow(), "the app's newer lock stands")
+    }
+
+    /// A new pairing published while the refused request was in flight is not the pairing the
+    /// server refused: nothing is torn down and nothing is marked revoked.
+    func testAConfirmationForACredentialReplacedMidFlightTearsNothingDown() {
+        let server = Server([unpaired])
+        XCTAssertEqual(run(server), .unpairedSuspected)
+        clocks.advance(61)
+        var env = environment(server)
+        env.currentCredential = { [self] in credential(updatedAt: clocks.wall, accessToken: "new-pairing") }
+        XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: env), .skipped("credential_changed"))
+        XCTAssertEqual(teardown.released, 0)
+        XCTAssertNil(DevicePairingRevocation.revokedAt(userDefaults: defaults))
+        XCTAssertNil(defaults.object(forKey: DevicePairingRevocation.suspectedAtKey))
+
+        // The same credential still published: the confirmation stands, tied to that token.
+        clocks.advance(61)
+        XCTAssertEqual(run(server), .unpairedSuspected)
+        clocks.advance(61)
+        env.currentCredential = { [self] in credential() }
+        XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: env), .unpairedConfirmed)
+        XCTAssertEqual(defaults.string(forKey: DevicePairingRevocation.revokedTokenKey), DevicePairingRevocation.fingerprint("device-token"))
+    }
+
+    /// A revocation confirmed while the phone's clock ran ahead: the re-paired credential, published
+    /// once the clock is right again, has an EARLIER `updatedAt` than the record — and still pulls.
+    func testARePairAfterAClockThatRanAheadIsNotRevoked() {
+        let server = Server([unpaired])
+        clocks.wall = t0.addingTimeInterval(86_400) // the child set the date a day forward
+        XCTAssertEqual(run(server), .unpairedSuspected)
+        clocks.advance(61)
+        XCTAssertEqual(run(server), .unpairedConfirmed)
+        clocks.wall = t0 // corrected
+        server.answers = [ok(manualLock: nil)]
+        XCTAssertEqual(run(server, credential: credential(updatedAt: t0, accessToken: "new-pairing")), .saved(changed: true))
+    }
+
+    /// Per-app rungs arrive in bursts: a rate-limited pull never reads the Keychain.
+    func testARateLimitedPullDoesNotReadTheCredential() {
+        let server = Server([ok(manualLock: nil)])
+        XCTAssertEqual(run(server), .saved(changed: true))
+        clocks.advance(10)
+        var reads = 0
+        let outcome = DeviceLockStatePull.run(
+            readCredential: { reads += 1; return self.credential() }, fallbackDSN: nil, environment: environment(server)
+        )
+        XCTAssertEqual(outcome, .skipped("rate_limited"))
+        XCTAssertEqual(reads, 0)
+        XCTAssertEqual(server.requests.count, 1)
     }
 }
 

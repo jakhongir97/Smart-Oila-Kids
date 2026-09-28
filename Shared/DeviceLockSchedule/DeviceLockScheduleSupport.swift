@@ -576,6 +576,12 @@ struct DeviceLockPolicySharedStore {
         userDefaults?.removeObject(forKey: Self.edgeEvaluatedAtKey)
     }
 
+    /// The app heard an answer from the server (b29 review): an extension's earlier, unconfirmed
+    /// DEVICE_UNPAIRED was a blip and must not count towards a later one.
+    func clearUnpairedSuspicion() {
+        DevicePairingRevocation.recordAnsweredContact(userDefaults: userDefaults)
+    }
+
     func markEdgeEvaluated(at date: Date) {
         userDefaults?.set(date.timeIntervalSince1970, forKey: Self.edgeEvaluatedAtKey)
     }

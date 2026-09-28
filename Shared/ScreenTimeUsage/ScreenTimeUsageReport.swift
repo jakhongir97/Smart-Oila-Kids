@@ -135,6 +135,19 @@ enum ScreenTimeUsageExtensionUploader {
             }
         }
 
+        /// The server answered with something other than DEVICE_UNPAIRED (a 2xx, or a 4xx/5xx
+        /// that is not an unpair): the pairing is alive, and an earlier DEVICE_UNPAIRED was a blip.
+        var wasAnswered: Bool {
+            switch self {
+            case .sent:
+                return true
+            case .failed(let why):
+                return why.hasPrefix(Self.httpFailurePrefix)
+            case .skipped, .unpaired:
+                return false
+            }
+        }
+
         static let httpFailurePrefix = "http_"
         static let encodeFailurePrefix = "encode "
     }

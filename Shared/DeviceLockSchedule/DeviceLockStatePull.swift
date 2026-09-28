@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - The server ended the pairing (seen from an extension)
@@ -10,16 +11,29 @@ import Foundation
 ///
 /// One answer is not enough, for the same reason the app confirms its own (`confirmAndInvalidate`,
 /// a probe 30–120 s later): a backend blip must not wipe every child's pairing at once. The first
-/// DEVICE_UNPAIRED is only SUSPECTED; a second one at least `confirmationGap` later, with no
-/// answered request in between, confirms it.
+/// DEVICE_UNPAIRED is only SUSPECTED; a second one between `confirmationGap` and
+/// `confirmationWindow` later, with no answered request in between, confirms it. Any other HTTP
+/// answer (a 2xx, a 5xx, a refused token) from the extension or the app clears the suspicion, and a
+/// suspicion older than the window is only a new suspicion (b29 review): one stale record must never
+/// turn the two-answer rule into a one-answer rule days later.
+///
+/// The revocation is tied to the TOKEN that was refused (a SHA-256 fingerprint), never to a wall
+/// clock the child can move: any other credential — a new pairing, even one published while the
+/// refused request was still in flight — is not revoked. Pairing also clears both records
+/// (`OilaDeviceClient.pair`), which is the contract the app side relies on.
 enum DevicePairingRevocation {
     /// Epoch seconds (Double) when an extension confirmed the server ended the pairing. The app
-    /// reads it on launch and clears it when it pairs again.
+    /// reads it on launch; a successful pairing clears it.
     static let revokedAtKey = "PAIRING_REVOKED_AT_V1"
+    /// Hex SHA-256 of the access token the server refused (never the token itself).
+    static let revokedTokenKey = "PAIRING_REVOKED_TOKEN_V1"
     /// Epoch seconds of the first unconfirmed DEVICE_UNPAIRED answer.
     static let suspectedAtKey = "PAIRING_UNPAIRED_SUSPECTED_AT_V1"
     /// The shortest gap between the two answers that confirm: the app's own shortest probe delay.
     static let confirmationGap: TimeInterval = 30
+    /// The longest: the app's longest probe (120 s) with slack for the usage-step cadence (60 s,
+    /// then 300 s of use). Beyond it the older answer says nothing about the pairing now.
+    static let confirmationWindow: TimeInterval = 15 * 60
 
     enum Verdict: Equatable {
         case suspected
@@ -31,40 +45,58 @@ enum DevicePairingRevocation {
         return Date(timeIntervalSince1970: raw)
     }
 
-    static func markRevoked(at date: Date, userDefaults: UserDefaults?) {
+    /// `refusedAccessToken` is the token the server answered DEVICE_UNPAIRED to; nil when unknown,
+    /// and then only a newer `updatedAt` un-revokes (the fallback rule).
+    static func markRevoked(at date: Date, refusedAccessToken: String?, userDefaults: UserDefaults?) {
         userDefaults?.set(date.timeIntervalSince1970, forKey: revokedAtKey)
+        if let refusedAccessToken {
+            userDefaults?.set(fingerprint(refusedAccessToken), forKey: revokedTokenKey)
+        } else {
+            userDefaults?.removeObject(forKey: revokedTokenKey)
+        }
         userDefaults?.removeObject(forKey: suspectedAtKey)
     }
 
     /// For the app, once it has wiped itself or paired again.
     static func clear(userDefaults: UserDefaults?) {
         userDefaults?.removeObject(forKey: revokedAtKey)
+        userDefaults?.removeObject(forKey: revokedTokenKey)
         userDefaults?.removeObject(forKey: suspectedAtKey)
     }
 
-    /// Whether an extension should stay off the network: the pairing was revoked and the app has
-    /// not published a credential since (a new pairing publishes a fresh copy, `updatedAt` later).
-    static func isRevoked(credentialUpdatedAt: Date?, userDefaults: UserDefaults?) -> Bool {
+    /// Whether an extension should stay off the network: the pairing was revoked and the credential
+    /// it holds is the one the server refused.
+    static func isRevoked(credential: LocationPushSharedCredential.Payload?, userDefaults: UserDefaults?) -> Bool {
         guard let revokedAt = revokedAt(userDefaults: userDefaults) else { return false }
-        guard let credentialUpdatedAt else { return true }
-        return credentialUpdatedAt <= revokedAt
+        guard let credential else { return true }
+        if let refused = userDefaults?.string(forKey: revokedTokenKey) {
+            return fingerprint(credential.accessToken) == refused
+        }
+        return credential.updatedAt <= revokedAt
     }
 
-    /// One `401 DEVICE_UNPAIRED` at `now`. Confirmed only when an earlier one is on record at least
-    /// `confirmationGap` before it; a record in the future (a clock wound back) starts again.
+    /// One `401 DEVICE_UNPAIRED` at `now`. Confirmed only when an earlier one is on record between
+    /// `confirmationGap` and `confirmationWindow` before it; a record older than that, or in the
+    /// future (a clock wound back), is replaced and this answer is a new suspicion.
     static func recordUnpairedAnswer(at now: Date, userDefaults: UserDefaults?) -> Verdict {
         if let raw = userDefaults?.object(forKey: suspectedAtKey) as? Double, raw > 0 {
             let gap = now.timeIntervalSince(Date(timeIntervalSince1970: raw))
-            if gap >= confirmationGap { return .confirmed }
-            if gap >= 0 { return .suspected }
+            if gap >= confirmationGap && gap <= confirmationWindow { return .confirmed }
+            if gap >= 0 && gap < confirmationGap { return .suspected }
         }
         userDefaults?.set(now.timeIntervalSince1970, forKey: suspectedAtKey)
         return .suspected
     }
 
-    /// Any answered request: the pairing is alive, and an earlier DEVICE_UNPAIRED was a blip.
+    /// Any answered request other than DEVICE_UNPAIRED — from an extension or the app: the pairing
+    /// is alive, and an earlier DEVICE_UNPAIRED was a blip.
     static func recordAnsweredContact(userDefaults: UserDefaults?) {
+        guard userDefaults?.object(forKey: suspectedAtKey) != nil else { return }
         userDefaults?.removeObject(forKey: suspectedAtKey)
+    }
+
+    static func fingerprint(_ token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// `{"success":false,"errorCode":"DEVICE_UNPAIRED",...}` under a 401 — the one answer that
@@ -103,11 +135,17 @@ enum DeviceLockUnpairTeardown {
         }
     }
 
-    static func perform(now: Date, store: DeviceLockPolicySharedStore, userDefaults: UserDefaults?, actions: Actions) {
+    static func perform(
+        now: Date,
+        refusedAccessToken: String?,
+        store: DeviceLockPolicySharedStore,
+        userDefaults: UserDefaults?,
+        actions: Actions
+    ) {
         store.clear()
         actions.releaseWholeDevice()
         actions.stopEdgesAndHeartbeat()
-        DevicePairingRevocation.markRevoked(at: now, userDefaults: userDefaults)
+        DevicePairingRevocation.markRevoked(at: now, refusedAccessToken: refusedAccessToken, userDefaults: userDefaults)
         actions.announce()
     }
 }
@@ -119,10 +157,11 @@ enum DeviceLockUnpairTeardown {
 /// A parent's lock reached a suspended or force-quit app only through a silent push, which iOS
 /// throttles, holds and drops (ANALYSIS_2026-09-28, lock-delivery-silent-push-only). The monitor
 /// extension is the one process iOS reliably wakes while the child is USING the phone — every
-/// device-total usage step, whatever the app's state, Low Power Mode or APNs — so it asks the
-/// server itself there (and on the daily heartbeat), saves the snapshot the app would have saved,
-/// and the caller re-evaluates. A lock lands within one step of use; an early unlock lands at the
-/// next step too.
+/// usage step (device-total with "All Apps & Categories", per-app otherwise), whatever the app's
+/// state, Low Power Mode or APNs — so it asks the server itself there (and on the daily heartbeat,
+/// which exists only while the policy has edges), saves the snapshot the app would have saved, and
+/// the caller re-evaluates. A lock lands within one step of use; an early unlock lands at the next
+/// step too. A phone with no usage selection at all gets no steps, only the heartbeat.
 ///
 /// Bounded for an extension (≈6 MB, short synchronous callbacks): one ephemeral request, waited on
 /// a semaphore for at most `requestTimeout`, at most once per `minimumInterval`, no retries.
@@ -161,6 +200,10 @@ enum DeviceLockStatePull {
         var clock: DeviceLockClock
         var transport: Transport
         var teardown: DeviceLockUnpairTeardown.Actions
+        /// The credential as the app has published it NOW, re-read just before a confirmed unpair
+        /// tears anything down: a new pairing published while the refused request was in flight
+        /// must not be torn down with the old one. nil = none readable (teardown proceeds).
+        var currentCredential: () -> LocationPushSharedCredential.Payload? = { nil }
 
         static var live: Environment {
             Environment(
@@ -168,7 +211,8 @@ enum DeviceLockStatePull {
                 userDefaults: ScreenTimeUsageAppGroup.sharedUserDefaults(),
                 clock: .live,
                 transport: DeviceLockStatePull.liveTransport,
-                teardown: .live
+                teardown: .live,
+                currentCredential: { LocationPushSharedCredential.read().payload }
             )
         }
     }
@@ -195,24 +239,37 @@ enum DeviceLockStatePull {
         return request
     }
 
-    /// One pull. The caller re-evaluates the lock when this returns `.saved(changed: true)`.
+    /// One pull. The caller re-evaluates the lock after any `.saved` (a same policy can still carry
+    /// a new clock anchor that flips the verdict).
     /// `fallbackDSN` names the snapshot when none is saved yet and the credential carries no DSN.
     static func run(
         credential: LocationPushSharedCredential.Payload?,
         fallbackDSN: String?,
         environment: Environment
     ) -> Outcome {
+        run(readCredential: { credential }, fallbackDSN: fallbackDSN, environment: environment)
+    }
+
+    /// `readCredential` is called only once the rate limit has let the pull through: a Keychain
+    /// read is the slowest thing a skipped pull could do, and per-app rungs arrive in bursts.
+    static func run(
+        readCredential: () -> LocationPushSharedCredential.Payload?,
+        fallbackDSN: String?,
+        environment: Environment
+    ) -> Outcome {
         let defaults = environment.userDefaults
         let clock = environment.clock
         let now = clock.wallNow()
-        guard let credential, let request = request(credential: credential) else { return .skipped("no_credential") }
-        if DevicePairingRevocation.isRevoked(credentialUpdatedAt: credential.updatedAt, userDefaults: defaults) {
-            return .skipped("revoked")
-        }
         let previous = environment.store.load()
         let lastAttempt = (defaults?.object(forKey: lastAttemptKey) as? Double).map(Date.init(timeIntervalSince1970:))
         if isRateLimited(now: now, lastAttempt: lastAttempt, lastReceived: previous?.receivedAt) {
             return .skipped("rate_limited")
+        }
+        guard let credential = readCredential(), let request = request(credential: credential) else {
+            return .skipped("no_credential")
+        }
+        if DevicePairingRevocation.isRevoked(credential: credential, userDefaults: defaults) {
+            return .skipped("revoked")
         }
         defaults?.set(now.timeIntervalSince1970, forKey: lastAttemptKey)
 
@@ -228,14 +285,16 @@ enum DeviceLockStatePull {
             return .failed(why)
         case let .http(status, body):
             if DevicePairingRevocation.isDeviceUnpairedAnswer(status: status, body: body) {
-                return handleUnpairedAnswer(now: clock.wallNow(), environment: environment)
+                return handleUnpairedAnswer(now: clock.wallNow(), refused: credential, environment: environment)
             }
+            // Answered, and not with DEVICE_UNPAIRED: the pairing is alive (the app's probe keeps
+            // the session on any other answer too, 5xx and refused tokens included).
+            DevicePairingRevocation.recordAnsweredContact(userDefaults: defaults)
             guard (200 ..< 300).contains(status) else { return .failed("http_\(status)") }
             let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
             // The app's envelope rule (`OilaDeviceClient.send`): `success` defaults to true, and
             // the payload is `data`.
             guard (json?["success"] as? Bool) ?? true else { return .failed("envelope_refused") }
-            DevicePairingRevocation.recordAnsweredContact(userDefaults: defaults)
             let object = (json?["data"] as? [String: Any]) ?? [:]
             let state = DeviceLockStateParser.parseLockState(from: object)
             let anchor = DeviceLockClock.anchor(
@@ -251,20 +310,41 @@ enum DeviceLockStatePull {
             guard let snapshot = DeviceLockPolicySnapshot.fromLockState(state, dsn: dsn, anchor: anchor) else {
                 return .unrecognized
             }
+            // Someone (the app, woken by a push) saved an answer received AFTER this request left:
+            // it is at least as fresh as this one, and writing over it could put back a policy the
+            // parent has just changed (b29 review). Its own evaluation already made the OS follow.
+            let current = environment.store.load()
+            if let current, current.receivedAt > sentWall, current.receivedAt != previous?.receivedAt {
+                return .skipped("superseded")
+            }
             environment.store.save(snapshot)
-            return .saved(changed: !snapshot.hasSamePolicy(as: previous))
+            return .saved(changed: !snapshot.hasSamePolicy(as: current))
         }
     }
 
-    /// A `401 DEVICE_UNPAIRED` from any extension request (this GET or the usage upload): suspect,
-    /// or — the second time — tear the lock down and leave the app its record.
-    static func handleUnpairedAnswer(now: Date, environment: Environment) -> Outcome {
+    /// A `401 DEVICE_UNPAIRED` to `refused` from any extension request (this GET or the usage
+    /// upload): suspect, or — the second time — tear the lock down and leave the app its record.
+    /// A confirmation is dropped when the app has published a different credential since the
+    /// request left (a new pairing): that pairing is not the one the server refused.
+    static func handleUnpairedAnswer(
+        now: Date,
+        refused: LocationPushSharedCredential.Payload?,
+        environment: Environment
+    ) -> Outcome {
         switch DevicePairingRevocation.recordUnpairedAnswer(at: now, userDefaults: environment.userDefaults) {
         case .suspected:
             return .unpairedSuspected
         case .confirmed:
+            if let refused, let current = environment.currentCredential(), current.accessToken != refused.accessToken {
+                DevicePairingRevocation.recordAnsweredContact(userDefaults: environment.userDefaults)
+                return .skipped("credential_changed")
+            }
             DeviceLockUnpairTeardown.perform(
-                now: now, store: environment.store, userDefaults: environment.userDefaults, actions: environment.teardown
+                now: now,
+                refusedAccessToken: refused?.accessToken,
+                store: environment.store,
+                userDefaults: environment.userDefaults,
+                actions: environment.teardown
             )
             return .unpairedConfirmed
         }

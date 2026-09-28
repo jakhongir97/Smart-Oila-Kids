@@ -8397,4 +8397,25 @@ final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
         service.reevaluateLock(reason: "tick")
         XCTAssertFalse(service.isLocked, "and nothing comes back from a policy that is gone")
     }
+    /// b29 review: an extension's unconfirmed DEVICE_UNPAIRED must not outlive proof that the
+    /// pairing is alive — the app's own unpair clears it, and so does any call the server answers.
+    func testTheAppClearsAnExtensionsUnpairSuspicion() async {
+        let appGroup = makeDefaults()
+        let h = Harness(clocks: Clocks(F.local(2026, 9, 21, 13, 0)), store: DeviceLockPolicySharedStore(userDefaults: appGroup),
+                        legacy: makeDefaults(), recorder: Recorder())
+        let service = makeService(h)
+
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: Date(), userDefaults: appGroup)
+        service.clearLockPolicy()
+        XCTAssertNil(appGroup.object(forKey: DevicePairingRevocation.suspectedAtKey), "the app's unpair")
+
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: Date(), userDefaults: appGroup)
+        service.start() // the first status post is answered (the stub accepts it)
+        defer { service.stop() }
+        let deadline = Date().addingTimeInterval(5)
+        while appGroup.object(forKey: DevicePairingRevocation.suspectedAtKey) != nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertNil(appGroup.object(forKey: DevicePairingRevocation.suspectedAtKey), "an answered call")
+    }
 }

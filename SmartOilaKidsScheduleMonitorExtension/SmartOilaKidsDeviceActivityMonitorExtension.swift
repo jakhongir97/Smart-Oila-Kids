@@ -131,11 +131,12 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
             handleLockEdge(activity: activity, callback: .recheck)
             // Then the server's word (build 29): a lock the silent push never delivered — the app
             // suspended, force-quit, Low Power Mode — lands on this step of use, and so does an
-            // early unlock. Only on the device-total rung (every few minutes of real use), and at
-            // most once a minute; the per-app rungs arrive in bursts.
-            if ScreenTimeUsageActivity.parse(eventName: event.rawValue)?.bundleId == ScreenTimeUsageLedger.deviceTotalKey {
-                pullLockPolicy(reason: "usage_step", activity: activity)
-            }
+            // early unlock. On ANY usage rung, not only the device-total one: that rung exists
+            // only when the child picked "All Apps & Categories", and a phone with a few single
+            // apps picked must be reached too (b29 review). Per-app rungs arrive in bursts; the
+            // pull's own 60 s App Group limit turns all but one into a cheap `rate_limited` skip
+            // (checked before the Keychain is read).
+            pullLockPolicy(reason: "usage_step", activity: activity)
             if recorded {
                 uploadUsage(reason: "threshold", force: false)
             }
@@ -276,19 +277,27 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     /// (written or released) and the edges re-armed at once, and a running app is told. One line
     /// per pull in `idevicesyslog` (`lock_pull`), including the skips.
     func pullLockPolicy(reason: String, activity: DeviceActivityName) {
-        let credential = LocationPushSharedCredential.read()
         let startedAt = DispatchTime.now()
+        var keychainStatus: OSStatus?
         let outcome = DeviceLockStatePull.run(
-            credential: credential.payload,
+            readCredential: {
+                let credential = LocationPushSharedCredential.read()
+                keychainStatus = credential.status
+                return credential.payload
+            },
             fallbackDSN: ScreenTimeUsageActivity.dsn(from: activity.rawValue),
             environment: .live
         )
         let elapsedMs = (DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds) / 1_000_000
+        let keychain = keychainStatus.map { String($0) } ?? "unread"
         Self.log.notice(
-            "schedule_monitor lock_pull reason=\(reason, privacy: .public) keychain=\(credential.status, privacy: .public) outcome=\(String(describing: outcome), privacy: .public) ms=\(elapsedMs, privacy: .public)"
+            "schedule_monitor lock_pull reason=\(reason, privacy: .public) keychain=\(keychain, privacy: .public) outcome=\(String(describing: outcome), privacy: .public) ms=\(elapsedMs, privacy: .public)"
         )
-        if case .saved(changed: true) = outcome {
-            handleLockEdge(activity: activity, callback: .pulled)
+        // After ANY save, not only a changed policy (b29 review): the same policy with a fresh
+        // server-time anchor (a reboot, a clock the child moved) can flip the verdict. `.recheck`
+        // stays quiet unless it wrote or armed something.
+        if case .saved(let changed) = outcome {
+            handleLockEdge(activity: activity, callback: changed ? .pulled : .recheck)
         }
     }
 }
@@ -369,7 +378,7 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         // Unpaired, as far as this phone knows (build 29): nothing more goes out until the app has
         // published a new pairing's credential.
         if DevicePairingRevocation.isRevoked(
-            credentialUpdatedAt: credential.payload?.updatedAt,
+            credential: credential.payload,
             userDefaults: ScreenTimeUsageAppGroup.sharedUserDefaults()
         ) {
             Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(revoked)")
@@ -406,8 +415,11 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         // the same suspect-then-confirm rule as the lock pull, and on confirmation the lock is torn
         // down for the app to find.
         if case .unpaired = outcome {
-            let verdict = DeviceLockStatePull.handleUnpairedAnswer(now: Date(), environment: .live)
+            let verdict = DeviceLockStatePull.handleUnpairedAnswer(now: Date(), refused: credential.payload, environment: .live)
             Self.log.notice("schedule_monitor lock_pull reason=usage_upload outcome=\(String(describing: verdict), privacy: .public)")
+        } else if outcome.wasAnswered {
+            // Any other HTTP answer: the pairing is alive, so an earlier DEVICE_UNPAIRED was a blip.
+            DevicePairingRevocation.recordAnsweredContact(userDefaults: ScreenTimeUsageAppGroup.sharedUserDefaults())
         }
         Self.log.notice(
             "schedule_monitor usage_upload reason=\(reason, privacy: .public) keychain=\(credential.status, privacy: .public) outcome=\(String(describing: outcome), privacy: .public)"

@@ -515,12 +515,14 @@ final class OilaDeviceClient: OilaDeviceServicing {
         baseURL: URL = AppConfig.oilaAPIBaseURL,
         session: URLSession = .shared,
         secureTokens: SecureTokenStoring = SecureTokenStore.oila,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        appGroupDefaults: UserDefaults? = ScreenTimeUsageAppGroup.sharedUserDefaults()
     ) {
         self.baseURL = baseURL
         self.session = session
         self.secureTokens = secureTokens
         self.userDefaults = userDefaults
+        self.appGroupDefaults = appGroupDefaults
     }
 
     // MARK: Pairing / session
@@ -572,6 +574,10 @@ final class OilaDeviceClient: OilaDeviceServicing {
             throw OilaAPIError(statusCode: 200, message: "Pairing response missing tokens", errorCode: "PAIR_NO_TOKEN", fieldErrors: [])
         }
         try persist(tokens)
+        // A new pairing is not the one an extension saw revoked (build 29 contract): clear the
+        // App Group records, so the extensions pull and upload again and the app's launch check
+        // never wipes the pairing it just made.
+        DevicePairingRevocation.clear(userDefaults: appGroupDefaults)
         return OilaPairResult(tokens: tokens, child: Self.parseChild(from: data), dsn: dsn)
     }
 
@@ -1750,6 +1756,8 @@ final class OilaDeviceClient: OilaDeviceServicing {
     private let session: URLSession
     private let secureTokens: SecureTokenStoring
     private let userDefaults: UserDefaults
+    /// The App Group, where the extensions keep their pairing-revocation records.
+    private let appGroupDefaults: UserDefaults?
     private let refreshGate = OilaRefreshGate()
 }
 

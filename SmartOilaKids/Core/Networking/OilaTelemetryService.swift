@@ -1530,6 +1530,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // The server answered (a status post, a location batch…): the network is back, so the lock
         // poll's ladder starts again from the bottom (build 29, lock-poll-backoff-10min).
         consecutiveLockFailures = 0
+        // And the pairing is alive: an extension's unconfirmed DEVICE_UNPAIRED was a blip (b29
+        // review — a stale suspicion must never confirm a later blip days on).
+        lockRuntime.store.clearUnpairedSuspicion()
     }
 
     /// How long the server may refuse the token, with no answered call at all, before the child's chip
@@ -2202,6 +2205,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         lockEdgeTimer?.invalidate(); lockEdgeTimer = nil
         nextLockCheckAt = nil
         lockRuntime.store.clear()
+        lockRuntime.store.clearUnpairedSuspicion()
         lockRuntime.stopAllEdges()
         lastArmedEdgeSignature = nil
         lastLoggedClockTamper = nil
