@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ManagedSettings
 
 // MARK: - The server ended the pairing (seen from an extension)
 
@@ -9,8 +10,9 @@ import Foundation
 /// first to hear `401 DEVICE_UNPAIRED`. It cannot unpair the app (no Keychain of the app's, no
 /// scene); it writes `revokedAtKey` and the app wipes itself on its next launch.
 ///
-/// One answer is not enough, for the same reason the app confirms its own (`confirmAndInvalidate`,
-/// a probe 30–120 s later): a backend blip must not wipe every child's pairing at once. The first
+/// One answer is not enough, for the same reason the app confirms its own (`PairingResetCoordinator`
+/// probes a DEVICE_UNPAIRED `confirmationGap`…45 s after it, never at once — final review): a
+/// backend blip must not wipe every child's pairing at once. The first
 /// DEVICE_UNPAIRED is only SUSPECTED; a second one between `confirmationGap` and
 /// `confirmationWindow` later, with no answered request in between, confirms it. Any other HTTP
 /// answer (a 2xx, a 5xx, a refused token) from the extension or the app clears the suspicion, and a
@@ -29,10 +31,13 @@ enum DevicePairingRevocation {
     static let revokedTokenKey = "PAIRING_REVOKED_TOKEN_V1"
     /// Epoch seconds of the first unconfirmed DEVICE_UNPAIRED answer.
     static let suspectedAtKey = "PAIRING_UNPAIRED_SUSPECTED_AT_V1"
-    /// The shortest gap between the two answers that confirm: the app's own shortest probe delay.
+    /// The shortest gap between the two answers that confirm. The app waits at least this long too
+    /// before its probe of a DEVICE_UNPAIRED (`PairingResetCoordinator.unpairedProbeDelayRange`), so
+    /// both processes need two answers this far apart before anything is torn down.
     static let confirmationGap: TimeInterval = 30
-    /// The longest: the app's longest probe (120 s) with slack for the usage-step cadence (60 s,
-    /// then 300 s of use). Beyond it the older answer says nothing about the pairing now.
+    /// The longest: the app's longest probe delay (120 s, telemetry's legacy confirmation) with slack
+    /// for the usage-step cadence (60 s, then 300 s of use). Beyond it the older answer says nothing
+    /// about the pairing now.
     static let confirmationWindow: TimeInterval = 15 * 60
 
     enum Verdict: Equatable {
@@ -113,7 +118,10 @@ enum DevicePairingRevocation {
 
 /// A confirmed unpair, from an extension: a phone that left the family must not stay locked by it.
 /// The same teardown as the app's `clearLockPolicy` (snapshot, OS shield, edges, heartbeat), plus
-/// the App Group record the app acts on.
+/// the per-app blocks and the deletion protection (final review: a force-quit app left Telegram
+/// shielded and Delete App hidden until someone opened Bolajon360 online), plus the App Group
+/// record the app acts on. A marker that turns out stale puts all of it back
+/// (`PairingResetCoordinator` → `reassertEnforcement`).
 enum DeviceLockUnpairTeardown {
     struct Actions {
         /// Writes the two whole-device keys back to unlocked on the default store.
@@ -122,6 +130,9 @@ enum DeviceLockUnpairTeardown {
         var stopEdgesAndHeartbeat: () -> Void
         /// Tells a running app (the Darwin notification it already follows).
         var announce: () -> Void
+        /// Clears the per-app shields (`shield.applications`) and `denyAppRemoval` on the default
+        /// store — the rest of what `BlockedApplicationsController` writes there.
+        var releasePerAppAndRemovalProtection: () -> Void = {}
 
         static var live: Actions {
             Actions(
@@ -130,7 +141,12 @@ enum DeviceLockUnpairTeardown {
                     DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter())
                     DeviceLockHeartbeat.stopAll()
                 },
-                announce: { DeviceLockEdgeMonitoring.postDidEvaluate() }
+                announce: { DeviceLockEdgeMonitoring.postDidEvaluate() },
+                releasePerAppAndRemovalProtection: {
+                    let store = ManagedSettingsStore()
+                    if store.shield.applications != nil { store.shield.applications = nil }
+                    if store.application.denyAppRemoval != nil { store.application.denyAppRemoval = nil }
+                }
             )
         }
     }
@@ -144,6 +160,7 @@ enum DeviceLockUnpairTeardown {
     ) {
         store.clear()
         actions.releaseWholeDevice()
+        actions.releasePerAppAndRemovalProtection()
         actions.stopEdgesAndHeartbeat()
         DevicePairingRevocation.markRevoked(at: now, refusedAccessToken: refusedAccessToken, userDefaults: userDefaults)
         actions.announce()
@@ -200,9 +217,13 @@ enum DeviceLockStatePull {
         var clock: DeviceLockClock
         var transport: Transport
         var teardown: DeviceLockUnpairTeardown.Actions
-        /// The credential as the app has published it NOW, re-read just before a confirmed unpair
-        /// tears anything down: a new pairing published while the refused request was in flight
-        /// must not be torn down with the old one. nil = none readable (teardown proceeds).
+        /// The credential as the app has published it NOW, re-read after the answer arrives:
+        /// • before a confirmed unpair tears anything down — a new pairing published while the
+        ///   refused request was in flight must not be torn down with the old one (nil: teardown
+        ///   proceeds);
+        /// • before a 2xx is saved — nil, or another token, means the app wiped (or re-paired)
+        ///   while the request was in flight, and the old family's policy must not be written back
+        ///   into the purged App Group (final review).
         var currentCredential: () -> LocationPushSharedCredential.Payload? = { nil }
 
         static var live: Environment {
@@ -316,6 +337,15 @@ enum DeviceLockStatePull {
             let current = environment.store.load()
             if let current, current.receivedAt > sentWall, current.receivedAt != previous?.receivedAt {
                 return .skipped("superseded")
+            }
+            // The pairing this request asked about must still be the one the app has published
+            // (final review): the app's wipe tears the shared credential down FIRST
+            // (`stopForPairingReset` → `LocationPushRegistrar.teardown`), so a late 200 that lands
+            // after an unpair — or after a quick re-pair — finds nil or another token here and
+            // writes nothing, and the caller re-evaluates nothing.
+            guard let published = environment.currentCredential(),
+                  published.accessToken == credential.accessToken else {
+                return .skipped("credential_changed")
             }
             environment.store.save(snapshot)
             return .saved(changed: !snapshot.hasSamePolicy(as: current))

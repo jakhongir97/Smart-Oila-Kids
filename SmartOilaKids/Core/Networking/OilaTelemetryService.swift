@@ -90,8 +90,9 @@ enum LinkHealth: Equatable {
         // Build 29: while `PairingResetCoordinator` is confirming that the pairing is gone, the chip
         // is the neutral "Ulanmoqda…", never the red "Hozir aloqa yo'q" — photo 699758 (Ibrohim
         // 699760) was exactly that red chip on a phone whose parent had just unpaired it, read as a
-        // network problem. The confirmation is seconds long; its answer is either the language
-        // screen or a healthy chip.
+        // network problem. The confirmation takes at most about a minute (a 30–45 s wait, then one
+        // probe); its answer is either the language screen or a healthy chip. The coordinator does
+        // not count the sustained-UNAUTHORIZED sequence's long waits as pending.
         if revocationPending { return .connecting }
         guard hasCredential else { return .noCredential }
         if awaitingContact, isContactStale(lastContactAt: lastContactAt, now: now) { return .connecting }
@@ -1637,8 +1638,8 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// status post is dropped. `recordCredentialRefusal` counts each one and
     /// `OilaDeviceClient.noteCredentialRejected` records it.
     ///
-    /// Even the server's DEVICE_UNPAIRED is confirmed by an independent probe — sent at once since
-    /// build 29, see `confirmAndInvalidate` — rather than trusted from a single response.
+    /// Even the server's DEVICE_UNPAIRED is confirmed by an independent probe — sent 30–45 s later
+    /// since build 29, see `confirmAndInvalidate` — rather than trusted from a single response.
     private func handleAuthorizationLoss(_ error: OilaAPIError) {
         let credentialAbsent = error.isCredentialAbsent
         if credentialAbsent { hasCredential = false }
@@ -1656,19 +1657,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             return
         }
         isConfirmingInvalidation = true
-        // DEVICE_UNPAIRED is probed AT ONCE — build 29, Ibrohim 699760: the random 30–120 s wait
-        // kept an unpaired phone on Home showing "no connection" (photo 699758), and a suspension
-        // during the wait paused it indefinitely. DEVICE_TOKEN_EXPIRED keeps the wait (b29 review):
-        // it is synthesized on the phone from a server UNAUTHORIZED plus the phone's own clock, so
-        // an immediate probe could land in the same seconds-long server blip and confirm it.
-        let probeImmediately = error.errorCode == OilaAPIError.deviceUnpairedCode
-        Task { [weak self] in await self?.confirmAndInvalidate(probeImmediately: probeImmediately) }
+        // DEVICE_UNPAIRED is probed after a SHORT wait — build 29, Ibrohim 699760: the random
+        // 30–120 s wait kept an unpaired phone on Home showing "no connection" (photo 699758). Not
+        // at once (final review): a probe one round trip after the refusal can land inside the same
+        // seconds-long backend fault and wipe every phone that made a request in it. 30–45 s is the
+        // monitor extension's own `DevicePairingRevocation.confirmationGap`, and the chip stays on
+        // the neutral "Ulanmoqda…" meanwhile (`PairingResetCoordinator.isConfirmingRevocation`).
+        // DEVICE_TOKEN_EXPIRED and REFRESH_INVALID keep the 30–120 s wait.
+        let shortFirstDelay = error.errorCode == OilaAPIError.deviceUnpairedCode
+        Task { [weak self] in await self?.confirmAndInvalidate(shortFirstDelay: shortFirstDelay) }
     }
 
     /// Confirm a reported `requiresRePair` before destroying the pairing.
     ///
     /// Each probe is an authorized `GET /device/lock/state`. Since build 29 the probe after a
-    /// DEVICE_UNPAIRED goes out immediately (`probeImmediately`); DEVICE_TOKEN_EXPIRED and
+    /// DEVICE_UNPAIRED waits only `PairingResetCoordinator.unpairedProbeDelayRange` (30–45 s,
+    /// `shortFirstDelay`); DEVICE_TOKEN_EXPIRED and
     /// REFRESH_INVALID still wait a randomized 30–120 s before each probe — the delay that keeps a backend blip from unpairing the
     /// fleet at once and de-synchronizes a mass revocation. Any probe that succeeds, or
     /// that fails for any other reason (offline, 5xx, and since 2026-09-24 a 401 UNAUTHORIZED),
@@ -1686,22 +1690,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// defence, from when any 401 got here: a JWT signing-key rotation or a gateway restart mid-deploy
     /// answered 401 for seconds and unpaired every device, and recovery needed a parent to mint a new
     /// code.
-    private func confirmAndInvalidate(probeImmediately: Bool = false) async {
+    private func confirmAndInvalidate(shortFirstDelay: Bool = false) async {
         defer { isConfirmingInvalidation = false }
         guard !didSignalInvalidation, isRunning else { return }
 
         for attempt in 1 ... Self.invalidationConfirmationsRequired {
-            // Build 29: the FIRST probe after DEVICE_UNPAIRED goes out now, with no randomized wait.
-            // The wait only ever protected against a fleet-wide blip, and DEVICE_UNPAIRED is
-            // per-device by construction (re-pairing needs a new code from that child's parent).
-            // DEVICE_TOKEN_EXPIRED keeps its one delayed probe; REFRESH_INVALID the delayed multi-probe.
-            if !(probeImmediately && attempt == 1) {
-                let delay = Self.invalidationProbeDelayRange.randomElement() ?? 45
-                do {
-                    try await sleeper(UInt64(delay) * 1_000_000_000)
-                } catch {
-                    return // cancelled — treat as "not confirmed"
-                }
+            // Build 29: the FIRST probe after DEVICE_UNPAIRED waits 30–45 s, never less than the
+            // monitor extension's confirmation gap (final review — the wait is what keeps a
+            // seconds-long backend fault from confirming itself across the fleet).
+            // DEVICE_TOKEN_EXPIRED keeps its one 30–120 s probe; REFRESH_INVALID the multi-probe.
+            let delay: TimeInterval = shortFirstDelay && attempt == 1
+                ? TimeInterval.random(in: PairingResetCoordinator.unpairedProbeDelayRange)
+                : TimeInterval(Self.invalidationProbeDelayRange.randomElement() ?? 45)
+            do {
+                try await sleeper(UInt64(delay * 1_000_000_000))
+            } catch {
+                return // cancelled — treat as "not confirmed"
             }
             guard !didSignalInvalidation, isRunning else { return }
 

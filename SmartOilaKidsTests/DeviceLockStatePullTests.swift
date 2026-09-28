@@ -33,14 +33,26 @@ final class DeviceLockStatePullTests: XCTestCase {
     }
 
     final class Teardown: @unchecked Sendable {
-        var released = 0, stopped = 0, announced = 0
+        var released = 0, stopped = 0, announced = 0, releasedPerApp = 0
         var actions: DeviceLockUnpairTeardown.Actions {
             DeviceLockUnpairTeardown.Actions(
                 releaseWholeDevice: { self.released += 1 },
                 stopEdgesAndHeartbeat: { self.stopped += 1 },
-                announce: { self.announced += 1 }
+                announce: { self.announced += 1 },
+                releasePerAppAndRemovalProtection: { self.releasedPerApp += 1 }
             )
         }
+    }
+
+    /// What the app has published in the shared Keychain item, as the pull re-reads it after the
+    /// answer: by default the credential the request itself carried (the pairing is unchanged).
+    static func publishedCredential(of server: Server) -> LocationPushSharedCredential.Payload? {
+        guard let bearer = server.requests.last?.value(forHTTPHeaderField: "Authorization"),
+              bearer.hasPrefix("Bearer ") else { return nil }
+        return LocationPushSharedCredential.Payload(
+            accessToken: String(bearer.dropFirst("Bearer ".count)), baseURL: "https://api.example.test/api/v1",
+            dsn: nil, updatedAt: Date(timeIntervalSince1970: 0)
+        )
     }
 
     private var suiteNames: [String] = []
@@ -72,7 +84,8 @@ final class DeviceLockStatePullTests: XCTestCase {
     private func environment(_ server: Server) -> DeviceLockStatePull.Environment {
         DeviceLockStatePull.Environment(
             store: store, userDefaults: defaults, clock: clocks.clock,
-            transport: { request, _ in server.answer(request) }, teardown: teardown.actions
+            transport: { request, _ in server.answer(request) }, teardown: teardown.actions,
+            currentCredential: { Self.publishedCredential(of: server) }
         )
     }
 
@@ -236,6 +249,7 @@ final class DeviceLockStatePullTests: XCTestCase {
         XCTAssertNil(store.load(), "the old family's policy is gone")
         XCTAssertFalse(lockedNow())
         XCTAssertEqual(teardown.released, 1, "the whole-device shield is written back to unlocked")
+        XCTAssertEqual(teardown.releasedPerApp, 1, "final review: per-app shields and deletion protection go too")
         XCTAssertEqual(teardown.stopped, 1, "edges and heartbeat stopped")
         XCTAssertEqual(teardown.announced, 1, "a running app is told")
         let raw = defaults.object(forKey: DevicePairingRevocation.revokedAtKey) as? Double
@@ -304,7 +318,7 @@ final class DeviceLockStatePullTests: XCTestCase {
         )
         XCTAssertNil(store.load())
         XCTAssertNil(store.lastEdgeEvaluatedAt())
-        XCTAssertEqual([teardown.released, teardown.stopped, teardown.announced], [1, 1, 1])
+        XCTAssertEqual([teardown.released, teardown.stopped, teardown.announced, teardown.releasedPerApp], [1, 1, 1, 1])
         XCTAssertEqual(DevicePairingRevocation.revokedAt(userDefaults: defaults), t0)
         XCTAssertNotEqual(defaults.string(forKey: DevicePairingRevocation.revokedTokenKey), "device-token", "a fingerprint, never the token")
         XCTAssertTrue(DevicePairingRevocation.isRevoked(credential: credential(updatedAt: t0.addingTimeInterval(-1)), userDefaults: defaults))
@@ -404,7 +418,8 @@ final class DeviceLockStatePullTests: XCTestCase {
         suiteNames.append(appsSuite)
         let appEnv = DeviceLockStatePull.Environment(
             store: store, userDefaults: UserDefaults(suiteName: appsSuite), clock: clocks.clock,
-            transport: { request, _ in appsAnswer.answer(request) }, teardown: teardown.actions
+            transport: { request, _ in appsAnswer.answer(request) }, teardown: teardown.actions,
+            currentCredential: { Self.publishedCredential(of: appsAnswer) }
         )
         var env = environment(pulled)
         env.transport = { [self] request, _ in
@@ -416,6 +431,36 @@ final class DeviceLockStatePullTests: XCTestCase {
         }
         XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: env), .skipped("superseded"))
         XCTAssertTrue(lockedNow(), "the app's newer lock stands")
+    }
+
+    /// Final review: the app wiped the pairing while this pull's request was in flight (its first
+    /// step tears the shared credential down). The late 200 must not write the old family's lock
+    /// back into the purged App Group — nothing is saved and the caller re-evaluates nothing.
+    func testALate200AfterTheAppWipedThePairingIsNotSaved() {
+        let lockWindow = (t0.addingTimeInterval(-60), t0.addingTimeInterval(8 * 3_600))
+        let server = Server([ok(manualLock: lockWindow)])
+        var env = environment(server)
+        env.currentCredential = { nil }
+        XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: env),
+                       .skipped("credential_changed"))
+        XCTAssertNil(store.load(), "nothing saved into the purged App Group")
+        XCTAssertFalse(lockedNow())
+    }
+
+    /// The same late 200 after a quick re-pair: the new pairing's token is published, so the old
+    /// family's policy is not saved over the new pairing.
+    func testALate200ForAReplacedCredentialIsNotSaved() {
+        let server = Server([ok(manualLock: (t0.addingTimeInterval(-60), t0.addingTimeInterval(900)))])
+        var env = environment(server)
+        env.currentCredential = { [self] in credential(updatedAt: clocks.wall, accessToken: "new-pairing") }
+        XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: env),
+                       .skipped("credential_changed"))
+        XCTAssertNil(store.load())
+        // The unchanged pairing still saves.
+        clocks.advance(61)
+        env.currentCredential = { [self] in credential() }
+        XCTAssertEqual(DeviceLockStatePull.run(credential: credential(), fallbackDSN: nil, environment: env),
+                       .saved(changed: true))
     }
 
     /// A new pairing published while the refused request was in flight is not the pairing the

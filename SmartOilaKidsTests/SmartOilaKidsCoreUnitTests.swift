@@ -5720,6 +5720,14 @@ final class TelemetryPairingLossTests: XCTestCase {
         var value: Int { lock.lock(); defer { lock.unlock() }; return count }
     }
 
+    /// The waits the service asked its sleeper for, in nanoseconds.
+    private final class WaitLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [UInt64] = []
+        func append(_ nanoseconds: UInt64) { lock.lock(); items.append(nanoseconds); lock.unlock() }
+        var all: [UInt64] { lock.lock(); defer { lock.unlock() }; return items }
+    }
+
     /// Every call the telemetry service makes, answered from fixed scripts.
     private final class Stub: OilaDeviceServicing, @unchecked Sendable {
         struct Unimplemented: Error {}
@@ -5933,12 +5941,18 @@ final class TelemetryPairingLossTests: XCTestCase {
         let stub = Stub(lockAnswers: [apiError(401, OilaAPIError.deviceUnpairedCode)])
         let (service, probes, invalidations) = start(stub)
         defer { service.stop() }
+        let waits = WaitLog()
+        service.sleeper = { nanoseconds in probes.bump(); waits.append(nanoseconds) }
 
         let ended = await waitUntil { invalidations.value == 1 }
 
         XCTAssertTrue(ended, "DEVICE_UNPAIRED, confirmed, ends the pairing")
-        // Build 29 (699760): the one probe goes out AT ONCE — no randomized wait before it.
-        XCTAssertEqual(probes.value, 0, "conclusive: no delay before the ONE probe")
+        // Build 29 (699760) + final review: ONE probe, after a SHORT wait — never less than the
+        // monitor extension's confirmation gap, so two answers inside one backend fault cannot wipe.
+        XCTAssertEqual(probes.value, 1, "one short wait before the ONE probe")
+        let wait = TimeInterval(waits.all.first ?? 0) / 1_000_000_000
+        XCTAssertGreaterThanOrEqual(wait, DevicePairingRevocation.confirmationGap - 0.001)
+        XCTAssertLessThanOrEqual(wait, PairingResetCoordinator.unpairedProbeDelayRange.upperBound + 0.001)
         XCTAssertEqual(stub.lockStateCalls, 2, "the poll that heard it, then the one probe")
         XCTAssertFalse(service.isRunning, "the pairing's telemetry stops with it")
     }
@@ -6040,7 +6054,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 200_000_000)
 
         XCTAssertTrue(probed)
-        XCTAssertEqual(probes.value, 0, "build 29: the probe after DEVICE_UNPAIRED goes out with no wait")
+        XCTAssertEqual(probes.value, 1, "final review: the probe after DEVICE_UNPAIRED waits its short gap")
         XCTAssertEqual(invalidations.value, 0)
         XCTAssertTrue(service.isRunning)
     }
@@ -6715,7 +6729,7 @@ final class TelemetryPairingLossTests: XCTestCase {
         let ended = await waitUntil { invalidations.value == 1 }
 
         XCTAssertTrue(ended)
-        XCTAssertEqual(probes.value, 1, "one delayed probe — only DEVICE_UNPAIRED skips the wait")
+        XCTAssertEqual(probes.value, 1, "one delayed probe")
         XCTAssertEqual(stub.lockStateCalls, 2, "the poll that heard it, then the one probe")
         XCTAssertFalse(service.isRunning)
     }
