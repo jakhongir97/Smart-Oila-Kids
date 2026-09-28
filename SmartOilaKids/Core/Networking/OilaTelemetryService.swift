@@ -1466,20 +1466,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // The throttle skipped that post, the `default` branch stopped every location service, the
         // app was suspended, and the parent's page kept saying "granted". An unchanged status (a
         // pause/resume re-applying it) stays rate-limited like any other event.
-        switch Self.authorizationStatusPost(
-            current: LocationAuthorizationSnapshot(status: status, accuracy: locationManager.accuracyAuthorization),
-            lastReported: lastReportedLocationAuthorization,
-            lastStatusPostAt: lastStatusPostAt,
-            now: Date(),
-            minimumGap: eventStatusMinimumGap
-        ) {
-        case .immediate:
-            postStatusUnderBackgroundTask(named: "oila.telemetry.authorization")
-        case .event:
-            Task { await postStatusForEvent() }
-        case .throttled:
-            break
-        }
+        reportLocationAuthorization(
+            locationAuthorizationReader?()
+                ?? LocationAuthorizationSnapshot(status: status, accuracy: locationManager.accuracyAuthorization)
+        )
         switch status {
         case .authorizedAlways:
             // Info.plist declares UIBackgroundModes=location, so background updates are safe.
@@ -1900,23 +1890,64 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         return .event
     }
 
-    /// `postStatus()` held open by a background-task assertion, so a post started just before
-    /// suspension still finishes. Same shape as `flushNow()`.
-    private func postStatusUnderBackgroundTask(named name: String) {
-        guard isRunning else { return }
-        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: name) {
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
-            }
+    /// The reporting half of `applyAuthorization`: decides with `authorizationStatusPost` against
+    /// what the last post really carried, then acts. Internal so a test can drive it with any pair
+    /// (the simulator's own `CLLocationManager` only ever says `.notDetermined`). Returns the decision.
+    @discardableResult
+    func reportLocationAuthorization(_ current: LocationAuthorizationSnapshot, now: Date = Date()) -> AuthorizationStatusPost {
+        guard isRunning else { return .throttled }
+        let decision = Self.authorizationStatusPost(
+            current: current,
+            lastReported: lastReportedLocationAuthorization,
+            lastStatusPostAt: lastStatusPostAt,
+            now: now,
+            minimumGap: eventStatusMinimumGap
+        )
+        switch decision {
+        case .immediate:
+            postAuthorizationChangeUnderBackgroundTask()
+        case .event:
+            Task { await postStatusForEvent() }
+        case .throttled:
+            break
         }
+        return decision
+    }
+
+    /// Background time for an authorization-change post and its retries: begins it and returns the
+    /// call that ends it. Injection seam, like `sosSendKeepAlive`, so a test sees it end only after
+    /// the last attempt.
+    var authorizationPostKeepAlive: @MainActor () -> @MainActor () -> Void = {
+        let keepAlive = SOSRequestKeepAlive.begin(named: "oila.telemetry.authorization")
+        return { keepAlive.end() }
+    }
+    /// The pause before each retry of a failed authorization-change post. Injection seam so a test
+    /// retries without real time passing.
+    var authorizationPostRetrySleeper: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
+    /// Retries after the first attempt, and the pause before each. Short: the whole run has to fit in
+    /// the ~30 s of background time iOS grants, and this is the last post before the app is suspended
+    /// (the `default` branch of `applyAuthorization` has just stopped every location service).
+    nonisolated static let authorizationPostRetryDelays: [UInt64] = [3_000_000_000, 8_000_000_000]
+
+    /// `postStatus()` held open by a background-task assertion, so a post started just before
+    /// suspension still finishes — and retried on a transient failure while the assertion lasts.
+    ///
+    /// Tried once, a weak connection lost the news for good: the `default` branch stops location,
+    /// the heartbeat dies at suspension, and the parent's page kept saying "granted" until the child
+    /// next opened the app. A failed attempt also hands the snapshot back (see `sendStatus`), so if
+    /// every retry fails too, the next report of the same status still counts as a change.
+    private func postAuthorizationChangeUnderBackgroundTask() {
+        guard isRunning else { return }
+        let endKeepAlive = authorizationPostKeepAlive()
         Task {
-            await postStatus()
-            if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
-                backgroundTask = .invalid
+            var outcome = await sendStatus()
+            for delay in Self.authorizationPostRetryDelays {
+                guard outcome == .transientFailure, isRunning else { break }
+                do { try await authorizationPostRetrySleeper(delay) } catch { break }
+                guard isRunning else { break }
+                outcome = await sendStatus()
             }
+            endKeepAlive()
         }
     }
 
@@ -1956,12 +1987,50 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     private func postStatus() async {
-        guard isRunning else { return }
-        lastStatusPostAt = Date()
-        lastReportedLocationAuthorization = LocationAuthorizationSnapshot(
+        _ = await sendStatus()
+    }
+
+    enum StatusPostOutcome: Equatable {
+        case delivered
+        /// Worth another attempt: no answer, a server error.
+        case transientFailure
+        /// The token was refused (counted by `recordCredentialRefusal`); asking again at once would
+        /// only be refused again and counted twice.
+        case credentialRefused
+        /// The pairing may be gone; `handleAuthorizationLoss` owns what happens next.
+        case pairingRefused
+        /// The service is not running; nothing was sent.
+        case notSent
+    }
+
+    /// Reads the authorization pair a status post carries. Injection seam: nil (production) reads
+    /// the location manager; a test sets the pair the simulator cannot produce.
+    var locationAuthorizationReader: (() -> LocationAuthorizationSnapshot)?
+
+    private var currentLocationAuthorization: LocationAuthorizationSnapshot {
+        locationAuthorizationReader?() ?? LocationAuthorizationSnapshot(
             status: locationManager.authorizationStatus,
             accuracy: locationManager.accuracyAuthorization
         )
+    }
+
+    /// One `POST /device/status`, and how it went.
+    ///
+    /// `lastReportedLocationAuthorization` is set BEFORE the request, so a second change report
+    /// arriving while this one is out is not sent twice; a failure hands the previous value back
+    /// (unless a newer post has replaced it meanwhile), so the parent is never assumed to know a
+    /// status no request delivered.
+    private func sendStatus() async -> StatusPostOutcome {
+        guard isRunning else { return .notSent }
+        lastStatusPostAt = Date()
+        let previouslyReported = lastReportedLocationAuthorization
+        let reported = currentLocationAuthorization
+        lastReportedLocationAuthorization = reported
+        func handBackReportedAuthorization() {
+            if lastReportedLocationAuthorization == reported {
+                lastReportedLocationAuthorization = previouslyReported
+            }
+        }
         if networkType != nil { didPostResolvedNetworkType = true }
         let battery = Self.batteryPercent()
         lastPostedBattery = battery
@@ -1969,20 +2038,25 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             battery: battery,
             networkType: networkType,
             soundMode: nil,
-            locationAuthorization: Self.locationAuthorizationName(for: locationManager.authorizationStatus),
+            locationAuthorization: Self.locationAuthorizationName(for: reported.status),
             diagnostics: await currentDiagnostics()
         )
         do {
             try await service.postDeviceStatus(status)
             recordSuccessfulContact()
+            return .delivered
         } catch let error as OilaAPIError where error.requiresRePair {
+            handBackReportedAuthorization()
             endAwaitingContact()
             handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
+            return .pairingRefused
         } catch {
             // Ignore transient status-post failures — but count a refused token, and stop the chip
             // waiting: this round trip has answered "no contact".
+            handBackReportedAuthorization()
             endAwaitingContact()
             recordCredentialRefusal(error)
+            return (error as? OilaAPIError)?.isCredentialRejected == true ? .credentialRefused : .transientFailure
         }
     }
 
