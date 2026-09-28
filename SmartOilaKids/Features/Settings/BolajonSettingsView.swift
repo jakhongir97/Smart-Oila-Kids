@@ -61,6 +61,7 @@ struct SettingsRootView: View {
     @State private var isLanguagePickerPresented = false
     @ObservedObject private var restrictedApps = ScreenTimeRestrictedAppsStore.shared
     @ObservedObject private var screenTimeAuthorization = ScreenTimeAuthorizationManager.shared
+    @ObservedObject private var pairingReset = PairingResetCoordinator.shared
 
     /// Count of live-denied permissions (drives the coral "N ta ruxsat o'chiq" badge). Every row
     /// in the checklist now reports a real OS status, so every row can count toward this.
@@ -75,7 +76,8 @@ struct SettingsRootView: View {
             hasCredential: telemetry.hasCredential,
             offPermissions: offPermissionCount,
             lastContactAt: telemetry.lastSuccessfulContactAt,
-            awaitingContact: telemetry.isAwaitingFirstContact
+            awaitingContact: telemetry.isAwaitingFirstContact,
+            revocationPending: pairingReset.isConfirmingRevocation
         )
     }
 
@@ -810,7 +812,9 @@ struct SettingsDisconnectScreen: View {
                 switch action {
                 case .reset:
                     throttle.reset()
-                    sessionStore.clearSession()
+                    // The same wipe a parent unpair gets (build 29): shields, deletion protection,
+                    // every DeviceActivity monitor and the push address go too, not only the session.
+                    PairingResetCoordinator.shared.reset(reason: .selfUnpair)
                 case let .stay(messageKey, clearDigits):
                     if clearDigits { pin = "" }
                     // A wrong PIN walks the phone's ladder; when that miss starts a lockout, say

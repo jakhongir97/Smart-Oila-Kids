@@ -1670,12 +1670,15 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 // for the rest of its life; anything else (notably locked-before-first-unlock) is
                 // transient and must NOT be allowed to tear down a valid pairing.
                 let absent = secureTokens.accessTokenState() == .absent
-                throw OilaAPIError(
+                let missing = OilaAPIError(
                     statusCode: 401,
                     message: "No device credential available on this device",
                     errorCode: absent ? OilaAPIError.credentialAbsentCode : OilaAPIError.noCredentialCode,
                     fieldErrors: []
                 )
+                // Only the conclusive half is worth reporting: an unreadable Keychain is transient.
+                if absent { reportPairingSignal(.refused(missing, path: path)) }
+                throw missing
             }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             sentToken = token
@@ -1698,6 +1701,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 success = (json?["success"] as? Bool) ?? true
             }
             if success {
+                if authorized { reportPairingSignal(.succeeded(path: path)) }
                 return json?["data"] ?? [:]
             }
             throw Self.error(from: json, statusCode: http.statusCode)
@@ -1718,6 +1722,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
             )
             guard allowRefresh, secureTokens.refreshToken()?.trimmedNonEmpty != nil else {
                 Self.noteCredentialRejected(serverError, path: path)
+                reportPairingSignal(.refused(serverError, path: path))
                 throw serverError
             }
             do {
@@ -1729,6 +1734,7 @@ final class OilaDeviceClient: OilaDeviceServicing {
                 // The refresh failed on its own terms; the caller still needs to know why the
                 // ORIGINAL request was rejected, so the server's 401 wins.
                 Self.noteCredentialRejected(serverError, path: path)
+                reportPairingSignal(.refused(serverError, path: path))
                 throw serverError
             }
             return try await send(
@@ -1740,6 +1746,68 @@ final class OilaDeviceClient: OilaDeviceServicing {
         }
 
         throw Self.error(from: json, statusCode: http.statusCode)
+    }
+
+    // MARK: - Pairing signals (build 29)
+
+    /// What an authorized call said about the PAIRING, reported from the one transport every
+    /// authorized route shares.
+    ///
+    /// Before build 29 only four telemetry routes could start the unpair confirmation, and Home's
+    /// own reads swallowed a `DEVICE_UNPAIRED` with `try?` — so after a parent unpair (Ibrohim,
+    /// 699760 / photo 699758) the phone sat on Home saying "Сейчас нет связи" until a telemetry
+    /// timer happened to fire. Reporting it here feeds home, tasks, chat, screen time, apps/sync,
+    /// usage/daily, removal-attempt, status, location and SOS into the same handler.
+    enum PairingSignal {
+        /// A 401 from the server (after `surfacedRejection`), or a conclusively absent credential.
+        case refused(OilaAPIError, path: String)
+        /// An authorized call was answered 2xx: the token is alive right now.
+        case succeeded(path: String)
+    }
+
+    /// Receives every `PairingSignal`. nil (the default) reports nothing, so a client built by a
+    /// test never reaches the app-wide reset; the app wires `shared` to `PairingResetCoordinator`
+    /// at launch. Called on whatever thread the request finished on.
+    var pairingSignalSink: ((PairingSignal) -> Void)?
+
+    /// The self-unpair route answers `DEVICE_UNPAIRED` on a retry after a dropped 200, and the
+    /// `auth/logout` tidy-up that follows a revoke answers it by design — both are the Settings
+    /// flow's own business (`UnpairScreenAction`), which resets through the coordinator itself.
+    /// Reporting them here too would only run a second, redundant confirmation.
+    static let pairingSignalExcludedPaths: Set<String> = ["device/unpair", "auth/logout"]
+
+    private func reportPairingSignal(_ signal: PairingSignal) {
+        guard let pairingSignalSink else { return }
+        switch signal {
+        case let .refused(_, path), let .succeeded(path):
+            guard !Self.pairingSignalExcludedPaths.contains(path) else { return }
+        }
+        pairingSignalSink(signal)
+    }
+
+    /// `GET /health` — public, unauthenticated, served at the API ROOT (api.json lists it as
+    /// `/health`, not under `/api/v1`). True only for a 200. Used by the UNAUTHORIZED confirmation
+    /// (`PairingResetCoordinator`): a server that cannot answer its own health check is a server in
+    /// trouble, and its 401s say nothing about this phone's pairing.
+    func checkHealth() async -> Bool {
+        guard let url = Self.healthURL(baseURL: baseURL) else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let answer = try? await session.data(for: request),
+              let http = answer.1 as? HTTPURLResponse else { return false }
+        return http.statusCode == 200
+    }
+
+    /// `https://host/api/v1` → `https://host/health`. Pure, so the rule is pinned by a test.
+    static func healthURL(baseURL: URL) -> URL? {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return nil }
+        components.path = "/health"
+        components.query = nil
+        components.fragment = nil
+        return components.url
     }
 
     /// The one place a refused-but-not-unpaired 401 (UNAUTHORIZED, or no errorCode) leaves a trace.

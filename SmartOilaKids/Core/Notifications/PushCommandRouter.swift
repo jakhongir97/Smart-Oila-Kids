@@ -112,6 +112,16 @@ private extension PushCommandRouter {
         static let statusSubjects = ["status", "holat"]
         /// Whole-event aliases where the status subject is not the first token.
         static let statusAliasEvents = ["device.status", "device_status", "devicestatus"]
+        /// Build 29 unpair push. The backend sends one on a parent unpair (Ibrohim 699760) but its
+        /// event name is NOT documented, so: tokens starting with these stems ("unpair", "unpaired",
+        /// "unlink", "unlinked"), prefix-on-token like the other routes, plus the glued form
+        /// ("deviceunpaired") — no ordinary word contains either stem.
+        static let unpairStems = ["unpair", "unlink"]
+        /// Whole-event aliases that name the device or child going away without either stem.
+        static let unpairAliasEvents = [
+            "device.removed", "device.revoked", "device.deleted",
+            "child.deleted", "child.removed", "device.unpaired"
+        ]
     }
 
     /// Shows "your parent sent a message" for a SILENT `chat.refresh`.
@@ -202,13 +212,6 @@ private extension PushCommandRouter {
         }
     }
 
-    /// True for a machine-only command whose alert text is disclosure, not correspondence — so it
-    /// must never occupy an unreadable inbox row or the badge that counts one.
-    static func suppressesInboxRow(_ payload: PushCommandPayload) -> Bool {
-        audioRoute(forCommand: payload.commandHaystack) != nil
-            || isStatusReportCommand(payload.commandHaystack)
-    }
-
     static func applyRouting(
         _ payload: PushCommandPayload,
         openedFromInteraction: Bool,
@@ -217,6 +220,25 @@ private extension PushCommandRouter {
         let haystack = payload.routingHaystack
         var deepLinkDestination: PushDeepLinkDestination?
         var routeActions: [String] = []
+
+        // The unpair push, from the structured event ONLY, and it routes nothing else: its alert
+        // text (if any) must not also trigger a chat banner, a lock refresh or a tasks deep link
+        // for a family that may be gone. It never ends the pairing by itself — the coordinator asks
+        // the server first (a 200 means the push is stale) and ignores a push for another dsn.
+        if isUnpairCommand(payload.commandHaystack) {
+            let pushedDSN = payload.dsn
+            Task { @MainActor in
+                _ = await PairingResetCoordinator.shared.handleUnpairPush(pushedDSN: pushedDSN)
+            }
+            updateDiagnostics(
+                status: "routed",
+                dsn: payload.dsn ?? "-",
+                lastEvent: payload.event,
+                lastRoute: "unpair_confirm",
+                deliveryContext: deliveryContext.rawValue
+            )
+            return
+        }
 
         // `status.report`: the parent asked for a fresh battery / network reading. Read from the
         // structured command, never the haystack — see `isStatusReportCommand`.
@@ -396,6 +418,26 @@ extension PushCommandRouter {
             return false
         }
         return hasStem(String(first), in: RoutingTokens.statusSubjects)
+    }
+
+    /// True for a machine-only command whose alert text is disclosure, not correspondence — so it
+    /// must never occupy an unreadable inbox row or the badge that counts one. Internal (not in the
+    /// private extension) so the unpair case is pinned by a test without routing a real push.
+    static func suppressesInboxRow(_ payload: PushCommandPayload) -> Bool {
+        audioRoute(forCommand: payload.commandHaystack) != nil
+            || isStatusReportCommand(payload.commandHaystack)
+            || isUnpairCommand(payload.commandHaystack)
+    }
+
+    /// True when the push is the backend's unpair command (build 29). Machine event only — never the
+    /// title or body, which a parent can type into. See `RoutingTokens.unpairStems`.
+    static func isUnpairCommand(_ command: String) -> Bool {
+        let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        if RoutingTokens.unpairAliasEvents.contains(normalized) { return true }
+        let tokens = normalized.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        if tokens.contains(where: { hasStem($0, in: RoutingTokens.unpairStems) }) { return true }
+        return containsAny(in: normalized, tokens: RoutingTokens.unpairStems)
     }
 
     /// Whether `userInfo` is a lock-state command, for the AppDelegate's completion-handler hold.

@@ -6,7 +6,7 @@ struct SmartOilaKidsApp: App {
     @UIApplicationDelegateAdaptor(SmartOilaKidsAppDelegate.self) private var appDelegate
     @AppStorage("APP_THEME") private var appThemeRawValue = AppTheme.system.rawValue
     @AppStorage("APP_LANGUAGE") private var appLanguageRawValue = AppLanguage.defaultForDevice.rawValue
-    @StateObject private var sessionStore = SessionStore()
+    @StateObject private var sessionStore = SessionStore.shared
 
     var body: some Scene {
         let appTheme = AppTheme(rawValue: appThemeRawValue) ?? .system

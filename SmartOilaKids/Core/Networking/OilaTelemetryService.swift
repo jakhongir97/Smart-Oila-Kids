@@ -84,8 +84,15 @@ enum LinkHealth: Equatable {
         offPermissions: Int,
         lastContactAt: Date?,
         awaitingContact: Bool = false,
+        revocationPending: Bool = false,
         now: Date = Date()
     ) -> LinkHealth {
+        // Build 29: while `PairingResetCoordinator` is confirming that the pairing is gone, the chip
+        // is the neutral "Ulanmoqda…", never the red "Hozir aloqa yo'q" — photo 699758 (Ibrohim
+        // 699760) was exactly that red chip on a phone whose parent had just unpaired it, read as a
+        // network problem. The confirmation is seconds long; its answer is either the language
+        // screen or a healthy chip.
+        if revocationPending { return .connecting }
         guard hasCredential else { return .noCredential }
         if awaitingContact, isContactStale(lastContactAt: lastContactAt, now: now) { return .connecting }
         guard let lastContactAt else { return .outOfContact(since: nil) }
@@ -491,10 +498,15 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     static let invalidationProbeDelayRange = 30 ... 120
     /// Injection seam so tests can drive `confirmAndInvalidate` without real time passing.
     var sleeper: (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
-    /// Injection seam for the one side effect that ends a pairing. Production posts
-    /// `.oilaSessionInvalidated`, which `RootView` answers with `SessionStore.clearSession()`; a test
-    /// counts calls instead, so asserting "this 401 never unpairs" cannot wipe the test host's session.
-    var sessionInvalidationSignal: () -> Void = {
+    /// Injection seam for the one side effect that ends a pairing. Production runs the full wipe
+    /// through `PairingResetCoordinator` HERE, synchronously — not through a view: the only observer
+    /// used to be `RootView.onReceive`, and a background launch (silent push, location relaunch) has
+    /// no scene, so a confirmation that finished there stopped telemetry and left the phone
+    /// "paired", shields and deletion protection still on (build 29). The notification is still
+    /// posted for anything that wants to refresh. A test counts calls instead, so asserting "this
+    /// 401 never unpairs" cannot wipe the test host's session.
+    var sessionInvalidationSignal: @MainActor () -> Void = {
+        PairingResetCoordinator.shared.reset(reason: .telemetryConfirmed)
         NotificationCenter.default.post(name: .oilaSessionInvalidated, object: nil)
     }
     /// Injection seam for the fix CoreLocation is holding (`CLLocationManager.location`, which is not
@@ -966,6 +978,29 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         LocationPushRegistrar.shared.teardown()
     }
 
+    /// The telemetry half of `PairingResetCoordinator`'s wipe. `stop()` is guarded on `isRunning`,
+    /// and telemetry only runs once onboarding is complete — so a pairing that ends while it is NOT
+    /// running (mid-onboarding, or a launch that never armed it) would otherwise keep the saved lock
+    /// policy, the whole-device shield, the lock edges and heartbeat, and the location-push address.
+    func stopForPairingReset() {
+        didSignalInvalidation = true
+        if isRunning {
+            stop()
+            return
+        }
+        clearLockPolicy()
+        pendingFixes.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.pendingFixesKey)
+        pendingSOS.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.pendingSOSKey)
+        lastSuccessfulContactAt = nil
+        UserDefaults.standard.removeObject(forKey: Self.lastContactKey)
+        awaitingContactGeneration &+= 1
+        endAwaitingContact()
+        hasCredential = true
+        LocationPushRegistrar.shared.teardown()
+    }
+
     // MARK: - SOS outbox
 
     /// How close together two presses must be to count as ONE emergency while the first is still
@@ -1176,7 +1211,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             }
             if let error = failure as? OilaAPIError, error.requiresRePair {
                 // Don't spin: let the confirmation probe decide whether the pairing is really gone.
-                handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
+                handleAuthorizationLoss(error)
             } else {
                 // Still offline — or a 401 that is not DEVICE_UNPAIRED, which is a token problem and
                 // not a reason to give up on an emergency. Keep the whole remaining queue for the
@@ -1577,9 +1612,10 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// status post is dropped. `recordCredentialRefusal` counts each one and
     /// `OilaDeviceClient.noteCredentialRejected` records it.
     ///
-    /// Even the server's DEVICE_UNPAIRED is confirmed by an independent probe after a randomized
-    /// delay — see `confirmAndInvalidate` — rather than trusted from a single response.
-    private func handleAuthorizationLoss(credentialAbsent: Bool = false) {
+    /// Even the server's DEVICE_UNPAIRED is confirmed by an independent probe — sent at once since
+    /// build 29, see `confirmAndInvalidate` — rather than trusted from a single response.
+    private func handleAuthorizationLoss(_ error: OilaAPIError) {
+        let credentialAbsent = error.isCredentialAbsent
         if credentialAbsent { hasCredential = false }
         guard !didSignalInvalidation, !isConfirmingInvalidation else { return }
         // A conclusively absent credential needs no confirmation, and cannot get one: the probe is an
@@ -1595,14 +1631,19 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             return
         }
         isConfirmingInvalidation = true
-        Task { [weak self] in await self?.confirmAndInvalidate() }
+        // A conclusive answer (DEVICE_UNPAIRED, an expired token) is probed AT ONCE — build 29,
+        // Ibrohim 699760: the random 30–120 s wait kept an unpaired phone on Home showing "no
+        // connection" (photo 699758), and a suspension during the wait paused it indefinitely.
+        let probeImmediately = Self.probeAnswerIsConclusive(error)
+        Task { [weak self] in await self?.confirmAndInvalidate(probeImmediately: probeImmediately) }
     }
 
     /// Confirm a reported `requiresRePair` before destroying the pairing.
     ///
-    /// Each probe is an authorized `GET /device/lock/state` after a randomized 30–120 s delay. The
-    /// delay is what keeps a backend blip from unpairing the fleet at once, and it de-synchronizes a
-    /// real mass revocation so it does not arrive as a re-pair stampede. Any probe that succeeds, or
+    /// Each probe is an authorized `GET /device/lock/state`. Since build 29 the probe after a
+    /// CONCLUSIVE answer goes out immediately (`probeImmediately`); only REFRESH_INVALID still waits
+    /// a randomized 30–120 s between probes — the delay that keeps a backend blip from unpairing the
+    /// fleet at once and de-synchronizes a mass revocation. Any probe that succeeds, or
     /// that fails for any other reason (offline, 5xx, and since 2026-09-24 a 401 UNAUTHORIZED),
     /// keeps the session.
     ///
@@ -1617,16 +1658,22 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// defence, from when any 401 got here: a JWT signing-key rotation or a gateway restart mid-deploy
     /// answered 401 for seconds and unpaired every device, and recovery needed a parent to mint a new
     /// code.
-    private func confirmAndInvalidate() async {
+    private func confirmAndInvalidate(probeImmediately: Bool = false) async {
         defer { isConfirmingInvalidation = false }
         guard !didSignalInvalidation, isRunning else { return }
 
         for attempt in 1 ... Self.invalidationConfirmationsRequired {
-            let delay = Self.invalidationProbeDelayRange.randomElement() ?? 45
-            do {
-                try await sleeper(UInt64(delay) * 1_000_000_000)
-            } catch {
-                return // cancelled — treat as "not confirmed"
+            // Build 29: the FIRST probe after a conclusive answer goes out now, with no randomized
+            // wait. The wait only ever protected against a fleet-wide blip, and DEVICE_UNPAIRED is
+            // per-device by construction (re-pairing needs a new code from that child's parent).
+            // REFRESH_INVALID keeps the delayed multi-probe.
+            if !(probeImmediately && attempt == 1) {
+                let delay = Self.invalidationProbeDelayRange.randomElement() ?? 45
+                do {
+                    try await sleeper(UInt64(delay) * 1_000_000_000)
+                } catch {
+                    return // cancelled — treat as "not confirmed"
+                }
             }
             guard !didSignalInvalidation, isRunning else { return }
 
@@ -1702,7 +1749,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
                 if isRunning {
                     pendingFixes = Array((batch + pendingFixes).suffix(maxQueuedFixes))
                 }
-                handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
+                handleAuthorizationLoss(error)
                 break
             } catch where Self.locationBatchIsPermanentlyRejected(error) {
                 // The server refused THIS batch for its content, and says so permanently: "The whole
@@ -1899,7 +1946,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             recordSuccessfulContact()
         } catch let error as OilaAPIError where error.requiresRePair {
             endAwaitingContact()
-            handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
+            handleAuthorizationLoss(error)
         } catch {
             // Ignore transient status-post failures — but count a refused token, and stop the chip
             // waiting: this round trip has answered "no contact".
@@ -1980,7 +2027,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
             applyLockState(state, timing: timing)
         } catch let error as OilaAPIError where error.requiresRePair {
             endAwaitingContact()
-            handleAuthorizationLoss(credentialAbsent: error.isCredentialAbsent)
+            handleAuthorizationLoss(error)
         } catch {
             // Keep the saved policy on a transient failure — but stop asking at full rate. The rule
             // itself runs on: this is the offline branch, and offline is exactly where it must act.

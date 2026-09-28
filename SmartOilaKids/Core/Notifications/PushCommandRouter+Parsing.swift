@@ -52,7 +52,7 @@ private extension PushCommandRouter {
     }
 
     static func resolveDSN(from userInfo: [AnyHashable: Any]) -> String? {
-        let dsnKeys = ["dsn", "device_dsn", "children_device_dsn", "child_dsn", "deviceDsn"]
+        let dsnKeys = ["dsn", "device_dsn", "children_device_dsn", "child_dsn", "deviceDsn", "deviceSerial", "device_serial"]
         if let direct = resolveFirstString(keys: dsnKeys, in: userInfo),
            let normalized = direct.trimmedNonEmpty {
             return normalized
