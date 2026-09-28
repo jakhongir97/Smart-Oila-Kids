@@ -42,6 +42,7 @@
 "lock.refresh" = "Refresh";
 "lock.refresh_hint" = "Checks the lock again.";
 "lock.not_enforced" = "The lock isn't working: Screen Time permission is off.";
+"lock.not_enforced_unavailable" = "The lock isn't working: Screen Time can't be turned on on this phone.";
 "lock.fix_permission" = "Turn on permission";
 
 

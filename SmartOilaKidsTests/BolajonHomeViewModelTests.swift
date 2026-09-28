@@ -1190,36 +1190,78 @@ final class DeviceLockBannerModelTests: XCTestCase {
 
     func testScheduleLocksSayTheyComeFromTheSchedule() throws {
         let end = calendar.date(from: DateComponents(year: 2026, month: 9, day: 28, hour: 21, minute: 0))!
-        let ranged = try XCTUnwrap(make(endsAt: end, bySchedule: true, scheduleRange: "13:00 – 21:00"))
-        XCTAssertEqual(ranged.detail, L10n.tr("lock.schedule", "13:00 – 21:00"))
-        XCTAssertEqual(ranged.offlineNote, L10n.tr("lock.offline_note", "21:00"))
+        let ended = try XCTUnwrap(make(endsAt: end, bySchedule: true, scheduleRange: "13:00 – 21:00"))
+        XCTAssertEqual(ended.detail, L10n.tr("lock.by_schedule_until", "21:00"),
+                       "the end the phone worked out comes first, as on build 28's cover")
+        XCTAssertEqual(ended.offlineNote, L10n.tr("lock.offline_note", "21:00"))
 
         let unranged = try XCTUnwrap(make(endsAt: end, bySchedule: true, scheduleRange: "  "))
         XCTAssertEqual(unranged.detail, L10n.tr("lock.by_schedule_until", "21:00"))
+
+        let rangeOnly = try XCTUnwrap(make(endsAt: nil, bySchedule: true, scheduleRange: " 21:00 – 07:00 "))
+        XCTAssertEqual(rangeOnly.detail, L10n.tr("lock.schedule", "21:00 – 07:00"),
+                       "the server's range is shown only when no end is known")
+        XCTAssertNil(rangeOnly.offlineNote)
 
         let open = try XCTUnwrap(make(endsAt: nil, bySchedule: true))
         XCTAssertEqual(open.detail, L10n.tr("lock.by_schedule"))
         XCTAssertNil(open.offlineNote)
     }
 
+    func testAStaleServerRangeNeverContradictsTheEnd() throws {
+        // Polled at 21:50 with no active schedule: the server's range fell back to the FIRST
+        // schedule ("maktab" 08:00 – 13:00). Offline at 22:00 the phone locks itself by "tun" and
+        // knows it opens at 07:00 tomorrow. The banner must say 07:00, never the stale range.
+        let end = calendar.date(from: DateComponents(year: 2026, month: 9, day: 29, hour: 7, minute: 0))!
+        let banner = try XCTUnwrap(make(endsAt: end, bySchedule: true, scheduleRange: "08:00 – 13:00"))
+        let endText = DeviceLockBannerModel.endsAtText(end, now: now, calendar: calendar, locale: locale)
+        XCTAssertEqual(banner.detail, L10n.tr("lock.by_schedule_until", endText))
+        XCTAssertFalse(banner.detail.contains("08:00"), banner.detail)
+        XCTAssertFalse(banner.accessibilityLabel.contains("13:00"), banner.accessibilityLabel)
+        XCTAssertEqual(banner.offlineNote, L10n.tr("lock.offline_note", endText))
+    }
+
     func testWarnsWhenScreenTimeCannotEnforceTheLock() throws {
         for status in [ScreenTimePermissionStatus.denied, .notDetermined] {
             let banner = try XCTUnwrap(make(endsAt: now.addingTimeInterval(600), status: status))
-            XCTAssertTrue(banner.showsEnforcementWarning, "\(status): the phone is not really locked")
-            XCTAssertTrue(banner.accessibilityLabel.contains(L10n.tr("lock.not_enforced")),
-                          "VoiceOver hears the warning too")
+            XCTAssertEqual(banner.enforcementWarning, L10n.tr("lock.not_enforced"), "\(status): the phone is not really locked")
+            XCTAssertTrue(banner.offersPermissionFix, "\(status): the permission screen can ask iOS again")
         }
-        XCTAssertFalse(try XCTUnwrap(make(status: .granted)).showsEnforcementWarning)
-        XCTAssertFalse(try XCTUnwrap(make(status: .unavailable)).showsEnforcementWarning,
-                       "nothing on the permission screen could turn it on")
-        XCTAssertFalse(try XCTUnwrap(make(featuresEnabled: false, status: .denied)).showsEnforcementWarning)
+        let granted = try XCTUnwrap(make(status: .granted))
+        XCTAssertNil(granted.enforcementWarning)
+        XCTAssertFalse(granted.offersPermissionFix)
+        let off = try XCTUnwrap(make(featuresEnabled: false, status: .denied))
+        XCTAssertFalse(off.showsEnforcementWarning, "a build without Screen Time says nothing")
+        XCTAssertFalse(off.offersPermissionFix)
     }
 
-    func testAccessibilityLabelReadsTheWholeCard() throws {
+    func testAPhoneThatCanNeverGrantScreenTimeIsWarnedWithoutAButton() throws {
+        // MDM / restrictions / no passcode (`markedUnavailable`): nothing is shielded, so the banner
+        // must not claim a lock — but a "Ruxsatni yoqish" there would lead nowhere.
+        let banner = try XCTUnwrap(make(endsAt: now.addingTimeInterval(600), status: .unavailable))
+        XCTAssertEqual(banner.enforcementWarning, L10n.tr("lock.not_enforced_unavailable"))
+        XCTAssertTrue(banner.showsEnforcementWarning)
+        XCTAssertFalse(banner.offersPermissionFix)
+        XCTAssertNil(try XCTUnwrap(make(featuresEnabled: false, status: .unavailable)).enforcementWarning)
+    }
+
+    func testAccessibilityLabelReadsTheCardTextOnce() throws {
         let banner = try XCTUnwrap(make(endsAt: now.addingTimeInterval(90 * 60)))
         XCTAssertEqual(banner.accessibilityLabel,
                        [L10n.tr("lock.title"), L10n.tr("lock.until", "14:30"), L10n.tr("lock.offline_note", "14:30")]
                         .joined(separator: ". "))
+        // The warning is its own element next to its button — in the label too, VoiceOver read it twice.
+        let warned = try XCTUnwrap(make(endsAt: now.addingTimeInterval(90 * 60), status: .denied))
+        XCTAssertEqual(warned.accessibilityLabel, banner.accessibilityLabel)
+        XCTAssertFalse(warned.accessibilityLabel.contains(L10n.tr("lock.not_enforced")))
+    }
+
+    func testTheRefreshChipLeavesTheTextRowAtLargeTextSizes() {
+        XCTAssertFalse(DeviceLockBannerCard.placesRefreshBelowText(.large), "default size: chip beside the text")
+        XCTAssertFalse(DeviceLockBannerCard.placesRefreshBelowText(.medium))
+        XCTAssertTrue(DeviceLockBannerCard.placesRefreshBelowText(.xLarge))
+        XCTAssertTrue(DeviceLockBannerCard.placesRefreshBelowText(.xxxLarge))
+        XCTAssertTrue(DeviceLockBannerCard.placesRefreshBelowText(.accessibility5))
     }
 
     func testRefreshReReadsTheLockAndGoesNowhere() {
@@ -1238,10 +1280,22 @@ final class DeviceLockBannerModelTests: XCTestCase {
         XCTAssertEqual(refresher.refreshes, 0)
     }
 
-    func testTheTelemetryServiceIsTheLiveRefresher() {
-        let refresher: DeviceLockRefreshing = OilaTelemetryService.shared
-        XCTAssertTrue(refresher === OilaTelemetryService.shared)
+    func testAGrantWhileLockedReappliesTheLockAtOnce() {
+        let refresher = RecordingLockRefresher()
+        DeviceLockBannerModel.screenTimeStatusChanged(to: .granted, isLocked: true, refresher: refresher)
+        XCTAssertEqual(refresher.refreshes, 1, "the shield lands now, not on the next tick or poll")
     }
+
+    func testOtherAuthorizationChangesReapplyNothing() {
+        let refresher = RecordingLockRefresher()
+        DeviceLockBannerModel.screenTimeStatusChanged(to: .granted, isLocked: false, refresher: refresher)
+        for status in [ScreenTimePermissionStatus.denied, .notDetermined, .unavailable] {
+            DeviceLockBannerModel.screenTimeStatusChanged(to: status, isLocked: true, refresher: refresher)
+        }
+        XCTAssertEqual(refresher.refreshes, 0)
+    }
+    // Home passing `OilaTelemetryService.shared` (its `lockState`) as the refresher is view wiring
+    // no unit test reaches; it is covered by the device plan (tap "Yangilash" after a missed unlock).
 }
 
 @MainActor

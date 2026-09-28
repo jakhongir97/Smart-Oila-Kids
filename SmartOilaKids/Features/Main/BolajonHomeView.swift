@@ -187,6 +187,11 @@ struct BolajonHomeView: View {
                 // kept showing whatever was true when the app was first opened.
                 Task { await reloadHome() }
             }
+            // Granted from the banner's "Ruxsatni yoqish" (or anywhere) while locked: apply the
+            // shield now rather than on the next tick or poll.
+            .onChange(of: screenTimeAuthorization.status) { status in
+                DeviceLockBannerModel.screenTimeStatusChanged(to: status, isLocked: lockState.isLocked, refresher: lockState)
+            }
             .onChange(of: path) { newPath in
                 let chatOpen = newPath.contains(.chat)
                 // Leaving the thread: it was just marked read on the server, so re-sync the badge
@@ -1178,16 +1183,21 @@ struct LocalScreenTimeUsageProvider: ScreenTimeUsageProviding {
 struct DeviceLockBannerModel: Equatable {
     /// "Telefon bloklandi".
     let title: String
-    /// "14:30 gacha" for a window with a known end; "Jadval: 21:00 – 07:00", "Jadval bo'yicha,
-    /// 07:00 gacha" or "Jadval bo'yicha" for a schedule; the plain subtitle when nothing is known.
+    /// "14:30 gacha" for a window with a known end; "Jadval bo'yicha, 07:00 gacha", "Jadval:
+    /// 21:00 – 07:00" or "Jadval bo'yicha" for a schedule; the plain subtitle when nothing is known.
     let detail: String
     /// "Internet bo'lmasa ham 14:30 da o'zi ochiladi." — only beside a known end: it is a promise
     /// about that end, never about a lock with none.
     let offlineNote: String?
-    /// Locked by the parent, but iOS cannot enforce it: Screen Time permission is off, so
+    /// Locked by the parent, but iOS cannot enforce it: Screen Time is not granted, so
     /// `OilaLockRuntime.applyWholeDevice` writes nothing and every app stays open. Without this line
-    /// the banner would claim a lock the phone is not applying (699621).
-    let showsEnforcementWarning: Bool
+    /// the banner would claim a lock the phone is not applying (699621). nil while iOS applies it.
+    let enforcementWarning: String?
+    /// Whether the warning carries "Ruxsatni yoqish": only when the permission screen can actually
+    /// ask iOS again (`.denied` / `.notDetermined`) — never for a phone that can never grant it.
+    let offersPermissionFix: Bool
+
+    var showsEnforcementWarning: Bool { enforcementWarning != nil }
 
     enum Action: Equatable {
         /// Re-read the lock now (`OilaTelemetryService.refreshLockNow`): a missed unlock push heals
@@ -1214,24 +1224,38 @@ struct DeviceLockBannerModel: Equatable {
         let range = scheduleRange?.trimmingCharacters(in: .whitespacesAndNewlines)
         let detail: String
         if bySchedule {
-            if let range, !range.isEmpty {
-                detail = L10n.tr("lock.schedule", range)
-            } else if let end {
+            // The end the phone worked out itself comes FIRST, as it did on build 28's cover. The
+            // server's range is only a poll-time guess: with no schedule active at poll time
+            // `resolvedScheduleRange` falls back to the first schedule in the list, and it is
+            // refreshed only by a successful poll — so a phone that locked itself offline at 22:00
+            // by "tun" would read "Jadval: 08:00 – 13:00" above "07:00 da o'zi ochiladi".
+            if let end {
                 detail = L10n.tr("lock.by_schedule_until", end)
+            } else if let range, !range.isEmpty {
+                detail = L10n.tr("lock.schedule", range)
             } else {
                 detail = L10n.tr("lock.by_schedule")
             }
         } else {
             detail = end.map { L10n.tr("lock.until", $0) } ?? L10n.tr("lock.subtitle")
         }
-        // `.unavailable` is not warned about: it is a build without Screen Time or a phone that
-        // cannot have it, and the permission screen has no row that could turn it on.
-        let unenforceable = screenTimeFeaturesEnabled && [.denied, .notDetermined].contains(screenTimeStatus)
+        // A build without Screen Time (`screenTimeFeaturesEnabled` off) enforces locks by other
+        // means and says nothing. With it on, anything but `.granted` means no shield is written:
+        // `.denied` / `.notDetermined` can be fixed from the permission screen; `.unavailable` (MDM,
+        // restrictions, no passcode — `markedUnavailable`) cannot, so it is warned about without
+        // a button that would lead nowhere.
+        let warning: String?
+        switch (screenTimeFeaturesEnabled, screenTimeStatus) {
+        case (false, _), (true, .granted): warning = nil
+        case (true, .unavailable): warning = L10n.tr("lock.not_enforced_unavailable")
+        case (true, .denied), (true, .notDetermined): warning = L10n.tr("lock.not_enforced")
+        }
         return DeviceLockBannerModel(
             title: L10n.tr("lock.title"),
             detail: detail,
             offlineNote: end.map { L10n.tr("lock.offline_note", $0) },
-            showsEnforcementWarning: unenforceable
+            enforcementWarning: warning,
+            offersPermissionFix: warning != nil && screenTimeStatus != .unavailable
         )
     }
 
@@ -1249,9 +1273,10 @@ struct DeviceLockBannerModel: Equatable {
         return formatter.string(from: date)
     }
 
-    /// The whole card as ONE VoiceOver element: title, window, offline promise and warning.
+    /// The card's text as ONE VoiceOver element: title, window and offline promise. The warning is
+    /// not in it — its own Text is read once, right before the button that fixes it.
     var accessibilityLabel: String {
-        [title, detail, offlineNote, showsEnforcementWarning ? L10n.tr("lock.not_enforced") : nil]
+        [title, detail, offlineNote]
             .compactMap { $0 }
             .joined(separator: ". ")
     }
@@ -1263,6 +1288,16 @@ struct DeviceLockBannerModel: Equatable {
         case .refresh: refresher.refreshLockNow()
         case .openPermissions: navigate(.settingsPermissions)
         }
+    }
+
+    /// Screen Time just became `.granted` while the phone is locked: re-read the lock now, so the
+    /// shield lands the moment the child comes back from the permission screen. Nothing else
+    /// re-runs `applyWholeDevice` on a grant, and until the next tick, poll or foreground (up to
+    /// ~30 s) the warning would already be gone while every app still opened.
+    @MainActor
+    static func screenTimeStatusChanged(to status: ScreenTimePermissionStatus, isLocked: Bool, refresher: DeviceLockRefreshing) {
+        guard status == .granted, isLocked else { return }
+        refresher.refreshLockNow()
     }
 }
 
@@ -1280,8 +1315,18 @@ extension OilaTelemetryService: DeviceLockRefreshing {}
 struct DeviceLockBannerCard: View {
     let model: DeviceLockBannerModel
     let onAction: (DeviceLockBannerModel.Action) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Beside the text the chip costs the column ~80 pt at the default size and ~110 pt once
+    /// `AppTypography` has scaled it (its 1.35x cap is reached by `.xxxLarge`); on a 375 pt phone
+    /// that left the detail and offline note ~120 pt and wrapped them word by word. From `.xLarge`
+    /// up the chip gets its own line under the text instead.
+    static func placesRefreshBelowText(_ size: DynamicTypeSize) -> Bool {
+        size >= .xLarge
+    }
 
     var body: some View {
+        let refreshBelow = Self.placesRefreshBelowText(dynamicTypeSize)
         InfoCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 14) {
@@ -1311,10 +1356,15 @@ struct DeviceLockBannerCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(model.accessibilityLabel)
+                    if !refreshBelow {
+                        refreshButton
+                    }
+                }
+                if refreshBelow {
                     refreshButton
                 }
-                if model.showsEnforcementWarning {
-                    warning
+                if let warningText = model.enforcementWarning {
+                    warning(warningText)
                 }
             }
         }
@@ -1344,29 +1394,33 @@ struct DeviceLockBannerCard: View {
     }
 
     /// Coral ink on a coral tint — the warning tokens the header chip and the permission list use.
-    private var warning: some View {
+    /// The warning Text is its own VoiceOver element (the card label leaves it out), read once
+    /// before its button.
+    private func warning(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 13, weight: .bold))
                     .accessibilityHidden(true)
-                Text(L10n.tr("lock.not_enforced"))
+                Text(text)
                     .font(AppTypography.bodyStrong(13))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(AppColors.pillCoralInk)
-            Button {
-                onAction(.openPermissions)
-            } label: {
-                Text(L10n.tr("lock.fix_permission"))
-                    .font(AppTypography.buttonLabel(14))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 44)
-                    // `ctaOrange` carries white labels at 4.80:1 light / 4.43:1 dark (AppColors).
-                    .background(Capsule().fill(AppColors.ctaOrange))
+            if model.offersPermissionFix {
+                Button {
+                    onAction(.openPermissions)
+                } label: {
+                    Text(L10n.tr("lock.fix_permission"))
+                        .font(AppTypography.buttonLabel(14))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 44)
+                        // `ctaOrange` carries white labels at 4.80:1 light / 4.43:1 dark (AppColors).
+                        .background(Capsule().fill(AppColors.ctaOrange))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

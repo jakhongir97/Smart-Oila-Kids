@@ -42,6 +42,7 @@
 "lock.refresh" = "Yangilash";
 "lock.refresh_hint" = "Blok holatini qayta tekshiradi.";
 "lock.not_enforced" = "Bloklash ishlamayapti: Ekran vaqti ruxsati o'chiq.";
+"lock.not_enforced_unavailable" = "Bloklash ishlamayapti: bu telefonda Ekran vaqtini yoqib bo'lmaydi.";
 "lock.fix_permission" = "Ruxsatni yoqish";
 
 
