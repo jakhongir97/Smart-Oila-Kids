@@ -90,7 +90,7 @@ final class PairingResetCoordinator: ObservableObject {
         var localDSN: @MainActor () -> String?
         /// Where the UNAUTHORIZED sequence persists its progress across a suspension or relaunch.
         var defaults: UserDefaults
-        /// The App Group the monitor extension writes `PAIRING_REVOKED_AT_V1` into.
+        /// The App Group the monitor extension writes `DevicePairingRevocation` records into.
         var appGroupDefaults: UserDefaults?
         /// The wipe itself. Production: `PairingResetCoordinator.liveWipe`.
         var wipe: @MainActor (Reason) -> Void
@@ -122,9 +122,6 @@ final class PairingResetCoordinator: ObservableObject {
     /// DEVICE_TOKEN_EXPIRED waits this long (random within) before its one probe. See the header.
     nonisolated static let expiredTokenProbeDelayRange: ClosedRange<TimeInterval> = 30 ... 60
 
-    /// Written by the DeviceActivity monitor extension (another lane) when ITS server call gets
-    /// 401 DEVICE_UNPAIRED: a Double, epoch seconds. The app confirms it and wipes.
-    nonisolated static let extensionRevokedAtKey = "PAIRING_REVOKED_AT_V1"
     nonisolated static let unauthorizedSinceKey = "PAIRING_UNAUTHORIZED_SINCE_V1"
     nonisolated static let unauthorizedStageKey = "PAIRING_UNAUTHORIZED_STAGE_V1"
     /// When the latest refusal of the sequence was confirmed (epoch seconds).
@@ -143,6 +140,9 @@ final class PairingResetCoordinator: ObservableObject {
     /// A DEVICE_TOKEN_EXPIRED waiting out `expiredTokenProbeDelayRange` before its probe.
     private var expiredTask: Task<ConfirmationOutcome, Never>?
     private var unauthorizedTask: Task<Void, Never>?
+    /// Follows the monitor extension's "I evaluated an edge", which is also how its unpair teardown
+    /// announces itself to a running app (`DeviceLockUnpairTeardown`).
+    private var extensionEdgeObserver: NSObjectProtocol?
     /// Bumped by every cancel, so a sequence that was cancelled while awaiting cannot act later.
     private var unauthorizedGeneration = 0
 
@@ -157,6 +157,15 @@ final class PairingResetCoordinator: ObservableObject {
     func install(client: OilaDeviceClient = .shared) {
         client.pairingSignalSink = { signal in
             Task { @MainActor in PairingResetCoordinator.shared.handle(signal) }
+        }
+        // A running (even backgrounded) app hears the extension's unpair teardown only as a lock
+        // edge; without this it would not look at the marker until the next launch or foreground.
+        if extensionEdgeObserver == nil {
+            extensionEdgeObserver = NotificationCenter.default.addObserver(
+                forName: OilaTelemetryService.oilaLockExtensionDidEvaluate, object: nil, queue: nil
+            ) { _ in
+                Task { @MainActor in PairingResetCoordinator.shared.checkExtensionMarker() }
+            }
         }
         checkOnLaunchOrForeground()
     }
@@ -201,10 +210,17 @@ extension PairingResetCoordinator {
             reset(reason: .credentialAbsent)
             return
         }
-        if deps.appGroupDefaults?.object(forKey: Self.extensionRevokedAtKey) != nil {
-            Task { _ = await confirmConclusive(source: .extensionMarker) }
-        }
+        checkExtensionMarker()
         resumeUnauthorizedSequenceIfPending()
+    }
+
+    /// The monitor extension's record of a confirmed 401 DEVICE_UNPAIRED (the one shared key,
+    /// `DevicePairingRevocation.revokedAtKey`). The app never trusts it alone: one probe decides.
+    /// Called on launch, on every foreground, and on each extension lock edge.
+    func checkExtensionMarker() {
+        guard deps.isPaired(),
+              DevicePairingRevocation.revokedAt(userDefaults: deps.appGroupDefaults) != nil else { return }
+        Task { _ = await confirmConclusive(source: .extensionMarker) }
     }
 
     /// The backend's unpair push. Matched on the machine event only (`PushCommandRouter`), and
@@ -496,8 +512,12 @@ extension PairingResetCoordinator {
         deps.defaults.removeObject(forKey: Self.unauthorizedLastRefusalKey)
     }
 
+    /// Clears ALL of the extension's revocation records, not just the timestamp: the extension stays
+    /// off the network while the refused token's fingerprint (`revokedTokenKey`) matches the
+    /// credential it holds, so a stale marker cleared by timestamp alone would keep it silent for
+    /// the life of this pairing.
     private func clearMarker() {
-        deps.appGroupDefaults?.removeObject(forKey: Self.extensionRevokedAtKey)
+        DevicePairingRevocation.clear(userDefaults: deps.appGroupDefaults)
     }
 
     private func refreshPublishedState() {

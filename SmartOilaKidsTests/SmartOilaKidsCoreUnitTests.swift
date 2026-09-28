@@ -6486,6 +6486,28 @@ final class TelemetryPairingLossTests: XCTestCase {
         XCTAssertTrue(cleared, "one answered call ends the run of refusals")
     }
 
+    /// Build 29 (lock-poll-backoff-10min): lock-GET timeouts on weak Wi-Fi, while the status posts
+    /// still got through, left the lock poll backed off for minutes — reset only by a lock GET that
+    /// succeeded. Any answered call now starts the lock ladder again.
+    func testAnAnsweredCallAlsoResetsTheLockPollLadder() async {
+        let stub = Stub(lockAnswers: [URLError(.timedOut)]) // status posts succeed
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        _ = await waitUntil { stub.lockStateCalls >= 1 && stub.statusPostCalls >= 1 }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        let callsBefore = stub.lockStateCalls
+        service.refreshLockNow()
+        let failed = await waitUntil {
+            stub.lockStateCalls > callsBefore && !service.isRefreshingLock && service.consecutiveLockFailures >= 1
+        }
+        XCTAssertTrue(failed, "the refresh's GET timed out and was counted")
+
+        service.postStatusNow()
+        let reset = await waitUntil { service.consecutiveLockFailures == 0 }
+        XCTAssertTrue(reset, "an answered status post resets the lock poll's ladder")
+    }
+
     func testARefusalThatHasOutlastedTheRelinkWindowTellsTheChildToAskAParent() {
         let silentSince = Date().addingTimeInterval(-(OilaTelemetryService.credentialRefusalRelinkAfter + 60))
         UserDefaults.standard.set(silentSince.timeIntervalSince1970, forKey: "OILA_LAST_SUCCESSFUL_CONTACT")
@@ -6841,6 +6863,34 @@ final class LockPollBackoffTests: XCTestCase {
 
     func testTheBackoffIsCappedSoALockNeverGoesUnnoticedForLong() {
         XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 50, baseInterval: base), 600)
+    }
+}
+
+/// Build 29: the TIMER's lock ladder stops at 90 s unless the server is refusing the token.
+final class LockTimerBackoffTests: XCTestCase {
+    private let base: TimeInterval = 30
+
+    func testOrdinaryFailuresClimbToNinetySecondsAndNoFurther() {
+        let curve = (0 ... 10).map {
+            OilaTelemetryService.lockTimerBackoff(consecutiveFailures: $0, credentialRefusals: 0, baseInterval: base)
+        }
+        XCTAssertEqual(curve, [0, 60, 90, 90, 90, 90, 90, 90, 90, 90, 90])
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoffCap, 90)
+    }
+
+    func testARefusedTokenKeepsTheLongLadder() {
+        func backoff(_ failures: Int, _ refusals: Int) -> TimeInterval {
+            OilaTelemetryService.lockTimerBackoff(consecutiveFailures: failures, credentialRefusals: refusals, baseInterval: base)
+        }
+        XCTAssertEqual(backoff(1, 1), 60)
+        XCTAssertEqual(backoff(3, 3), 240)
+        XCTAssertEqual(backoff(50, 50), 600, "asking a server that refuses the token again cannot help")
+        XCTAssertEqual(backoff(0, 4), 480, "refusals on other routes count too")
+    }
+
+    func testTheLocationDrainCurveIsUnchanged() {
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 5, baseInterval: base), 600)
+        XCTAssertEqual(OilaTelemetryService.lockPollBackoff(consecutiveFailures: 5, baseInterval: base, cap: 90), 90)
     }
 }
 
@@ -8383,5 +8433,27 @@ final class OilaTelemetryServiceLockPolicyTests: XCTestCase {
         XCTAssertEqual(h.recorder.stoppedAll, 1)
         XCTAssertEqual(h.recorder.shield.last, false)
         XCTAssertNil(service.lastSuccessfulContactAt)
+    }
+
+    /// b29 review: an extension's unconfirmed DEVICE_UNPAIRED must not outlive proof that the
+    /// pairing is alive — the app's own unpair clears it, and so does any call the server answers.
+    func testTheAppClearsAnExtensionsUnpairSuspicion() async {
+        let appGroup = makeDefaults()
+        let h = Harness(clocks: Clocks(F.local(2026, 9, 21, 13, 0)), store: DeviceLockPolicySharedStore(userDefaults: appGroup),
+                        legacy: makeDefaults(), recorder: Recorder())
+        let service = makeService(h)
+
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: Date(), userDefaults: appGroup)
+        service.clearLockPolicy()
+        XCTAssertNil(appGroup.object(forKey: DevicePairingRevocation.suspectedAtKey), "the app's unpair")
+
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: Date(), userDefaults: appGroup)
+        service.start() // the first status post is answered (the stub accepts it)
+        defer { service.stop() }
+        let deadline = Date().addingTimeInterval(5)
+        while appGroup.object(forKey: DevicePairingRevocation.suspectedAtKey) != nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertNil(appGroup.object(forKey: DevicePairingRevocation.suspectedAtKey), "an answered call")
     }
 }

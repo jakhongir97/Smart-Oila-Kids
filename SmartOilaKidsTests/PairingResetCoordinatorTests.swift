@@ -534,21 +534,21 @@ extension PairingResetCoordinatorTests {
     }
 
     func testTheExtensionMarkerIsConfirmedAndWipes() async {
-        world.group.set(1_800_000_000.0, forKey: PairingResetCoordinator.extensionRevokedAtKey)
+        world.group.set(1_800_000_000.0, forKey: DevicePairingRevocation.revokedAtKey)
         world.probeAnswers = [unpaired]
         coordinator.checkOnLaunchOrForeground()
         let wiped = await waitUntil { !self.world.wipes.isEmpty }
         XCTAssertTrue(wiped)
         XCTAssertEqual(world.wipes, [.extensionRevoked])
-        XCTAssertNil(world.group.object(forKey: PairingResetCoordinator.extensionRevokedAtKey))
+        XCTAssertNil(world.group.object(forKey: DevicePairingRevocation.revokedAtKey))
     }
 
     func testAStaleExtensionMarkerIsClearedAfterA200() async {
-        world.group.set(1_800_000_000.0, forKey: PairingResetCoordinator.extensionRevokedAtKey)
+        world.group.set(1_800_000_000.0, forKey: DevicePairingRevocation.revokedAtKey)
         world.probeAnswers = [nil]
         coordinator.checkOnLaunchOrForeground()
         let cleared = await waitUntil {
-            self.world.group.object(forKey: PairingResetCoordinator.extensionRevokedAtKey) == nil
+            self.world.group.object(forKey: DevicePairingRevocation.revokedAtKey) == nil
         }
         XCTAssertTrue(cleared)
         XCTAssertTrue(world.wipes.isEmpty)
@@ -560,18 +560,73 @@ extension PairingResetCoordinatorTests {
 
     /// Offline: the marker stays for the next wake.
     func testTheExtensionMarkerSurvivesAnUnansweredProbe() async {
-        world.group.set(1_800_000_000.0, forKey: PairingResetCoordinator.extensionRevokedAtKey)
+        world.group.set(1_800_000_000.0, forKey: DevicePairingRevocation.revokedAtKey)
         world.probeAnswers = [URLError(.timedOut)]
         coordinator.checkOnLaunchOrForeground()
         let probed = await waitUntil { self.world.probeCalls == 1 && !self.coordinator.isConfirmingRevocation }
         XCTAssertTrue(probed)
-        XCTAssertNotNil(world.group.object(forKey: PairingResetCoordinator.extensionRevokedAtKey))
+        XCTAssertNotNil(world.group.object(forKey: DevicePairingRevocation.revokedAtKey))
         XCTAssertTrue(world.wipes.isEmpty)
         XCTAssertEqual(world.reassertCalls, 0)
     }
 
     func testTheMarkerKeyIsTheOneTheExtensionWrites() {
-        XCTAssertEqual(PairingResetCoordinator.extensionRevokedAtKey, "PAIRING_REVOKED_AT_V1")
+        XCTAssertEqual(DevicePairingRevocation.revokedAtKey, "PAIRING_REVOKED_AT_V1")
+    }
+
+    /// b29 merge contract: the record the monitor extension's teardown writes (timestamp plus the
+    /// refused token's fingerprint) is exactly what the app confirms and wipes on.
+    func testTheExtensionTeardownsRecordIsWhatTheAppConfirms() async {
+        DeviceLockUnpairTeardown.perform(
+            now: Date(timeIntervalSince1970: 1_800_000_000),
+            refusedAccessToken: "old-token",
+            store: DeviceLockPolicySharedStore(userDefaults: world.group),
+            userDefaults: world.group,
+            actions: .init(releaseWholeDevice: {}, stopEdgesAndHeartbeat: {}, announce: {})
+        )
+        world.probeAnswers = [unpaired]
+        coordinator.checkOnLaunchOrForeground()
+        let wiped = await waitUntil { !self.world.wipes.isEmpty }
+        XCTAssertTrue(wiped)
+        XCTAssertEqual(world.wipes, [.extensionRevoked])
+        XCTAssertNil(world.group.object(forKey: DevicePairingRevocation.revokedAtKey))
+        XCTAssertNil(world.group.object(forKey: DevicePairingRevocation.revokedTokenKey))
+    }
+
+    /// b29 merge: the extension's edge notification (how its teardown reaches a running app) makes
+    /// the app confirm the marker at once; with no marker it sends nothing.
+    func testAnExtensionEdgeChecksTheMarker() async {
+        world.probeAnswers = [unpaired]
+        coordinator.checkExtensionMarker()
+        XCTAssertEqual(world.probeCalls, 0, "no marker, no probe")
+        world.group.set(1_800_000_000.0, forKey: DevicePairingRevocation.revokedAtKey)
+        coordinator.checkExtensionMarker()
+        let wiped = await waitUntil { !self.world.wipes.isEmpty }
+        XCTAssertTrue(wiped)
+        XCTAssertEqual(world.wipes, [.extensionRevoked])
+    }
+
+    /// b29 merge contract: a stale marker must let the extension back on the network. It stays off
+    /// while the refused token's fingerprint matches the credential it holds, so clearing only the
+    /// timestamp would not be enough for a pairing that kept its token.
+    func testAStaleMarkerPutsTheExtensionBackOnline() async {
+        DevicePairingRevocation.markRevoked(
+            at: Date(timeIntervalSince1970: 1_800_000_000), refusedAccessToken: "live-token", userDefaults: world.group
+        )
+        let credential = LocationPushSharedCredential.Payload(
+            accessToken: "live-token", baseURL: "https://example.invalid", dsn: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertTrue(DevicePairingRevocation.isRevoked(credential: credential, userDefaults: world.group))
+        world.probeAnswers = [nil]
+        coordinator.checkOnLaunchOrForeground()
+        let cleared = await waitUntil {
+            !DevicePairingRevocation.isRevoked(credential: credential, userDefaults: self.world.group)
+        }
+        XCTAssertTrue(cleared)
+        XCTAssertNil(world.group.object(forKey: DevicePairingRevocation.revokedTokenKey))
+        XCTAssertNil(world.group.object(forKey: DevicePairingRevocation.suspectedAtKey))
+        XCTAssertTrue(world.wipes.isEmpty)
     }
 }
 
@@ -749,13 +804,13 @@ final class SessionStoreAppGroupPurgeTests: XCTestCase {
         defaults.set(AppLanguage.ru.rawValue, forKey: "APP_LANGUAGE")
         let store = SessionStore(userDefaults: defaults, secureTokens: SecureTokenStoreStub(access: nil),
                                  deviceTokens: SecureTokenStoreStub(access: nil), appGroupIdentifier: groupName)
-        group.set(1_800_000_000.0, forKey: PairingResetCoordinator.extensionRevokedAtKey)
+        group.set(1_800_000_000.0, forKey: DevicePairingRevocation.revokedAtKey)
         group.set("snapshot", forKey: "SOME_EXTENSION_KEY")
 
         store.purgeAppGroupContainer()
 
         let reread = UserDefaults(suiteName: groupName)!
-        XCTAssertNil(reread.object(forKey: PairingResetCoordinator.extensionRevokedAtKey))
+        XCTAssertNil(reread.object(forKey: DevicePairingRevocation.revokedAtKey))
         XCTAssertNil(reread.object(forKey: "SOME_EXTENSION_KEY"))
         XCTAssertEqual(reread.string(forKey: "APP_LANGUAGE"), AppLanguage.ru.rawValue)
     }

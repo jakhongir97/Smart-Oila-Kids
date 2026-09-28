@@ -21,9 +21,11 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
             handleLockEdge(activity: activity, callback: .intervalStart)
             return
         }
-        // The daily heartbeat: re-check the lock and restart the edge chain if it ran out.
+        // The daily heartbeat: re-check the lock and restart the edge chain if it ran out — then
+        // ask the server (build 29), so a day with no phone use still hears the parent once.
         if DeviceLockHeartbeat.isHeartbeatActivity(rawValue: activity.rawValue) {
             handleLockEdge(activity: activity, callback: .recheck)
+            pullLockPolicy(reason: "heartbeat_start", activity: activity)
             return
         }
 
@@ -76,6 +78,7 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         }
         if DeviceLockHeartbeat.isHeartbeatActivity(rawValue: activity.rawValue) {
             handleLockEdge(activity: activity, callback: .recheck)
+            pullLockPolicy(reason: "heartbeat_end", activity: activity)
             return
         }
 
@@ -126,6 +129,14 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
             // BEFORE the upload (build 28): iOS delivers these callbacks one at a time, so a lock
             // decision placed after the network waited behind a whole request on a slow line.
             handleLockEdge(activity: activity, callback: .recheck)
+            // Then the server's word (build 29): a lock the silent push never delivered — the app
+            // suspended, force-quit, Low Power Mode — lands on this step of use, and so does an
+            // early unlock. On ANY usage rung, not only the device-total one: that rung exists
+            // only when the child picked "All Apps & Categories", and a phone with a few single
+            // apps picked must be reached too (b29 review). Per-app rungs arrive in bursts; the
+            // pull's own 60 s App Group limit turns all but one into a cheap `rate_limited` skip
+            // (checked before the Keychain is read).
+            pullLockPolicy(reason: "usage_step", activity: activity)
             if recorded {
                 uploadUsage(reason: "threshold", force: false)
             }
@@ -177,6 +188,9 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
     enum LockEdgeCallback: String {
         case intervalStart = "start"
         case intervalEnd = "end"
+        /// A re-check right after `DeviceLockStatePull` saved a policy that says something new.
+        /// Evaluated like `recheck`, but always logged and always announced.
+        case pulled = "pull"
         /// Not an edge: the heartbeat or a usage callback, re-checking at the trusted now. Quiet
         /// unless it changed something, because a usage step can arrive every few seconds.
         case recheck
@@ -223,7 +237,7 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         // A re-check must not undo an edge this extension just evaluated a little EARLY (a callback
         // that fired before its minute is evaluated at the edge): the same guard the app applies.
         let stamped = lockPolicyStore.lastEdgeEvaluatedAt()
-        if callback == .recheck, let stamped, stamped > trustedNow,
+        if callback == .recheck || callback == .pulled, let stamped, stamped > trustedNow,
            stamped.timeIntervalSince(trustedNow) <= DeviceLockEdgeMonitoring.earlyCallbackTolerance {
             evaluationTime = stamped
         }
@@ -240,6 +254,8 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         let changedSomething = wrote || !result.started.isEmpty || !result.stopped.isEmpty || result.failures > 0
         // A quiet re-check that changed nothing tells nobody: the app would only re-decide the same.
         guard callback != .recheck || changedSomething else { return }
+        // (`.pulled` always gets here: the policy changed, so a running app must re-read it even
+        // when the verdict and the armed edges happen to be the same.)
         // Never move the stamp backwards while it is still ahead of now: that would hand the app
         // (which honours it) an earlier, wrong answer in the same gap.
         if let stamped, stamped > trustedNow, evaluationTime < stamped {
@@ -252,6 +268,37 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         Self.log.notice(
             "schedule_monitor lock_edge callback=\(callback.rawValue, privacy: .public) activity=\(raw, privacy: .public) locked=\(locked ? 1 : 0, privacy: .public) wrote=\(wrote ? 1 : 0, privacy: .public) eval_ahead_s=\(Int(evaluationTime.timeIntervalSince(trustedNow)), privacy: .public) skew_s=\(Int(trustedNow.timeIntervalSince(wallNow)), privacy: .public) next_edge_in_s=\(nextIn, privacy: .public) armed=\(outlook.entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public)"
         )
+    }
+
+    /// Ask the server for the lock policy from this process (build 29), then make the OS follow it.
+    ///
+    /// Runs AFTER the quick re-check from the saved snapshot, so the verdict never waits behind the
+    /// network; when the pull saved a policy that says something new, the lock is re-evaluated
+    /// (written or released) and the edges re-armed at once, and a running app is told. One line
+    /// per pull in `idevicesyslog` (`lock_pull`), including the skips.
+    func pullLockPolicy(reason: String, activity: DeviceActivityName) {
+        let startedAt = DispatchTime.now()
+        var keychainStatus: OSStatus?
+        let outcome = DeviceLockStatePull.run(
+            readCredential: {
+                let credential = LocationPushSharedCredential.read()
+                keychainStatus = credential.status
+                return credential.payload
+            },
+            fallbackDSN: ScreenTimeUsageActivity.dsn(from: activity.rawValue),
+            environment: .live
+        )
+        let elapsedMs = (DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds) / 1_000_000
+        let keychain = keychainStatus.map { String($0) } ?? "unread"
+        Self.log.notice(
+            "schedule_monitor lock_pull reason=\(reason, privacy: .public) keychain=\(keychain, privacy: .public) outcome=\(String(describing: outcome), privacy: .public) ms=\(elapsedMs, privacy: .public)"
+        )
+        // After ANY save, not only a changed policy (b29 review): the same policy with a fresh
+        // server-time anchor (a reboot, a clock the child moved) can flip the verdict. `.recheck`
+        // stays quiet unless it wrote or armed something.
+        if case .saved(let changed) = outcome {
+            handleLockEdge(activity: activity, callback: changed ? .pulled : .recheck)
+        }
     }
 }
 
@@ -328,6 +375,15 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         // Read BEFORE the claim: a keychain read is the slowest step before the request, and time
         // spent inside the lease before `resume()` is time the request no longer has.
         let credential = LocationPushSharedCredential.read()
+        // Unpaired, as far as this phone knows (build 29): nothing more goes out until the app has
+        // published a new pairing's credential.
+        if DevicePairingRevocation.isRevoked(
+            credential: credential.payload,
+            userDefaults: ScreenTimeUsageAppGroup.sharedUserDefaults()
+        ) {
+            Self.log.notice("schedule_monitor usage_upload reason=\(reason, privacy: .public) outcome=skipped(revoked)")
+            return
+        }
         let lease: ScreenTimeUsageUploadLock
         switch Self.claimUploadLease(retrying: force) {
         case .claimed(let claimed):
@@ -354,6 +410,16 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         }
         if case .sent = outcome {
             usageLedger.setLastExtensionUploadAt(now)
+        }
+        // The server says the pairing is gone (build 29), handled after the lease is given back:
+        // the same suspect-then-confirm rule as the lock pull, and on confirmation the lock is torn
+        // down for the app to find.
+        if case .unpaired = outcome {
+            let verdict = DeviceLockStatePull.handleUnpairedAnswer(now: Date(), refused: credential.payload, environment: .live)
+            Self.log.notice("schedule_monitor lock_pull reason=usage_upload outcome=\(String(describing: verdict), privacy: .public)")
+        } else if outcome.wasAnswered {
+            // Any other HTTP answer: the pairing is alive, so an earlier DEVICE_UNPAIRED was a blip.
+            DevicePairingRevocation.recordAnsweredContact(userDefaults: ScreenTimeUsageAppGroup.sharedUserDefaults())
         }
         Self.log.notice(
             "schedule_monitor usage_upload reason=\(reason, privacy: .public) keychain=\(credential.status, privacy: .public) outcome=\(String(describing: outcome), privacy: .public)"

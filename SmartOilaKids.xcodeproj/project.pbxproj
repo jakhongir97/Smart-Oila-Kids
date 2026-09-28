@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B29A0C0000000000000000C2 /* DeviceLockStatePullTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29A0C0000000000000000C1 /* DeviceLockStatePullTests.swift */; };
+		B29A0C0000000000000000B1 /* DeviceLockStateWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29A0C0000000000000000A1 /* DeviceLockStateWire.swift */; };
+		B29A0C0000000000000000B2 /* DeviceLockStateWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29A0C0000000000000000A1 /* DeviceLockStateWire.swift */; };
+		B29A0C0000000000000000B3 /* DeviceLockStatePull.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29A0C0000000000000000A2 /* DeviceLockStatePull.swift */; };
+		B29A0C0000000000000000B4 /* DeviceLockStatePull.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29A0C0000000000000000A2 /* DeviceLockStatePull.swift */; };
 		1DCA7104000000000000042F /* ScreenTimeLabelProof.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000042E /* ScreenTimeLabelProof.swift */; };
 		1DCA7104000000000000042D /* ScreenTimeUsageUploadLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000042B /* ScreenTimeUsageUploadLock.swift */; };
 		1DCA7104000000000000042C /* ScreenTimeUsageUploadLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DCA7104000000000000042B /* ScreenTimeUsageUploadLock.swift */; };
@@ -223,6 +228,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B29A0C0000000000000000C1 /* DeviceLockStatePullTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockStatePullTests.swift; sourceTree = "<group>"; };
+		B29A0C0000000000000000A1 /* DeviceLockStateWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockStateWire.swift; sourceTree = "<group>"; };
+		B29A0C0000000000000000A2 /* DeviceLockStatePull.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceLockStatePull.swift; sourceTree = "<group>"; };
 		1DCA7104000000000000042E /* ScreenTimeLabelProof.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeLabelProof.swift; sourceTree = "<group>"; };
 		1DCA7104000000000000042B /* ScreenTimeUsageUploadLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageUploadLock.swift; sourceTree = "<group>"; };
 		1DCA71040000000000000429 /* ScreenTimeUsageLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenTimeUsageLedgerTests.swift; sourceTree = "<group>"; };
@@ -743,6 +751,8 @@
 				1DCA71040000000000000412 /* ScreenTimeAlwaysAllowedSharedStore.swift */,
 				31CB267462E8296CE7B50CDD /* DeviceControlEventSharedStore.swift */,
 				95B0CE9BBF7416A3F9A8EF7A /* DeviceLockScheduleSupport.swift */,
+				B29A0C0000000000000000A1 /* DeviceLockStateWire.swift */,
+				B29A0C0000000000000000A2 /* DeviceLockStatePull.swift */,
 			);
 			path = DeviceLockSchedule;
 			sourceTree = "<group>";
@@ -761,6 +771,7 @@
 			children = (
 				1DCA71040000000000000429 /* ScreenTimeUsageLedgerTests.swift */,
 				1DCA71040000000000000432 /* ScreenTimeUsageUploadTests.swift */,
+				B29A0C0000000000000000C1 /* DeviceLockStatePullTests.swift */,
 				F1A0B1C2D3E4F50617283967 /* DeviceAppLimitMonitorControllerTests.swift */,
 				F1A0B1C2D3E4F50617283965 /* DeviceLockCoordinatorTests.swift */,
 				F1A0B1C2D3E4F50617283969 /* DeviceLockScheduleMonitorControllerTests.swift */,
@@ -1036,6 +1047,8 @@
 				B1346442FED346C1AE4965C6 /* DeviceAppLimitSharedStore.swift in Sources */,
 				21CD5BDD52E44B109A0B7C87 /* DeviceControlEventSharedStore.swift in Sources */,
 				3C465EFD824F4F06990EA633 /* DeviceLockScheduleSupport.swift in Sources */,
+				B29A0C0000000000000000B2 /* DeviceLockStateWire.swift in Sources */,
+				B29A0C0000000000000000B4 /* DeviceLockStatePull.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1109,6 +1122,8 @@
 				AEFC4A423E96D6F5343B9947 /* DeviceLockOverlay.swift in Sources */,
 				7035D0F4DFA51CF3C677B465 /* DeviceLockScheduleMonitorController.swift in Sources */,
 				350DE396F3550391AF1F3E17 /* DeviceLockScheduleSupport.swift in Sources */,
+				B29A0C0000000000000000B1 /* DeviceLockStateWire.swift in Sources */,
+				B29A0C0000000000000000B3 /* DeviceLockStatePull.swift in Sources */,
 				8C1B6ED634A4E71A01A4EC75 /* DeviceLockService.swift in Sources */,
 				37760941AA63006820D7BAE9 /* DeviceLockShieldController.swift in Sources */,
 				5C29D76513395FB5680C999B /* DeviceLockWebSocketService.swift in Sources */,
@@ -1171,6 +1186,7 @@
 			files = (
 				1DCA7104000000000000042A /* ScreenTimeUsageLedgerTests.swift in Sources */,
 				1DCA71040000000000000433 /* ScreenTimeUsageUploadTests.swift in Sources */,
+				B29A0C0000000000000000C2 /* DeviceLockStatePullTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283966 /* DeviceAppLimitMonitorControllerTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283964 /* DeviceLockCoordinatorTests.swift in Sources */,
 				F1A0B1C2D3E4F50617283968 /* DeviceLockScheduleMonitorControllerTests.swift in Sources */,

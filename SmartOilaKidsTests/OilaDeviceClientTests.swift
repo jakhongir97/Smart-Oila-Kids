@@ -72,6 +72,31 @@ final class OilaDeviceClientTests: XCTestCase {
         XCTAssertEqual(result.child?.name, "Ali")
     }
 
+    /// Build 29 contract: a successful pairing clears what an extension recorded about a revoked
+    /// pairing, so the extensions pull and upload again and the app's launch check never wipes the
+    /// pairing it has just made (b29 review).
+    func testPairClearsTheExtensionsRevocationRecords() async throws {
+        let appGroup = UserDefaults(suiteName: "OilaDeviceClientTests.appGroup.\(UUID().uuidString)")!
+        DevicePairingRevocation.markRevoked(at: Date(), refusedAccessToken: "OLD_JWT", userDefaults: appGroup)
+        _ = DevicePairingRevocation.recordUnpairedAnswer(at: Date(), userDefaults: appGroup)
+        let client = OilaDeviceClient(
+            baseURL: URL(string: "https://test.local/")!,
+            session: makeStubbedSession(),
+            secureTokens: InMemoryTokenStore(),
+            userDefaults: UserDefaults(suiteName: "OilaDeviceClientTests.\(UUID().uuidString)")!,
+            appGroupDefaults: appGroup
+        )
+        TestHTTPURLProtocol.requestHandler = { [self] request in
+            ok(request, #"{"success":true,"data":{"deviceToken":"DEVICE_JWT"}}"#)
+        }
+
+        _ = try await client.pair(code: "12345")
+
+        XCTAssertNil(DevicePairingRevocation.revokedAt(userDefaults: appGroup))
+        XCTAssertNil(appGroup.object(forKey: DevicePairingRevocation.revokedTokenKey))
+        XCTAssertNil(appGroup.object(forKey: DevicePairingRevocation.suspectedAtKey))
+    }
+
     func testPairWithoutTokensThrows() async {
         let client = makeClient(tokens: InMemoryTokenStore())
         TestHTTPURLProtocol.requestHandler = { request in

@@ -118,6 +118,9 @@ enum ScreenTimeUsageExtensionUploader {
         case sent(status: Int)
         case skipped(reason: String)
         case failed(String)
+        /// `401 DEVICE_UNPAIRED`: the server says the pairing is gone. Answered, so nothing may
+        /// still land; the caller hands it to `DeviceLockStatePull.handleUnpairedAnswer` (build 29).
+        case unpaired
 
         /// The request ended without an HTTP answer — cancelled at the deadline, timed out, or the
         /// connection dropped — so its body may still land on the server. The lease is then given
@@ -125,10 +128,23 @@ enum ScreenTimeUsageExtensionUploader {
         /// that never encoded left nothing on the wire.
         var mayStillLand: Bool {
             switch self {
-            case .sent, .skipped:
+            case .sent, .skipped, .unpaired:
                 return false
             case .failed(let why):
                 return !why.hasPrefix(Self.httpFailurePrefix) && !why.hasPrefix(Self.encodeFailurePrefix)
+            }
+        }
+
+        /// The server answered with something other than DEVICE_UNPAIRED (a 2xx, or a 4xx/5xx
+        /// that is not an unpair): the pairing is alive, and an earlier DEVICE_UNPAIRED was a blip.
+        var wasAnswered: Bool {
+            switch self {
+            case .sent:
+                return true
+            case .failed(let why):
+                return why.hasPrefix(Self.httpFailurePrefix)
+            case .skipped, .unpaired:
+                return false
             }
         }
 
@@ -175,11 +191,15 @@ enum ScreenTimeUsageExtensionUploader {
 
         let semaphore = DispatchSemaphore(value: 0)
         let box = OutcomeBox()
-        let task = session.dataTask(with: request) { _, response, error in
+        let task = session.dataTask(with: request) { data, response, error in
             if let error {
                 box.set(.failed(String(describing: error)))
             } else if let http = response as? HTTPURLResponse {
-                box.set((200..<300).contains(http.statusCode) ? .sent(status: http.statusCode) : .failed(Outcome.httpFailurePrefix + "\(http.statusCode)"))
+                if DevicePairingRevocation.isDeviceUnpairedAnswer(status: http.statusCode, body: data) {
+                    box.set(.unpaired)
+                } else {
+                    box.set((200..<300).contains(http.statusCode) ? .sent(status: http.statusCode) : .failed(Outcome.httpFailurePrefix + "\(http.statusCode)"))
+                }
             } else {
                 box.set(.failed("no_http_response"))
             }
