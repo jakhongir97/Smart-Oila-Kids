@@ -184,9 +184,10 @@ private extension PushCommandRouter {
         // So the media commands are dropped on the COMMAND, not on the text. Keyed on
         // `commandHaystack` — the machine-authored event alone — because keying it on the wide
         // haystack would let a parent suppress rows by typing "stream" into a chat message.
-        // Deliberately narrow to the two routes that open hardware plus `status.report`: those have
-        // no reading surface and no reader. A lock/chat/tasks push that ever does arrive with real
-        // human text still files a row.
+        // Deliberately narrow to the two routes that open hardware, `status.report` and (build 29)
+        // `lock.*`: those have no reading surface and no reader — a lock banner is shown live by iOS
+        // and the lock itself is on screen. A chat/tasks push that ever does arrive with real human
+        // text still files a row.
         let title = payload.title?.trimmedNonEmpty
         let body = payload.body?.trimmedNonEmpty
         guard title != nil || body != nil else { return }
@@ -200,13 +201,6 @@ private extension PushCommandRouter {
                 isRead: openedFromInteraction
             )
         }
-    }
-
-    /// True for a machine-only command whose alert text is disclosure, not correspondence — so it
-    /// must never occupy an unreadable inbox row or the badge that counts one.
-    static func suppressesInboxRow(_ payload: PushCommandPayload) -> Bool {
-        audioRoute(forCommand: payload.commandHaystack) != nil
-            || isStatusReportCommand(payload.commandHaystack)
     }
 
     static func applyRouting(
@@ -396,6 +390,31 @@ extension PushCommandRouter {
             return false
         }
         return hasStem(String(first), in: RoutingTokens.statusSubjects)
+    }
+
+    /// True for a machine-only command whose alert text is disclosure, not correspondence — so it
+    /// must never occupy an unreadable inbox row or the badge that counts one. Internal so the rule
+    /// is pinned by a test.
+    ///
+    /// `lock.*` joined in build 29: the backend is asked to send `lock.refresh` as an ALERT push
+    /// (priority 10, `content-available: 1`, a "Telefon 18:18 gacha bloklandi" / "Telefon ochildi"
+    /// banner), because the silent kind is throttled for minutes and never reaches a force-quit
+    /// app. Filed as a row, every lock, unlock and schedule change would grow the badge.
+    static func suppressesInboxRow(_ payload: PushCommandPayload) -> Bool {
+        audioRoute(forCommand: payload.commandHaystack) != nil
+            || isStatusReportCommand(payload.commandHaystack)
+            || isLockCommand(payload.commandHaystack)
+    }
+
+    /// True when the event's SUBJECT is the lock (`lock.refresh`, `lock.updated`, `unlock`…):
+    /// the first token, as `isStatusReportCommand` reads it, so an event that merely mentions a
+    /// lock somewhere ("message_task_lock") is not swallowed, and never the human text.
+    static func isLockCommand(_ command: String) -> Bool {
+        let normalized = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let first = normalized.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).first else {
+            return false
+        }
+        return hasStem(String(first), in: ["lock", "unlock"])
     }
 
     /// Whether `userInfo` is a lock-state command, for the AppDelegate's completion-handler hold.

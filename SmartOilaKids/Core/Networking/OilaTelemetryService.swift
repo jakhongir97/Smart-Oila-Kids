@@ -276,7 +276,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// A refresh asked for while one was already running: run exactly one more when it lands.
     private var lockRefreshRequestedWhileBusy = false
     /// Consecutive `fetchLockState()` failures, driving the timer's backoff.
-    private var consecutiveLockFailures = 0
+    private(set) var consecutiveLockFailures = 0
     /// Bumped by every `beginAwaitingContact()` and by `stop()`, so a deadline armed for an earlier
     /// wait cannot end a later one.
     private var awaitingContactGeneration = 0
@@ -1527,6 +1527,9 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         if !hasCredential { hasCredential = true }
         consecutiveCredentialRejections = 0
         credentialRefusedSince = nil
+        // The server answered (a status post, a location batch…): the network is back, so the lock
+        // poll's ladder starts again from the bottom (build 29, lock-poll-backoff-10min).
+        consecutiveLockFailures = 0
     }
 
     /// How long the server may refuse the token, with no answered call at all, before the child's chip
@@ -2004,20 +2007,46 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         // BEFORE the backoff early-return, so an unreachable device still re-evaluates every 30 s
         // tick rather than inheriting the poll's 10-minute backoff.
         reevaluateLock(reason: "tick")
-        let backoff = Self.lockPollBackoff(consecutiveFailures: consecutiveLockFailures,
-                                           baseInterval: lockInterval)
+        let backoff = Self.lockTimerBackoff(consecutiveFailures: consecutiveLockFailures,
+                                            credentialRefusals: consecutiveCredentialRejections,
+                                            baseInterval: lockInterval)
         if let last = lastLockPollAt, Date().timeIntervalSince(last) < backoff { return }
         lastLockPollAt = Date()
         await refreshLock()
     }
 
-    /// Effective interval for the lock poll after `consecutiveFailures` failures: the base interval
-    /// doubled per failure, capped at 10 minutes. Pure, so the curve is testable.
+    /// Effective interval after `consecutiveFailures` failures: the base interval doubled per
+    /// failure, capped at `cap` (10 minutes unless told otherwise — the credential-refusal curve the
+    /// location drain also runs on). Pure, so the curve is testable.
     nonisolated static func lockPollBackoff(consecutiveFailures: Int,
-                                            baseInterval: TimeInterval) -> TimeInterval {
+                                            baseInterval: TimeInterval,
+                                            cap: TimeInterval = credentialRefusalBackoffCap) -> TimeInterval {
         guard consecutiveFailures > 0 else { return 0 }
         let capped = min(consecutiveFailures, 8)
-        return min(baseInterval * pow(2, Double(capped)), 600)
+        return min(baseInterval * pow(2, Double(capped)), cap)
+    }
+
+    /// The longest the lock TIMER waits after failed polls that were not credential refusals
+    /// (offline, timeouts, 5xx) — build 29. It used to climb to 10 minutes, so three timeouts on
+    /// weak Wi-Fi left a parent's lock waiting four minutes, five left it ten, unless the push got
+    /// through (lock-poll-backoff-10min). 90 s keeps a dead radio from being woken every 30 s and a
+    /// lock from waiting more than a minute and a half.
+    nonisolated static let lockPollBackoffCap: TimeInterval = 90
+    /// Only a server that keeps REFUSING the token earns the long wait: asking again cannot help.
+    nonisolated static let credentialRefusalBackoffCap: TimeInterval = 600
+
+    /// The lock timer's interval: the short curve (`lockPollBackoffCap`) for ordinary failures, the
+    /// long one while the token is being refused (`consecutiveCredentialRejections`, which any
+    /// answered request clears). Pure, so the curve is testable.
+    nonisolated static func lockTimerBackoff(consecutiveFailures: Int,
+                                             credentialRefusals: Int,
+                                             baseInterval: TimeInterval) -> TimeInterval {
+        if credentialRefusals > 0 {
+            return lockPollBackoff(consecutiveFailures: max(consecutiveFailures, credentialRefusals),
+                                   baseInterval: baseInterval, cap: credentialRefusalBackoffCap)
+        }
+        return lockPollBackoff(consecutiveFailures: consecutiveFailures, baseInterval: baseInterval,
+                               cap: lockPollBackoffCap)
     }
 
     // MARK: - The whole-device lock (build 26)
@@ -2030,7 +2059,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
 
     /// How long an OLD backend's bare `isLocked: true` (or build 24's saved lock on upgrade) is held
     /// with no word from the server: the 8 h product rule (PO, 2026-09-16), as a window with an end.
-    nonisolated static let legacyLockCeiling: TimeInterval = 8 * 3_600
+    nonisolated static let legacyLockCeiling: TimeInterval = DeviceLockPolicySnapshot.legacyLockCeiling
 
     /// Both clocks around one `GET /device/lock/state`, for the clock anchor.
     struct LockPollTiming {
@@ -2183,53 +2212,15 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     }
 
     /// The snapshot one lock-state payload yields, or nil for a shape with no lock information at
-    /// all (the saved snapshot is then KEPT: an unexpected shape must neither lock nor unlock).
-    ///
-    /// A current backend's payload is taken as data (`carriesLockPolicy`). An OLD backend's bare
-    /// `isLocked` becomes a window from now to its `lockedUntil`, never more than 8 h — refreshed by
-    /// every poll while online, so a longer lock keeps being enforced, and ending by itself offline
-    /// (the 2026-09-16 rule) instead of the permanent lock this build exists to end; an old
-    /// backend's `schedules: []` does not make it a current one. A `manualLock` that is present but
-    /// unreadable counts as running only when `manualLockEnabled` says so. A window whose end is
-    /// only that 8 h ceiling is marked `manualEndIsCeiling`, so the cover shows no sliding time.
+    /// all (the saved snapshot is then KEPT). The rule itself lives in Shared
+    /// (`DeviceLockPolicySnapshot.fromLockState`, build 29), because the schedule-monitor extension
+    /// now pulls the policy too and must save exactly what this process saves.
     nonisolated static func lockPolicySnapshot(
         from state: OilaLockState,
         dsn: String,
         anchor: DeviceLockClockAnchor
     ) -> DeviceLockPolicySnapshot? {
-        // "Now" in the trusted domain: the server's clock at the anchor (the phone's, with no serverTime).
-        let now = anchor.wall.addingTimeInterval(anchor.offset)
-        let heldWindow = DeviceLockManualWindow(startsAt: now, endsAt: now.addingTimeInterval(legacyLockCeiling))
-        if state.carriesLockPolicy {
-            let manual: DeviceLockManualWindow?
-            switch state.manualLock {
-            case let .window(window): manual = window
-            case .unreadable: manual = state.manualLockEnabled == true ? heldWindow : nil
-            case .null, .absent: manual = nil
-            }
-            return DeviceLockPolicySnapshot(
-                dsn: dsn, manualLock: manual, schedules: state.schedules ?? [], serverTime: state.serverTime,
-                receivedAt: anchor.wall, clock: anchor, isLegacy: false,
-                // The held window's end is the phone's own ceiling, renewed by every poll.
-                manualEndIsCeiling: manual != nil && state.manualLock == .unreadable ? true : nil,
-                scheduleZoneSecondsFromGMT: DeviceLockPolicy.scheduleZoneSeconds(
-                    deviceLocalTime: state.deviceLocalTime, serverTime: state.serverTime,
-                    phoneSecondsFromGMT: state.serverTime.map { TimeZone.current.secondsFromGMT(for: $0) }
-                )
-            )
-        }
-        guard let legacyLocked = state.isDeviceLocked else { return nil }
-        // A `lockedUntil` already past makes the window empty: the end the parent saw wins over a
-        // flag that has not caught up.
-        let manual = legacyLocked
-            ? DeviceLockManualWindow(startsAt: now, endsAt: min(state.lockedUntil ?? heldWindow.endsAt, heldWindow.endsAt))
-            : nil
-        // Renewed by every poll, the ceiling is no end to show; a `lockedUntil` inside it is.
-        let endIsCeiling = manual.map { window in state.lockedUntil.map { $0 > window.endsAt } ?? true }
-        return DeviceLockPolicySnapshot(
-            dsn: dsn, manualLock: manual, schedules: [], serverTime: nil,
-            receivedAt: anchor.wall, clock: anchor, isLegacy: true, manualEndIsCeiling: endIsCeiling
-        )
+        DeviceLockPolicySnapshot.fromLockState(state, dsn: dsn, anchor: anchor)
     }
 
     /// Build 24's saved lock as a window, so an upgrade while offline neither opens a locked phone
