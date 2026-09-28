@@ -184,6 +184,7 @@
 "perm2.bglocation.body" = "So your parent sees where you are even when the app is closed, iOS will next ask whether to share location “Always”.";
 "perm2.usage.title" = "See which apps are used most";
 "perm2.usage.body" = "You'll see how much time each app takes and can set time limits.";
+"perm2.usage.body_legacy" = "Blocking apps works on this iOS version. Counting screen time needs iOS 17.4 or newer.";
 "perm2.limits.title" = "Restrict apps when needed";
 "perm2.limits.body" = "You'll be able to block apps at any time.";
 "perm2.summary.title" = "Done! Protection is on";
@@ -350,7 +351,7 @@
 "screentime.restricted.intro" = "The parent blocks apps and sees their time on the Oila360 site. The phone needs two things: choose all apps once (one switch) and, when the site blocks an app, tap its icon once to say which one it is. Nothing to type.";
 "screentime.restricted.not_authorized" = "Screen Time access is off. Turn it on in the permissions step first.";
 "screentime.restricted.summary" = "%d linked · %d need linking";
-"screentime.restricted.usage_unsupported" = "On this iOS version blocking works, but per-app time needs iOS 17.4 or newer.";
+"screentime.restricted.usage_unsupported" = "On this iOS version blocking works, but screen time (whole phone and apps) is counted only on iOS 17.4 or newer.";
 "screentime.restricted.too_many" = "Apple allows at most %d apps. Only the first %d are timed — remove some.";
 "screentime.restricted.guided_cta" = "Link";
 "screentime.restricted.guided_nothing" = "%@ was not ticked. Tap again and tick that app in Apple's list.";

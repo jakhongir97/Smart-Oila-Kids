@@ -77,13 +77,26 @@ struct BolajonPermissionStep: Identifiable {
 
     /// The step after `index`. The app pick is skipped while Screen Time is not granted: Apple's
     /// picker hands out nothing without the grant, so the step could only ever say "unavailable".
-    /// Pure, so the rule is pinned by a test.
+    /// The second Screen Time step (`.appLimits`) is skipped while it IS granted (build 29): it
+    /// shares the one FamilyControls grant with `.usage`, so on arrival it could only show
+    /// "✓ Ruxsat berilgan" and wait for an extra "Davom etish" — a screen that seems to ask again
+    /// (Ibrohim's "yana so'rayapti"). It still shows when `.usage` was passed without the grant
+    /// (`.unavailable`, or two failed rounds), where it is a second chance to grant. The checklist
+    /// keeps both rows. Pure, so the rule is pinned by a test.
     static func nextIndex(after index: Int, in steps: [BolajonPermissionStep], screenTimeGranted: Bool) -> Int? {
         var next = index + 1
-        while next < steps.count, steps[next].kind == .appSelection, !screenTimeGranted {
+        while next < steps.count, isSkipped(steps[next].kind, screenTimeGranted: screenTimeGranted) {
             next += 1
         }
         return next < steps.count ? next : nil
+    }
+
+    private static func isSkipped(_ kind: Kind, screenTimeGranted: Bool) -> Bool {
+        switch kind {
+        case .appSelection: return !screenTimeGranted
+        case .appLimits: return screenTimeGranted
+        default: return false
+        }
     }
 
     /// Onboarding steps, feature-gated: a step ships only while something in the build can consume
@@ -484,10 +497,19 @@ enum BolajonStepGate {
     ]
 
     /// The body under the title. The Always step's own body describes the system alert that is about
-    /// to appear, which is wrong once iOS will not show it again.
-    static func bodyKey(for step: BolajonPermissionStep, phase: BolajonStepPhase) -> String {
+    /// to appear, which is wrong once iOS will not show it again. The usage step's body promises
+    /// per-app minutes and limits, which below iOS 17.4 nothing measures (`ScreenTimeUsageMonitoring
+    /// .isSupported`), so that phone reads a variant that promises only what works there: blocking.
+    static func bodyKey(
+        for step: BolajonPermissionStep,
+        phase: BolajonStepPhase,
+        usageMeasured: Bool = ScreenTimeUsageMonitoring.isSupported
+    ) -> String {
         if step.kind == .backgroundLocation, case .needsSettings = phase {
             return "perm2.bglocation.body_settings"
+        }
+        if step.kind == .usage, !usageMeasured {
+            return "perm2.usage.body_legacy"
         }
         return step.bodyKey
     }

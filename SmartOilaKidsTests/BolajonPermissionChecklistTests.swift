@@ -376,6 +376,20 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertNotEqual(L10n.tr("perm2.bglocation.body_settings"), "perm2.bglocation.body_settings")
     }
 
+    /// Below iOS 17.4 nothing measures screen time — neither per app nor the whole phone — so the
+    /// usage step must not promise per-app minutes or limits there (build 29).
+    func testTheUsageBodyPromisesNoTimeBelowIOS17_4() {
+        for phase in Self.everyPhase {
+            XCTAssertEqual(BolajonStepGate.bodyKey(for: step(.usage), phase: phase, usageMeasured: true), "perm2.usage.body")
+            XCTAssertEqual(BolajonStepGate.bodyKey(for: step(.usage), phase: phase, usageMeasured: false),
+                           "perm2.usage.body_legacy")
+            XCTAssertEqual(BolajonStepGate.bodyKey(for: step(.appLimits), phase: phase, usageMeasured: false),
+                           "perm2.limits.body", "blocking works on every version")
+        }
+        XCTAssertNotEqual(L10n.tr("perm2.usage.body_legacy"), "perm2.usage.body_legacy")
+        XCTAssertNotEqual(L10n.tr("perm2.usage.body_legacy"), L10n.tr("perm2.usage.body"))
+    }
+
     /// An upgrade iOS ignored in this run (Allow Once, or spent before the marker) goes to Settings
     /// for the rest of the run instead of another silent 2 s spinner.
     func testAnIgnoredAlwaysUpgradeGoesToSettings() {
@@ -500,7 +514,8 @@ final class BolajonPermissionChecklistTests: XCTestCase {
                 }
                 if let badge = actions.badgeKey { keys.insert(badge) }
                 }
-                keys.insert(BolajonStepGate.bodyKey(for: step, phase: phase))
+                keys.insert(BolajonStepGate.bodyKey(for: step, phase: phase, usageMeasured: true))
+                keys.insert(BolajonStepGate.bodyKey(for: step, phase: phase, usageMeasured: false))
             }
         }
         for key in keys {
@@ -554,6 +569,24 @@ final class BolajonPermissionChecklistTests: XCTestCase {
         XCTAssertEqual(BolajonPermissionStep.nextIndex(after: 0, in: steps, screenTimeGranted: false), 1)
         XCTAssertNil(BolajonPermissionStep.nextIndex(after: steps.count - 1, in: steps, screenTimeGranted: true))
         XCTAssertFalse(BolajonPermissionStep.all(screenTimeEnabled: false, mediaEnabled: true).contains { $0.kind == .appSelection })
+    }
+
+    /// Build 29: `.appLimits` shares the one Screen Time grant with `.usage`, so once it is granted
+    /// the second screen could only show "✓ Ruxsat berilgan" and wait for another tap. It is passed
+    /// by then — straight from the usage step to the app pick — and still shown when the usage step
+    /// was left without the grant. The order and both checklist rows stay.
+    func testTheSecondScreenTimeStepIsPassedOnceGranted() {
+        let steps = BolajonPermissionStep.all(screenTimeEnabled: true, mediaEnabled: true)
+        let usage = steps.firstIndex { $0.kind == .usage }!
+        let limits = steps.firstIndex { $0.kind == .appLimits }!
+        let pick = steps.firstIndex { $0.kind == .appSelection }!
+        XCTAssertEqual(limits, usage + 1, "the step order is unchanged")
+        XCTAssertEqual(BolajonPermissionStep.nextIndex(after: usage, in: steps, screenTimeGranted: true), pick)
+        XCTAssertEqual(BolajonPermissionStep.nextIndex(after: usage, in: steps, screenTimeGranted: false), limits)
+        // Reaching the usage step from location never jumps past it, granted or not.
+        let always = steps.firstIndex { $0.kind == .backgroundLocation }!
+        XCTAssertEqual(BolajonPermissionStep.nextIndex(after: always, in: steps, screenTimeGranted: true), usage)
+        XCTAssertEqual(BolajonPermissionStep.nextIndex(after: always, in: steps, screenTimeGranted: false), usage)
     }
 
     // MARK: - Screen Time answers

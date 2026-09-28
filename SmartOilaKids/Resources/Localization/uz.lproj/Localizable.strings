@@ -184,6 +184,7 @@
 "perm2.bglocation.body" = "Ota-onangiz ilova yopiq bo'lsa ham qayerdaligingizni ko'rishi uchun iOS keyin “Always” («Всегда») ruxsatini so'raydi.";
 "perm2.usage.title" = "Qaysi ilova ko'p ishlatilishini ko'ring";
 "perm2.usage.body" = "Har bir ilovaga qancha vaqt sarflanganini ko'rasiz va vaqt chegarasini qo'yasiz.";
+"perm2.usage.body_legacy" = "Ilovalarni bloklash bu iOS versiyasida ishlaydi. Ekran vaqtini hisoblash uchun iOS 17.4 yoki yangiroq kerak.";
 "perm2.limits.title" = "Kerak bo'lsa, ilovalarni cheklang";
 "perm2.limits.body" = "Ilovalarni istalgan vaqtda bloklay olasiz.";
 "perm2.summary.title" = "Tayyor! Himoya yoqildi";
@@ -350,7 +351,7 @@
 "screentime.restricted.intro" = "Ilovalarni ota-ona Oila360 saytidan bloklaydi va vaqtini ko'radi. Telefonda ikki narsa kerak: bir marta hamma ilovani tanlash (bitta tugma) va sayt bloklagan ilova qaysi belgi ekanini bir marta bosib ko'rsatish. Nom yozish yo'q.";
 "screentime.restricted.not_authorized" = "Ekran vaqti ruxsati o'chiq. Avval ruxsatlar bosqichida yoqing.";
 "screentime.restricted.summary" = "%d bog'langan · %d belgilash kerak";
-"screentime.restricted.usage_unsupported" = "Bu iOS versiyasida bloklash ishlaydi, lekin ilova bo'yicha vaqt uchun iOS 17.4 yoki yangiroq kerak.";
+"screentime.restricted.usage_unsupported" = "Bu iOS versiyasida bloklash ishlaydi, lekin ekran vaqti (butun telefon va ilovalar) faqat iOS 17.4 yoki yangiroqda hisoblanadi.";
 "screentime.restricted.too_many" = "Apple ko'pi bilan %d ta ilovaga ruxsat beradi. Faqat birinchi %d tasining vaqti hisoblanadi — ortiqchasini olib tashlang.";
 "screentime.restricted.guided_cta" = "Belgilash";
 "screentime.restricted.guided_nothing" = "%@ belgilanmadi. Qayta bosib Apple ro'yxatida o'sha ilovani belgilang.";
