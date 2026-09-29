@@ -16,6 +16,7 @@ import XCTest
 final class DeviceDiagnosticsReporterTests: XCTestCase {
     private func map(
         location: CLAuthorizationStatus = .authorizedAlways,
+        locationAccuracy: CLAccuracyAuthorization? = .fullAccuracy,
         locationServicesEnabled: Bool? = true,
         notifications: UNAuthorizationStatus = .authorized,
         microphone: AVAudioSession.RecordPermission = .granted,
@@ -26,6 +27,7 @@ final class DeviceDiagnosticsReporterTests: XCTestCase {
     ) -> [String: String] {
         DeviceDiagnosticsReporter.map(
             location: location,
+            locationAccuracy: locationAccuracy,
             locationServicesEnabled: locationServicesEnabled,
             notifications: notifications,
             microphone: microphone,
@@ -62,15 +64,40 @@ final class DeviceDiagnosticsReporterTests: XCTestCase {
     }
 
     func testEveryEmittedKeyIsOneTheLiveSpecLists() {
-        // `PostDeviceStatusDto.diagnostics` names its known keys (ingestion.json, 2026-09-24). Pinned
-        // here as well as in `emittableKeys`, so widening the allow-list alone cannot pass.
+        // `PostDeviceStatusDto.diagnostics` names its known keys (ingestion.json, 2026-09-29 — adds
+        // preciseLocation and deviceAdmin). Pinned here as well as in `emittableKeys`, so widening
+        // the allow-list alone cannot pass.
         let liveKeys: Set<String> = [
-            "location", "locationBackground", "locationServices", "batteryOptimization",
+            "location", "locationBackground", "locationServices", "preciseLocation", "deviceAdmin",
+            "batteryOptimization",
             "backgroundRefresh", "usageAccess", "accessibility", "overlay", "notifications",
             "microphone", "camera", "autoStart", "lowPowerMode"
         ]
         XCTAssertTrue(DeviceDiagnosticsReporter.emittableKeys.isSubset(of: liveKeys))
         XCTAssertTrue(Set(map().keys).isSubset(of: liveKeys))
+    }
+
+    // MARK: - preciseLocation (Ibrohim 699878)
+
+    func testPreciseLocationFollowsTheAccuracySwitchWhileLocationIsAllowed() {
+        for status in [CLAuthorizationStatus.authorizedAlways, .authorizedWhenInUse] {
+            XCTAssertEqual(map(location: status, locationAccuracy: .fullAccuracy)["preciseLocation"], "granted")
+            XCTAssertEqual(map(location: status, locationAccuracy: .reducedAccuracy)["preciseLocation"], "denied",
+                           "Precise Location off: the parent's map is a circle kilometres wide")
+        }
+    }
+
+    func testPreciseLocationIsLeftOutWhenLocationIsNotAllowed() {
+        for status in [CLAuthorizationStatus.denied, .restricted, .notDetermined] {
+            for accuracy in [CLAccuracyAuthorization.fullAccuracy, .reducedAccuracy] {
+                XCTAssertNil(map(location: status, locationAccuracy: accuracy)["preciseLocation"],
+                             "no location, no accuracy to report — omitted, never guessed (\(status.rawValue))")
+            }
+        }
+    }
+
+    func testPreciseLocationIsLeftOutWhenTheAccuracyIsUnknown() {
+        XCTAssertNil(map(location: .authorizedAlways, locationAccuracy: nil)["preciseLocation"])
     }
 
     func testAndroidOnlyConceptsAreOmittedRatherThanReportedAsUnavailable() {
@@ -185,7 +212,7 @@ final class DeviceDiagnosticsReporterTests: XCTestCase {
 
     func testAHealthyHandsetReportsEveryKeyGranted() {
         let result = map()
-        XCTAssertEqual(result.count, 9)
+        XCTAssertEqual(result.count, 10, "9 keys + preciseLocation (location allowed, full accuracy)")
         XCTAssertTrue(result.values.allSatisfy { $0 == "granted" }, "\(result)")
     }
 }

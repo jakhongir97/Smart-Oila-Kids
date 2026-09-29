@@ -2228,6 +2228,7 @@ final class OilaTelemetryService: NSObject, ObservableObject {
         screenTime.refreshStatus()
         return DeviceDiagnosticsReporter.map(
             location: locationManager.authorizationStatus,
+            locationAccuracy: locationManager.accuracyAuthorization,
             locationServicesEnabled: locationServices,
             notifications: notifications,
             microphone: AVAudioSession.sharedInstance().recordPermission,

@@ -41,7 +41,7 @@ enum DeviceDiagnosticsReporter {
     /// strays outside the schema — the failure mode of getting that wrong is a 400 on every status
     /// post, i.e. the entire fleet reading as offline.
     static let emittableKeys: Set<String> = [
-        "location", "locationBackground", "locationServices",
+        "location", "locationBackground", "locationServices", "preciseLocation",
         "notifications", "microphone", "camera",
         "backgroundRefresh", "lowPowerMode", "usageAccess"
     ]
@@ -77,6 +77,7 @@ enum DeviceDiagnosticsReporter {
     ///   last resolved it.
     static func map(
         location: CLAuthorizationStatus,
+        locationAccuracy: CLAccuracyAuthorization? = nil,
         locationServicesEnabled: Bool?,
         notifications: UNAuthorizationStatus,
         microphone: AVAudioSession.RecordPermission,
@@ -116,6 +117,21 @@ enum DeviceDiagnosticsReporter {
             // Omit rather than guess. A future case reported as `not_determined` would be a
             // confident lie; absence is the one value the contract defines as "unknown".
             break
+        }
+
+        // `preciseLocation` (Ibrohim 699878, 2026-09-29; server-known since 2026-09-29): the iOS
+        // "Precise Location" switch. It only means something while location is allowed — with
+        // location off there is no accuracy to speak of — so in every other state the key is left
+        // out ("never reported"), never guessed.
+        if let locationAccuracy, location == .authorizedAlways || location == .authorizedWhenInUse {
+            switch locationAccuracy {
+            case .fullAccuracy:
+                map["preciseLocation"] = Value.granted
+            case .reducedAccuracy:
+                map["preciseLocation"] = Value.denied
+            @unknown default:
+                break
+            }
         }
 
         if let locationServicesEnabled {

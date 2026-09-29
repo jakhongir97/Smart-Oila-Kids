@@ -412,7 +412,7 @@ final class StatusDiagnosticsSafetyTests: XCTestCase {
         XCTAssertEqual(
             DeviceDiagnosticsReporter.emittableKeys,
             [
-                "location", "locationBackground", "locationServices",
+                "location", "locationBackground", "locationServices", "preciseLocation",
                 "notifications", "microphone", "camera",
                 "backgroundRefresh", "lowPowerMode", "usageAccess"
             ]
