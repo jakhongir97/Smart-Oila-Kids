@@ -154,6 +154,10 @@ extension RootView {
         PairingResetCoordinator.shared.checkOnLaunchOrForeground()
         OilaTelemetryService.shared.refreshLockNow()
         OilaTelemetryService.shared.postStatusNow()
+        // Paired but still in onboarding: telemetry is not running yet, so report status on its own.
+        if sessionStore.oilaPaired, !sessionStore.onboardingCompleted {
+            OilaTelemetryService.shared.postSetupStatus(reason: "foreground_onboarding")
+        }
         RuntimeDiagnosticsCenter.shared.updateLifecycle(
             scenePhase: phase,
             applicationState: applicationState,

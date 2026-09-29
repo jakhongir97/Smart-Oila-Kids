@@ -90,6 +90,9 @@ struct BolajonSetupFlowView: View {
         Task { @MainActor in FCMPushRegistrar.shared.refreshRegistrationToken() }
         // Set DSN last: it flips `hasLinkedChildDevice` and starts child services.
         sessionStore.setDSN(result.dsn)
+        // Battery, Wi-Fi/Mobile and permissions reach the parent now, not after the last onboarding
+        // step (telemetry starts only then). Needs no permission.
+        OilaTelemetryService.shared.postSetupStatus(reason: "paired")
         // Replace the stack (not append) so back/swipe can't return to the used pairing code.
         path = [.success]
     }

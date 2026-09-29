@@ -6750,6 +6750,74 @@ final class TelemetryPairingLossTests: XCTestCase {
                        DeviceDiagnosticsReporter.usageAccessValue(ScreenTimeAuthorizationManager.shared.status),
                        "read from the Screen Time authorization the post just refreshed")
     }
+
+    // MARK: Status during onboarding (build 30, Ibrohim 699849/699850)
+
+    func testASetupStatusGoesOutAsSoonAsTheCodeIsAcceptedWithoutTelemetryRunning() async throws {
+        // The pairing code is redeemed before the permission steps and telemetry starts only after
+        // the last one, so the parent saw "—" for battery and network. The status goes out on its own.
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let service = OilaTelemetryService(service: stub)
+        service.setupStatusPairingPresent = { true }
+        service.setupNetworkTypeReader = { "Wifi" }
+
+        service.postSetupStatus(reason: "paired")
+        let posted = await waitUntil { stub.statusPostCalls == 1 }
+
+        XCTAssertTrue(posted)
+        XCTAssertFalse(service.isRunning, "telemetry itself still waits for onboarding")
+        let status = try XCTUnwrap(stub.postedStatuses.first)
+        XCTAssertEqual(status.networkType, "Wifi")
+        XCTAssertNotNil(status.diagnostics, "the permission map goes with it")
+        XCTAssertNotNil(status.locationAuthorization)
+        XCTAssertEqual(stub.lockStateCalls, 0, "only the status post — no lock poll, no location")
+    }
+
+    func testNoSetupStatusBeforeThePairingCodeIsRedeemed() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let service = OilaTelemetryService(service: stub)
+        service.setupStatusPairingPresent = { false }
+        service.setupNetworkTypeReader = { "Wifi" }
+
+        service.postSetupStatus(reason: "onboarding_step")
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(stub.statusPostCalls, 0, "no credential, nothing to report against")
+    }
+
+    func testSetupStatusAsksWhileOneIsOutBecomeOneMorePost() async {
+        // Onboarding steps can advance faster than a cold radio answers: the asks made while a post
+        // is out collapse into one follow-up that carries the newest permission map.
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)], statusDelay: 300_000_000)
+        let service = OilaTelemetryService(service: stub)
+        service.setupStatusPairingPresent = { true }
+        service.setupNetworkTypeReader = { "Mobile" }
+
+        service.postSetupStatus(reason: "paired")
+        _ = await waitUntil { stub.statusPostCalls == 1 }
+        service.postSetupStatus(reason: "onboarding_step")
+        service.postSetupStatus(reason: "onboarding_step")
+        let second = await waitUntil { stub.statusPostCalls == 2 }
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertTrue(second)
+        XCTAssertEqual(stub.statusPostCalls, 2, "two asks during the first post → one follow-up, not two")
+        XCTAssertEqual(stub.postedStatuses.last?.networkType, "Mobile")
+    }
+
+    func testOnceTelemetryRunsASetupStatusIsTheNormalStatusPost() async {
+        let stub = Stub(lockAnswers: [URLError(.notConnectedToInternet)])
+        let (service, _, _) = start(stub)
+        defer { service.stop() }
+        _ = await waitUntil { stub.statusPostCalls >= 1 }
+        let before = stub.statusPostCalls
+        service.setupNetworkTypeReader = { XCTFail("the running service reports through its own path"); return nil }
+
+        service.postSetupStatus(reason: "foreground_onboarding")
+        let posted = await waitUntil { stub.statusPostCalls == before + 1 }
+
+        XCTAssertTrue(posted)
+    }
 }
 
 // MARK: - What an SOS is allowed to claim about where the child is

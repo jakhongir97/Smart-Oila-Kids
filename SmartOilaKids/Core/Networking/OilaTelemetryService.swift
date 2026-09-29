@@ -279,6 +279,16 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     /// session-invalidation signal per run.
     private var didSignalInvalidation = false
     private var isConfirmingInvalidation = false
+    /// Setup-time status (`postSetupStatus`): one post in flight, and whether another step asked
+    /// for one while it was out.
+    private var setupStatusInFlight = false
+    private var setupStatusPending = false
+    /// Whether this install holds a device credential and a DSN, i.e. the pairing code has been
+    /// redeemed. Injection seam: tests set it; production reads the Keychain and UserDefaults.
+    var setupStatusPairingPresent: () -> Bool = {
+        SecureTokenStore.oila.accessTokenState() != .absent
+            && UserDefaults.standard.string(forKey: "DSN")?.trimmedNonEmpty != nil
+    }
     /// Monotonic tag for lock-state reads so a slow poll can't overwrite a newer push refresh.
     private var lockRefreshSequence = 0
     /// True while a lock read is in flight, so two triggers arriving together (the push reaches both
@@ -807,6 +817,80 @@ final class OilaTelemetryService: NSObject, ObservableObject {
     func postStatusNow() {
         guard isRunning else { return }
         Task { await postStatus() }
+    }
+
+    /// Report battery, Wi-Fi/Mobile and the permission map while the child is still in onboarding.
+    ///
+    /// Telemetry itself starts only once onboarding completes (`RootView.syncGeoService`), and the
+    /// pairing code is redeemed BEFORE the permission steps — so a freshly paired phone showed the
+    /// parent "—" for battery and network until the very last step (Ibrohim 699849/699850,
+    /// 2026-09-29). A status post needs no permission and fires no prompt, so it goes out as soon as
+    /// the code is accepted, after each onboarding step, and on each return to the foreground.
+    /// Location still waits for telemetry: it needs the location step. Once telemetry runs, this is
+    /// just `postStatusNow()`.
+    func postSetupStatus(reason: String) {
+        if isRunning {
+            postStatusNow()
+            return
+        }
+        guard setupStatusPairingPresent() else { return }
+        if setupStatusInFlight {
+            setupStatusPending = true
+            return
+        }
+        setupStatusInFlight = true
+        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "oila.telemetry.setup-status") {
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+        Task {
+            var currentReason = reason
+            repeat {
+                setupStatusPending = false
+                await sendSetupStatus(reason: currentReason)
+                currentReason = "coalesced"
+            } while setupStatusPending && !isRunning && setupStatusPairingPresent()
+            setupStatusInFlight = false
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+    }
+
+    /// The network type a status post carries, read without the run's path monitor (which only
+    /// exists while telemetry runs). A fresh monitor's first path can land a moment after `start`,
+    /// so it is re-read a few times before giving up.
+    var setupNetworkTypeReader: () async -> String? = {
+        let monitor = NWPathMonitor()
+        monitor.start(queue: DispatchQueue(label: "oila.telemetry.setup-path"))
+        defer { monitor.cancel() }
+        for attempt in 0 ..< 6 {
+            if let type = OilaTelemetryService.networkTypeName(for: monitor.currentPath) { return type }
+            if attempt < 5 { try? await Task.sleep(nanoseconds: 250_000_000) }
+        }
+        return nil
+    }
+
+    private func sendSetupStatus(reason: String) async {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let status = OilaDeviceStatus(
+            battery: Self.batteryPercent(),
+            networkType: await setupNetworkTypeReader(),
+            soundMode: nil,
+            locationAuthorization: Self.locationAuthorizationName(for: currentLocationAuthorization.status),
+            diagnostics: await currentDiagnostics()
+        )
+        do {
+            try await service.postDeviceStatus(status)
+            Self.lockLog.notice("setup_status reason=\(reason, privacy: .public) outcome=delivered battery=\(status.battery.map(String.init) ?? "-", privacy: .public) network=\(status.networkType ?? "-", privacy: .public)")
+        } catch {
+            // A 401 already reached PairingResetCoordinator through the client's pairing signal.
+            Self.lockLog.notice("setup_status reason=\(reason, privacy: .public) outcome=failed error=\(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Answer the parent's explicit `status.report` probe with LOCATION as well as status.

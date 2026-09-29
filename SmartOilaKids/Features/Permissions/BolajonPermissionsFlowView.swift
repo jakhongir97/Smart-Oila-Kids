@@ -1029,6 +1029,8 @@ struct BolajonPermissionsFlowView: View {
                   after: index, in: steps,
                   screenTimeGranted: manager.screenTimePermissionStatus == .granted
               ) else { return }
+        // The step just granted changes the permission map the parent sees — report it now.
+        OilaTelemetryService.shared.postSetupStatus(reason: "onboarding_step")
         path.append(steps[next].kind == .summary ? .summary : .step(next))
     }
 
