@@ -21,6 +21,13 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
             handleLockEdge(activity: activity, callback: .intervalStart)
             return
         }
+        // The ten-minute poll (build 31): the phone asks for the lock whatever the app's state,
+        // the child's use or the push — then the next slot is armed (inside `pullLockPolicy`).
+        if DeviceLockPollChain.isPollActivity(rawValue: activity.rawValue) {
+            handleLockEdge(activity: activity, callback: .recheck)
+            pullLockPolicy(reason: "poll", activity: activity)
+            return
+        }
         // The daily heartbeat: re-check the lock and restart the edge chain if it ran out — then
         // ask the server (build 29), so a day with no phone use still hears the parent once.
         if DeviceLockHeartbeat.isHeartbeatActivity(rawValue: activity.rawValue) {
@@ -74,6 +81,12 @@ final class SmartOilaKidsDeviceActivityMonitorExtension: DeviceActivityMonitor {
         if DeviceLockEdgeActivityIdentifier.isLockEdgeActivity(rawValue: activity.rawValue)
             || DeviceLockLegacyDeadline.isLegacyActivity(rawValue: activity.rawValue) {
             handleLockEdge(activity: activity, callback: .intervalEnd)
+            return
+        }
+        // A poll slot is over: free its place and make sure the next one is armed, so a start that
+        // never arrived does not end the chain. No request here — the next start is minutes away.
+        if DeviceLockPollChain.isPollActivity(rawValue: activity.rawValue) {
+            extendPollChain(activity: activity)
             return
         }
         if DeviceLockHeartbeat.isHeartbeatActivity(rawValue: activity.rawValue) {
@@ -285,7 +298,8 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
                 keychainStatus = credential.status
                 return credential.payload
             },
-            fallbackDSN: ScreenTimeUsageActivity.dsn(from: activity.rawValue),
+            fallbackDSN: ScreenTimeUsageActivity.dsn(from: activity.rawValue)
+                ?? DeviceLockPollChain.dsn(from: activity.rawValue),
             environment: .live
         )
         let elapsedMs = (DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds) / 1_000_000
@@ -299,6 +313,32 @@ private extension SmartOilaKidsDeviceActivityMonitorExtension {
         if case .saved(let changed) = outcome {
             handleLockEdge(activity: activity, callback: changed ? .pulled : .recheck)
         }
+        // The poll chain (build 31). Unpaired: nothing is left to ask about, so it stops waking the
+        // phone (a confirmed unpair already stopped it in the teardown). Otherwise a poll slot always
+        // arms the next one, even when the app's fresh poll made this pull a skip; any other caller
+        // only after a pull that really went out, so a burst of usage rungs costs no extra XPC.
+        switch outcome {
+        case .skipped("revoked"), .unpairedConfirmed:
+            DeviceLockPollChain.stopAll()
+        case .skipped("rate_limited"), .skipped("no_credential"):
+            if DeviceLockPollChain.isPollActivity(rawValue: activity.rawValue) { extendPollChain(activity: activity) }
+        default:
+            extendPollChain(activity: activity)
+        }
+    }
+
+    /// Arms the next poll slot for the pairing this phone holds: the saved policy's DSN, else the
+    /// one in the activity's name, else the published credential's.
+    func extendPollChain(activity: DeviceActivityName) {
+        let dsn = lockPolicyStore.load()?.dsn
+            ?? DeviceLockPollChain.dsn(from: activity.rawValue)
+            ?? ScreenTimeUsageActivity.dsn(from: activity.rawValue)
+            ?? LocationPushSharedCredential.read().payload?.dsn
+        guard let dsn else {
+            Self.log.notice("schedule_monitor lock_poll skipped reason=no_dsn activity=\(activity.rawValue, privacy: .public)")
+            return
+        }
+        DeviceLockPollChain.ensureArmed(dsn: dsn)
     }
 }
 

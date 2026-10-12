@@ -126,7 +126,7 @@ enum DeviceLockUnpairTeardown {
     struct Actions {
         /// Writes the two whole-device keys back to unlocked on the default store.
         var releaseWholeDevice: () -> Void
-        /// Stops every lock-edge activity and the daily heartbeat.
+        /// Stops every lock-edge activity, the daily heartbeat and the poll chain.
         var stopEdgesAndHeartbeat: () -> Void
         /// Tells a running app (the Darwin notification it already follows).
         var announce: () -> Void
@@ -140,6 +140,7 @@ enum DeviceLockUnpairTeardown {
                 stopEdgesAndHeartbeat: {
                     DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter())
                     DeviceLockHeartbeat.stopAll()
+                    DeviceLockPollChain.stopAll()
                 },
                 announce: { DeviceLockEdgeMonitoring.postDidEvaluate() },
                 releasePerAppAndRemovalProtection: {
@@ -173,12 +174,12 @@ enum DeviceLockUnpairTeardown {
 ///
 /// A parent's lock reached a suspended or force-quit app only through a silent push, which iOS
 /// throttles, holds and drops (ANALYSIS_2026-09-28, lock-delivery-silent-push-only). The monitor
-/// extension is the one process iOS reliably wakes while the child is USING the phone — every
-/// usage step (device-total with "All Apps & Categories", per-app otherwise), whatever the app's
-/// state, Low Power Mode or APNs — so it asks the server itself there (and on the daily heartbeat,
-/// which exists only while the policy has edges), saves the snapshot the app would have saved, and
-/// the caller re-evaluates. A lock lands within one step of use; an early unlock lands at the next
-/// step too. A phone with no usage selection at all gets no steps, only the heartbeat.
+/// extension is the one process iOS reliably wakes whatever the app's state, Low Power Mode or
+/// APNs: on every usage step (device-total with "All Apps & Categories", per-app otherwise), on the
+/// ten-minute poll chain (build 31, `DeviceLockPollChain` — the only wake of an idle or fully
+/// shielded phone) and on the daily heartbeat. It asks the server itself there, saves the snapshot
+/// the app would have saved, and the caller re-evaluates. A lock or an early unlock lands within
+/// ten minutes, sooner while the child uses the phone.
 ///
 /// Bounded for an extension (≈6 MB, short synchronous callbacks): one ephemeral request, waited on
 /// a semaphore for at most `requestTimeout`, at most once per `minimumInterval`, no retries.

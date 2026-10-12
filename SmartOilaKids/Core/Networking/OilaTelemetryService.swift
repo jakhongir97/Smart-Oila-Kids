@@ -2699,15 +2699,21 @@ struct OilaLockRuntime {
                 guard OilaLockRuntime.screenTimeAuthorized() else { return nil }
                 let dsn = UserDefaults.standard.string(forKey: "DSN")?.trimmedNonEmpty
                 ScreenTimeSystemWorker.async(.activity) {
+                    // Edges first: they hold the lock's own instants, and the poll chain never takes
+                    // the places they need (`DeviceLockPollChain.maximumTotalActivities`).
                     let result = DeviceLockEdgeMonitoring.arm(entries, center: LiveDeviceLockEdgeCenter(), wallNow: Date())
-                    // While there is anything to arm, the daily heartbeat keeps the chain alive through a
-                    // phone that is off across every armed edge (see `DeviceLockHeartbeat`).
+                    // The daily heartbeat keeps the edge chain alive through a phone that is off across
+                    // every armed edge (see `DeviceLockHeartbeat`), and restarts the poll chain if it
+                    // ever ends. Since build 31 it runs with no edges too: a phone with no schedule still
+                    // has to hear a parent's "lock now".
                     var heartbeatStarted = false
-                    if !entries.isEmpty, let dsn {
+                    var pollStarted = 0
+                    if let dsn {
                         heartbeatStarted = DeviceLockHeartbeat.ensureArmed(dsn: dsn)
+                        pollStarted = DeviceLockPollChain.ensureArmed(dsn: dsn).start.count
                     }
                     OilaTelemetryService.lockLog.notice(
-                        "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public) heartbeat_started=\(heartbeatStarted ? 1 : 0, privacy: .public)"
+                        "lock_edge armed planned=\(entries.count, privacy: .public) started=\(result.started.count, privacy: .public) stopped=\(result.stopped.count, privacy: .public) failures=\(result.failures, privacy: .public) heartbeat_started=\(heartbeatStarted ? 1 : 0, privacy: .public) poll_started=\(pollStarted, privacy: .public)"
                     )
                     if result.failures > 0 {
                         Task { @MainActor in OilaTelemetryService.shared.handleEdgeArmFailure() }
@@ -2721,6 +2727,7 @@ struct OilaLockRuntime {
                 ScreenTimeSystemWorker.async(.activity) {
                     DeviceLockEdgeMonitoring.stopAll(center: LiveDeviceLockEdgeCenter())
                     DeviceLockHeartbeat.stopAll()
+                    DeviceLockPollChain.stopAll()
                 }
             },
             legacyDefaults: .standard,

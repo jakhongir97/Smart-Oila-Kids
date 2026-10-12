@@ -8098,6 +8098,188 @@ final class OilaLockPolicyParsingTests: XCTestCase {
         XCTAssertEqual(schedule.intervalEnd.minute, 59)
     }
 
+    // MARK: The ten-minute poll chain (build 31)
+
+    private final class FakePollCenter: DeviceActivityPollCenter {
+        var armed: [(name: String, start: Date?)] = []
+        var started: [(String, DeviceActivitySchedule)] = []
+        var stopped: [String] = []
+        var refuse = false
+        struct Refused: Error {}
+
+        func activities() -> [(name: String, start: Date?)] { armed }
+        func start(name: String, schedule: DeviceActivitySchedule) throws {
+            if refuse { throw Refused() }
+            started.append((name, schedule))
+        }
+        func stop(names: [String]) { stopped += names }
+    }
+
+    /// 1_800_000_000 s is minute 30_000_000, a mark on the ten-minute grid.
+    private var pollGridNow: Date { Date(timeIntervalSince1970: 1_800_000_000) }
+    private let pollDSN = "8D905F9F-770B-4D36"
+
+    private func pollName(_ minute: Int, dsn: String? = nil) -> String {
+        DeviceLockPollChain.activityName(dsn: dsn ?? pollDSN, slotMinute: minute)
+    }
+
+    private func pollSlot(_ minute: Int) -> Date { DeviceLockPollChain.slotStart(minute) }
+
+    /// Its prefix must never match the edge sweep or any other activity's, and the name carries the
+    /// normalized DSN and the slot's minute.
+    func testThePollIsItsOwnActivityNamedByItsSlot() {
+        let name = DeviceLockPollChain.activityName(dsn: pollDSN, slotMinute: 30_000_010)
+        XCTAssertEqual(name, "smartoila.lock-poll|8d905f9f-770b-4d36|30000010")
+        XCTAssertTrue(DeviceLockPollChain.isPollActivity(rawValue: name))
+        XCTAssertEqual(DeviceLockPollChain.dsn(from: name), "8d905f9f-770b-4d36")
+        XCTAssertEqual(DeviceLockPollChain.slotMinute(from: name), 30_000_010)
+        XCTAssertEqual(DeviceLockPollChain.activityName(dsn: "a|b", slotMinute: 1), "smartoila.lock-poll|a_b|1",
+                       "the separator can never appear inside the DSN")
+        XCTAssertFalse(DeviceLockEdgeActivityIdentifier.isLockEdgeActivity(rawValue: name))
+        XCTAssertNil(DeviceLockEdgeActivityIdentifier.edgeMinute(from: name))
+        XCTAssertFalse(DeviceLockHeartbeat.isHeartbeatActivity(rawValue: name))
+        XCTAssertFalse(DeviceLockLegacyDeadline.isLegacyActivity(rawValue: name))
+        XCTAssertFalse(DeviceLockScheduleActivityIdentifier.isScheduleActivity(rawValue: name))
+        XCTAssertFalse(DeviceAppLimitActivityIdentifier.isAppLimitActivity(rawValue: name))
+        XCTAssertFalse(ScreenTimeUsageActivity.isUsageActivity(rawValue: name))
+        XCTAssertFalse(DeviceLockPollChain.isPollActivity(rawValue: DeviceLockHeartbeat.activityName(dsn: pollDSN)))
+        XCTAssertFalse(DeviceLockPollChain.isPollActivity(rawValue: DeviceLockEdgeActivityIdentifier.rawValue(dsn: pollDSN, edgeMinute: 1)))
+        XCTAssertNil(DeviceLockPollChain.dsn(from: "smartoila.lock-poll|"))
+        XCTAssertNil(DeviceLockPollChain.slotMinute(from: DeviceLockHeartbeat.activityName(dsn: pollDSN)))
+    }
+
+    /// The next slot is on the ten-minute grid and at least a minute ahead: a callback a little
+    /// late or early on its own slot arms the one after, never itself again.
+    func testTheNextSlotIsOnTheGridAtLeastAMinuteAhead() {
+        let base = 30_000_000
+        XCTAssertEqual(DeviceLockPollChain.nextSlotMinute(after: pollGridNow), base + 10, "on a mark: the next mark")
+        XCTAssertEqual(DeviceLockPollChain.nextSlotMinute(after: pollGridNow.addingTimeInterval(-2)), base + 10,
+                       "a start delivered two seconds early does not re-arm its own slot")
+        XCTAssertEqual(DeviceLockPollChain.nextSlotMinute(after: pollGridNow.addingTimeInterval(8 * 60 + 59)), base + 10)
+        XCTAssertEqual(DeviceLockPollChain.nextSlotMinute(after: pollGridNow.addingTimeInterval(9 * 60 + 1)), base + 20,
+                       "a slot under a minute away is skipped for the one after")
+        XCTAssertEqual(DeviceLockPollChain.nextSlotMinute(after: pollGridNow.addingTimeInterval(16 * 60)), base + 20)
+    }
+
+    func testEachSlotIsAOneOffSixteenMinuteActivity() {
+        let calendar = LockFixture.tashkent
+        let start = pollSlot(30_000_010)
+        let schedule = DeviceLockPollChain.schedule(start: start, calendar: calendar)
+        XCTAssertFalse(schedule.repeats)
+        XCTAssertEqual(calendar.date(from: schedule.intervalStart), start)
+        XCTAssertEqual(calendar.date(from: schedule.intervalEnd), start.addingTimeInterval(16 * 60),
+                       "Apple's 15-minute floor, plus a minute")
+        XCTAssertNotNil(schedule.intervalStart.year, "full date components, year to second")
+        XCTAssertNotNil(schedule.intervalStart.second)
+    }
+
+    func testAnEmptyChainArmsTheNextSlot() {
+        let plan = DeviceLockPollChain.plan(dsn: pollDSN, armed: [], otherActivities: 3, now: pollGridNow)
+        XCTAssertEqual(plan, DeviceLockPollChain.Plan(start: [30_000_010], stop: [], budgetExhausted: false))
+    }
+
+    /// The steady state, seen from a slot's own start: the slot before it still running, this one
+    /// running — both left to finish — and only the next one armed.
+    func testAtASlotStartTheRunningSlotsAreKeptAndOnlyTheNextIsArmed() {
+        let armed: [(name: String, start: Date?)] = [
+            (name: pollName(29_999_990), start: Optional(pollSlot(29_999_990))),
+            (name: pollName(30_000_000), start: Optional(pollSlot(30_000_000)))
+        ]
+        let plan = DeviceLockPollChain.plan(dsn: pollDSN, armed: armed, otherActivities: 3, now: pollGridNow)
+        XCTAssertEqual(plan.start, [30_000_010])
+        XCTAssertEqual(plan.stop, [], "stopping a running slot only delivers an intervalDidEnd for nothing")
+    }
+
+    func testANextSlotAlreadyArmedChangesNothing() {
+        let armed: [(name: String, start: Date?)] = [
+            (name: pollName(30_000_000), start: Optional(pollSlot(30_000_000))),
+            (name: pollName(30_000_010), start: Optional(pollSlot(30_000_010)))
+        ]
+        let plan = DeviceLockPollChain.plan(dsn: pollDSN, armed: armed, otherActivities: 3, now: pollGridNow.addingTimeInterval(120))
+        XCTAssertEqual(plan, DeviceLockPollChain.Plan())
+    }
+
+    /// Over (16 minutes after its start), another pairing's, or ahead without being the next slot
+    /// (armed before the clock or the zone moved): stopped. A slot under a minute away is kept — it
+    /// is the next callback.
+    func testFinishedForeignAndMisplacedSlotsAreStoppedAnImminentOneIsKept() {
+        let now = pollGridNow.addingTimeInterval(9 * 60 + 30) // the 10-minute slot is 30 s away
+        let armed: [(name: String, start: Date?)] = [
+            (name: pollName(29_999_980), start: Optional(pollSlot(29_999_980))),          // over
+            (name: pollName(30_000_000), start: Optional(pollSlot(30_000_000))),          // running
+            (name: pollName(30_000_010), start: Optional(pollSlot(30_000_010))),          // imminent
+            (name: pollName(30_000_090), start: Optional(pollSlot(30_000_090))),          // misplaced, ahead
+            (name: pollName(30_000_000, dsn: "OLD-PAIRING"), start: Optional(pollSlot(30_000_000))),
+            (name: pollName(30_000_000, dsn: "8D905F9F-770B-4D37"), start: nil)
+        ]
+        let plan = DeviceLockPollChain.plan(dsn: pollDSN, armed: armed, otherActivities: 3, now: now)
+        XCTAssertEqual(Set(plan.stop), [
+            pollName(29_999_980), pollName(30_000_090),
+            pollName(30_000_000, dsn: "OLD-PAIRING"), pollName(30_000_000, dsn: "8D905F9F-770B-4D37")
+        ])
+        XCTAssertEqual(plan.start, [30_000_020], "the 10-minute slot is under a minute away: the one after is armed")
+    }
+
+    /// The zone moved: the components armed for the next slot now name another instant. Stopped and
+    /// armed again under the same name.
+    func testTheNextSlotArmedOnAnotherZoneIsArmedAgain() {
+        let armed: [(name: String, start: Date?)] = [(name: pollName(30_000_010), start: Optional(pollSlot(30_000_010).addingTimeInterval(5 * 3_600)))]
+        let plan = DeviceLockPollChain.plan(dsn: pollDSN, armed: armed, otherActivities: 3, now: pollGridNow)
+        XCTAssertEqual(plan.stop, [pollName(30_000_010)])
+        XCTAssertEqual(plan.start, [30_000_010])
+    }
+
+    /// Lock edges, usage, app limits and the heartbeat come first: the chain never takes the last place.
+    func testTheChainNeverTakesThePlacesTheEdgesNeed() {
+        let running: [(name: String, start: Date?)] = [(name: pollName(30_000_000), start: Optional(pollSlot(30_000_000)))]
+        let fits = DeviceLockPollChain.plan(dsn: pollDSN, armed: running, otherActivities: 17, now: pollGridNow)
+        XCTAssertEqual(fits.start, [30_000_010], "17 others + 1 running + 1 new = 19")
+        XCTAssertFalse(fits.budgetExhausted)
+        let full = DeviceLockPollChain.plan(dsn: pollDSN, armed: running, otherActivities: 18, now: pollGridNow)
+        XCTAssertEqual(full.start, [])
+        XCTAssertTrue(full.budgetExhausted)
+    }
+
+    func testEnsureArmedStartsTheNextSlotAndCountsEveryOtherActivity() {
+        let center = FakePollCenter()
+        center.armed = [
+            (name: "smartoila.usage|child", start: nil),
+            (name: DeviceLockHeartbeat.activityName(dsn: pollDSN), start: nil),
+            (name: pollName(29_999_980), start: Optional(pollSlot(29_999_980)))
+        ]
+        let plan = DeviceLockPollChain.ensureArmed(dsn: pollDSN, now: pollGridNow, center: center, calendar: LockFixture.tashkent)
+        XCTAssertEqual(center.stopped, [pollName(29_999_980)])
+        XCTAssertEqual(center.started.map(\.0), [pollName(30_000_010)])
+        XCTAssertEqual(center.started.first.flatMap { LockFixture.tashkent.date(from: $0.1.intervalStart) }, pollSlot(30_000_010))
+        XCTAssertEqual(plan.start, [30_000_010])
+
+        center.armed = Array(repeating: (name: "smartoila.lock-edge|x|1", start: nil), count: 19)
+        center.started = []
+        let full = DeviceLockPollChain.ensureArmed(dsn: pollDSN, now: pollGridNow, center: center, calendar: LockFixture.tashkent)
+        XCTAssertTrue(full.budgetExhausted)
+        XCTAssertTrue(center.started.isEmpty)
+    }
+
+    func testARefusedStartIsLoggedNotThrown() {
+        let center = FakePollCenter()
+        center.refuse = true
+        let plan = DeviceLockPollChain.ensureArmed(dsn: pollDSN, now: pollGridNow, center: center, calendar: LockFixture.tashkent)
+        XCTAssertEqual(plan.start, [30_000_010], "planned; the next callback or arm tries again")
+        XCTAssertTrue(center.started.isEmpty)
+    }
+
+    func testStopAllStopsOnlyThePollChain() {
+        let center = FakePollCenter()
+        center.armed = [
+            (name: pollName(30_000_000), start: Optional(pollSlot(30_000_000))),
+            (name: pollName(30_000_010, dsn: "OTHER"), start: Optional(pollSlot(30_000_010))),
+            (name: DeviceLockHeartbeat.activityName(dsn: pollDSN), start: nil),
+            (name: DeviceLockEdgeActivityIdentifier.rawValue(dsn: pollDSN, edgeMinute: 30_000_100), start: nil)
+        ]
+        DeviceLockPollChain.stopAll(center: center)
+        XCTAssertEqual(center.stopped, [pollName(30_000_000), pollName(30_000_010, dsn: "OTHER")])
+    }
+
     // MARK: Schedules are read in the server's device zone (build 26, closes a zone-change bypass)
 
     func testTheDeviceZoneIsDerivedFromTheServersOwnClockAndLocalTime() {

@@ -680,6 +680,194 @@ enum DeviceLockHeartbeat {
     }
 }
 
+/// The DeviceActivity surface the poll chain needs. A protocol so tests never touch
+/// `DeviceActivityCenter`.
+protocol DeviceActivityPollCenter {
+    /// Every activity this app holds. Only the poll chain's own carry their interval start (on the
+    /// phone's clock, when the schedule can be read back); the rest are there to be counted.
+    func activities() -> [(name: String, start: Date?)]
+    func start(name: String, schedule: DeviceActivitySchedule) throws
+    func stop(names: [String])
+}
+
+struct LiveDeviceActivityPollCenter: DeviceActivityPollCenter {
+    func activities() -> [(name: String, start: Date?)] {
+        let center = DeviceActivityCenter()
+        return center.activities.map { activity in
+            let raw = activity.rawValue
+            guard DeviceLockPollChain.isPollActivity(rawValue: raw) else { return (name: raw, start: nil) }
+            let start = center.schedule(for: activity).flatMap { Calendar.current.date(from: $0.intervalStart) }
+            return (name: raw, start: start)
+        }
+    }
+
+    func start(name: String, schedule: DeviceActivitySchedule) throws {
+        try DeviceActivityCenter().startMonitoring(DeviceActivityName(name), during: schedule)
+    }
+
+    func stop(names: [String]) {
+        guard !names.isEmpty else { return }
+        DeviceActivityCenter().stopMonitoring(names.map { DeviceActivityName($0) })
+    }
+}
+
+/// Wakes the monitor extension every ten minutes, all day, whatever the app's state (build 31), so
+/// the phone asks the server for the lock by itself.
+///
+/// Ibrohim on build 30 (2026-10-08, 700690): "even after a long time it does not lock, or does not
+/// unlock". A swiped-away app hears no silent push at all, and the extension woke only for a usage
+/// step (none without the "All Apps & Categories" pick, none while everything is shielded — so an
+/// early unlock waited for `endsAt`), for the lock's own edges and for the daily heartbeat. A
+/// parent's "lock now" on a phone with no schedule had nothing at all to wake for.
+///
+/// Each poll is a one-off activity `[slot, slot + 16 min]` on a fixed ten-minute grid, named by
+/// its slot's minute, so re-arming never restarts a RUNNING activity (a restart delivers a spurious
+/// end+start pair, measured 2026-09-16) — the edge chain's pattern. Its `intervalDidStart` asks the
+/// server (`DeviceLockStatePull`: still at most one request a minute, skipped while the app's own
+/// 30 s poll is fresh) and arms the next slot; its `intervalDidEnd` arms it too, so one lost start
+/// does not end the chain. The heartbeat, every usage step that reached the server and every arm
+/// in the app start it again if it does end. At most two running plus one ahead: three of the
+/// twenty activities Apple allows, and never one a lock edge needs (`maximumTotalActivities`).
+enum DeviceLockPollChain {
+    static let prefix = "smartoila.lock-poll|"
+    static let spacing: TimeInterval = 10 * 60
+    /// Apple refuses an interval shorter than 15 minutes.
+    static let intervalLength: TimeInterval = DeviceLockEdgeMonitoring.intervalLength
+    /// A slot closer than this is not armed (an activity starting within a minute is unmeasured,
+    /// proof 7); the one after it is. An armed slot this close is kept: it is the next callback.
+    static let minimumLead: TimeInterval = DeviceLockEdgeMonitoring.minimumLead
+    /// The chain never takes the last places: lock edges (12 + a fallback, plus a running one or
+    /// two), usage, app limits and the heartbeat come first. A refused edge costs a lock; a missing
+    /// poll costs minutes, and the next callback tries again.
+    static let maximumTotalActivities = 19
+
+    static func activityName(dsn: String, slotMinute: Int) -> String {
+        prefix + DeviceLockEdgeActivityIdentifier.normalize(dsn) + "|" + String(slotMinute)
+    }
+
+    static func isPollActivity(rawValue: String) -> Bool {
+        rawValue.hasPrefix(prefix)
+    }
+
+    /// The normalized DSN in a poll activity's name.
+    static func dsn(from rawValue: String) -> String? {
+        guard isPollActivity(rawValue: rawValue) else { return nil }
+        let parts = rawValue.dropFirst(prefix.count).split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty else { return nil }
+        return String(parts[0])
+    }
+
+    static func slotMinute(from rawValue: String) -> Int? {
+        guard isPollActivity(rawValue: rawValue), let last = rawValue.split(separator: "|").last else { return nil }
+        return Int(last)
+    }
+
+    /// The first slot on the grid at least `minimumLead` after `now`, in epoch minutes.
+    static func nextSlotMinute(after now: Date) -> Int {
+        let step = Int(spacing / 60)
+        let earliest = Int((now.addingTimeInterval(minimumLead).timeIntervalSince1970 / 60).rounded(.up))
+        return ((earliest + step - 1) / step) * step
+    }
+
+    static func slotStart(_ minute: Int) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(minute) * 60)
+    }
+
+    struct Plan: Equatable {
+        /// Slot minutes to start.
+        var start: [Int] = []
+        var stop: [String] = []
+        /// The next slot was wanted but the activity budget is spent.
+        var budgetExhausted = false
+    }
+
+    /// Bring this pairing's chain to: the running slots left to finish, the next slot armed, nothing
+    /// else of ours. `armed` are the poll activities (any pairing's) with their read-back starts on
+    /// the phone's clock; `otherActivities` counts everything else the app holds.
+    ///
+    /// Another pairing's slots, slots that are over and slots ahead that are not the next one (armed
+    /// before the clock or the zone moved) are stopped. A running slot is left alone: stopping it
+    /// delivers an `intervalDidEnd` for nothing, and it ends by itself.
+    static func plan(dsn: String, armed: [(name: String, start: Date?)], otherActivities: Int, now: Date) -> Plan {
+        let wanted = nextSlotMinute(after: now)
+        let wantedName = activityName(dsn: dsn, slotMinute: wanted)
+        let ownPrefix = prefix + DeviceLockEdgeActivityIdentifier.normalize(dsn) + "|"
+        var plan = Plan()
+        var wantedIsArmed = false
+        var kept = 0
+        for activity in armed {
+            guard activity.name.hasPrefix(ownPrefix), let start = activity.start else {
+                plan.stop.append(activity.name)
+                continue
+            }
+            if activity.name == wantedName, abs(start.timeIntervalSince(slotStart(wanted))) < 60 {
+                wantedIsArmed = true
+                kept += 1
+                continue
+            }
+            let ahead = start.timeIntervalSince(now)
+            if ahead > minimumLead || -ahead >= intervalLength {
+                plan.stop.append(activity.name)
+            } else {
+                kept += 1
+            }
+        }
+        guard !wantedIsArmed else { return plan }
+        if otherActivities + kept + 1 <= maximumTotalActivities {
+            plan.start = [wanted]
+        } else {
+            plan.budgetExhausted = true
+        }
+        return plan
+    }
+
+    static func schedule(start: Date, calendar: Calendar = .current) -> DeviceActivitySchedule {
+        let units: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
+        return DeviceActivitySchedule(
+            intervalStart: calendar.dateComponents(units, from: start),
+            intervalEnd: calendar.dateComponents(units, from: start.addingTimeInterval(intervalLength)),
+            repeats: false
+        )
+    }
+
+    /// Arms the next slot for this pairing (and tidies the rest). Cheap when nothing is missing: one
+    /// read of the armed set.
+    @discardableResult
+    static func ensureArmed(
+        dsn: String,
+        now: Date = Date(),
+        center: DeviceActivityPollCenter = LiveDeviceActivityPollCenter(),
+        calendar: Calendar = .current
+    ) -> Plan {
+        let all = center.activities()
+        let ours = all.filter { isPollActivity(rawValue: $0.name) }
+        let plan = plan(dsn: dsn, armed: ours, otherActivities: all.count - ours.count, now: now)
+        center.stop(names: plan.stop)
+        var failures = 0
+        for minute in plan.start {
+            do {
+                try center.start(name: activityName(dsn: dsn, slotMinute: minute), schedule: schedule(start: slotStart(minute), calendar: calendar))
+            } catch {
+                failures += 1
+                log.error("lock_poll arm_failed slot_minute=\(minute, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+        }
+        if !plan.start.isEmpty || !plan.stop.isEmpty || plan.budgetExhausted {
+            log.notice(
+                "lock_poll armed started=\(plan.start.count - failures, privacy: .public) stopped=\(plan.stop.count, privacy: .public) failures=\(failures, privacy: .public) budget_exhausted=\(plan.budgetExhausted ? 1 : 0, privacy: .public) activities=\(all.count, privacy: .public)"
+            )
+        }
+        return plan
+    }
+
+    /// Unpair: the old family's chain must not keep waking the phone.
+    static func stopAll(center: DeviceActivityPollCenter = LiveDeviceActivityPollCenter()) {
+        center.stop(names: center.activities().map(\.name).filter(isPollActivity(rawValue:)))
+    }
+
+    static let log = Logger(subsystem: "uz.smartoila.kids", category: "screentime")
+}
+
 /// Build 24's single "lock-until" activity and its App Group record, kept only to retire them.
 ///
 /// A phone updated while locked keeps build 24's activity armed until the app next runs. If it
